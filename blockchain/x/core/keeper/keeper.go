@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"mirage/consensusfatal"
@@ -17,6 +21,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
@@ -35,7 +40,14 @@ type Keeper struct {
 }
 
 func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec, bank bankkeeper.Keeper, staking *stakingkeeper.Keeper, distribution *distrkeeper.Keeper, slashing slashingkeeper.Keeper) Keeper {
-	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing}
+	return Keeper{
+		storeService: failFastKVStoreService{delegate: storeService},
+		cdc:          cdc,
+		bank:         bank,
+		staking:      staking,
+		distribution: distribution,
+		slashing:     slashing,
+	}
 }
 
 // StoreService exposes the KV store service for use in upgrade handlers.
@@ -301,18 +313,24 @@ func entryPrefix(prefix, owner string) []byte {
 var sentinelValue = []byte{1}
 
 func putUint32(v uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, v); return b }
-func getUint32(b []byte) uint32 {
-	if len(b) < 4 {
-		return 0
+func getUint32(b []byte) (uint32, error) {
+	if len(b) == 0 {
+		return 0, nil
 	}
-	return binary.BigEndian.Uint32(b)
+	if len(b) != 4 {
+		return 0, fmt.Errorf("expected 4-byte big-endian uint32, got %d bytes", len(b))
+	}
+	return binary.BigEndian.Uint32(b), nil
 }
 func putUint64(v uint64) []byte { b := make([]byte, 8); binary.BigEndian.PutUint64(b, v); return b }
-func getUint64(b []byte) uint64 {
-	if len(b) < 8 {
-		return 0
+func getUint64(b []byte) (uint64, error) {
+	if len(b) == 0 {
+		return 0, nil
 	}
-	return binary.BigEndian.Uint64(b)
+	if len(b) != 8 {
+		return 0, fmt.Errorf("expected 8-byte big-endian uint64, got %d bytes", len(b))
+	}
+	return binary.BigEndian.Uint64(b), nil
 }
 
 // prefixEndBytes returns the end key for a prefix range scan (increment last byte).
@@ -334,8 +352,8 @@ func prefixEndBytes(prefix []byte) []byte {
 // ── Unordered set helpers (followed_users, followed_topics) ────────────
 
 // addSetEntry adds an entry to an unordered set. Returns false if already present.
-// Writes the entry first, then increments the count (crash-safety: orphan entry
-// is harmless and will be counted on next List call).
+// Writes are atomic through the transaction cache; any later error rolls the
+// entry write back with the count write.
 func (k Keeper) addSetEntry(ctx sdk.Context, prefix, owner, entry string) (bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
 	ek := entryKey(prefix, owner, entry)
@@ -349,10 +367,22 @@ func (k Keeper) addSetEntry(ctx sdk.Context, prefix, owner, entry string) (bool,
 	if err := store.Set(ek, sentinelValue); err != nil {
 		return false, err
 	}
-	// Increment count
+	// Increment count. A failed read must not be decoded as zero: that would
+	// rewrite a real counter from scratch and admit entries past the tier cap
+	// on this node only (review M-2).
 	ck := countKey(prefix, owner)
-	cb, _ := store.Get(ck)
-	cnt := getUint32(cb) + 1
+	cb, err := store.Get(ck)
+	if err != nil {
+		return false, fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
+	}
+	cnt, err := getUint32(cb)
+	if err != nil {
+		return false, fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	if cnt == math.MaxUint32 {
+		return false, fmt.Errorf("count overflow for %s/%s", prefix, owner)
+	}
+	cnt++
 	return true, store.Set(ck, putUint32(cnt))
 }
 
@@ -371,8 +401,14 @@ func (k Keeper) removeSetEntry(ctx sdk.Context, prefix, owner, entry string) err
 		return err
 	}
 	ck := countKey(prefix, owner)
-	cb, _ := store.Get(ck)
-	cnt := getUint32(cb)
+	cb, err := store.Get(ck)
+	if err != nil {
+		return fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
+	}
+	cnt, err := getUint32(cb)
+	if err != nil {
+		return fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
+	}
 	if cnt > 0 {
 		cnt--
 	}
@@ -391,10 +427,20 @@ func (k Keeper) hasSetEntry(ctx sdk.Context, prefix, owner, entry string) (bool,
 	return len(b) > 0, nil
 }
 
-func (k Keeper) countSetEntries(ctx sdk.Context, prefix, owner string) uint32 {
+// countSetEntries returns the stored entry count. An absent key is zero; a
+// failed read is an error, never zero, because these counts gate hard tier
+// caps (review M-2).
+func (k Keeper) countSetEntries(ctx sdk.Context, prefix, owner string) (uint32, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	b, _ := store.Get(countKey(prefix, owner))
-	return getUint32(b)
+	b, err := store.Get(countKey(prefix, owner))
+	if err != nil {
+		return 0, fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
+	}
+	count, err := getUint32(b)
+	if err != nil {
+		return 0, fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	return count, nil
 }
 
 // listSetEntries returns all entries for an owner (unordered).
@@ -405,7 +451,6 @@ func (k Keeper) listSetEntries(ctx sdk.Context, prefix, owner string) ([]string,
 	if err != nil {
 		return nil, err
 	}
-	defer it.Close()
 
 	pfxLen := len(pfx)
 	var out []string
@@ -414,6 +459,13 @@ func (k Keeper) listSetEntries(ctx sdk.Context, prefix, owner string) ([]string,
 		if len(key) > pfxLen {
 			out = append(out, string(key[pfxLen:]))
 		}
+	}
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return nil, err
+	}
+	if err := it.Close(); err != nil {
+		return nil, err
 	}
 	if out == nil {
 		out = []string{}
@@ -433,7 +485,13 @@ func (k Keeper) deleteAllSetEntries(ctx sdk.Context, prefix, owner string) error
 	for ; it.Valid(); it.Next() {
 		keys = append(keys, append([]byte(nil), it.Key()...))
 	}
-	it.Close()
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return err
+	}
+	if err := it.Close(); err != nil {
+		return err
+	}
 	for _, key := range keys {
 		if err := store.Delete(key); err != nil {
 			return err
@@ -462,19 +520,40 @@ func (k Keeper) addOrderedEntry(ctx sdk.Context, prefix, owner, entry string) (b
 	if len(existing) > 0 {
 		return false, nil // already present
 	}
-	// Get next sequence (position)
+	// Get next sequence (position). A failed sequence read would restart
+	// positions at zero on this node and reorder the list against peers.
 	sk := seqKey(prefix, owner)
-	sb, _ := store.Get(sk)
-	seq := getUint64(sb)
+	sb, err := store.Get(sk)
+	if err != nil {
+		return false, fmt.Errorf("sequence read failed for %s/%s: %w", prefix, owner, err)
+	}
+	seq, err := getUint64(sb)
+	if err != nil {
+		return false, fmt.Errorf("sequence decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	nextSeq, err := types.CheckedAddUint64(seq, 1)
+	if err != nil {
+		return false, fmt.Errorf("sequence overflow for %s/%s: %w", prefix, owner, err)
+	}
 	if err := store.Set(ek, putUint64(seq)); err != nil {
 		return false, err
 	}
-	if err := store.Set(sk, putUint64(seq+1)); err != nil {
+	if err := store.Set(sk, putUint64(nextSeq)); err != nil {
 		return false, err
 	}
 	ck := countKey(prefix, owner)
-	cb, _ := store.Get(ck)
-	cnt := getUint32(cb) + 1
+	cb, err := store.Get(ck)
+	if err != nil {
+		return false, fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
+	}
+	cnt, err := getUint32(cb)
+	if err != nil {
+		return false, fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	if cnt == math.MaxUint32 {
+		return false, fmt.Errorf("count overflow for %s/%s", prefix, owner)
+	}
+	cnt++
 	return true, store.Set(ck, putUint32(cnt))
 }
 
@@ -491,7 +570,6 @@ func (k Keeper) listOrderedEntries(ctx sdk.Context, prefix, owner string) ([]str
 	if err != nil {
 		return nil, err
 	}
-	defer it.Close()
 
 	pfxLen := len(pfx)
 	type kv struct {
@@ -502,8 +580,21 @@ func (k Keeper) listOrderedEntries(ctx sdk.Context, prefix, owner string) ([]str
 	for ; it.Valid(); it.Next() {
 		key := it.Key()
 		if len(key) > pfxLen {
-			items = append(items, kv{entry: string(key[pfxLen:]), pos: getUint64(it.Value())})
+			pos, err := getUint64(it.Value())
+			if err != nil {
+				_ = it.Close()
+				return nil, fmt.Errorf("position decode failed for %s/%s entry=%q: %w",
+					prefix, owner, string(key[pfxLen:]), err)
+			}
+			items = append(items, kv{entry: string(key[pfxLen:]), pos: pos})
 		}
+	}
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return nil, err
+	}
+	if err := it.Close(); err != nil {
+		return nil, err
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].pos < items[j].pos })
 	out := make([]string, len(items))
@@ -549,20 +640,41 @@ func (k Keeper) addDequeEntry(ctx sdk.Context, prefix, owner, entry string, maxC
 	if len(existing) > 0 {
 		return false, nil // already present — idempotent
 	}
-	// Assign next sequence
+	// Assign next sequence. A failed read here would reuse sequence numbers
+	// and evict a different entry than peers do on the next overflow.
 	sk := seqKey(prefix, owner)
-	sb, _ := store.Get(sk)
-	seq := getUint64(sb)
+	sb, err := store.Get(sk)
+	if err != nil {
+		return false, fmt.Errorf("sequence read failed for %s/%s: %w", prefix, owner, err)
+	}
+	seq, err := getUint64(sb)
+	if err != nil {
+		return false, fmt.Errorf("sequence decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	nextSeq, err := types.CheckedAddUint64(seq, 1)
+	if err != nil {
+		return false, fmt.Errorf("sequence overflow for %s/%s: %w", prefix, owner, err)
+	}
 	if err := store.Set(ek, putUint64(seq)); err != nil {
 		return false, err
 	}
-	if err := store.Set(sk, putUint64(seq+1)); err != nil {
+	if err := store.Set(sk, putUint64(nextSeq)); err != nil {
 		return false, err
 	}
 	// Increment count
 	ck := countKey(prefix, owner)
-	cb, _ := store.Get(ck)
-	cnt := getUint32(cb) + 1
+	cb, err := store.Get(ck)
+	if err != nil {
+		return false, fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
+	}
+	cnt, err := getUint32(cb)
+	if err != nil {
+		return false, fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
+	}
+	if cnt == math.MaxUint32 {
+		return false, fmt.Errorf("count overflow for %s/%s", prefix, owner)
+	}
+	cnt++
 	if err := store.Set(ck, putUint32(cnt)); err != nil {
 		return false, err
 	}
@@ -595,18 +707,28 @@ func (k Keeper) evictLowestSeq(ctx sdk.Context, prefix, owner string) error {
 	if err != nil {
 		return err
 	}
-	defer it.Close()
 
 	var minKey []byte
 	var minSeq uint64
 	first := true
 	for ; it.Valid(); it.Next() {
-		s := getUint64(it.Value())
+		s, err := getUint64(it.Value())
+		if err != nil {
+			_ = it.Close()
+			return fmt.Errorf("sequence decode failed for %s/%s: %w", prefix, owner, err)
+		}
 		if first || s < minSeq {
 			minKey = append([]byte(nil), it.Key()...)
 			minSeq = s
 			first = false
 		}
+	}
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return err
+	}
+	if err := it.Close(); err != nil {
+		return err
 	}
 	if minKey != nil {
 		return store.Delete(minKey)
@@ -632,7 +754,7 @@ func (k Keeper) HasFollowedUser(ctx sdk.Context, owner, user string) (bool, erro
 	return k.hasSetEntry(ctx, types.FollowedUsersPrefix, owner, user)
 }
 
-func (k Keeper) CountFollowedUsers(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountFollowedUsers(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.FollowedUsersPrefix, owner)
 }
 
@@ -658,7 +780,7 @@ func (k Keeper) HasFollowedTopic(ctx sdk.Context, owner, topic string) (bool, er
 	return k.hasSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
 }
 
-func (k Keeper) CountFollowedTopics(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountFollowedTopics(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.FollowedTopicsPrefix, owner)
 }
 
@@ -684,7 +806,7 @@ func (k Keeper) HasEnabledAgent(ctx sdk.Context, owner, agent string) (bool, err
 	return k.hasSetEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
 }
 
-func (k Keeper) CountEnabledAgents(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountEnabledAgents(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.EnabledAgentsPrefix, owner)
 }
 
@@ -717,7 +839,7 @@ func (k Keeper) HasBlockedUser(ctx sdk.Context, owner, user string) (bool, error
 	return k.hasSetEntry(ctx, types.BlockedUsersPrefix, owner, user)
 }
 
-func (k Keeper) CountBlockedUsers(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountBlockedUsers(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.BlockedUsersPrefix, owner)
 }
 
@@ -743,7 +865,7 @@ func (k Keeper) HasBlockedPost(ctx sdk.Context, owner, txhash string) (bool, err
 	return k.hasSetEntry(ctx, types.BlockedPostsPrefix, owner, txhash)
 }
 
-func (k Keeper) CountBlockedPosts(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountBlockedPosts(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.BlockedPostsPrefix, owner)
 }
 
@@ -769,7 +891,7 @@ func (k Keeper) HasBlockedTopic(ctx sdk.Context, owner, topic string) (bool, err
 	return k.hasSetEntry(ctx, types.BlockedTopicsPrefix, owner, topic)
 }
 
-func (k Keeper) CountBlockedTopics(ctx sdk.Context, owner string) uint32 {
+func (k Keeper) CountBlockedTopics(ctx sdk.Context, owner string) (uint32, error) {
 	return k.countSetEntries(ctx, types.BlockedTopicsPrefix, owner)
 }
 
@@ -793,10 +915,16 @@ func (k Keeper) GetAllProfiles(ctx sdk.Context) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer iterator.Close()
 
 	for ; iterator.Valid(); iterator.Next() {
-		profiles = append(profiles, iterator.Value())
+		profiles = append(profiles, append([]byte(nil), iterator.Value()...))
+	}
+	if err := iterator.Error(); err != nil {
+		_ = iterator.Close()
+		return nil, err
+	}
+	if err := iterator.Close(); err != nil {
+		return nil, err
 	}
 
 	return profiles, nil
@@ -827,11 +955,10 @@ func (k Keeper) GetProfilesPaginated(ctx sdk.Context, key []byte, limit uint64) 
 	if err != nil {
 		return nil, nil, err
 	}
-	defer iterator.Close()
 
 	count := uint64(0)
 	for ; iterator.Valid() && count < limit; iterator.Next() {
-		profiles = append(profiles, iterator.Value())
+		profiles = append(profiles, append([]byte(nil), iterator.Value()...))
 		count++
 	}
 
@@ -841,6 +968,13 @@ func (k Keeper) GetProfilesPaginated(ctx sdk.Context, key []byte, limit uint64) 
 		if len(fullKey) > len(profilesPrefix) {
 			nextKey = fullKey[len(profilesPrefix):]
 		}
+	}
+	if err := iterator.Error(); err != nil {
+		_ = iterator.Close()
+		return nil, nil, err
+	}
+	if err := iterator.Close(); err != nil {
+		return nil, nil, err
 	}
 
 	return profiles, nextKey, nil
@@ -857,13 +991,19 @@ func (k Keeper) GetAllKVPairs(ctx sdk.Context) ([]*types.RawKVPair, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer iterator.Close()
 
 	for ; iterator.Valid(); iterator.Next() {
 		pairs = append(pairs, &types.RawKVPair{
 			Key:   base64.StdEncoding.EncodeToString(iterator.Key()),
 			Value: base64.StdEncoding.EncodeToString(iterator.Value()),
 		})
+	}
+	if err := iterator.Error(); err != nil {
+		_ = iterator.Close()
+		return nil, err
+	}
+	if err := iterator.Close(); err != nil {
+		return nil, err
 	}
 
 	return pairs, nil
@@ -913,7 +1053,12 @@ func (k Keeper) DeductFeeFromOwner(ctx sdk.Context, owner string, amount uint64)
 		return err
 	}
 	coin := sdk.NewCoin("umirage", sdkmath.NewIntFromUint64(amount))
-	return k.bank.SendCoinsFromAccountToModule(ctx, addr, types.ModuleName, sdk.NewCoins(coin))
+	coins := sdk.NewCoins(coin)
+	if !k.bankSpendableCoins(ctx, addr).IsAllGTE(coins) {
+		return sdkerrors.ErrInsufficientFunds.Wrapf("spendable balance is smaller than %s", coins)
+	}
+	return haltFinalizeUnexpectedBankError(ctx, "deduct_fee_from_owner",
+		k.bank.SendCoinsFromAccountToModule(ctx, addr, types.ModuleName, coins))
 }
 
 // GetBalance returns the spendable balance for denom on an address.
@@ -922,12 +1067,15 @@ func (k Keeper) GetBalance(ctx sdk.Context, owner string, denom string) sdkmath.
 	if err != nil {
 		return sdkmath.NewInt(0)
 	}
-	return k.bank.GetBalance(ctx, addr, denom).Amount
+	return k.bankBalance(ctx, addr, denom).Amount
 }
 
 // SendCoins transfers coins from one account to another using the bank keeper.
 func (k Keeper) SendCoins(ctx sdk.Context, fromAddr sdk.AccAddress, toAddr sdk.AccAddress, amt sdk.Coins) error {
-	return k.bank.SendCoins(ctx, fromAddr, toAddr, amt)
+	if !k.bankSpendableCoins(ctx, fromAddr).IsAllGTE(amt) {
+		return sdkerrors.ErrInsufficientFunds.Wrapf("spendable balance is smaller than %s", amt)
+	}
+	return haltFinalizeUnexpectedBankError(ctx, "send_coins", k.bank.SendCoins(ctx, fromAddr, toAddr, amt))
 }
 
 // AccToValoper converts a bech32 account address (acc) to a validator operator address (valoper)
@@ -950,7 +1098,10 @@ func (k Keeper) PunishValidator(ctx sdk.Context, valoper string, fraction sdkmat
 	}
 	validator, err := k.staking.GetValidator(ctx, valAddr)
 	if err != nil {
-		return fmt.Errorf("validator not found: %w", err)
+		if errors.Is(err, stakingtypes.ErrNoValidatorFound) {
+			return fmt.Errorf("validator not found: %w", err)
+		}
+		return haltFinalizeStoreError(ctx, "staking_get_validator", err)
 	}
 
 	// Compute consensus address and power
@@ -967,21 +1118,21 @@ func (k Keeper) PunishValidator(ctx sdk.Context, valoper string, fraction sdkmat
 			fraction = sdkmath.LegacyNewDec(1)
 		}
 		if err := k.slashing.Slash(sdk.WrapSDKContext(ctx), consAddr, fraction, power, ctx.BlockHeight()); err != nil {
-			return fmt.Errorf("slash failed: %w", err)
+			return fmt.Errorf("slash failed: %w", haltFinalizeSlashingError(ctx, "slashing_slash", err))
 		}
 	}
 
 	// Jail if requested
 	if jail {
 		if err := k.slashing.Jail(sdk.WrapSDKContext(ctx), consAddr); err != nil {
-			return fmt.Errorf("jail failed: %w", err)
+			return fmt.Errorf("jail failed: %w", haltFinalizeSlashingError(ctx, "slashing_jail", err))
 		}
 	}
 
 	// Tombstone if requested
 	if tombstone {
 		if err := k.slashing.Tombstone(sdk.WrapSDKContext(ctx), consAddr); err != nil {
-			return fmt.Errorf("tombstone failed: %w", err)
+			return fmt.Errorf("tombstone failed: %w", haltFinalizeSlashingError(ctx, "slashing_tombstone", err))
 		}
 	}
 
@@ -1050,7 +1201,6 @@ func (k Keeper) IterateRelayCredits(ctx sdk.Context, fn func(valoper string, amt
 	if err != nil {
 		return err
 	}
-	defer it.Close()
 	for ; it.Valid(); it.Next() {
 		key := string(it.Key())
 		valoper := strings.TrimPrefix(key, types.RelayCreditsPrefix)
@@ -1064,7 +1214,11 @@ func (k Keeper) IterateRelayCredits(ctx sdk.Context, fn func(valoper string, amt
 			break
 		}
 	}
-	return nil
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return err
+	}
+	return it.Close()
 }
 
 func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
@@ -1082,7 +1236,13 @@ func (k Keeper) ResetAllRelayCredits(ctx sdk.Context) error {
 	for ; it.Valid(); it.Next() {
 		keys = append(keys, append([]byte(nil), it.Key()...))
 	}
-	it.Close()
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return err
+	}
+	if err := it.Close(); err != nil {
+		return err
+	}
 	for _, key := range keys {
 		if err := store.Delete(key); err != nil {
 			return fmt.Errorf("ResetAllRelayCredits: delete %x: %w", key, err)
@@ -1247,10 +1407,10 @@ func (k Keeper) mintDenom() string { return types.MintDenom }
 // fees and caused the 2026-06-12 app-hash divergence at height 5280036
 // (supply was low by 164,124,000 while balances were unchanged).
 //
-// Returning an error from the EndBlock caller halts only the corrupted node,
-// with the precise discrepancy logged, instead of silently committing a
-// divergent app hash that surfaces later as a cryptic consensus failure. The
-// auto-recovery watchdog then state-syncs the node from healthy peers.
+// During Finalize, a mismatch terminates only the corrupted node with the
+// precise discrepancy logged, instead of silently committing a divergent app
+// hash that surfaces later as a cryptic consensus failure. The auto-recovery
+// watchdog then state-syncs the node from healthy peers.
 //
 // See docs/troubleshooting/divergence-recovery.md.
 //
@@ -1261,18 +1421,19 @@ func (k Keeper) mintDenom() string { return types.MintDenom }
 func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
 	denom := k.mintDenom()
 	sum := sdkmath.ZeroInt()
-	k.bank.IterateAllBalances(ctx, func(_ sdk.AccAddress, coin sdk.Coin) bool {
+	k.iterateAllBankBalances(ctx, func(_ sdk.AccAddress, coin sdk.Coin) bool {
 		if coin.Denom == denom {
 			sum = sum.Add(coin.Amount)
 		}
 		return false
 	})
-	supply := k.bank.GetSupply(ctx, denom).Amount
+	supply := k.bankSupply(ctx, denom).Amount
 	if !supply.Equal(sum) {
-		return fmt.Errorf(
+		err := fmt.Errorf(
 			"supply invariant violated for %s: recorded supply %s != sum of balances %s (diff %s)",
 			denom, supply.String(), sum.String(), supply.Sub(sum).String(),
 		)
+		return haltFinalizeInvariantError(ctx, "supply_equals_balances", err)
 	}
 	return nil
 }
@@ -1300,7 +1461,7 @@ func decodeSupplyInt(bz []byte) (sdkmath.Int, error) {
 // in the block so EndBlock's AssertSupplyDeltaInvariant is meaningful.
 func (k Keeper) CaptureBlockSupplyStart(ctx sdk.Context) error {
 	store := k.storeService.OpenKVStore(ctx)
-	supply := k.bank.GetSupply(ctx, k.mintDenom()).Amount
+	supply := k.bankSupply(ctx, k.mintDenom()).Amount
 	if err := store.Set(k.blockSupplyStartKey(), encodeSupplyInt(supply)); err != nil {
 		return fmt.Errorf("CONSENSUS_FATAL:SUPPLY_START_SET: %w", err)
 	}
@@ -1372,12 +1533,13 @@ func (k Keeper) AssertSupplyDeltaInvariant(ctx sdk.Context) error {
 		}
 	}
 	expected := start.Add(delta)
-	supply := k.bank.GetSupply(ctx, k.mintDenom()).Amount
+	supply := k.bankSupply(ctx, k.mintDenom()).Amount
 	if !supply.Equal(expected) {
-		return fmt.Errorf(
+		err := fmt.Errorf(
 			"supply delta invariant violated for %s: supply %s != start %s + delta %s (expected %s, diff %s)",
 			k.mintDenom(), supply.String(), start.String(), delta.String(), expected.String(), supply.Sub(expected).String(),
 		)
+		return haltFinalizeInvariantError(ctx, "supply_delta", err)
 	}
 	return nil
 }
@@ -1390,7 +1552,7 @@ func (k Keeper) burnCoinsTracked(ctx sdk.Context, amt sdkmath.Int) error {
 	}
 	coin := sdk.NewCoin(k.mintDenom(), amt)
 	if err := k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin)); err != nil {
-		return err
+		return haltFinalizeUnexpectedBankError(ctx, "burn_core_coins", err)
 	}
 	return k.addSupplyDelta(ctx, amt.Neg())
 }
@@ -1403,7 +1565,7 @@ func (k Keeper) mintCoinsTracked(ctx sdk.Context, amt sdkmath.Int) error {
 	}
 	coin := sdk.NewCoin(k.mintDenom(), amt)
 	if err := k.bank.MintCoins(ctx, types.ModuleName, sdk.NewCoins(coin)); err != nil {
-		return err
+		return haltFinalizeBankError(ctx, "mint_core_coins", err)
 	}
 	return k.addSupplyDelta(ctx, amt)
 }
@@ -1411,7 +1573,7 @@ func (k Keeper) mintCoinsTracked(ctx sdk.Context, amt sdkmath.Int) error {
 // BurnAllFromModule burns all balance of the core module account for the mint denom
 func (k Keeper) BurnAllFromModule(ctx sdk.Context) error {
 	addr := k.moduleAddress()
-	bal := k.bank.GetBalance(ctx, addr, k.mintDenom()).Amount
+	bal := k.bankBalance(ctx, addr, k.mintDenom()).Amount
 	if !bal.IsPositive() {
 		return nil
 	}
@@ -1425,13 +1587,13 @@ func (k Keeper) BurnAllFromModuleName(ctx sdk.Context, moduleName string) error 
 		return nil
 	}
 	srcAddr := authtypes.NewModuleAddress(moduleName)
-	bal := k.bank.GetBalance(ctx, srcAddr, k.mintDenom()).Amount
+	bal := k.bankBalance(ctx, srcAddr, k.mintDenom()).Amount
 	if !bal.IsPositive() {
 		return nil
 	}
 	coin := sdk.NewCoin(k.mintDenom(), bal)
 	if err := k.bank.SendCoinsFromModuleToModule(ctx, moduleName, types.ModuleName, sdk.NewCoins(coin)); err != nil {
-		return err
+		return haltFinalizeUnexpectedBankError(ctx, "move_module_balance_for_burn", err)
 	}
 	return k.burnCoinsTracked(ctx, bal)
 }
@@ -1444,7 +1606,7 @@ func (k Keeper) BurnFromModuleAmount(ctx sdk.Context, amount uint64) error {
 		return nil
 	}
 	addr := k.moduleAddress()
-	bal := k.bank.GetBalance(ctx, addr, k.mintDenom()).Amount
+	bal := k.bankBalance(ctx, addr, k.mintDenom()).Amount
 	amt := sdkmath.NewIntFromUint64(amount)
 	if bal.LT(amt) {
 		// CONSENSUS_FATAL class: deterministic — recorded reserve liabilities
@@ -1476,7 +1638,8 @@ func (k Keeper) MintToAccount(ctx sdk.Context, recipient string, amount uint64) 
 	if err := k.mintCoinsTracked(ctx, amt); err != nil {
 		return err
 	}
-	return k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, to, sdk.NewCoins(coin))
+	return haltFinalizeUnexpectedBankError(ctx, "send_minted_coins",
+		k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, to, sdk.NewCoins(coin)))
 }
 
 type mintRecipient struct {
@@ -1485,12 +1648,9 @@ type mintRecipient struct {
 	amount          sdkmath.Int
 }
 
-// buildMintRecipients filters reward recipients before MintCoins runs. Invalid
-// validator operator addresses are skipped, and their reward share is not
-// included in the amount minted for this interval. If operatorAddrs and
-// amounts have mismatched lengths (a programmer bug), the function returns
-// empty results rather than panicking; the caller will then simply skip
-// minting for this interval. MintIfNeeded must never halt the chain.
+// buildMintRecipients validates reward recipients before MintCoins runs. It
+// reports invalid validator addresses and mismatched slices to MintIfNeeded,
+// which rejects the block before minting.
 func buildMintRecipients(operatorAddrs []string, amounts []sdkmath.Int) (recipients []mintRecipient, skippedInvalid []string, totalMint sdkmath.Int, mismatch bool) {
 	if len(operatorAddrs) != len(amounts) {
 		return nil, nil, sdkmath.ZeroInt(), true
@@ -1525,73 +1685,45 @@ func buildMintRecipients(operatorAddrs []string, amounts []sdkmath.Int) (recipie
 type mintBankIface interface {
 	MintCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
 	SendCoinsFromModuleToAccount(ctx context.Context, senderModule string, recipientAddr sdk.AccAddress, amt sdk.Coins) error
-	BurnCoins(ctx context.Context, moduleName string, amt sdk.Coins) error
 }
 
-// mintResult captures the accounting outcome of a single mint interval's
-// mint+distribute cycle.
-//
-//   - minted: coins that were successfully minted into the module account.
-//   - sent:   coins delivered to validator accounts.
-//   - burnedSkipped: coins that could not be sent to their recipient but
-//     were successfully burned from the module account (supply neutral).
-//   - stuckInModule: coins that could neither be sent nor burned and remain
-//     in the module account; operators must reconcile these out-of-band.
-//     This is an accounting drift the chain accepts rather than halting.
+// mintResult captures the accounting outcome of a successful mint interval.
+// A distribution error returns the partial result only for diagnostics; the
+// caller rejects the block and the SDK rolls every operation back.
 type mintResult struct {
-	minted        sdkmath.Int
-	sent          sdkmath.Int
-	burnedSkipped sdkmath.Int
-	stuckInModule sdkmath.Int
+	minted sdkmath.Int
+	sent   sdkmath.Int
 }
 
 // mintAndDistribute mints totalMint into moduleName and distributes it across
-// recipients. On per-recipient send failure it attempts to burn the skipped
-// portion so the total supply delta for this interval equals `sent`. If the
-// burn itself fails the coins stay in the module account and are accounted
-// as `stuckInModule`. This function returns no error: BeginBlock must never
-// halt on bank subsystem failures.
-//
-// ADR: docs/architecture/adr-mint-log-and-continue.md — intentional
-// log-and-continue (not CONSENSUS_FATAL) after the 2026-07-12 full-chain halt;
-// liveness preferred for mint/admin-waiver bank failures.
+// recipients. Any bank error propagates so BeginBlock's cache rolls back the
+// mint and every earlier send as one state transition.
 func mintAndDistribute(
 	ctx sdk.Context,
 	bank mintBankIface,
 	moduleName, denom string,
 	recipients []mintRecipient,
 	totalMint sdkmath.Int,
-) mintResult {
+) (mintResult, error) {
 	result := mintResult{
-		minted:        sdkmath.ZeroInt(),
-		sent:          sdkmath.ZeroInt(),
-		burnedSkipped: sdkmath.ZeroInt(),
-		stuckInModule: sdkmath.ZeroInt(),
+		minted: sdkmath.ZeroInt(),
+		sent:   sdkmath.ZeroInt(),
 	}
 	if !totalMint.IsPositive() || len(recipients) == 0 {
-		return result
+		return result, nil
 	}
 	mintCoins := sdk.NewCoins(sdk.NewCoin(denom, totalMint))
 	if err := bank.MintCoins(ctx, moduleName, mintCoins); err != nil {
-		ctx.Logger().Error("mint distribution: MintCoins failed; skipping interval distribution",
-			"amount", totalMint.String(), "err", err)
-		return result
+		return result, fmt.Errorf("mint distribution: mint %s: %w", totalMint.String(),
+			haltFinalizeUnexpectedBankError(ctx, "mint_distribution", err))
 	}
 	result.minted = totalMint
 	for _, r := range recipients {
 		rewardCoins := sdk.NewCoins(sdk.NewCoin(denom, r.amount))
 		if err := bank.SendCoinsFromModuleToAccount(ctx, moduleName, r.accountAddress, rewardCoins); err != nil {
-			ctx.Logger().Error("mint distribution: send failed; attempting to burn skipped reward",
-				"valoper", r.operatorAddress, "amount", r.amount.String(), "err", err)
-			if burnErr := bank.BurnCoins(ctx, moduleName, rewardCoins); burnErr != nil {
-				ctx.Logger().Error("mint distribution: burn of skipped reward also failed; coins stuck in module account",
-					"valoper", r.operatorAddress, "amount", r.amount.String(),
-					"send_err", err.Error(), "burn_err", burnErr.Error())
-				result.stuckInModule = result.stuckInModule.Add(r.amount)
-				continue
-			}
-			result.burnedSkipped = result.burnedSkipped.Add(r.amount)
-			continue
+			return result, fmt.Errorf("mint distribution: send to %s amount %s: %w",
+				r.operatorAddress, r.amount.String(),
+				haltFinalizeUnexpectedBankError(ctx, "mint_distribution_send", err))
 		}
 		result.sent = result.sent.Add(r.amount)
 		ctx.Logger().Info("mint distribution",
@@ -1599,29 +1731,34 @@ func mintAndDistribute(
 			"total", r.amount.String(),
 		)
 	}
-	return result
+	return result, nil
 }
 
 // MintIfNeeded mints params.MintQuantity umirage every params.MintInterval
 // blocks and distributes proportionally to validator accounts.
 //
-// INVARIANT: this function MUST NEVER return a non-nil error. BeginBlock is
-// consensus-critical and halting on a minting subsystem failure is worse than
-// accepting a missed interval. Every internal failure is logged and either
-// skips the interval or degrades gracefully (e.g. burning unpayable rewards,
-// or tracking `stuck_in_module` coins when burn also fails). The error return
-// is retained only for callers that still check it; it is always nil.
+// Every state-dependent failure propagates. A node that skips minting while
+// peers succeed commits a different supply and app hash even when its own local
+// supply invariant remains internally consistent.
 func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	current := ctx.BlockHeight()
 	params := k.GetParams(ctx)
 
+	interval, err := types.CheckedUint64ToInt64(params.MintInterval)
+	if err != nil {
+		return fmt.Errorf("MintIfNeeded: unusable mint_interval %d: %w", params.MintInterval, err)
+	}
+	if interval <= 0 {
+		return fmt.Errorf("MintIfNeeded: mint_interval must be positive: %d", params.MintInterval)
+	}
+
 	// Start minting from block MintInterval, then every MintInterval thereafter
-	if current < int64(params.MintInterval) {
+	if current < interval {
 		return nil
 	}
 
 	// Mint if current block is a multiple of MintInterval
-	if current%int64(params.MintInterval) != 0 {
+	if current%interval != 0 {
 		return nil
 	}
 
@@ -1645,8 +1782,8 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		total_stake = total_stake.Add(val.Tokens)
 		return false
 	}); err != nil {
-		ctx.Logger().Error("mint distribution: IterateValidators failed; skipping interval", "err", err)
-		return nil
+		return fmt.Errorf("mint distribution: iterate validators: %w",
+			haltFinalizeStoreError(ctx, "staking_iterate_validators", err))
 	}
 	if total_stake.IsZero() {
 		return nil
@@ -1667,21 +1804,15 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 
 	// Split pools based on param MintDynamicSplit [0,1]
 	split := params.MintDynamicSplit
-	if split < 0 {
-		split = 0
-	}
-	if split > 1 {
-		split = 1
-	}
 	dynDec, errDec := sdkmath.LegacyNewDecFromStr(fmt.Sprintf("%.18f", split))
 	if errDec != nil {
-		ctx.Logger().Error("mint distribution: invalid MintDynamicSplit; skipping interval",
-			"value", fmt.Sprintf("%.18f", split), "err", errDec)
-		return nil
+		return fmt.Errorf("mint distribution: invalid MintDynamicSplit %s: %w",
+			fmt.Sprintf("%.18f", split), errDec)
 	}
 	dynamicPool := dynDec.MulInt(amt).TruncateInt()
 	if dynamicPool.IsNegative() || dynamicPool.GT(amt) {
-		dynamicPool = amt.QuoRaw(2)
+		return fmt.Errorf("mint distribution: dynamic pool %s outside [0,%s]",
+			dynamicPool.String(), amt.String())
 	}
 	baselinePool := amt.Sub(dynamicPool)
 
@@ -1796,11 +1927,11 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 				if !w.weight.IsPositive() {
 					continue
 				}
+				lastIdxWithWeight = w.idx
 				alloc := w.weight.MulInt(dynamicPool).QuoTruncate(sumWeights).TruncateInt()
 				if alloc.IsPositive() {
 					rewards[w.idx].dynamic = alloc
 					dynamicAssigned = dynamicAssigned.Add(alloc)
-					lastIdxWithWeight = w.idx
 					ctx.Logger().Info("dynamic alloc initial",
 						"valoper", rewards[w.idx].validator.OperatorAddress,
 						"alloc", alloc.String(),
@@ -1820,8 +1951,7 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		}
 	}
 
-	// Build payable recipients BEFORE minting so invalid validators simply do
-	// not receive a reward and their share is not minted.
+	// Build and validate every recipient before minting.
 	operatorAddrs := make([]string, len(rewards))
 	amounts := make([]sdkmath.Int, len(rewards))
 	for i, r := range rewards {
@@ -1830,42 +1960,31 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 	}
 	recipients, skippedInvalid, totalMint, mismatch := buildMintRecipients(operatorAddrs, amounts)
 	if mismatch {
-		// Programmer bug: slices are always built from the same rewards loop.
-		// Log, skip the interval, never halt.
-		ctx.Logger().Error("mint distribution: recipient slice length mismatch; skipping interval",
-			"operator_addrs", len(operatorAddrs), "amounts", len(amounts))
-		return nil
+		return fmt.Errorf("mint distribution: recipient slice length mismatch: operator_addrs=%d amounts=%d",
+			len(operatorAddrs), len(amounts))
 	}
 	if len(skippedInvalid) > 0 {
-		ctx.Logger().Error("mint distribution: skipped invalid validator addresses",
-			"count", len(skippedInvalid), "valopers", strings.Join(skippedInvalid, ","))
+		return fmt.Errorf("mint distribution: invalid validator addresses: %s",
+			strings.Join(skippedInvalid, ","))
 	}
 
-	result := mintAndDistribute(ctx, k.bank, types.ModuleName, k.mintDenom(), recipients, totalMint)
+	result, err := mintAndDistribute(ctx, k.bank, types.ModuleName, k.mintDenom(), recipients, totalMint)
+	if err != nil {
+		return err
+	}
 
 	// Track net supply change for the O(1) EndBlock delta invariant (M-2).
-	// Net = minted − burned_skipped; stuck_in_module coins remain in supply
-	// (they were minted and not burned) so they stay in the delta.
-	if net := result.minted.Sub(result.burnedSkipped); !net.IsZero() {
+	if net := result.minted; !net.IsZero() {
 		if err := k.addSupplyDelta(ctx, net); err != nil {
-			ctx.Logger().Error("mint distribution: supply delta tracking failed; EndBlock invariant will halt",
-				"net", net.String(), "err", err)
+			return fmt.Errorf("mint distribution: track supply delta %s: %w", net.String(), err)
 		}
 	}
 
-	// Always reset relay credits at end of interval so the next interval
-	// starts fresh, even if no reward was distributed. A failure here is
-	// logged but does not halt the chain; credits may carry over, giving
-	// affected validators extra weight next interval.
+	// Reset relay credits at end of interval so the next interval starts fresh.
+	// A failure rolls the block back with the mint and sends.
 	if err := k.ResetAllRelayCredits(ctx); err != nil {
-		// CONSENSUS_FATAL class: node-local — partial deletion would commit a
-		// different mint input set on this validator at the next interval.
-		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDITS_RESET",
-			"height", ctx.BlockHeight(), "err", err)
-		consensusfatal.HaltErr(fmt.Errorf(
-			"CONSENSUS_FATAL:RELAY_CREDITS_RESET height=%d: %w",
-			ctx.BlockHeight(), err,
-		))
+		return fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDITS_RESET height=%d: %w",
+			ctx.BlockHeight(), err)
 	}
 
 	ctx.Logger().Info("mint interval complete",
@@ -1873,8 +1992,6 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		"attempted_mint", totalMint.String(),
 		"minted", result.minted.String(),
 		"sent", result.sent.String(),
-		"burned_skipped", result.burnedSkipped.String(),
-		"stuck_in_module", result.stuckInModule.String(),
 		"validators", len(recipients),
 		"skipped_invalid_validators", len(skippedInvalid),
 		"total_stake", total_stake.String(),
@@ -1930,7 +2047,13 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 		}
 		count = binary.BigEndian.Uint64(existing)
 	}
-	count++
+	count, err = types.CheckedAddUint64(count, 1)
+	if err != nil {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:POW_COUNT_OVERFLOW height=%d op=record: %w",
+			ctx.BlockHeight(), err,
+		))
+	}
 
 	bz := make([]byte, 8)
 	binary.BigEndian.PutUint64(bz, count)
@@ -1945,9 +2068,16 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	currentHeight := ctx.BlockHeight()
-	periodStart := currentHeight - int64(params.PowMessageWindow) + 1
-	if periodStart < 1 {
-		periodStart = 1
+	// A window outside the governance-safe bound cannot be summed: clamping it
+	// would sum a different range than peers, and iterating it would be an
+	// unbounded sweep (review M-7). Params.Validate rejects such values, so
+	// reaching here means raw-imported or upgrade-written state.
+	periodStart, err := types.CheckedWindowStart(currentHeight, params.PowMessageWindow)
+	if err != nil {
+		ctx.Logger().Error("CONSENSUS_FATAL:POW_WINDOW_PARAM",
+			"height", currentHeight, "window", params.PowMessageWindow, "op", "window_sum", "err", err)
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=window_sum: %w",
+			currentHeight, params.PowMessageWindow, err))
 	}
 
 	total := uint64(0)
@@ -1968,7 +2098,13 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 					ctx.BlockHeight(), height, len(bz),
 				))
 			}
-			total += binary.BigEndian.Uint64(bz)
+			total, err = types.CheckedAddUint64(total, binary.BigEndian.Uint64(bz))
+			if err != nil {
+				consensusfatal.HaltErr(fmt.Errorf(
+					"CONSENSUS_FATAL:POW_COUNT_OVERFLOW height=%d read_height=%d op=window_sum: %w",
+					ctx.BlockHeight(), height, err,
+				))
+			}
 		}
 	}
 	return total
@@ -1979,7 +2115,17 @@ func (k Keeper) CleanupOldCounters(ctx sdk.Context, params types.Params) error {
 	store := k.storeService.OpenKVStore(ctx)
 	currentHeight := ctx.BlockHeight()
 	// Keep 2 windows worth of data for safety margin
-	cutoffHeight := currentHeight - int64(params.PowMessageWindow)*2
+	retention, err := types.CheckedMulUint64(params.PowMessageWindow, 2)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=cleanup: %w",
+			currentHeight, params.PowMessageWindow, err)
+	}
+	retentionHeights, err := types.CheckedUint64ToInt64(retention)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=cleanup: %w",
+			currentHeight, params.PowMessageWindow, err)
+	}
+	cutoffHeight := currentHeight - retentionHeights
 
 	if cutoffHeight < 1 {
 		return nil // Nothing to clean up yet
@@ -2006,11 +2152,14 @@ func (k Keeper) CleanupOldCounters(ctx sdk.Context, params types.Params) error {
 		if len(markerBz) != 8 {
 			return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_LEN height=%d len=%d", currentHeight, len(markerBz))
 		}
-		marker := binary.BigEndian.Uint64(markerBz)
-		if marker < 1 || marker > uint64(currentHeight) {
+		marker, err := types.CheckedUint64ToInt64(binary.BigEndian.Uint64(markerBz))
+		if err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_RANGE height=%d: %w", currentHeight, err)
+		}
+		if marker < 1 || marker > currentHeight {
 			return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_RANGE height=%d marker=%d", currentHeight, marker)
 		}
-		startHeight = int64(marker)
+		startHeight = marker
 	}
 
 	for height := startHeight; height <= cutoffHeight && deleted < maxDeletesPerBlock; height++ {
@@ -2042,9 +2191,10 @@ func (k Keeper) CleanupOldCounters(ctx sdk.Context, params types.Params) error {
 func (k Keeper) ClearPoWWindow(ctx sdk.Context, params types.Params) error {
 	store := k.storeService.OpenKVStore(ctx)
 	currentHeight := ctx.BlockHeight()
-	start := currentHeight - int64(params.PowMessageWindow) + 1
-	if start < 1 {
-		start = 1
+	start, err := types.CheckedWindowStart(currentHeight, params.PowMessageWindow)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=window_clear: %w",
+			currentHeight, params.PowMessageWindow, err)
 	}
 	for h := start; h <= currentHeight; h++ {
 		key := k.powMessageCountKey(h)
@@ -2083,9 +2233,18 @@ func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	if len(bz) == 0 {
 		return BaseDifficultySteps
 	}
+	if len(bz) != 8 {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:DIFFICULTY_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
+			ctx.BlockHeight(), len(bz),
+		))
+	}
 	v := binary.BigEndian.Uint64(bz)
 	if v > MaxSafeDifficultySteps {
-		return MaxSafeDifficultySteps
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:DIFFICULTY_RANGE height=%d difficulty=%d max=%d",
+			ctx.BlockHeight(), v, MaxSafeDifficultySteps,
+		))
 	}
 	return v
 }
@@ -2108,6 +2267,9 @@ func (k Keeper) lastChangeHeightKey() []byte   { return []byte("last_diff_change
 
 // SetCurrentDifficulty sets the current dynamic difficulty and records previous value and change height
 func (k Keeper) SetCurrentDifficulty(ctx sdk.Context, difficulty uint64) error {
+	if difficulty > MaxSafeDifficultySteps {
+		return fmt.Errorf("difficulty %d exceeds max %d", difficulty, MaxSafeDifficultySteps)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	// read old
 	old := k.GetCurrentDifficulty(ctx)
@@ -2146,7 +2308,20 @@ func (k Keeper) GetPreviousDifficulty(ctx sdk.Context) uint64 {
 	if len(bz) == 0 {
 		return k.GetCurrentDifficulty(ctx)
 	}
-	return binary.BigEndian.Uint64(bz)
+	if len(bz) != 8 {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:PREV_DIFFICULTY_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
+			ctx.BlockHeight(), len(bz),
+		))
+	}
+	v := binary.BigEndian.Uint64(bz)
+	if v > MaxSafeDifficultySteps {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:PREV_DIFFICULTY_RANGE height=%d difficulty=%d max=%d",
+			ctx.BlockHeight(), v, MaxSafeDifficultySteps,
+		))
+	}
+	return v
 }
 
 // GetLastDifficultyChangeHeight returns the height of the last difficulty change
@@ -2162,7 +2337,21 @@ func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 	if len(bz) == 0 {
 		return 0
 	}
-	return int64(binary.BigEndian.Uint64(bz))
+	if len(bz) != 8 {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:LAST_DIFF_CHANGE_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
+			ctx.BlockHeight(), len(bz),
+		))
+	}
+	v := binary.BigEndian.Uint64(bz)
+	height, err := types.CheckedUint64ToInt64(v)
+	if err != nil {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:LAST_DIFF_CHANGE_RANGE height=%d stored=%d: %w",
+			ctx.BlockHeight(), v, err,
+		))
+	}
+	return height
 }
 
 // GetConsecutiveLowUsage returns the number of consecutive blocks with low usage
@@ -2178,11 +2367,27 @@ func (k Keeper) GetConsecutiveLowUsage(ctx sdk.Context) uint64 {
 	if len(bz) == 0 {
 		return 0
 	}
-	return binary.BigEndian.Uint64(bz)
+	if len(bz) != 8 {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
+			ctx.BlockHeight(), len(bz),
+		))
+	}
+	v := binary.BigEndian.Uint64(bz)
+	if v > types.MaxPowCalmSequenceThreshold {
+		consensusfatal.HaltErr(fmt.Errorf(
+			"CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_RANGE height=%d count=%d max=%d",
+			ctx.BlockHeight(), v, types.MaxPowCalmSequenceThreshold,
+		))
+	}
+	return v
 }
 
 // SetConsecutiveLowUsage sets the number of consecutive blocks with low usage
 func (k Keeper) SetConsecutiveLowUsage(ctx sdk.Context, count uint64) error {
+	if count > types.MaxPowCalmSequenceThreshold {
+		return fmt.Errorf("consecutive low usage %d exceeds max %d", count, types.MaxPowCalmSequenceThreshold)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	bz := make([]byte, 8)
 	binary.BigEndian.PutUint64(bz, count)
@@ -2199,6 +2404,12 @@ func (k Keeper) subscriptionKey(expiry int64, addr string) []byte {
 
 // SetSubscription indexes a subscription for renewal tracking
 func (k Keeper) SetSubscription(ctx sdk.Context, addr string, level int, expiry int64) error {
+	if expiry <= 0 {
+		return fmt.Errorf("subscription expiry must be positive: %d", expiry)
+	}
+	if level < 0 || uint64(level) > math.MaxUint32 {
+		return fmt.Errorf("subscription level out of uint32 range: %d", level)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	key := k.subscriptionKey(expiry, addr)
 	bz := make([]byte, 4)
@@ -2222,10 +2433,17 @@ type ExpiredSubscription struct {
 
 // GetExpiredSubscriptions returns all subscriptions with expiry <= timestamp
 func (k Keeper) GetExpiredSubscriptions(ctx sdk.Context, timestamp int64) ([]ExpiredSubscription, error) {
+	if timestamp < 0 {
+		return nil, fmt.Errorf("subscription expiry scan timestamp must be non-negative: %d", timestamp)
+	}
+	exclusiveEnd, err := types.CheckedAddInt64(timestamp, 1)
+	if err != nil {
+		return nil, fmt.Errorf("subscription expiry scan end: %w", err)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	prefix := []byte(types.SubscriptionsPrefix)
 	// End key is for all subscriptions with expiry <= timestamp
-	endKey := []byte(fmt.Sprintf("%s%016x:", types.SubscriptionsPrefix, timestamp+1))
+	endKey := []byte(fmt.Sprintf("%s%016x:", types.SubscriptionsPrefix, exclusiveEnd))
 
 	var expired []ExpiredSubscription
 
@@ -2233,7 +2451,6 @@ func (k Keeper) GetExpiredSubscriptions(ctx sdk.Context, timestamp int64) ([]Exp
 	if err != nil {
 		return nil, err
 	}
-	defer iterator.Close()
 
 	for ; iterator.Valid(); iterator.Next() {
 		key := string(iterator.Key())
@@ -2241,23 +2458,43 @@ func (k Keeper) GetExpiredSubscriptions(ctx sdk.Context, timestamp int64) ([]Exp
 		trimmed := strings.TrimPrefix(key, types.SubscriptionsPrefix)
 		parts := strings.SplitN(trimmed, ":", 2)
 		if len(parts) != 2 {
-			continue
+			_ = iterator.Close()
+			return nil, fmt.Errorf("malformed subscription index key %q", key)
 		}
-		var expiry int64
-		_, err := fmt.Sscanf(parts[0], "%x", &expiry)
+		expiryUint, err := strconv.ParseUint(parts[0], 16, 64)
 		if err != nil {
-			continue
+			_ = iterator.Close()
+			return nil, fmt.Errorf("malformed subscription expiry in key %q: %w", key, err)
+		}
+		expiry, err := types.CheckedUint64ToInt64(expiryUint)
+		if err != nil {
+			_ = iterator.Close()
+			return nil, fmt.Errorf("subscription expiry out of range in key %q: %w", key, err)
 		}
 		addr := parts[1]
-		level := 0
-		if v := iterator.Value(); len(v) >= 4 {
-			level = int(binary.BigEndian.Uint32(v))
+		if strings.TrimSpace(addr) == "" {
+			_ = iterator.Close()
+			return nil, fmt.Errorf("subscription index key %q has empty address", key)
 		}
+		value := iterator.Value()
+		if len(value) != 4 {
+			_ = iterator.Close()
+			return nil, fmt.Errorf("malformed subscription level for %q: expected 4 bytes, got %d",
+				key, len(value))
+		}
+		level := int(binary.BigEndian.Uint32(value))
 		expired = append(expired, ExpiredSubscription{
 			Address: addr,
 			Level:   level,
 			Expiry:  expiry,
 		})
+	}
+	if err := iterator.Error(); err != nil {
+		_ = iterator.Close()
+		return nil, err
+	}
+	if err := iterator.Close(); err != nil {
+		return nil, err
 	}
 
 	return expired, nil
@@ -2274,10 +2511,13 @@ func (k Keeper) BurnFromAccount(ctx sdk.Context, addr string, amount uint64) err
 	}
 	coin := sdk.NewCoin(k.mintDenom(), sdkmath.NewIntFromUint64(amount))
 	coins := sdk.NewCoins(coin)
+	if !k.bankSpendableCoins(ctx, accAddr).IsAllGTE(coins) {
+		return sdkerrors.ErrInsufficientFunds.Wrapf("spendable balance is smaller than %s", coins)
+	}
 
 	// Send to module account first
 	if err := k.bank.SendCoinsFromAccountToModule(ctx, accAddr, types.ModuleName, coins); err != nil {
-		return err
+		return haltFinalizeUnexpectedBankError(ctx, "move_account_balance_for_burn", err)
 	}
 	// Then burn from module (tracked for O(1) supply delta invariant)
 	return k.burnCoinsTracked(ctx, coin.Amount)
@@ -2286,92 +2526,93 @@ func (k Keeper) BurnFromAccount(ctx sdk.Context, addr string, amount uint64) err
 // DeleteUserState removes all on-chain state for a user:
 // profile core, all profile lists, username mapping, subscription index,
 // and sweeps spendable balances to the community pool.
-// Returns the username that was released (for logging) and the swept amounts.
-func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased string, sweptAmounts sdk.Coins, err error) {
+//
+// username and subscriptionExpiry come from the caller's already-decoded
+// profile. Reloading and re-decoding them here used to discard both the Get
+// and the unmarshal error, which could delete the profile while leaving its
+// username mapping or subscription index behind — and a surviving index later
+// trips CONSENSUS_FATAL:PROFILE_MISSING (review M-3).
+//
+// Returns the swept amounts. Rollback of earlier deletes on a later failure is
+// the caller's transaction cache, not a compensating write here.
+func (k Keeper) DeleteUserState(ctx sdk.Context, addr, username string, subscriptionExpiry int64) (sweptAmounts sdk.Coins, err error) {
 	store := k.storeService.OpenKVStore(ctx)
 	accAddr, err := sdk.AccAddressFromBech32(addr)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid address: %w", err)
-	}
-
-	// Load profile to get username and subscription expiry before deletion
-	var username string
-	var subscriptionExpiry int64
-	if bz, found, _ := k.GetProfileCore(ctx, addr); found {
-		var core types.ProfileCore
-		if err := json.Unmarshal(bz, &core); err == nil {
-			username = core.Username
-			subscriptionExpiry = core.SubscriptionExpiry
-		}
+		return nil, fmt.Errorf("invalid address: %w", err)
 	}
 
 	// Delete profile core KV
 	if err := store.Delete(k.profileKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	// Delete all per-entry list keys (prefix-range delete + count + seq for each list)
 	if err := k.DeleteAllEnabledAgents(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := k.DeleteAllFollowedUsers(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := k.DeleteAllFollowedTopics(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := k.DeleteAllBlockedUsers(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := k.DeleteAllBlockedPosts(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := k.DeleteAllBlockedTopics(ctx, addr); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	// Also delete legacy blob keys in case they exist (pre-migration data)
 	if err := store.Delete(k.profileEnabledAgentsKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := store.Delete(k.profileFollowedUsersKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := store.Delete(k.profileFollowedTopicsKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := store.Delete(k.profileBlockedUsersKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := store.Delete(k.profileBlockedPostsKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err := store.Delete(k.profileBlockedTopicsKey(addr)); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	// Release username mapping
 	if username != "" {
 		if err := k.ReleaseUsername(ctx, username, addr); err != nil {
-			return "", nil, err
+			return nil, err
 		}
-		usernameReleased = username
 	}
 
-	// Remove subscription index entry if present
+	// Remove subscription index entry if present. Discarding this error left a
+	// stale index pointing at a deleted profile.
 	if subscriptionExpiry > 0 {
-		_ = k.RemoveSubscription(ctx, addr, subscriptionExpiry)
+		if err := k.RemoveSubscription(ctx, addr, subscriptionExpiry); err != nil {
+			return nil, fmt.Errorf("failed to remove subscription index for %s at expiry %d: %w",
+				addr, subscriptionExpiry, err)
+		}
 	}
 
 	// Sweep all spendable balances to community pool
-	spendable := k.bank.SpendableCoins(ctx, accAddr)
+	spendable := k.bankSpendableCoins(ctx, accAddr)
 	if spendable.IsAllPositive() {
 		if err := k.distribution.FundCommunityPool(ctx, spendable, accAddr); err != nil {
-			return usernameReleased, nil, fmt.Errorf("failed to sweep funds to community pool: %w", err)
+			return nil, fmt.Errorf("failed to sweep funds to community pool: %w",
+				haltFinalizeUnexpectedBankError(ctx, "fund_community_pool", err))
 		}
 		sweptAmounts = spendable
 	}
 
-	return usernameReleased, sweptAmounts, nil
+	return sweptAmounts, nil
 }
 
 // GetTotalBondedValidatorPower returns the total voting power of all bonded validators
@@ -2381,7 +2622,7 @@ func (k Keeper) GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error) {
 		totalPower += validator.GetConsensusPower(k.staking.PowerReduction(ctx))
 		return false
 	})
-	return totalPower, err
+	return totalPower, haltFinalizeStoreError(ctx, "staking_iterate_bonded_validators", err)
 }
 
 // GetValidatorPower returns the voting power of a specific validator
@@ -2392,7 +2633,10 @@ func (k Keeper) GetValidatorPower(ctx sdk.Context, valoper string) (int64, error
 	}
 	validator, err := k.staking.GetValidator(ctx, valAddr)
 	if err != nil {
-		return 0, fmt.Errorf("validator not found: %w", err)
+		if errors.Is(err, stakingtypes.ErrNoValidatorFound) {
+			return 0, fmt.Errorf("validator not found: %w", err)
+		}
+		return 0, haltFinalizeStoreError(ctx, "staking_get_validator_power", err)
 	}
 	if !validator.IsBonded() {
 		return 0, fmt.Errorf("validator not bonded")
@@ -2408,7 +2652,10 @@ func (k Keeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 	}
 	validator, err := k.staking.GetValidator(ctx, valAddr)
 	if err != nil {
-		return false, nil // Not found = not bonded
+		if errors.Is(err, stakingtypes.ErrNoValidatorFound) {
+			return false, nil
+		}
+		return false, haltFinalizeStoreError(ctx, "staking_is_validator_bonded", err)
 	}
 	return validator.IsBonded(), nil
 }
@@ -2417,18 +2664,21 @@ func (k Keeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 func (k Keeper) HasEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint64) bool {
 	store := k.storeService.OpenKVStore(ctx)
 	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
-	val, err := store.Get(key)
+	found, err := store.Has(key)
 	if err != nil {
 		// CONSENSUS_FATAL class: node-local
-		ctx.Logger().Error("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
+		ctx.Logger().Error("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS height=%d: %w", ctx.BlockHeight(), err))
 	}
-	return val != nil
+	return found
 }
 
 // SetEnvelopeNonce records a nonce for the given pubkey hash with an expiry time.
 func (k Keeper) SetEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint64, expiryUnix int64) error {
+	if expiryUnix <= 0 {
+		return fmt.Errorf("envelope nonce expiry must be positive: %d", expiryUnix)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
 	if err := store.Set(key, []byte{}); err != nil {
@@ -2445,20 +2695,33 @@ func (k Keeper) SetEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint6
 
 // PruneExpiredNonces removes all nonce entries that have expired.
 func (k Keeper) PruneExpiredNonces(ctx sdk.Context, nowUnix int64) (int, error) {
+	if nowUnix < 0 {
+		return 0, fmt.Errorf("envelope nonce prune time must be non-negative: %d", nowUnix)
+	}
+	exclusiveEnd, err := types.CheckedAddInt64(nowUnix, 1)
+	if err != nil {
+		return 0, fmt.Errorf("envelope nonce prune cutoff: %w", err)
+	}
 	store := k.storeService.OpenKVStore(ctx)
 	prefix := []byte(types.EnvelopeNonceExpiryPrefix)
 	// End key is exclusive; use nowUnix+1 so we include entries expiring exactly at nowUnix
-	cutoff := []byte(fmt.Sprintf("%s%020d/", types.EnvelopeNonceExpiryPrefix, nowUnix+1))
+	cutoff := []byte(fmt.Sprintf("%s%020d/", types.EnvelopeNonceExpiryPrefix, exclusiveEnd))
 
 	iter, err := store.Iterator(prefix, cutoff)
 	if err != nil {
 		return 0, err
 	}
-	defer iter.Close()
 
 	var toDelete [][]byte
 	for ; iter.Valid(); iter.Next() {
 		toDelete = append(toDelete, append([]byte{}, iter.Key()...))
+	}
+	if err := iter.Error(); err != nil {
+		_ = iter.Close()
+		return 0, err
+	}
+	if err := iter.Close(); err != nil {
+		return 0, err
 	}
 
 	pruned := 0
@@ -2467,11 +2730,30 @@ func (k Keeper) PruneExpiredNonces(ctx sdk.Context, nowUnix int64) (int, error) 
 		// Format: envelope_nonce_expiry/{expiry_unix}/{pubkey_hash}/{nonce}
 		// We need to reconstruct: envelope_nonce/{pubkey_hash}/{nonce}
 		suffix := string(expiryKey[len(types.EnvelopeNonceExpiryPrefix):])
-		// Skip past the expiry timestamp (20 digits + "/")
-		if len(suffix) <= 21 {
+		if len(suffix) <= 21 || suffix[20] != '/' {
 			return pruned, fmt.Errorf("invalid envelope nonce expiry key: %q", string(expiryKey))
 		}
-		nonceKeySuffix := suffix[21:] // {pubkey_hash}/{nonce}
+		expiry, err := strconv.ParseInt(suffix[:20], 10, 64)
+		if err != nil || expiry < 0 || expiry > nowUnix {
+			return pruned, fmt.Errorf("invalid envelope nonce expiry timestamp in key %q", string(expiryKey))
+		}
+		nonceParts := strings.Split(suffix[21:], "/")
+		if len(nonceParts) != 2 || nonceParts[0] == "" || nonceParts[1] == "" {
+			return pruned, fmt.Errorf("invalid envelope nonce expiry key: %q", string(expiryKey))
+		}
+		pubkeyHash, err := hex.DecodeString(nonceParts[0])
+		if err != nil || len(pubkeyHash) == 0 {
+			return pruned, fmt.Errorf("invalid envelope nonce pubkey hash in key %q", string(expiryKey))
+		}
+		nonce, err := strconv.ParseUint(nonceParts[1], 10, 64)
+		if err != nil {
+			return pruned, fmt.Errorf("invalid envelope nonce in key %q", string(expiryKey))
+		}
+		canonicalSuffix := fmt.Sprintf("%020d/%x/%d", expiry, pubkeyHash, nonce)
+		if suffix != canonicalSuffix {
+			return pruned, fmt.Errorf("non-canonical envelope nonce expiry key: %q", string(expiryKey))
+		}
+		nonceKeySuffix := suffix[21:]
 		nonceKey := []byte(types.EnvelopeNoncePrefix + nonceKeySuffix)
 		if err := store.Delete(nonceKey); err != nil {
 			return pruned, err

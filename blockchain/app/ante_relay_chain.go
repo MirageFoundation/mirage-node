@@ -59,8 +59,6 @@ func relayAnteDecorators(
 		authante.NewSigVerificationDecorator(ak, signModeHandler),
 		authante.NewDeductFeeDecorator(ak, bk, nil, nil),
 		RelaySigDecorator{Keeper: ck},
-		// MinFee is zero: PoW is never skipped based on the SDK fee, the node
-		// pays gas separately.
-		&PowDecorator{MinFee: sdk.Coin{}, Keeper: ck},
+		&PowDecorator{Keeper: ck},
 	}
 }

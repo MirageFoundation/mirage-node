@@ -39,11 +39,12 @@ import (
 // would accept them, producing per-node tx-acceptance divergence ->
 // app-hash divergence.
 //
-// The last_block_hash equality check is skipped for CheckTx (mempool) where header info may be
-// unavailable; it is enforced during DeliverTx.
+// The last_block_hash check runs in CheckTx and DeliverTx alike whenever the
+// header carries a LastBlockId.Hash. An empty LastBlockId.Hash is only legal at
+// bootstrap (height <= 1, where no previous block exists); above that height an
+// empty hash means the header is unusable and the tx is rejected rather than
+// admitted with the hash check silently disabled.
 type PowDecorator struct {
-	// MinFee, when provided in the tx fee with same denom and amount >=, skips PoW entirely
-	MinFee sdk.Coin
 	// Keeper provides access to dynamic difficulty, params, and the on-chain
 	// recent-block-hash window.
 	Keeper corekeeper.Keeper
@@ -209,16 +210,37 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 	return nil
 }
 
-func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	// Refresh params from the blockchain state.
-	params := d.Keeper.GetParams(ctx)
+// bootstrapHeight is the only height at which a header may legally lack a
+// previous-block hash: at height 1 no block has been committed yet.
+const bootstrapHeight = int64(1)
 
+// requireLastBlockHash rejects a header whose LastBlockId.Hash is empty above
+// bootstrap height. An empty hash disables the entire envelope-staleness check,
+// so tolerating it would let an envelope built against any block be admitted.
+func requireLastBlockHash(chainLastID string, height int64) error {
+	if strings.TrimSpace(chainLastID) != "" {
+		return nil
+	}
+	if height <= bootstrapHeight {
+		return nil
+	}
+	return fmt.Errorf("missing LastBlockId.Hash at height %d", height)
+}
+
+func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
 	// chainLastID is the hash of the immediately-previous committed block.
 	// This is always accepted by the equality branch of the PoW validator;
 	// it is also already prepended to the on-chain recent-block-hashes
 	// window by BeginBlock so older envelopes within the window pass the
 	// list-check branch.
 	chainLastID := strings.ToLower(hex.EncodeToString(ctx.BlockHeader().LastBlockId.Hash))
+	if err := requireLastBlockHash(chainLastID, ctx.BlockHeight()); err != nil {
+		ctx.Logger().Error("PoW: unusable header", "err", err.Error())
+		return ctx, err
+	}
+
+	// Refresh params from the blockchain state.
+	params := d.Keeper.GetParams(ctx)
 
 	// lookupHash queries the on-chain recent-block-hashes window. The
 	// closure captures the ABCI context so the validator stays a pure

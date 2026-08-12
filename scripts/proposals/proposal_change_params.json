@@ -10,6 +10,16 @@
                 "pow_difficulty_allowance": "2",
                 "pow_message_limit": "25",
                 "pow_message_window": "20"
+            },
+            "update_mask": {
+                "paths": [
+                    "min_difficulty",
+                    "pow_calm_period_definition",
+                    "pow_calm_sequence_threshold",
+                    "pow_difficulty_allowance",
+                    "pow_message_limit",
+                    "pow_message_window"
+                ]
             }
         }
     ],

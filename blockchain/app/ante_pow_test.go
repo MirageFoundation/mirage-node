@@ -323,6 +323,65 @@ func TestValidatePoW(t *testing.T) {
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
 }
 
+// TestRequireLastBlockHashBootstrapBoundary pins L-7: an empty
+// LastBlockId.Hash disables envelope-staleness checking entirely, so it is
+// legal only at bootstrap height (1), where no previous block exists.
+func TestRequireLastBlockHashBootstrapBoundary(t *testing.T) {
+	const hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+
+	require.NoError(t, requireLastBlockHash("", 1), "height 1 has no previous block")
+	require.NoError(t, requireLastBlockHash("", 0), "pre-genesis contexts carry no header")
+
+	err := requireLastBlockHash("", 2)
+	require.Error(t, err, "empty hash above bootstrap height must reject")
+	require.Contains(t, err.Error(), "missing LastBlockId.Hash at height 2")
+
+	require.NoError(t, requireLastBlockHash(hash, 2))
+	require.NoError(t, requireLastBlockHash(hash, 1))
+	require.Error(t, requireLastBlockHash("   ", 2), "whitespace is not a hash")
+}
+
+// TestPowDecoratorRejectsMissingLastBlockHash proves the header check runs
+// before any keeper access, so an unusable header cannot reach PoW routing.
+// The decorator carries a zero keeper on purpose: if the guard were moved
+// after GetParams this test would panic instead of returning an error.
+func TestPowDecoratorRejectsMissingLastBlockHash(t *testing.T) {
+	ctx := sdk.Context{}.
+		WithBlockHeight(2).
+		WithLogger(cosmoslog.NewNopLogger())
+
+	decorator := &PowDecorator{}
+	next := func(ctx sdk.Context, _ sdk.Tx, _ bool) (sdk.Context, error) {
+		t.Fatal("unusable header reached the next ante decorator")
+		return ctx, nil
+	}
+
+	_, err := decorator.AnteHandle(ctx, mockTx{msgs: []sdk.Msg{&coretypes.MsgPost{}}}, false, next)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing LastBlockId.Hash at height 2")
+}
+
+// BenchmarkValidatePoWBytesArgon2 records the per-envelope cost of the
+// memory-hard verification every PoW-routed relay message pays in both CheckTx
+// and DeliverTx (MsgSubscribe and MsgSetAutoRenewal pay tokens/reserve instead). Report allocations and compare against the baseline recorded in
+// the release retest rather than asserting a wall-clock threshold here: CI
+// machines vary too much for a time assertion to mean anything.
+func BenchmarkValidatePoWBytesArgon2(b *testing.B) {
+	canonical := bytes.Repeat([]byte("canonical_envelope_bytes"), 8)
+	lastBlockHash, err := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
+	require.NoError(b, err)
+	lastID := hex.EncodeToString(lastBlockHash)
+	ring := &mockHashLookup{seenHashes: map[string]bool{lastID: true}}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Difficulty 0 with a fixed nonce: the benchmark measures one Argon2id
+		// verification, not the search for a passing nonce.
+		_ = validatePoWBytesArgon2(canonical, lastBlockHash, 0, uint64(i), lastID, ring.lookup, false, 0, 0, 0, 0, 0, 8, 0.25)
+	}
+}
+
 type mockTx struct {
 	msgs []sdk.Msg
 }

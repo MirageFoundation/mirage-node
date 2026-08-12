@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	"github.com/stretchr/testify/require"
@@ -232,20 +233,12 @@ func TestAwardNonAdminBurnsOrErrors(t *testing.T) {
 	}
 
 	t.Logf("[debug] award non-admin owner=%s target=%s", owner, target)
-	var err error
-	didPanic := false
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				didPanic = true
-			}
-		}()
-		_, err = am.Award(ctx, req)
-	}()
-	if didPanic {
-		t.Log("[debug] award burn path panicked as expected with nil bank keeper")
-		return
-	}
+
+	// A non-admin award must be paid for. Refusing the transfer that funds the
+	// burn proves the cost is charged rather than waived.
+	mk.bank.sendToModuleErr = sdkerrors.ErrInsufficientFunds
+
+	_, err := am.Award(ctx, req)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to burn award cost")
 }

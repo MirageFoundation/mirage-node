@@ -290,6 +290,75 @@ func TestProcessSubscriptionsHandlesValidExpiredSubscription(t *testing.T) {
 		"valid free-tier expired subscription path must be a no-op")
 }
 
+// --- Wedged paid user recovers through handler-side downgrade -------------
+
+// TestWedgedPaidUserDowngradesThenSucceedsAsFreeTier pins the wedged-user
+// recovery path end to end: a paid user whose reserve cannot cover the fee must not be
+// rejected (that was the wedge — the ante rejected the tx, baseapp discarded
+// the downgrade, and the user could never transact again). The handler-side
+// deduction downgrades them to free tier, and the next operation succeeds
+// because free tier is charged nothing.
+func TestWedgedPaidUserDowngradesThenSucceedsAsFreeTier(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	owner := testAccAddressString()
+	expiry := int64(1_900_000_000)
+	bz, err := json.Marshal(types.ProfileCore{
+		Owner:              owner,
+		Level:              1,
+		ReserveFunds:       0,
+		SubscriptionExpiry: expiry,
+		AutoRenew:          true,
+	})
+	require.NoError(t, err)
+	require.NoError(t, mk.SetProfileCore(ctx, owner, bz))
+	require.NoError(t, mk.SetSubscription(ctx, owner, 1, expiry))
+
+	// An ordinary relay operation reaches the handler and pays for its gas.
+	require.NoError(t, am.deductRelayGasFee(ctx, owner, 1, 100_000, "wedged-user-regression"),
+		"exhausted reserve must downgrade, not reject and wedge the user")
+
+	stored, found, err := mk.GetProfileCore(ctx, owner)
+	require.NoError(t, err)
+	require.True(t, found)
+	var core types.ProfileCore
+	require.NoError(t, json.Unmarshal(stored, &core))
+	require.Equal(t, int32(0), core.Level, "downgraded to free tier")
+	require.Zero(t, core.ReserveFunds)
+	require.Zero(t, core.SubscriptionExpiry)
+	require.False(t, core.AutoRenew)
+
+	// The downgrade must be durable, including the subscription index, so
+	// EndBlock does not try to renew a user who no longer has a reserve.
+	expired, err := mk.GetExpiredSubscriptions(ctx, expiry+1)
+	require.NoError(t, err)
+	require.Empty(t, expired, "subscription index entry must be removed on downgrade")
+
+	var downgrade bool
+	for _, ev := range ctx.EventManager().Events() {
+		if ev.Type != "subscription_expired" {
+			continue
+		}
+		for _, attr := range ev.Attributes {
+			if attr.Key == "reason" && attr.Value == "reserve_exhausted" {
+				downgrade = true
+			}
+		}
+	}
+	require.True(t, downgrade, "indexer needs a subscription_expired event to mirror the downgrade")
+
+	// The next operation runs as free tier: nothing to charge, nothing to fail.
+	require.NoError(t, am.deductRelayGasFee(ctx, owner, int(core.Level), 100_000, "wedged-user-regression"),
+		"user must be able to transact again after the downgrade")
+
+	after, found, err := mk.GetProfileCore(ctx, owner)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, stored, after, "free-tier path must not mutate the profile again")
+}
+
 // Compile-time guard: keeps sdk imported even if a future test refactor
 // removes its only direct use here.
 var _ = sdk.AccAddress(nil)

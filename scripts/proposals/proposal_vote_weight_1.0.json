@@ -66,6 +66,11 @@
                         "max_biography_length": "512"
                     }
                 ]
+            },
+            "update_mask": {
+                "paths": [
+                    "tiers"
+                ]
             }
         }
     ],

@@ -66,6 +66,9 @@ func (m *mockKVStore) Get(key []byte) ([]byte, error) {
 }
 
 func (m *mockKVStore) Has(key []byte) (bool, error) {
+	if err, ok := m.getErrors[string(key)]; ok {
+		return false, err
+	}
 	_, ok := m.store[string(key)]
 	return ok, nil
 }
@@ -160,6 +163,19 @@ func (it *sortedMockIterator) Error() error { return nil }
 // other bank call panics, surfacing an unmocked path rather than hiding it.
 type mockBank struct {
 	bankkeeper.Keeper
+
+	// sendToModuleErr is returned by SendCoinsFromAccountToModule when set, so
+	// tests can distinguish a typed insufficient-funds rejection from a
+	// node-local bank/store failure.
+	sendToModuleErr error
+
+	sendModuleToModuleErr error
+	burnCoinsErr          error
+
+	// balances overrides the default empty balance per bech32 address. Needed to
+	// back escrowed reserve, which BurnFromModuleAmount refuses to burn without
+	// a matching module balance.
+	balances map[string]sdkmath.Int
 }
 
 func (mockBank) IterateAllBalances(context.Context, func(sdk.AccAddress, sdk.Coin) bool) {}
@@ -168,17 +184,49 @@ func (mockBank) GetSupply(_ context.Context, denom string) sdk.Coin {
 	return sdk.NewCoin(denom, sdkmath.ZeroInt())
 }
 
-// GetBalance reports every account as empty, which is what BeginBlock's
-// fee-collector burn needs to reach its early return. Without it the embedded
-// nil bankkeeper.Keeper panics and BeginBlock cannot be exercised at all.
-func (mockBank) GetBalance(_ context.Context, _ sdk.AccAddress, denom string) sdk.Coin {
+func (mockBank) IterateTotalSupply(_ context.Context, _ func(sdk.Coin) bool) {}
+
+// GetBalance reports every account as empty unless a test says otherwise, which
+// is what BeginBlock's fee-collector burn needs to reach its early return.
+// Without it the embedded nil bankkeeper.Keeper panics and BeginBlock cannot be
+// exercised at all.
+func (m *mockBank) GetBalance(_ context.Context, addr sdk.AccAddress, denom string) sdk.Coin {
+	if amt, ok := m.balances[addr.String()]; ok {
+		return sdk.NewCoin(denom, amt)
+	}
 	return sdk.NewCoin(denom, sdkmath.ZeroInt())
+}
+
+func (m *mockBank) GetAllBalances(_ context.Context, addr sdk.AccAddress) sdk.Coins {
+	if amt, ok := m.balances[addr.String()]; ok && amt.IsPositive() {
+		return sdk.NewCoins(sdk.NewCoin(types.MintDenom, amt))
+	}
+	return sdk.NewCoins()
+}
+
+// SpendableCoins mirrors the configured balances. Most tests leave the map
+// empty, so DeleteUserState still has nothing to sweep.
+func (m *mockBank) SpendableCoins(ctx context.Context, addr sdk.AccAddress) sdk.Coins {
+	return m.GetAllBalances(ctx, addr)
+}
+
+func (m *mockBank) SendCoinsFromAccountToModule(_ context.Context, _ sdk.AccAddress, _ string, _ sdk.Coins) error {
+	return m.sendToModuleErr
+}
+
+func (m *mockBank) SendCoinsFromModuleToModule(_ context.Context, _, _ string, _ sdk.Coins) error {
+	return m.sendModuleToModuleErr
+}
+
+func (m *mockBank) BurnCoins(_ context.Context, _ string, _ sdk.Coins) error {
+	return m.burnCoinsErr
 }
 
 // mockKeeper wraps keeper.Keeper to override IsValidatorBonded for testing
 type mockKeeper struct {
 	keeper.Keeper
 	storeService    *mockStoreService
+	bank            *mockBank
 	bondedValidator string // validator address that is considered bonded
 }
 
@@ -188,12 +236,15 @@ func newMockKeeper() *mockKeeper {
 	cdc := codec.NewProtoCodec(interfaceRegistry)
 
 	// Create a real keeper with a minimal mock bank and nil/empty keepers
-	// (we'll override what we need).
-	k := keeper.NewKeeper(storeService, cdc, mockBank{}, nil, nil, slashingkeeper.Keeper{})
+	// (we'll override what we need). The bank is a pointer so tests can inject
+	// failures after construction.
+	bank := &mockBank{}
+	k := keeper.NewKeeper(storeService, cdc, bank, nil, nil, slashingkeeper.Keeper{})
 
 	mk := &mockKeeper{
 		Keeper:          k,
 		storeService:    storeService,
+		bank:            bank,
 		bondedValidator: testValoperAddressString(),
 	}
 

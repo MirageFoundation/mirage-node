@@ -5,12 +5,17 @@
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "params": {
                 "subscription_reserve_percent": "1"
+            },
+            "update_mask": {
+                "paths": [
+                    "subscription_reserve_percent"
+                ]
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
     "title": "Change subscription reserve percentage",
-    "summary": "Change the percentage of monthly subscription fees escrowed as gas reserve from 20% to 25%. The remainder is burned.",
+    "summary": "Change the percentage of subscription fees escrowed as gas reserve from 95% to 100%. No portion is burned.",
     "expedited": true
 }

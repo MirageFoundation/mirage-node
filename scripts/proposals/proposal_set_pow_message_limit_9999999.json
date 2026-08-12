@@ -5,6 +5,11 @@
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "params": {
                 "pow_message_limit": "9999999"
+            },
+            "update_mask": {
+                "paths": [
+                    "pow_message_limit"
+                ]
             }
         }
     ],

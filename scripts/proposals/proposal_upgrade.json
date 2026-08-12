@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.32.0 (authorize relay gas payer)",
-    "summary": "Consensus-breaking ante fix for C-1. Relay transactions must carry a real outer unordered signature from the gas payer; the hand-rolled RelayGasFeeDecorator that deducted from fee.payer without authorization is replaced by the SDK SigVerification and DeductFee decorators with a minimum gas-price floor and no fee ceiling. Validator still pays gas for free-user relays; paid users still burn from reserve. No store or param migration — binary swap only. Mixed binaries diverge immediately: every validator must cross this single coordinated height on the v1.32.0 binary.",
+    "title": "Upgrade to v1.34.0 (fail-fast consensus writes, bounded params)",
+    "summary": "Consensus-breaking hardening from the 2026-08-07 blockchain review. Store read and write failures on consensus inputs now reject the transaction or fail the block instead of decoding as zero, so a node-local storage fault can no longer silently diverge one validator's state. Every count, sequence, PoW window, cleanup cursor, subscription index and profile write is error-returning. Parameters gained operational upper bounds (PoW window, mint interval, subscription period, envelope age, calm threshold) and every cast, multiplication and expiry computation is checked instead of wrapping. MsgUpdateParams now requires an explicit update_mask, so governance can intentionally set a parameter to zero and cannot silently skip a supplied field. Subscription reserve and burn amounts are split in basis points and sum exactly to the period fee. The upgrade handler runs module migrations and re-validates stored params against the new bounds; it fails before block production if any stored value is out of range. No state rewrite. Mixed binaries diverge immediately: every validator must cross this single coordinated height on the v1.34.0 binary.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.32.0",
+                "name": "v1.34.0",
                 "height": "T+50",
                 "info": ""
             }

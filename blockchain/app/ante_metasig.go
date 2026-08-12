@@ -79,7 +79,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgPost", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -112,7 +115,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgVote", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgVote", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -145,7 +151,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -178,7 +187,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -211,7 +223,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -244,7 +259,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -279,7 +297,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -312,7 +333,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -345,7 +369,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -378,7 +405,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -411,7 +441,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -443,7 +476,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -475,7 +511,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -507,7 +546,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -539,7 +581,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -572,7 +617,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockTopic", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockTopic", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -605,7 +653,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockTopic", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockTopic", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -637,7 +688,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDelete", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -669,7 +723,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -703,7 +760,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -743,7 +803,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEdit", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -783,7 +846,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -821,7 +887,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -857,7 +926,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -890,7 +962,10 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAward", "err", err.Error())
 				return ctx, err
 			}
-			nonceExpiry := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
+			if err != nil {
+				return ctx, err
+			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAward", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
@@ -957,17 +1032,24 @@ func verifyRelaySignature(msgName string, pubkey []byte, sig []byte, fill func(*
 	return nil
 }
 
-func envelopeNonceExpiryUnix(ctx sdk.Context, timestampMs uint64, maxAgeSec uint64) int64 {
-	maxAge := time.Duration(maxAgeSec) * time.Second
+func envelopeNonceExpiryUnix(ctx sdk.Context, timestampMs uint64, maxAgeSec uint64) (int64, error) {
+	maxAge, err := coretypes.CheckedEnvelopeAge(maxAgeSec)
+	if err != nil {
+		return 0, fmt.Errorf("max_envelope_age unusable: %w", err)
+	}
 	blockTime := ctx.BlockTime()
 	expiry := blockTime.Add(maxAge + 5*time.Minute)
 	if timestampMs > 0 {
-		txTime := time.UnixMilli(int64(timestampMs))
+		txTimeMs, err := coretypes.CheckedUint64ToInt64(timestampMs)
+		if err != nil {
+			return 0, fmt.Errorf("envelope_timestamp out of range: %w", err)
+		}
+		txTime := time.UnixMilli(txTimeMs)
 		if candidate := txTime.Add(maxAge + 5*time.Minute); candidate.After(expiry) {
 			expiry = candidate
 		}
 	}
-	return expiry.Unix()
+	return expiry.Unix(), nil
 }
 
 // validateEnvelopeTimestamp checks that envelope_timestamp is not too old or in the future.
@@ -977,10 +1059,20 @@ func validateEnvelopeTimestamp(ctx sdk.Context, timestampMs uint64, maxAgeSec ui
 	if timestampMs == 0 {
 		return fmt.Errorf("envelope_timestamp is required")
 	}
-	txTime := time.UnixMilli(int64(timestampMs))
+	// A timestamp or max-age that cannot be represented must reject the
+	// envelope. Wrapping either one silently widens or inverts the replay
+	// window (review M-7).
+	txTimeMs, err := coretypes.CheckedUint64ToInt64(timestampMs)
+	if err != nil {
+		return fmt.Errorf("envelope_timestamp out of range: %w", err)
+	}
+	maxAge, err := coretypes.CheckedEnvelopeAge(maxAgeSec)
+	if err != nil {
+		return fmt.Errorf("max_envelope_age unusable: %w", err)
+	}
+	txTime := time.UnixMilli(txTimeMs)
 	blockTime := ctx.BlockTime()
 	age := blockTime.Sub(txTime)
-	maxAge := time.Duration(maxAgeSec) * time.Second
 	if age > maxAge {
 		return fmt.Errorf("envelope_timestamp too old: age=%s, max=%s (tx_time=%s, block_time=%s)", age, maxAge, txTime, blockTime)
 	}
@@ -996,4 +1088,3 @@ func validateEnvelopeTimestamp(ctx sdk.Context, timestampMs uint64, maxAgeSec ui
 	}
 	return nil
 }
-

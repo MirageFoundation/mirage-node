@@ -1,68 +1,68 @@
-# ADR: Mint Subsystem and Admin Fee Waiver Use Log-and-Continue
+# ADR: Mint Fail-Fast and the Admin Insufficient-Funds Waiver
 
-**Status:** Accepted  
-**Date:** 2026-08-04  
+**Status:** Superseded for mint distribution in v1.34.0; admin waiver retained
+**Date:** 2026-08-04
+**Revised:** 2026-08-12
 **Related:** Security review 2026-08-04 M-9; incident 2026-07-12 full-chain halt
 
 ## Context
 
 Most consensus-critical decode and state-write failures in Mirage use a
 fail-fast contract: return a tagged `CONSENSUS_FATAL` error (or panic) so a
-node stops rather than committing a divergent app hash. Two paths intentionally
-depart from that contract:
+node stops rather than committing a divergent app hash. This ADR originally
+made two exceptions:
 
 1. **Mint distribution** — `mintAndDistribute` / `MintIfNeeded` in
-   `blockchain/x/core/keeper/keeper.go`. Bank failures
-   (`MintCoins`, `SendCoinsFromModuleToAccount`, `BurnCoins`) and related
-   distribution failures are logged and the interval degrades (skip send,
-   burn skipped reward, or track `stuckInModule`) without halting BeginBlock.
+   `blockchain/x/core/keeper/keeper.go`.
 2. **Admin relay gas waiver** — the `userLevel >= 100` branch of
    `deductRelayGasFee` in `blockchain/x/core/module/module.go`. If
-   `DeductFeeFromOwner` fails (insufficient balance), the fee is skipped and
-   the transaction proceeds.
+   `DeductFeeFromOwner` fails with `ErrInsufficientFunds`, the fee is skipped
+   and the transaction proceeds.
 
-## Decision
+   The waiver is scoped to that one typed error. Every other
+   `DeductFeeFromOwner` failure (bank or store level) rejects the transaction:
+   those failures are node-local, so skipping the deduction on the failing node
+   while peers deduct and burn is exactly the asymmetric skip this ADR does not
+   accept. See review L-10 in `docs/security/blockchain/review-2026-08-07.md`.
 
-Keep log-and-continue for these two paths. Do **not** promote them to
-`CONSENSUS_FATAL` halt sites.
+## Revised decision
 
-This decision was re-evaluated after v1.31.0 replaced consensus panics with
-process exits and remains accepted for mint distribution and the admin fee
-waiver. Relay-credit reset is excluded: a partial reset can commit different
-mint inputs on one validator, so reset failures terminate the affected node.
+Mint distribution and fee-collector burning now fail closed. Every
+non-deterministic bank, distribution, supply-delta, and relay-credit-reset
+failure terminates the affected validator during finalization, so the SDK
+discards the block cache. Per-recipient compensation is unnecessary because
+the entire mint and every earlier send roll back together.
+
+The typed admin insufficient-funds waiver remains. It performs no state change
+on any validator and is determined by the signed payer's on-chain balance.
+Every other deduction error still rejects the transaction.
 
 ## Rationale
 
 On 2026-07-12 a deterministic fail-fast panic (false-positive `PRUNE_HOLE` in
 the vendored IAVL fork) contributed to a multi-hour full-chain halt when
 enough voting power entered a consensus-zombie state. That incident raised the
-cost of adding further halt sites for failures that are:
+cost of halt sites, but the original mint conclusion was wrong. A node that
+skips a mint or fee burn remains locally supply-consistent while still
+committing different balances and supply from peers that succeeded. A
+node-local store or bank failure therefore creates an app-hash split; calling
+the drift “bounded accounting” does not make it safe.
 
-- **Bank / balance conditioned**, not silent substitution of consensus params
-  or profile decode;
-- **Low divergence risk in practice** when the failure mode is deterministic
-  across validators (same balances, same bank code path), or when the
-  accepted drift is bounded accounting (missed mint interval, unpaid admin
-  fee) rather than conflicting app hashes from asymmetric skips;
-- **Liveness-sensitive** — BeginBlock mint runs every interval; admin ops
-  should not be blocked solely on gas fee availability.
-
-Preferring liveness here is an explicit tradeoff: a missed mint interval or a
-waived admin fee is preferable to another chain-wide halt for these
-subsystems. Divergence risk is accepted as low for deterministic bank
-failures under homogeneous validator software and state.
+The process-exit recovery mechanism addresses the 2026-07-12 zombie behavior.
+It is safer to stop the affected node with its block uncommitted than to let it
+continue from a state no healthy peer has.
 
 ## Consequences
 
-- Reviewers must treat these sites as **documented exceptions**, not contract
-  drift to be “fixed” by adding panic sites.
-- Operators should monitor mint-interval and admin-fee-skip logs; sustained
-  failures still warrant investigation.
-- The v1.31.0 process-exit mechanism removes consensus zombies but does not
-  change the liveness tradeoff accepted for mint distribution or admin fees.
+- Mint and fee-collector bank failures halt the affected node and trigger the
+  normal recovery path.
+- A failed distribution cannot leave partially paid validators or coins stuck
+  in the core module account.
+- Operators should still monitor the typed admin insufficient-funds waiver.
 
 ## References
 
-- Code: `mintAndDistribute`, `MintIfNeeded`, `deductRelayGasFee` admin branch
+- Code: `mintAndDistribute`, `MintIfNeeded`, `BeginBlock`,
+  `deductRelayGasFee` admin branch
 - `docs/security/blockchain/review-2026-08-04.md` (M-9, H-1)
 - `docs/troubleshooting/postmortems/` (2026-07-12 / related halt notes)

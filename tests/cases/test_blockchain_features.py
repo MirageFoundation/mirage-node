@@ -656,15 +656,27 @@ def test_security(backend: str) -> None:
     except Exception as e:
         _fail("security.params_check", str(e))
 
-    # 2. Verify subscription_period is non-zero (M-8 SubscriptionPeriod=0 governance attack)
+    # 2. subscription_period bounds. Zero is a documented mode, not an attack:
+    #    subscriptions become one-time purchases that expire (and downgrade the
+    #    user) instead of renewing. What must never happen is an unbounded
+    #    period, which would push expiry arithmetic out of range, so assert the
+    #    value stays inside the chain's own cap of one year in minutes.
     try:
-        sub_period = int(params.get("subscription_period", 0))
-        if sub_period > 0:
-            _pass("security.subscription_period_nonzero")
+        sub_period = int(params.get("subscription_period", -1))
+        # Mirrors MaxSubscriptionPeriodMinutes in blockchain/x/core/types/params.go
+        max_period = 525_600
+        if sub_period == 0:
+            _pass("security.subscription_period_bounded")
+            _debug("security: subscription_period=0 — one-time purchase mode, renewals disabled")
+        elif 0 < sub_period <= max_period:
+            _pass("security.subscription_period_bounded")
         else:
-            _fail("security.subscription_period_nonzero", f"subscription_period={sub_period}")
+            _fail(
+                "security.subscription_period_bounded",
+                f"subscription_period={sub_period} outside [0, {max_period}]",
+            )
     except Exception as e:
-        _fail("security.subscription_period_nonzero", str(e))
+        _fail("security.subscription_period_bounded", str(e))
 
     # 3. Relay nonce: submit same tx twice — second should be rejected
     #    (Note: basic timestamp replay check already exists via envelope_timestamp;

@@ -34,12 +34,10 @@ import (
 //     the earlier log-and-continue treatment of these writes (review M-5,
 //     M-6, L-2, L-3).
 //
-//   * Writes whose skipped state cannot change a later consensus decision
-//     may still log and continue. PruneExpiredNonces qualifies: envelope
-//     admission tests the timestamp window independently, so an expired
-//     nonce surviving one extra block admits nothing new.
+//   * Expired nonce deletes also propagate. Nonce admission checks key
+//     presence, so a stale key on one node changes transaction acceptance.
 //
-// Tests in this file pin all three contracts.
+// Tests in this file pin these contracts.
 
 // --- EndBlock: consensus-critical writes fail closed -----------------------
 
@@ -116,23 +114,12 @@ func TestEndBlockFailsClosedOnSetCurrentDifficultyFailureCalmDecrease(t *testing
 		"failed SetCurrentDifficulty must leave the difficulty unchanged")
 }
 
-// TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions: an
+// TestProcessSubscriptionsPropagatesIteratorFailure: an
 // iterator-open failure on the subscriptions prefix is itself evidence of
 // per-node store divergence (deterministic data should iterate identically
-// on all nodes). processSubscriptions returns the error and EndBlock now
-// halts the chain rather than silently skipping renewals/expiries on this
-// node only — the previous "log and continue" let one node skip mutations
-// that peers performed, producing app-hash divergence on the next round.
-//
-// PruneExpiredNonces also iterates from EndBlock but is non-consensus-critical:
-// it only deletes expired entries (a write whose failure logs and continues
-// without diverging state). GetPoWMessageCount, by contrast, is a
-// consensus-critical READ — its sliding-window sum feeds SetCurrentDifficulty,
-// so a raw store.Get failure there now fails fast
-// (CONSENSUS_FATAL:POW_COUNT_STORE_GET) rather than silently undercounting on
-// one node. See TestConsensusReadsPanicOnStoreGetFailure. The blocking case in
-// this test is the subscriptions iterator.
-func TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions(t *testing.T) {
+// on all nodes). The error must propagate rather than silently skipping
+// renewals and expiries on this node only.
+func TestProcessSubscriptionsPropagatesIteratorFailure(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -140,7 +127,7 @@ func TestEndBlockPropagatesIteratorFailureFromGetExpiredSubscriptions(t *testing
 	mk.storeService.iterError = errors.New("simulated iterator failure")
 
 	require.NotPanics(t, func() {
-		err := am.EndBlock(ctx)
+		err := am.processSubscriptions(ctx, types.DefaultParams())
 		require.Error(t, err, "iterator failure must propagate so the chain halts (auto-recovery state-syncs)")
 	})
 }
@@ -329,7 +316,7 @@ func TestConsensusReadsPanicOnStoreGetFailure(t *testing.T) {
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetPoWMessageCount(ctx, types.DefaultParams()) }},
 		{"RecordPoWMessage", powKey, "CONSENSUS_FATAL:POW_COUNT_STORE_GET",
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.RecordPoWMessage(ctx) }},
-		{"HasEnvelopeNonce", nonceKey, "CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_GET",
+		{"HasEnvelopeNonce", nonceKey, "CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS",
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.HasEnvelopeNonce(ctx, []byte{0xab, 0xcd}, 7) }},
 		{"GetRelayCredit", "relay_credits/miragevaloper1test", "CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET",
 			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetRelayCredit(ctx, "miragevaloper1test") }},
@@ -371,6 +358,32 @@ func TestPoWMessageCountPanicsOnDecodeFailure(t *testing.T) {
 			requirePanicContains(t, "CONSENSUS_FATAL:POW_COUNT_DECODE", func() {
 				_ = mk.RecordPoWMessage(ctx)
 			})
+		})
+	}
+}
+
+func TestDifficultyStatePanicsOnDecodeFailure(t *testing.T) {
+	cases := []struct {
+		key    string
+		tag    string
+		invoke func(*mockKeeper, sdk.Context)
+	}{
+		{"current_difficulty", "CONSENSUS_FATAL:DIFFICULTY_DECODE",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetCurrentDifficulty(ctx) }},
+		{"prev_difficulty", "CONSENSUS_FATAL:PREV_DIFFICULTY_DECODE",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetPreviousDifficulty(ctx) }},
+		{"last_diff_change_height", "CONSENSUS_FATAL:LAST_DIFF_CHANGE_DECODE",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetLastDifficultyChangeHeight(ctx) }},
+		{"consecutive_low_usage", "CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_DECODE",
+			func(mk *mockKeeper, ctx sdk.Context) { _ = mk.GetConsecutiveLowUsage(ctx) }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			mk := newMockKeeper()
+			ctx := newMockContext()
+			mk.storeService.store[tc.key] = []byte{1}
+			requirePanicContains(t, tc.tag, func() { tc.invoke(mk, ctx) })
 		})
 	}
 }

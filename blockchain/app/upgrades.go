@@ -39,6 +39,13 @@ var removedBridgePrefixes = []string{
 	"bridge_sequence/",
 }
 
+func validateV1340Params(params coretypes.Params) error {
+	if err := params.Validate(); err != nil {
+		return fmt.Errorf("v1.34.0: stored params violate the new bounds: %w", err)
+	}
+	return nil
+}
+
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
 	// Add more upgrade handlers as needed
@@ -2173,6 +2180,44 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.32.0 complete - relay outer signature required for gas payment")
+			return toVM, nil
+		},
+	)
+
+	// ── v1.34.0: Fail-fast consensus writes and bounded parameters ──
+	// Consensus-breaking: store read/write failures on consensus inputs now
+	// reject the tx or halt the block instead of decoding as zero, and Params
+	// gained operational upper bounds (window, mint interval, subscription
+	// period, envelope age, calm threshold). MsgUpdateParams now requires an
+	// explicit update_mask.
+	//
+	// No state rewrite: the only migration work is proving stored Params still
+	// satisfy the tightened bounds. If they do not, the upgrade fails here
+	// rather than letting the chain produce blocks with parameters the runtime
+	// arithmetic would later reject.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.34.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.34.0 (fail-fast consensus writes, bounded params)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.34.0: RunMigrations failed: %w", err)
+			}
+
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if err := validateV1340Params(params); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.34.0: stored params satisfy the new operational bounds",
+				"pow_message_window", params.PowMessageWindow,
+				"pow_calm_sequence_threshold", params.PowCalmSequenceThreshold,
+				"mint_interval", params.MintInterval,
+				"max_envelope_age", params.MaxEnvelopeAge,
+				"subscription_period", params.SubscriptionPeriod)
+
+			sdkCtx.Logger().Info("Upgrade to v1.34.0 complete")
 			return toVM, nil
 		},
 	)

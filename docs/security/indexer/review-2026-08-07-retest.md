@@ -140,3 +140,27 @@ Implementation review closed remaining soft-fail residuals before release:
   testing showed would halt the indexer permanently on a vote for a post that
   never existed — see M-7.
 - Corrupt `meta.history_gaps` raises `IndexerUnavailable`; `set_last_height` is forbidden.
+
+---
+
+## Appendix — delta review of post-retest commits (2026-08-12)
+
+This retest certifies code as of `v1.33.2`. Reviewed on 2026-08-12 as part of the blockchain `v1.34.0` release gate: `62992b41` ("Make untrusted post content unable to halt indexing, and restore lurker counts", v1.33.7) and the indexer supervisor added in `9471e026` (v1.33.6).
+
+**M-7 extended, H-1 not reintroduced.** `62992b41` adds a `derive_from_content` chokepoint (`indexer/message_processor.py:64-90`) that catches any exception from a pure function of untrusted post content — thumbnail discovery and mention parsing — and continues without the derived value. The catch is deliberately broad, but it wraps only derivations, never database, gRPC, or continuity code. The writes those derivations feed still re-raise, and block projection still aborts inside the transaction (`indexer/main.py:321-326`), so a genuine failure still rolls the block back. This is the same contract M-7 closed with for missing vote/edit targets: post-consensus junk must not halt every node at the same height. The trigger was concrete — on 2026-08-11 one post whose content broke `urlsplit` killed the indexer on every node at height 6754167, and the backend served 503 for 80 minutes because its readiness check reads indexer lag.
+
+### L-4 — skipped derivations leave no durable record (Low, accepted)
+
+`derive_from_content` logs the label and traceback but not the block height or message identity, and increments no counter and writes no marker. After log rotation a skipped derivation is invisible, whereas the M-7 vote skips that it is modelled on do log the txhash and target. The consequence is bounded — only cosmetic fields (a thumbnail, a mention row) can be lost, never index integrity or continuity — which is why this is accepted rather than fixed in this pass. **Trigger:** the first time a missing thumbnail or mention has to be explained after the fact, add the height and txhash to the log line and a counter to health output.
+
+### I-4 — supervisor restart budget is hourly-only, with no alert (Informational, accepted)
+
+`deploy/run_indexer_supervised.sh` mirrors `run_miraged_supervised.sh`: it restarts the indexer with a five-second backoff and exits 1 after more than twelve restarts inside a sliding hour, logging an `ACTION ITEM` line naming the crash loop.
+
+A genuinely fatal error cannot hide behind it. Continuity verification, migrations, and required-parameter loading all fail during startup before any block projects, so the crash rate is immediate: twelve restarts elapse in about a minute and the supervisor exits, leaving the indexer dead and loud rather than flapping. The residual is narrower than it first looks: a crash slower than one per five minutes restarts indefinitely, because the budget is a rate and not a lifetime cap. In that regime the indexer is projecting blocks between crashes, so it is degraded rather than stalled, and the backend's lag check still reports 503 on write paths if it falls behind. Visibility is log-only — there is no pager or webhook on a persistent loop.
+
+Accepted as the deliberate trade the script's own header describes: bounding the blast radius while nobody is watching, without changing where crashes get fixed. **Trigger:** any observed sustained flap, or the next time the fleet gains an alerting channel — then add a cumulative lifetime restart budget and an alert hook, in both supervisors together.
+
+**Lurker counting holds.** The new `stats_visitors.address_bound_at` column makes lurker attribution use the device-binding timestamp instead of a per-event address, so pre-login anonymous events stay out of logged-in counts. An address is still written only from `g.verified_request_address` after a successful signed route, never from a query parameter or an unsigned header, so backend L-7 is intact. Stats reads remain admin-signed aggregates.
+
+**Verification note.** This appendix is source review only. The suites listed above were not re-run for it.

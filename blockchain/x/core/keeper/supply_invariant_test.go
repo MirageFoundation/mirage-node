@@ -13,6 +13,7 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	"github.com/stretchr/testify/require"
 
+	"mirage/consensusfatal"
 	"mirage/x/core/types"
 )
 
@@ -35,6 +36,10 @@ func (m *supplyMockBank) IterateAllBalances(_ context.Context, cb func(sdk.AccAd
 
 func (m *supplyMockBank) GetSupply(_ context.Context, denom string) sdk.Coin {
 	return sdk.NewInt64Coin(denom, m.supply)
+}
+
+func (m *supplyMockBank) IterateTotalSupply(_ context.Context, cb func(sdk.Coin) bool) {
+	cb(sdk.NewInt64Coin(types.MintDenom, m.supply))
 }
 
 type supplyKVService struct {
@@ -102,6 +107,21 @@ func TestAssertSupplyInvariant_DoubleBurnFingerprint(t *testing.T) {
 	err := k.AssertSupplyInvariant(sdk.Context{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "supply invariant violated")
+}
+
+func TestAssertSupplyInvariantMismatchHaltsDuringFinalize(t *testing.T) {
+	restore := consensusfatal.SetHaltForTest(func(err error) { panic(err) })
+	defer restore()
+
+	k := newSupplyTestKeeper(99, []int64{100})
+	ctx := sdk.Context{}.
+		WithContext(context.Background()).
+		WithLogger(log.NewNopLogger()).
+		WithExecMode(sdk.ExecModeFinalize)
+
+	require.Panics(t, func() {
+		_ = k.AssertSupplyInvariant(ctx)
+	})
 }
 
 func TestAssertSupplyDeltaInvariant_Consistent(t *testing.T) {

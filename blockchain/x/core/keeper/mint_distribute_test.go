@@ -15,7 +15,7 @@ import (
 
 // bankCall records a single bank method invocation for assertions.
 type bankCall struct {
-	op     string // "mint" | "send" | "burn"
+	op     string // "mint" | "send"
 	module string
 	to     sdk.AccAddress
 	amount sdkmath.Int
@@ -27,13 +27,10 @@ type bankCall struct {
 type mockMintBank struct {
 	calls []bankCall
 
-	mintFail     error
-	sendFailFor  map[string]error // keyed by valoper bech32 (or accAddress string)
-	burnFailAll  error
-	burnFailOnce map[string]error // one-shot failure per sender key
+	mintFail    error
+	sendFailFor map[string]error // keyed by valoper bech32 (or accAddress string)
 
-	// supply = minted - burned; sent moves coins from module to user,
-	// so the module account balance = minted - sent - burned.
+	// Sent coins move from the module account to users without changing supply.
 	moduleBalance sdkmath.Int
 	supply        sdkmath.Int
 }
@@ -41,7 +38,6 @@ type mockMintBank struct {
 func newMockMintBank() *mockMintBank {
 	return &mockMintBank{
 		sendFailFor:   make(map[string]error),
-		burnFailOnce:  make(map[string]error),
 		moduleBalance: sdkmath.ZeroInt(),
 		supply:        sdkmath.ZeroInt(),
 	}
@@ -68,22 +64,7 @@ func (m *mockMintBank) SendCoinsFromModuleToAccount(_ context.Context, senderMod
 	return nil
 }
 
-func (m *mockMintBank) BurnCoins(_ context.Context, moduleName string, amt sdk.Coins) error {
-	call := bankCall{op: "burn", module: moduleName, amount: amt[0].Amount}
-	m.calls = append(m.calls, call)
-	if m.burnFailAll != nil {
-		return m.burnFailAll
-	}
-	if err, ok := m.burnFailOnce[moduleName]; ok {
-		delete(m.burnFailOnce, moduleName)
-		return err
-	}
-	m.moduleBalance = m.moduleBalance.Sub(amt[0].Amount)
-	m.supply = m.supply.Sub(amt[0].Amount)
-	return nil
-}
-
-// opsOf returns a compact op sequence (e.g. ["mint","send","send","burn"]).
+// opsOf returns a compact op sequence (e.g. ["mint","send","send"]).
 func (m *mockMintBank) opsOf() []string {
 	out := make([]string, len(m.calls))
 	for i, c := range m.calls {
@@ -147,12 +128,11 @@ func TestMintAndDistribute_HappyPath(t *testing.T) {
 	)
 	total := sumAmounts(recipients)
 
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, total)
+	result, err := mintAndDistribute(ctx, bank, "core", "umirage", recipients, total)
 
+	require.NoError(t, err)
 	require.Equal(t, sdkmath.NewInt(600), result.minted)
 	require.Equal(t, sdkmath.NewInt(600), result.sent)
-	require.True(t, result.burnedSkipped.IsZero())
-	require.True(t, result.stuckInModule.IsZero())
 	require.Equal(t, []string{"mint", "send", "send", "send"}, bank.opsOf())
 	require.True(t, bank.moduleBalance.IsZero(), "module balance must be zero after full distribution")
 	require.Equal(t, sdkmath.NewInt(600), bank.supply, "supply increases by total minted")
@@ -162,7 +142,8 @@ func TestMintAndDistribute_NoOpOnZeroTotal(t *testing.T) {
 	bank := newMockMintBank()
 	ctx := distributeTestCtx()
 
-	result := mintAndDistribute(ctx, bank, "core", "umirage", nil, sdkmath.ZeroInt())
+	result, err := mintAndDistribute(ctx, bank, "core", "umirage", nil, sdkmath.ZeroInt())
+	require.NoError(t, err)
 	require.True(t, result.minted.IsZero())
 	require.True(t, result.sent.IsZero())
 	require.Empty(t, bank.calls, "no bank calls when totalMint is zero")
@@ -172,7 +153,8 @@ func TestMintAndDistribute_NoOpOnEmptyRecipients(t *testing.T) {
 	bank := newMockMintBank()
 	ctx := distributeTestCtx()
 
-	result := mintAndDistribute(ctx, bank, "core", "umirage", nil, sdkmath.NewInt(100))
+	result, err := mintAndDistribute(ctx, bank, "core", "umirage", nil, sdkmath.NewInt(100))
+	require.NoError(t, err)
 	require.True(t, result.minted.IsZero())
 	require.Empty(t, bank.calls, "no bank calls when recipients are empty")
 }
@@ -183,17 +165,16 @@ func TestMintAndDistribute_MintCoinsFails_NothingSent(t *testing.T) {
 	ctx := distributeTestCtx()
 
 	recipients := makeRecipients(t, byte(0x01), sdkmath.NewInt(100))
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sdkmath.NewInt(100))
+	result, err := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sdkmath.NewInt(100))
 
+	require.ErrorContains(t, err, "mint-denied-by-restriction")
 	require.True(t, result.minted.IsZero())
 	require.True(t, result.sent.IsZero())
-	require.True(t, result.burnedSkipped.IsZero())
-	require.True(t, result.stuckInModule.IsZero())
 	require.Equal(t, []string{"mint"}, bank.opsOf(), "must not proceed past MintCoins failure")
 	require.True(t, bank.supply.IsZero(), "supply unchanged on MintCoins failure")
 }
 
-func TestMintAndDistribute_SendFails_BurnSucceeds(t *testing.T) {
+func TestMintAndDistribute_SendFailurePropagates(t *testing.T) {
 	bank := newMockMintBank()
 	recipients := makeRecipients(t,
 		byte(0x01), sdkmath.NewInt(100),
@@ -203,81 +184,10 @@ func TestMintAndDistribute_SendFails_BurnSucceeds(t *testing.T) {
 	bank.sendFailFor[recipients[1].accountAddress.String()] = fmt.Errorf("send-fail-target-blocked")
 	ctx := distributeTestCtx()
 
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sumAmounts(recipients))
+	result, err := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sumAmounts(recipients))
 
+	require.ErrorContains(t, err, "send-fail-target-blocked")
 	require.Equal(t, sdkmath.NewInt(600), result.minted)
-	require.Equal(t, sdkmath.NewInt(400), result.sent, "two valid sends deliver 100+300")
-	require.Equal(t, sdkmath.NewInt(200), result.burnedSkipped)
-	require.True(t, result.stuckInModule.IsZero())
-	require.Equal(t, []string{"mint", "send", "send", "burn", "send"}, bank.opsOf())
-	require.True(t, bank.moduleBalance.IsZero(), "module balance must be zero (sent 400 + burned 200 = minted 600)")
-	require.Equal(t, sdkmath.NewInt(400), bank.supply, "supply grows by sent, not by minted-but-burned portion")
-}
-
-func TestMintAndDistribute_SendFails_BurnFails_StuckInModule(t *testing.T) {
-	bank := newMockMintBank()
-	recipients := makeRecipients(t,
-		byte(0x01), sdkmath.NewInt(100),
-		byte(0x02), sdkmath.NewInt(200),
-		byte(0x03), sdkmath.NewInt(300),
-	)
-	bank.sendFailFor[recipients[1].accountAddress.String()] = fmt.Errorf("send-fail-target-blocked")
-	bank.burnFailAll = fmt.Errorf("burn-denied")
-	ctx := distributeTestCtx()
-
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sumAmounts(recipients))
-
-	require.Equal(t, sdkmath.NewInt(600), result.minted)
-	require.Equal(t, sdkmath.NewInt(400), result.sent)
-	require.True(t, result.burnedSkipped.IsZero(), "burn failed so nothing gets counted as burned")
-	require.Equal(t, sdkmath.NewInt(200), result.stuckInModule)
-	require.Equal(t, []string{"mint", "send", "send", "burn", "send"}, bank.opsOf())
-	require.Equal(t, sdkmath.NewInt(200), bank.moduleBalance, "200 stuck in module")
-	require.Equal(t, sdkmath.NewInt(600), bank.supply, "supply still reflects full mint because burn failed")
-}
-
-func TestMintAndDistribute_AllSendsFail_AllBurned(t *testing.T) {
-	bank := newMockMintBank()
-	recipients := makeRecipients(t,
-		byte(0x01), sdkmath.NewInt(100),
-		byte(0x02), sdkmath.NewInt(200),
-	)
-	for _, r := range recipients {
-		bank.sendFailFor[r.accountAddress.String()] = fmt.Errorf("send-fail")
-	}
-	ctx := distributeTestCtx()
-
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sumAmounts(recipients))
-
-	require.Equal(t, sdkmath.NewInt(300), result.minted)
-	require.True(t, result.sent.IsZero())
-	require.Equal(t, sdkmath.NewInt(300), result.burnedSkipped)
-	require.True(t, result.stuckInModule.IsZero())
-	require.True(t, bank.moduleBalance.IsZero())
-	require.True(t, bank.supply.IsZero(), "mint(300) - burn(300) = 0 supply delta")
-}
-
-func TestMintAndDistribute_OneStuckOthersPaid(t *testing.T) {
-	bank := newMockMintBank()
-	recipients := makeRecipients(t,
-		byte(0x01), sdkmath.NewInt(100),
-		byte(0x02), sdkmath.NewInt(200),
-		byte(0x03), sdkmath.NewInt(300),
-	)
-	// middle recipient: send fails AND burn fails (stuck)
-	bank.sendFailFor[recipients[1].accountAddress.String()] = fmt.Errorf("send-fail")
-	bank.burnFailAll = fmt.Errorf("burn-fail")
-	ctx := distributeTestCtx()
-
-	result := mintAndDistribute(ctx, bank, "core", "umirage", recipients, sumAmounts(recipients))
-
-	require.Equal(t, sdkmath.NewInt(600), result.minted)
-	require.Equal(t, sdkmath.NewInt(400), result.sent)
-	require.True(t, result.burnedSkipped.IsZero())
-	require.Equal(t, sdkmath.NewInt(200), result.stuckInModule)
-	require.Equal(t, sdkmath.NewInt(200), bank.moduleBalance, "unburnable stuck 200 remains")
-
-	// invariants
-	require.Equal(t, result.minted, result.sent.Add(result.burnedSkipped).Add(result.stuckInModule),
-		"minted = sent + burnedSkipped + stuckInModule")
+	require.Equal(t, sdkmath.NewInt(100), result.sent, "distribution stops at the first failed send")
+	require.Equal(t, []string{"mint", "send", "send"}, bank.opsOf())
 }

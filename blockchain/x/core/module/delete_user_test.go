@@ -213,20 +213,15 @@ func TestDeleteUserSelfAuthAccepted(t *testing.T) {
 		Target:         owner,
 	}
 
-	// Will panic on fund sweep (nil bank keeper in mock).
-	// We recover and verify the auth check passed and deletion started.
-	func() {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("expected panic from nil bank keeper during fund sweep")
-			}
-		}()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
-	_, found, _ := mk.GetProfileCore(ctx, owner)
+	_, found, err := mk.GetProfileCore(ctx, owner)
+	require.NoError(t, err)
 	require.False(t, found, "profile should be deleted")
+
+	require.NotContains(t, mk.storeService.store, types.UsernamesPrefix+"testuser",
+		"username mapping must be released with the profile")
 }
 
 func TestDeleteUserGovernanceAuthAccepted(t *testing.T) {
@@ -246,17 +241,11 @@ func TestDeleteUserGovernanceAuthAccepted(t *testing.T) {
 		Target:    targetAddr,
 	}
 
-	func() {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("expected panic from nil bank keeper during fund sweep")
-			}
-		}()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
-	_, found, _ := mk.GetProfileCore(ctx, targetAddr)
+	_, found, err := mk.GetProfileCore(ctx, targetAddr)
+	require.NoError(t, err)
 	require.False(t, found, "profile should be deleted by governance")
 }
 
@@ -277,21 +266,14 @@ func TestDeleteUserGovernanceSkipsGasFee(t *testing.T) {
 		Target:    targetAddr,
 	}
 
-	// Governance should NOT trigger deductRelayGasFee (which would fail on nil params).
-	// If gas fee were incorrectly triggered for governance, the nil params keeper
-	// would panic before reaching the fund sweep. The test verifies it panics only
-	// on fund sweep, not on gas fee.
-	func() {
-		defer func() {
-			r := recover()
-			if r == nil {
-				t.Fatal("expected panic from nil bank keeper during fund sweep")
-			}
-		}()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	// Governance must not trigger deductRelayGasFee. The target is level 5 with
+	// no reserve, so a fee deduction would downgrade or reject; a clean success
+	// proves the fee path was skipped entirely.
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
-	_, found, _ := mk.GetProfileCore(ctx, targetAddr)
+	_, found, err := mk.GetProfileCore(ctx, targetAddr)
+	require.NoError(t, err)
 	require.False(t, found, "profile should be deleted")
 }
 
@@ -315,13 +297,11 @@ func TestDeleteUserReleasesUsername(t *testing.T) {
 		Target:         owner,
 	}
 
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
 	otherOwner := sdk.AccAddress(bytes.Repeat([]byte{0x0A}, 20)).String()
-	err := mk.ClaimUsername(ctx, "releaseme", otherOwner)
+	err = mk.ClaimUsername(ctx, "releaseme", otherOwner)
 	require.NoError(t, err, "released username should be claimable by another user")
 }
 
@@ -351,28 +331,32 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 		Target:         owner,
 	}
 
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
 	// All lists should be cleaned up
-	agents, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
+	agents, err := mk.ListEnabledAgentsOrdered(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, agents, "enabled agents should be empty")
 
-	users, _ := mk.ListFollowedUsers(ctx, owner)
+	users, err := mk.ListFollowedUsers(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, users, "followed users should be empty")
 
-	topics, _ := mk.ListFollowedTopics(ctx, owner)
+	topics, err := mk.ListFollowedTopics(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, topics, "followed topics should be empty")
 
-	blockedUsers, _ := mk.ListBlockedUsers(ctx, owner)
+	blockedUsers, err := mk.ListBlockedUsers(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, blockedUsers, "blocked users should be empty")
 
-	blockedPosts, _ := mk.ListBlockedPosts(ctx, owner)
+	blockedPosts, err := mk.ListBlockedPosts(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, blockedPosts, "blocked posts should be empty")
 
-	blockedTopics, _ := mk.ListBlockedTopics(ctx, owner)
+	blockedTopics, err := mk.ListBlockedTopics(ctx, owner)
+	require.NoError(t, err)
 	require.Empty(t, blockedTopics, "blocked topics should be empty")
 }
 
@@ -394,14 +378,11 @@ func TestDeleteUserDoubleDeleteRejects(t *testing.T) {
 		Target:         owner,
 	}
 
-	// First delete - will panic on fund sweep but profile is gone
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
 	// Second delete should fail with "not found"
-	_, err := am.DeleteUser(ctx, req)
+	_, err = am.DeleteUser(ctx, req)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "profile not found or already deleted")
 }
@@ -424,12 +405,11 @@ func TestDeleteUserTargetNormalization(t *testing.T) {
 		Target:         "  " + owner + "  ",
 	}
 
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.NoError(t, err)
 
-	_, found, _ := mk.GetProfileCore(ctx, owner)
+	_, found, err := mk.GetProfileCore(ctx, owner)
+	require.NoError(t, err)
 	require.False(t, found, "profile should be deleted with trimmed target")
 }
 

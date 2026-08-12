@@ -239,7 +239,8 @@ type Params struct {
 	MinUsernameSize uint64 `protobuf:"varint,36,opt,name=min_username_size,json=minUsernameSize,proto3" json:"min_username_size,omitempty"`
 	// min_topic_size is the minimum topic length
 	MinTopicSize uint64 `protobuf:"varint,37,opt,name=min_topic_size,json=minTopicSize,proto3" json:"min_topic_size,omitempty"`
-	// mint_dynamic_credit_cap caps per-interval relay credits per validator
+	// mint_dynamic_credit_cap caps per-interval relay credits per validator.
+	// Zero disables credit weighting; the dynamic pool then falls back to stake weighting.
 	MintDynamicCreditCap uint64 `protobuf:"varint,38,opt,name=mint_dynamic_credit_cap,json=mintDynamicCreditCap,proto3" json:"mint_dynamic_credit_cap,omitempty"`
 	// mint_dynamic_split is fraction [0,1] of MintQuantity allocated to dynamic pool
 	MintDynamicSplit float64 `protobuf:"fixed64,39,opt,name=mint_dynamic_split,json=mintDynamicSplit,proto3" json:"mint_dynamic_split,omitempty"`
@@ -252,10 +253,10 @@ type Params struct {
 	// Levels 2-9 are reserved for future subscription tiers and currently invalid.
 	Tiers []*TierConfig `protobuf:"bytes,41,rep,name=tiers,proto3" json:"tiers,omitempty"`
 	// subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
-	// Default: 0.80 (80% of period fee goes to reserve, 20% burned)
+	// Default: 0.95 (95% of period fee goes to reserve, 5% burned)
 	SubscriptionReservePercent float64 `protobuf:"fixed64,42,opt,name=subscription_reserve_percent,json=subscriptionReservePercent,proto3" json:"subscription_reserve_percent,omitempty"`
 	// relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
-	// Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
+	// Default: 1000 (1000 umirage per gas). Set to match node's minimum-gas-prices.
 	RelayMinGasPrice uint64 `protobuf:"varint,43,opt,name=relay_min_gas_price,json=relayMinGasPrice,proto3" json:"relay_min_gas_price,omitempty"`
 	// relay_max_gas_fee is the maximum gas fee that can be deducted per relayed transaction (in umirage)
 	// Default: 500,000,000 (500 MIRAGE). Protects users from unexpectedly high fees.

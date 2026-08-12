@@ -8,6 +8,7 @@ Exports:
 These are dynamic classes compatible with CosmPy Aerial Transaction.add_message.
 """
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
+from google.protobuf import field_mask_pb2
 
 
 def _build_pool():
@@ -514,7 +515,16 @@ def _build_pool():
     f_awards.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_awards.type_name = ".mirage.core.v1.AwardConfig"
 
-    # MsgUpdateParams (authority + Params)
+    # MsgUpdateParams (authority + Params + update_mask)
+    #
+    # update_mask (field 3) selects which Params fields a governance proposal
+    # applies. Without it in this schema, a decoded MsgUpdateParams would drop
+    # the mask and the indexer could not tell which fields a proposal changed.
+    # The well-known FieldMask descriptor is registered in this pool because the
+    # pool is built from scratch and does not inherit the default one.
+    pool.Add(descriptor_pb2.FileDescriptorProto.FromString(field_mask_pb2.DESCRIPTOR.serialized_pb))
+    file_proto.dependency.append("google/protobuf/field_mask.proto")
+
     msg5 = file_proto.message_type.add()
     msg5.name = "MsgUpdateParams"
     add_f(msg5, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
@@ -524,6 +534,12 @@ def _build_pool():
     f.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
     f.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f.type_name = ".mirage.core.v1.Params"
+    f = msg5.field.add()
+    f.name = "update_mask"
+    f.number = 3
+    f.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+    f.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f.type_name = ".google.protobuf.FieldMask"
 
     # QueryParamsResponse (wraps Params)
     msg6 = file_proto.message_type.add()

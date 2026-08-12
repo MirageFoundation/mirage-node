@@ -189,6 +189,8 @@ func TestValidateEnvelopeTimestampBoundaries(t *testing.T) {
 	require.NoError(t, validateEnvelopeTimestamp(ctx, okFuture, maxAge))
 	require.Error(t, validateEnvelopeTimestamp(ctx, tooOld, maxAge))
 	require.Error(t, validateEnvelopeTimestamp(ctx, tooFuture, maxAge))
+	require.ErrorContains(t, validateEnvelopeTimestamp(ctx, ^uint64(0), maxAge), "overflows int64")
+	require.ErrorContains(t, validateEnvelopeTimestamp(ctx, okPast, ^uint64(0)), "exceeds max")
 }
 
 type testFeeTx struct {

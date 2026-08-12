@@ -2,119 +2,260 @@ package core
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	gogotypes "github.com/cosmos/gogoproto/types"
+	"github.com/stretchr/testify/require"
 
 	"mirage/x/core/types"
 )
 
-// TestUpdateParamsCoversAllFields ensures all Params fields are handled in UpdateParams.
-// If a new field is added to Params but not to UpdateParams, this test will fail.
-func TestUpdateParamsCoversAllFields(t *testing.T) {
-	// These fields are expected to be handled in UpdateParams
-	// Add any new param fields here when implementing them
-	handledFields := map[string]bool{
-		// Minting
-		"MintInterval":         true,
-		"MintQuantity":         true,
-		"MintDynamicCreditCap": true,
-		"MintDynamicSplit":     true,
-		// PoW
-		"MinDifficulty":            true,
-		"PowMessageWindow":         true,
-		"PowMessageLimit":          true,
-		"PowCalmPeriodDefinition":  true,
-		"PowCalmSequenceThreshold": true,
-		"PowDifficultyAllowance":   true,
-		"PowDifficultyStep":        true,
-		"BlockHashWindow":          true,
-		// Username/Topic limits
-		"MinUsernameSize": true,
-		"MaxUsernameSize": true,
-		"MinTopicSize":    true,
-		"MaxTopicSize":    true,
-		// Subscription
-		"SubscriptionPeriod":         true,
-		"SubscriptionReservePercent": true,
-		"Tiers":                      true,
-		// Relay
-		"RelayMinGasPrice": true,
-		"RelayMaxGasFee":   true,
-		// Envelope
-		"MaxEnvelopeAge": true,
-		// Awards
-		"AwardConfigs": true,
+// protoFieldName extracts the canonical snake_case proto field name from a
+// generated struct field's protobuf tag.
+func protoFieldName(t *testing.T, field reflect.StructField) string {
+	t.Helper()
+	for _, part := range strings.Split(field.Tag.Get("protobuf"), ",") {
+		if strings.HasPrefix(part, "name=") {
+			return strings.TrimPrefix(part, "name=")
+		}
 	}
+	t.Fatalf("field %s has no protobuf name tag", field.Name)
+	return ""
+}
 
-	// Get all fields from Params struct using reflection
+// TestUpdateParamsCoversAllFields ensures every Params field can be selected by
+// an update_mask path, and that the allowlist has no stale entries. Adding a
+// param without adding it to paramFieldSetters makes it ungovernable, which is
+// exactly the drift this pins.
+func TestUpdateParamsCoversAllFields(t *testing.T) {
 	paramsType := reflect.TypeOf(types.Params{})
-	var missingFields []string
+	actual := make(map[string]bool, paramsType.NumField())
 
+	var missing []string
 	for i := 0; i < paramsType.NumField(); i++ {
 		field := paramsType.Field(i)
-		// Skip protobuf internal fields
 		if field.Name == "state" || field.Name == "sizeCache" || field.Name == "unknownFields" {
 			continue
 		}
-		if !handledFields[field.Name] {
-			missingFields = append(missingFields, field.Name)
+		name := protoFieldName(t, field)
+		actual[name] = true
+		if _, ok := paramFieldSetters[name]; !ok {
+			missing = append(missing, name)
 		}
 	}
 
-	if len(missingFields) > 0 {
-		t.Errorf("The following Params fields are not handled in UpdateParams: %v\n"+
-			"Add them to UpdateParams in module.go and update the handledFields map in this test.",
-			missingFields)
-	}
+	require.Empty(t, missing,
+		"these Params fields cannot be selected by update_mask; add them to paramFieldSetters in module.go")
 
-	// Also verify we don't have stale entries in handledFields
-	actualFields := make(map[string]bool)
+	var stale []string
+	for name := range paramFieldSetters {
+		if !actual[name] {
+			stale = append(stale, name)
+		}
+	}
+	require.Empty(t, stale, "these paramFieldSetters entries no longer exist in Params")
+}
+
+// TestUpdateParamsSettersAssignOnlyTheirOwnField proves each setter is wired to
+// the field its path names, catching copy-paste errors in the allowlist.
+func TestUpdateParamsSettersAssignOnlyTheirOwnField(t *testing.T) {
+	paramsType := reflect.TypeOf(types.Params{})
+	fieldByProtoName := map[string]string{}
 	for i := 0; i < paramsType.NumField(); i++ {
 		field := paramsType.Field(i)
-		if field.Name != "state" && field.Name != "sizeCache" && field.Name != "unknownFields" {
-			actualFields[field.Name] = true
+		if field.Name == "state" || field.Name == "sizeCache" || field.Name == "unknownFields" {
+			continue
 		}
+		fieldByProtoName[protoFieldName(t, field)] = field.Name
 	}
 
-	var staleFields []string
-	for fieldName := range handledFields {
-		if !actualFields[fieldName] {
-			staleFields = append(staleFields, fieldName)
-		}
-	}
+	for path, setter := range paramFieldSetters {
+		t.Run(path, func(t *testing.T) {
+			goField, ok := fieldByProtoName[path]
+			require.True(t, ok)
 
-	if len(staleFields) > 0 {
-		t.Errorf("The following fields are in handledFields but don't exist in Params: %v\n"+
-			"Remove them from the handledFields map in this test.",
-			staleFields)
+			base := types.DefaultParams()
+			source := mutatedParams(t, base)
+
+			merged := base
+			setter(&merged, source)
+
+			mergedVal := reflect.ValueOf(merged)
+			sourceVal := reflect.ValueOf(source)
+			baseVal := reflect.ValueOf(base)
+
+			require.True(t,
+				reflect.DeepEqual(mergedVal.FieldByName(goField).Interface(), sourceVal.FieldByName(goField).Interface()),
+				"setter for %q did not assign %s", path, goField)
+
+			for otherPath, otherGoField := range fieldByProtoName {
+				if otherPath == path {
+					continue
+				}
+				require.True(t,
+					reflect.DeepEqual(mergedVal.FieldByName(otherGoField).Interface(), baseVal.FieldByName(otherGoField).Interface()),
+					"setter for %q also modified %s", path, otherGoField)
+			}
+		})
 	}
 }
 
-func TestApplyParamUpdatesPartial(t *testing.T) {
+// mutatedParams returns params whose every field differs from base, so a setter
+// that assigns the wrong field is detectable.
+func mutatedParams(t *testing.T, base types.Params) types.Params {
+	t.Helper()
+	out := base
+	outVal := reflect.ValueOf(&out).Elem()
+	for i := 0; i < outVal.NumField(); i++ {
+		field := outVal.Type().Field(i)
+		if field.Name == "state" || field.Name == "sizeCache" || field.Name == "unknownFields" {
+			continue
+		}
+		f := outVal.Field(i)
+		switch f.Kind() {
+		case reflect.Uint64:
+			f.SetUint(f.Uint() + 1)
+		case reflect.Float64:
+			f.SetFloat(f.Float() / 2)
+		case reflect.Slice:
+			f.Set(reflect.MakeSlice(f.Type(), 1, 1))
+		default:
+			t.Fatalf("unhandled Params field kind %s for %s", f.Kind(), field.Name)
+		}
+	}
+	return out
+}
+
+func mask(paths ...string) *gogotypes.FieldMask {
+	return &gogotypes.FieldMask{Paths: paths}
+}
+
+func TestApplyParamUpdatesAppliesOnlyMaskedFields(t *testing.T) {
 	base := types.DefaultParams()
 	updates := types.Params{
-		MinDifficulty: base.MinDifficulty + 1,
-		AwardConfigs: []*types.AwardConfig{
-			{Name: "test", Cost: 1},
-		},
+		MinDifficulty:   base.MinDifficulty + 1,
+		MaxUsernameSize: base.MaxUsernameSize + 7,
+		AwardConfigs:    []*types.AwardConfig{{Name: "test", Cost: 1}},
 	}
 
-	updated, changed := applyParamUpdates(base, updates)
-	if updated.MinDifficulty != base.MinDifficulty+1 {
-		t.Fatalf("MinDifficulty = %d, want %d", updated.MinDifficulty, base.MinDifficulty+1)
+	updated, changed, err := applyParamUpdates(base, updates, mask("min_difficulty", "award_configs"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"min_difficulty", "award_configs"}, changed)
+
+	require.Equal(t, base.MinDifficulty+1, updated.MinDifficulty)
+	require.Len(t, updated.AwardConfigs, 1)
+	require.Equal(t, "test", updated.AwardConfigs[0].Name)
+
+	require.Equal(t, base.MaxUsernameSize, updated.MaxUsernameSize,
+		"an unmasked field must be untouched even when the proposal carries a value for it")
+	require.Equal(t, base.PowDifficultyStep, updated.PowDifficultyStep)
+	require.Equal(t, base.SubscriptionPeriod, updated.SubscriptionPeriod)
+}
+
+// TestApplyParamUpdatesAppliesZeroValues is the L-9 regression: zero used to mean
+// "not supplied", so no proposal could ever select it.
+func TestApplyParamUpdatesAppliesZeroValues(t *testing.T) {
+	base := types.DefaultParams()
+	require.NotZero(t, base.SubscriptionPeriod)
+
+	updated, changed, err := applyParamUpdates(base, types.Params{SubscriptionPeriod: 0}, mask("subscription_period"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"subscription_period"}, changed)
+	require.Zero(t, updated.SubscriptionPeriod, "a masked zero must be applied")
+	require.NoError(t, updated.Validate(), "one-time-payment mode must remain valid params")
+
+	// The same holds for a float field.
+	updated, _, err = applyParamUpdates(base, types.Params{SubscriptionReservePercent: 0}, mask("subscription_reserve_percent"))
+	require.NoError(t, err)
+	require.Zero(t, updated.SubscriptionReservePercent)
+}
+
+func TestApplyParamUpdatesReplacesRepeatedFields(t *testing.T) {
+	base := types.DefaultParams()
+	require.Len(t, base.Tiers, 3)
+
+	replacement := types.DefaultTiers()
+	replacement[2].PeriodFee = 1
+	updated, _, err := applyParamUpdates(base, types.Params{Tiers: replacement}, mask("tiers"))
+	require.NoError(t, err)
+	require.Len(t, updated.Tiers, 3)
+	require.Equal(t, uint64(1), updated.Tiers[2].PeriodFee)
+
+	// An empty repeated value is a real replacement request, and must then fail
+	// validation rather than be silently ignored.
+	updated, _, err = applyParamUpdates(base, types.Params{Tiers: nil}, mask("tiers"))
+	require.NoError(t, err)
+	require.Empty(t, updated.Tiers)
+	require.Error(t, updated.Validate())
+}
+
+func TestApplyParamUpdatesRejectsBadMasks(t *testing.T) {
+	base := types.DefaultParams()
+	updates := types.Params{MinDifficulty: base.MinDifficulty + 1}
+
+	cases := map[string]*gogotypes.FieldMask{
+		"nil":            nil,
+		"empty":          mask(),
+		"blank_path":     mask("   "),
+		"unknown_path":   mask("not_a_param"),
+		"duplicate_path": mask("min_difficulty", "min_difficulty"),
+		"nested_path":    mask("tiers.period_fee"),
+		"camel_case":     mask("minDifficulty"),
+		"whitespace":     mask(" min_difficulty "),
 	}
-	if updated.MaxUsernameSize != base.MaxUsernameSize {
-		t.Fatalf("MaxUsernameSize changed unexpectedly: %d", updated.MaxUsernameSize)
+
+	for name, m := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := applyParamUpdates(base, updates, m)
+			require.Error(t, err)
+		})
 	}
-	if updated.PowDifficultyStep != base.PowDifficultyStep {
-		t.Fatalf("PowDifficultyStep changed unexpectedly: %f", updated.PowDifficultyStep)
-	}
-	if updated.SubscriptionPeriod != base.SubscriptionPeriod {
-		t.Fatalf("SubscriptionPeriod changed unexpectedly: %d", updated.SubscriptionPeriod)
-	}
-	if len(updated.AwardConfigs) != 1 || updated.AwardConfigs[0].Name != "test" {
-		t.Fatalf("AwardConfigs not updated as expected: %v", updated.AwardConfigs)
-	}
-	if len(changed) == 0 {
-		t.Fatal("Expected changed fields to be reported")
-	}
+}
+
+func TestApplyParamUpdatesRejectsNoOp(t *testing.T) {
+	base := types.DefaultParams()
+
+	_, _, err := applyParamUpdates(
+		base,
+		types.Params{MinDifficulty: base.MinDifficulty},
+		mask("min_difficulty"),
+	)
+	require.ErrorContains(t, err, "does not change any selected field")
+}
+
+func TestUpdateParamsRejectsMissingMask(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
+		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		Params:    types.DefaultParams(),
+	})
+	require.ErrorContains(t, err, "update_mask is required")
+}
+
+func TestGetProfilesReturnsCorruptProfileError(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+	mk.storeService.store[types.ProfilesPrefix+testAccAddressString()] = []byte("{")
+
+	_, err := am.GetProfiles(ctx, &types.QueryProfilesRequest{})
+	require.ErrorContains(t, err, "corrupt profile JSON")
+}
+
+func TestApplyParamUpdatesSurfacesInvalidMergedParams(t *testing.T) {
+	base := types.DefaultParams()
+
+	updated, _, err := applyParamUpdates(base, types.Params{PowMessageWindow: types.MaxPowMessageWindow + 1}, mask("pow_message_window"))
+	require.NoError(t, err, "the merge itself succeeds; validation is the gate")
+	require.Error(t, updated.Validate(), "a masked value past its bound must fail Validate")
+
+	updated, _, err = applyParamUpdates(base, types.Params{MinDifficulty: 0}, mask("min_difficulty"))
+	require.NoError(t, err)
+	require.Error(t, updated.Validate(), "a masked zero that is invalid must be rejected by Validate")
 }

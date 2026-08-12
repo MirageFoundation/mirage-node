@@ -24,6 +24,28 @@ const (
 	MinPowDifficultyStep = 0.01
 )
 
+// Governance-safe upper bounds for parameters that size loops, windows, and time
+// arithmetic. Without them a single proposal can make EndBlock sweep an
+// unbounded key range, overflow an expiry, or stall difficulty adjustment
+// forever (review M-7).
+const (
+	// MaxPowMessageWindow bounds the sliding window swept every block. Aligned
+	// with the existing block_hash_window cap of 1000.
+	MaxPowMessageWindow = 1_000
+	// MaxMintInterval is roughly one year at the documented 3s block time.
+	MaxMintInterval = 10_512_000
+	// MaxSubscriptionPeriodMinutes is one year.
+	MaxSubscriptionPeriodMinutes = 525_600
+	// MaxEnvelopeAgeSeconds is one day.
+	MaxEnvelopeAgeSeconds = 86_400
+	// MaxProfileListEntries keeps uint64 governance values representable by
+	// the uint32 counters used by profile-list storage.
+	MaxProfileListEntries = math.MaxUint32
+	// MaxPowCalmSequenceThreshold keeps the calm counter in a range that can
+	// actually be reached, so difficulty can still fall.
+	MaxPowCalmSequenceThreshold = 1_000_000
+)
+
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
 var ValidSubscriptionLevels = map[int]bool{
 	LevelSubscriber: true,
@@ -190,8 +212,8 @@ func (p Params) Validate() error {
 	if p.MinDifficulty == 0 || p.MinDifficulty > 256 {
 		return fmt.Errorf("min_difficulty must be in [1,256]")
 	}
-	if p.PowMessageWindow == 0 {
-		return fmt.Errorf("pow_message_window must be > 0")
+	if p.PowMessageWindow == 0 || p.PowMessageWindow > MaxPowMessageWindow {
+		return fmt.Errorf("pow_message_window must be in [1,%d]", MaxPowMessageWindow)
 	}
 	if p.PowMessageLimit == 0 {
 		return fmt.Errorf("pow_message_limit must be > 0")
@@ -199,11 +221,11 @@ func (p Params) Validate() error {
 	if p.PowCalmPeriodDefinition >= p.PowMessageLimit {
 		return fmt.Errorf("pow_calm_period_definition must be < pow_message_limit")
 	}
-	if p.PowCalmSequenceThreshold == 0 {
-		return fmt.Errorf("pow_calm_sequence_threshold must be > 0")
+	if p.PowCalmSequenceThreshold == 0 || p.PowCalmSequenceThreshold > MaxPowCalmSequenceThreshold {
+		return fmt.Errorf("pow_calm_sequence_threshold must be in [1,%d]", MaxPowCalmSequenceThreshold)
 	}
-	if p.MintInterval == 0 {
-		return fmt.Errorf("mint_interval must be > 0")
+	if p.MintInterval == 0 || p.MintInterval > MaxMintInterval {
+		return fmt.Errorf("mint_interval must be in [1,%d]", MaxMintInterval)
 	}
 	if p.MintQuantity == 0 {
 		return fmt.Errorf("mint_quantity must be > 0")
@@ -218,7 +240,11 @@ func (p Params) Validate() error {
 	if p.BlockHashWindow == 0 || p.BlockHashWindow > 1000 {
 		return fmt.Errorf("block_hash_window must be in [1,1000]")
 	}
-	if p.PowDifficultyAllowance > p.PowMessageWindow*2 {
+	allowanceCeiling, err := CheckedMulUint64(p.PowMessageWindow, 2)
+	if err != nil {
+		return fmt.Errorf("pow_message_window %d: %w", p.PowMessageWindow, err)
+	}
+	if p.PowDifficultyAllowance > allowanceCeiling {
 		return fmt.Errorf("pow_difficulty_allowance must be <= 2*pow_message_window")
 	}
 	if p.MaxUsernameSize == 0 || p.MaxUsernameSize > 128 {
@@ -255,8 +281,12 @@ func (p Params) Validate() error {
 		return fmt.Errorf("relay_max_gas_fee %d exceeds max %d", p.RelayMaxGasFee, MaxRelayMaxGasFee)
 	}
 	// MaxEnvelopeAge must be > 0 (replay protection)
-	if p.MaxEnvelopeAge == 0 {
-		return fmt.Errorf("max_envelope_age must be > 0")
+	if p.MaxEnvelopeAge == 0 || p.MaxEnvelopeAge > MaxEnvelopeAgeSeconds {
+		return fmt.Errorf("max_envelope_age must be in [1,%d]", MaxEnvelopeAgeSeconds)
+	}
+	// SubscriptionPeriod of 0 selects documented one-time-payment mode.
+	if p.SubscriptionPeriod > MaxSubscriptionPeriodMinutes {
+		return fmt.Errorf("subscription_period must be in [0,%d]", MaxSubscriptionPeriodMinutes)
 	}
 	// Validate tiers
 	if len(p.Tiers) != 3 {
@@ -278,6 +308,23 @@ func (p Params) Validate() error {
 		}
 		if tier.MaxContentLength == 0 {
 			return fmt.Errorf("tier %d: max_content_length must be > 0", i)
+		}
+		listLimits := []struct {
+			name  string
+			value uint64
+		}{
+			{"max_enabled_agents", tier.MaxEnabledAgents},
+			{"max_followed_users", tier.MaxFollowedUsers},
+			{"max_followed_topics", tier.MaxFollowedTopics},
+			{"max_blocked_users", tier.MaxBlockedUsers},
+			{"max_blocked_posts", tier.MaxBlockedPosts},
+			{"max_blocked_topics", tier.MaxBlockedTopics},
+		}
+		for _, limit := range listLimits {
+			if limit.value > MaxProfileListEntries {
+				return fmt.Errorf("tier %d: %s %d exceeds max %d",
+					i, limit.name, limit.value, MaxProfileListEntries)
+			}
 		}
 		if math.IsNaN(tier.VoteWeight) || math.IsInf(tier.VoteWeight, 0) {
 			return fmt.Errorf("tier %d: vote_weight must be finite", i)

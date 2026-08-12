@@ -8,6 +8,9 @@ plugins:
       - plugins=grpc
       - module=mirage
       - Mgoogle/protobuf/any.proto=github.com/cosmos/gogoproto/types/any
+      # gogo marshalers need the gogo FieldMask, not the API-v2 fieldmaskpb type,
+      # which has no Marshal/Size/Unmarshal methods.
+      - Mgoogle/protobuf/field_mask.proto=github.com/cosmos/gogoproto/types
       - Mcosmos/orm/v1/orm.proto=cosmossdk.io/orm
       - Mcosmos/app/v1alpha1/module.proto=cosmossdk.io/api/cosmos/app/v1alpha1
   - local:

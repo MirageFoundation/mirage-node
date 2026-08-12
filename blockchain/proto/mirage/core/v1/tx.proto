@@ -7,6 +7,7 @@ import "cosmos/msg/v1/msg.proto";
 import "cosmos_proto/cosmos.proto";
 import "amino/amino.proto";
 import "gogoproto/gogo.proto";
+import "google/protobuf/field_mask.proto";
 import "mirage/core/v1/params.proto";
 
 // Msg defines the Msg service for the core module.
@@ -114,8 +115,16 @@ message MsgUpdateParams {
   // authority is the address that controls the module (defaults to x/gov unless overwritten).
   string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
-  // NOTE: All parameters must be supplied.
+  // params carries the values for the fields selected by update_mask. Values in
+  // unselected fields are ignored, and a selected field is applied even when its
+  // value is zero or empty.
   Params params = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+
+  // update_mask selects which Params fields the proposal changes. It is
+  // required and must be non-empty. Every path must be a supported top-level
+  // snake_case Params field name; unknown, duplicate, and nested paths are
+  // rejected. Repeated fields (tiers, award_configs) are replaced wholesale.
+  google.protobuf.FieldMask update_mask = 3;
 }
 
 // MsgUpdateParamsResponse defines the response structure for executing a

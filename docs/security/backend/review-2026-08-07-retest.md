@@ -120,3 +120,21 @@ Local Docker testnet (`hostname=testnet`) after `pow_message_limit=9999999`:
 Fleet deploy on 2026-08-09 (`bd2c294f` / v1.33.3): all four validators running the release image with synced chain/indexer, backend APIs returning 200, and payout/outbox schema present.
 
 Primary regression categories: `quest_config`, `quest_assignment`, `fleet_url`, `analytics_identity`, `reward_claim_authz`, `payout_*`, `push_outbox_*`, `runner_accounting`.
+
+---
+
+## Appendix — delta review of post-retest commits (2026-08-12)
+
+This retest certifies code as of `v1.33.3` (`bd2c294f`). Reviewed on 2026-08-12 as part of the blockchain `v1.34.0` release gate: `8217360f` ("stats: whole-day chart buckets + fixed 30d DAU; drop stale indexer height row", v1.33.8) and `f6491865` ("stats: count logged-in readers as lurkers, and stop splitting them in two", v1.33.9).
+
+**No new finding. L-7 holds.** The stats identity path still takes an address only from `g.verified_request_address`, and only in the `after_request` hook, only when the response was not an error. `extract_identity` never reads a request-supplied address, so an unauthenticated call cannot bind an identity to a visitor. Lurker counting additionally requires a dated binding: the new `stats_visitors.address_bound_at` column means anonymous events recorded before a login are not retroactively attributed to the account.
+
+Every metric these commits added or changed — the fixed 30-day DAU block, whole-day chart buckets, the merged lurker definition — is served only through the admin-signed export and aggregate endpoints, which verify a signature over a nonce-bound payload and require level 100 or higher. Responses contain integer counts and daily buckets, no addresses, usernames, or visitor hashes, so there is no new enumeration oracle and no new per-user granularity. The one public stats endpoint, `POST /api/stats/visitor_attribution`, is write-only and records UTM fields with no address.
+
+Client IP handling is unaffected: no stats path reads a forwarding header, because analytics identity is a salted visitor hash plus a verified address and never an IP.
+
+`f6491865` does let the beacon path read `visitor_id` from a JSON body when the header is absent. That value is client-supplied and salted-hashed exactly like `X-Mirage-Visitor`, and it authenticates nothing. A caller can pollute analytics for a fingerprint they choose, including binding a visitor hash to *their own* address, but cannot bind a victim's address without the victim's key. That is the pre-existing analytics trust model, unchanged and not a regression.
+
+The migration `indexer/migrations/v1_33_8_drop_stale_indexer_state_height.py` deletes the `last_processed_height` row from `indexer_state`. No code reads it: height authority is `meta.last_height` through `get_last_height()` / `set_checkpoint()`. The only surviving mentions are the migration itself, two documentation notes (one of which is a runbook warning not to trust the stale key), and an unrelated JSON response field of the same name in `web/backend/chain.py:307` that is populated from `meta.last_height`. The migration key and filename match the `v1.33.8` tag it shipped with.
+
+**Verification note.** This appendix is source review only. The suites listed above were not re-run for it.

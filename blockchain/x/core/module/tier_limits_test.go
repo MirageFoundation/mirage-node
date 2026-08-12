@@ -918,6 +918,32 @@ func TestBlockPostDequeKeepsNewest(t *testing.T) {
 	require.Equal(t, []string{genTxHash(4), genTxHash(5), genTxHash(6), genTxHash(7)}, got)
 }
 
+func TestBlockedListZeroLimitRejectsAdds(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, _ := testPubkeyOwner()
+
+	params := mk.GetParams(ctx)
+	params.Tiers[0].MaxBlockedUsers = 0
+	params.Tiers[0].MaxBlockedPosts = 0
+	params.Tiers[0].MaxBlockedTopics = 0
+	require.NoError(t, mk.SetParams(ctx, params))
+
+	_, err := am.BlockUser(ctx, &types.MsgBlockUser{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: genAddr(1),
+	})
+	require.ErrorContains(t, err, "blocked user limit is zero")
+
+	_, err = am.BlockPost(ctx, &types.MsgBlockPost{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: genTxHash(1),
+	})
+	require.ErrorContains(t, err, "blocked post limit is zero")
+
+	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{
+		Authority: "not-gov", EnvelopePubkey: pub, Topic: "topic",
+	})
+	require.ErrorContains(t, err, "blocked topic limit is zero")
+}
+
 // =========================================================================
 // Hard cap vs deque: combined test to show the behavioral difference
 // =========================================================================

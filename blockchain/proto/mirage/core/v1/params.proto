@@ -86,7 +86,8 @@ message Params {
   // min_topic_size is the minimum topic length
   uint64 min_topic_size = 37;
 
-  // mint_dynamic_credit_cap caps per-interval relay credits per validator
+  // mint_dynamic_credit_cap caps per-interval relay credits per validator.
+  // Zero disables credit weighting; the dynamic pool then falls back to stake weighting.
   uint64 mint_dynamic_credit_cap = 38;
 
   // mint_dynamic_split is fraction [0,1] of MintQuantity allocated to dynamic pool
@@ -103,11 +104,11 @@ message Params {
   repeated TierConfig tiers = 41;
 
   // subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
-  // Default: 0.80 (80% of period fee goes to reserve, 20% burned)
+  // Default: 0.95 (95% of period fee goes to reserve, 5% burned)
   double subscription_reserve_percent = 42;
 
   // relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
-  // Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
+  // Default: 1000 (1000 umirage per gas). Set to match node's minimum-gas-prices.
   uint64 relay_min_gas_price = 43;
 
   // relay_max_gas_fee is the maximum gas fee that can be deducted per relayed transaction (in umirage)
