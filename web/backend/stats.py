@@ -41,15 +41,32 @@ DAY = 86400
 # Lookback for the DAU baseline. Fixed, never derived from the selected window.
 DAU_WINDOW_DAYS = 30
 
-# Active-use signals: a request to one of these means the user is reading or
-# interacting with Mirage content, not just loading a shell or polling config.
-# Anything else under /api/ is a bare "visit".
+# Active-use signals: a request to one of these means a human is looking at
+# Mirage content. Anyone logged in who does anything to view Mirage is active,
+# so the list covers reading you can only do with the app open — including the
+# ones the client sends on your behalf while you read (seen_posts as you scroll,
+# mark_inbox_viewed as you read replies). Anything else under /api/ is a bare
+# "visit": config polling, push-token housekeeping, health, landing-page stats.
+#
+# Keeping the read markers out of this list silently deleted most lurkers.
+# "Lurker" needs one event that is both engagement and provably logged in, and
+# for a large slice of users those two facts never land on the same row: their
+# get_posts reads are unsigned (and, from a header-less client, not recorded at
+# all), while their signed reads were classified as mere visits. On 2026-08-10
+# prod counted 25 lurkers when 86 distinct addresses had signed seen_posts that
+# day against 54 contributors.
 _ENGAGEMENT_PREFIXES = (
+    "/api/bootstrap",
     "/api/get_posts",
     "/api/get_comments",
+    "/api/get_comment_context",
+    "/api/get_inbox",
     "/api/get_profile",
     "/api/get_topics",
+    "/api/get_user_posts",
+    "/api/mark_inbox_viewed",
     "/api/search",
+    "/api/seen_posts",
     "/api/core/vote",
 )
 
@@ -90,6 +107,33 @@ def _clean_addr(addr: Optional[str]) -> Optional[str]:
     return a
 
 
+def _raw_visitor_id() -> str:
+    """The client's analytics id: the header when it can be set, else the body.
+
+    `navigator.sendBeacon` cannot attach custom headers, so the seen_posts
+    beacon — our single best proof that a signed-in user is reading — arrived
+    with no visitor id at all. The device never bound to the address, and one
+    human split into two identities: an address that looked logged in but idle,
+    and a browser hash that looked like a logged-out visitor. Both halves were
+    counted, so lurkers were understated and visitors overstated by the same
+    people.
+
+    The body is exactly as client-supplied as the header, so reading it grants
+    no trust the header did not already have: the value is salted and hashed
+    before storage and authenticates nothing. The JSON guard keeps this off the
+    upload paths, where parsing the body here would be wasteful and pointless.
+    """
+    raw = (request.headers.get(VISITOR_HEADER, "") or "").strip()
+    if raw:
+        return raw
+    if request.mimetype != "application/json":
+        return ""
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return ""
+    return str(body.get("visitor_id") or "").strip()
+
+
 def extract_identity(signed_request_verified: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Return (visitor_hash, address, platform) for the current request.
 
@@ -102,8 +146,7 @@ def extract_identity(signed_request_verified: bool = False) -> Tuple[Optional[st
     """
     if not has_request_context():
         return None, None, None
-    raw_visitor = request.headers.get(VISITOR_HEADER, "") if request else ""
-    visitor_hash = hash_visitor_id(raw_visitor)
+    visitor_hash = hash_visitor_id(_raw_visitor_id())
     # Merely presenting a public key proves nothing. The shared signature
     # verifier records the derived address only after cryptographic validation,
     # and only a successful route's after-request hook opts into attribution.

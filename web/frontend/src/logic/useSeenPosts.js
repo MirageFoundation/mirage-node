@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback } from "react";
 import Storage from "../utils/Storage";
 import { signPlainPayload } from "../utils/signPlain";
+import { getVisitorId } from "../utils/visitorId";
 
 const DWELL_MS = 3000;
 const GLANCE_MS = 150;
@@ -197,6 +198,11 @@ async function flushSeenBeacon() {
         const payload = JSON.stringify({
             address: batch.address,
             posts: batch.entries,
+            // sendBeacon cannot set headers, so the analytics id rides in the
+            // body. Without it this request has no device identity and the
+            // reader is split into a logged-in address and a separate
+            // "logged-out visitor" browser.
+            visitor_id: getVisitorId(),
             ...batch.sig,
         });
         const ok = navigator.sendBeacon(

@@ -146,7 +146,23 @@ def test_stats_pure(backend):
         "/api/get_profile": "engagement",
         "/api/search": "engagement",
         "/api/core/vote": "engagement",
+        # Reading you can only do with Mirage open, including the markers the
+        # client sends while you read. These were classified as bare visits,
+        # which is what erased most lurkers: a signed-in reader who never posts
+        # produced no engagement-classified event, so they counted as neither a
+        # lurker nor a contributor.
+        "/api/bootstrap": "engagement",
+        "/api/seen_posts": "engagement",
+        "/api/mark_inbox_viewed": "engagement",
+        "/api/get_inbox": "engagement",
+        "/api/get_user_posts": "engagement",
+        "/api/get_comment_context": "engagement",
+        # Plumbing stays a bare visit: nobody is looking at Mirage because a
+        # push token got refreshed or a config blob was polled.
         "/api/get_node_config": "visit",
+        "/api/get_chain_config": "visit",
+        "/api/core/register_push_token": "visit",
+        "/api/get_welcome_stats": "visit",
         "/api/admin/stats/export": None,
         "/static/app.js": None,
     }
@@ -155,6 +171,43 @@ def test_stats_pure(backend):
         _pass("stats.event_classification")
     else:
         _fail("stats.event_classification", f"mismatches: {cbad}")
+
+    # sendBeacon cannot set headers, so the seen_posts flush carries its
+    # analytics id in the JSON body instead. Both routes must resolve to the
+    # SAME hash: when they did not, one reader became a logged-in address plus a
+    # separate "logged-out visitor" browser, understating lurkers and
+    # overstating visitors with the same person.
+    from flask import Flask
+
+    probe_app = Flask("stats_identity_probe")
+    with probe_app.test_request_context("/api/get_posts", headers={"X-Mirage-Visitor": "vid-42"}):
+        via_header, _, _ = st.extract_identity()
+    with probe_app.test_request_context("/api/seen_posts", method="POST", json={"visitor_id": "vid-42"}):
+        via_body, _, _ = st.extract_identity()
+    # The header still wins when both are present, and a body id is only read
+    # from JSON — never guessed from an upload or a form post.
+    with probe_app.test_request_context(
+        "/api/seen_posts", method="POST", json={"visitor_id": "body"}, headers={"X-Mirage-Visitor": "vid-42"}
+    ):
+        both, _, _ = st.extract_identity()
+    with probe_app.test_request_context("/api/upload_media", method="POST", data=b"\x00binary", content_type="image/png"):
+        non_json, _, _ = st.extract_identity()
+    with probe_app.test_request_context("/api/seen_posts", method="POST", json={"posts": []}):
+        no_id, _, _ = st.extract_identity()
+    identity_checks = [
+        via_header is not None,
+        via_body == via_header,
+        both == via_header,
+        non_json is None,
+        no_id is None,
+    ]
+    if all(identity_checks):
+        _pass("stats.visitor_id_from_beacon_body")
+    else:
+        _fail(
+            "stats.visitor_id_from_beacon_body",
+            f"header={via_header} body={via_body} both={both} non_json={non_json} no_id={no_id}",
+        )
 
     # The query-time CTE must still null the profile-view address, so rows
     # recorded while a query address counted as identity self-correct instead of
