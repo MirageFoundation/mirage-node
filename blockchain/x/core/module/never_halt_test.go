@@ -26,14 +26,22 @@ import (
 //     failure. The chain halts cleanly; the auto-recovery watchdog
 //     state-syncs from healthy peers.
 //
-//   * Non-consensus-critical writes (PruneExpiredNonces,
-//     SetCurrentDifficulty, SetConsecutiveLowUsage, etc.) STILL log and
-//     continue. Those failures affect ALL nodes equally — same operation,
-//     same in-memory inputs, same outcome — and so do not cause divergence.
+//   * Consensus-critical writes (SetCurrentDifficulty, ClearPoWWindow,
+//     SetConsecutiveLowUsage, CleanupOldCounters) MUST propagate their
+//     failure so the block is not committed. A store failure is node-local,
+//     not fleet-wide: the node that fails the write reads different
+//     difficulty inputs on the next block than its peers do. This replaces
+//     the earlier log-and-continue treatment of these writes (review M-5,
+//     M-6, L-2, L-3).
 //
-// Tests in this file pin both contracts.
+//   * Writes whose skipped state cannot change a later consensus decision
+//     may still log and continue. PruneExpiredNonces qualifies: envelope
+//     admission tests the timestamp window independently, so an expired
+//     nonce surviving one extra block admits nothing new.
+//
+// Tests in this file pin all three contracts.
 
-// --- EndBlock: writes still log-and-continue --------------------------------
+// --- EndBlock: consensus-critical writes fail closed -----------------------
 
 // TestEndBlockNeverReturnsError_EmptyState verifies the baseline: on a fresh
 // store with default params (seeded by newMockKeeper) and no PoW messages /
@@ -53,11 +61,11 @@ func TestEndBlockNeverReturnsError_EmptyState(t *testing.T) {
 		"EndBlock should advance the calm sequence on a zero-message block")
 }
 
-// TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure forces the
-// calm-increment write to fail. Set failures are non-consensus-critical
-// (they fail equally on all nodes; the sequence simply does not advance
-// this block on any node). EndBlock logs and returns nil.
-func TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure(t *testing.T) {
+// TestEndBlockFailsClosedOnSetConsecutiveLowUsageFailure forces the
+// calm-increment write to fail. The calm sequence decides when difficulty
+// drops, so a node that silently skips the increment reaches the threshold on
+// a different block than its peers. EndBlock must return the error.
+func TestEndBlockFailsClosedOnSetConsecutiveLowUsageFailure(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -66,20 +74,24 @@ func TestEndBlockNeverReturnsError_OnSetConsecutiveLowUsageFailure(t *testing.T)
 		"consecutive_low_usage": errors.New("simulated SetConsecutiveLowUsage failure"),
 	}
 
+	var err error
 	require.NotPanics(t, func() {
-		require.NoError(t, am.EndBlock(ctx))
+		err = am.EndBlock(ctx)
 	})
+	require.Error(t, err,
+		"calm-sequence write failure must propagate so the block is not committed")
 
 	// Sequence must NOT have advanced because the Set failed.
 	require.Equal(t, uint64(0), mk.GetConsecutiveLowUsage(ctx),
 		"SetConsecutiveLowUsage failure must not be masked by a silent write")
 }
 
-// TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease
-// forces the calm-decrease branch: start at difficulty 3, seed a calm
-// sequence >= threshold, and inject a Set failure on "current_difficulty".
-// EndBlock must still return nil — Set failures are non-divergent.
-func TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease(t *testing.T) {
+// TestEndBlockFailsClosedOnSetCurrentDifficultyFailureCalmDecrease forces the
+// calm-decrease branch: start at difficulty 3, seed a calm sequence >=
+// threshold, and inject a Set failure on "current_difficulty". Difficulty is
+// read by the PoW ante on every transaction, so the failure must propagate
+// rather than leave this node admitting work at a stale difficulty.
+func TestEndBlockFailsClosedOnSetCurrentDifficultyFailureCalmDecrease(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
@@ -93,9 +105,12 @@ func TestEndBlockNeverReturnsError_OnSetCurrentDifficultyFailureCalmDecrease(t *
 		"current_difficulty": errors.New("simulated SetCurrentDifficulty failure on calm decrease"),
 	}
 
+	var err error
 	require.NotPanics(t, func() {
-		require.NoError(t, am.EndBlock(ctx))
+		err = am.EndBlock(ctx)
 	})
+	require.Error(t, err,
+		"difficulty write failure must propagate so the block is not committed")
 
 	require.Equal(t, uint64(3), mk.GetCurrentDifficulty(ctx),
 		"failed SetCurrentDifficulty must leave the difficulty unchanged")

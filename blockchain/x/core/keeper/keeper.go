@@ -1992,10 +1992,25 @@ func (k Keeper) CleanupOldCounters(ctx sdk.Context, params types.Params) error {
 
 	// Start from the oldest possible height (genesis = 1) and work up to cutoff
 	// We use a stored marker to track cleanup progress across blocks
+	// A node-local Get failure must not be read as "no marker": that would
+	// restart this node's sweep at height 1 while peers continue from the
+	// stored cursor, committing a different counter keyset and therefore a
+	// different app hash (review M-6).
 	markerKey := []byte("pow_cleanup_marker")
 	startHeight := int64(1)
-	if bz, err := store.Get(markerKey); err == nil && len(bz) == 8 {
-		startHeight = int64(binary.BigEndian.Uint64(bz))
+	markerBz, err := store.Get(markerKey)
+	if err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_GET height=%d: %w", currentHeight, err)
+	}
+	if len(markerBz) > 0 {
+		if len(markerBz) != 8 {
+			return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_LEN height=%d len=%d", currentHeight, len(markerBz))
+		}
+		marker := binary.BigEndian.Uint64(markerBz)
+		if marker < 1 || marker > uint64(currentHeight) {
+			return fmt.Errorf("CONSENSUS_FATAL:POW_CLEANUP_MARKER_RANGE height=%d marker=%d", currentHeight, marker)
+		}
+		startHeight = int64(marker)
 	}
 
 	for height := startHeight; height <= cutoffHeight && deleted < maxDeletesPerBlock; height++ {
@@ -2033,7 +2048,11 @@ func (k Keeper) ClearPoWWindow(ctx sdk.Context, params types.Params) error {
 	}
 	for h := start; h <= currentHeight; h++ {
 		key := k.powMessageCountKey(h)
-		_ = store.Delete(key)
+		// A partial clear feeds a different sliding-window count into the
+		// next block's difficulty decision than peers see (review L-2).
+		if err := store.Delete(key); err != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_CLEAR height=%d: %w", h, err)
+		}
 	}
 	return nil
 }
@@ -2098,13 +2117,19 @@ func (k Keeper) SetCurrentDifficulty(ctx sdk.Context, difficulty uint64) error {
 	if err := store.Set(k.currentDifficultyKey(), bz); err != nil {
 		return err
 	}
-	// store previous and height
+	// Previous difficulty and change height are read by the ante grace window,
+	// so all three writes are one state transition. A failure here returns an
+	// error and the caller's cache rollback undoes the current write (L-3).
 	pbz := make([]byte, 8)
 	binary.BigEndian.PutUint64(pbz, old)
-	_ = store.Set(k.previousDifficultyKey(), pbz)
+	if err := store.Set(k.previousDifficultyKey(), pbz); err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_SET height=%d: %w", ctx.BlockHeight(), err)
+	}
 	hbz := make([]byte, 8)
 	binary.BigEndian.PutUint64(hbz, uint64(ctx.BlockHeight()))
-	_ = store.Set(k.lastChangeHeightKey(), hbz)
+	if err := store.Set(k.lastChangeHeightKey(), hbz); err != nil {
+		return fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_CHANGE_HEIGHT_SET height=%d: %w", ctx.BlockHeight(), err)
+	}
 	return nil
 }
 

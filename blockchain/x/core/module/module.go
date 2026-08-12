@@ -641,11 +641,16 @@ func (AppModule) ConsensusVersion() uint64 { return 1 }
 // subsequent blocks, which is strictly worse than a clean halt
 // detected by the auto-recovery watchdog.
 //
-// Non-consensus-critical write failures (BurnAllFromModuleName(fee_collector),
-// MintIfNeeded, SetCurrentDifficulty, CleanupOldCounters) are still logged
-// and the corresponding state simply does not update this block; those
-// failures affect ALL nodes equally (same operation, same in-memory
-// state) and so do not cause divergence.
+// Difficulty initialization and CleanupOldCounters also propagate: both
+// write state that later blocks read to make consensus decisions, and a
+// store failure is node-local, not fleet-wide (review M-5, M-6).
+//
+// Two exceptions remain deliberate, and both are non-consensus inputs:
+// BurnAllFromModuleName(fee_collector) leaves fees in the collector for the
+// next block to burn, and MintIfNeeded is governed by the liveness decision
+// in docs/architecture/adr-mint-log-and-continue.md. Only a failure whose
+// skipped state cannot change a later consensus decision may be logged and
+// continued; a node-local store error is never fleet-wide.
 func (am AppModule) BeginBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
@@ -667,12 +672,15 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		sdkCtx.Logger().Error("BeginBlock: MintIfNeeded returned error (should be impossible)", "err", err)
 	}
 
-	// Initialize difficulty if not set (base step = 0). If this fails the
-	// next block will retry; do not halt.
+	// Initialize difficulty if not set (base step = 0). The PoW ante reads
+	// this every transaction, so a node that fails the write admits work at a
+	// different difficulty than its peers.
 	params := am.k.GetParams(sdkCtx)
 	if !am.k.HasCurrentDifficulty(sdkCtx) {
 		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficultySteps); err != nil {
-			sdkCtx.Logger().Error("BeginBlock: SetCurrentDifficulty(base) failed; will retry next block", "err", err)
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_INIT BeginBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
 		}
 	}
 
@@ -730,11 +738,14 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 
 	// Faucet username is set during network bootstrap via a direct tx.
 
-	// Cleanup old counters periodically (every 100 blocks). If this fails,
-	// stale counter rows linger until the next successful sweep; never halt.
+	// Cleanup old counters periodically (every 100 blocks). The sweep deletes
+	// committed keys and advances a stored cursor, so a node that skips or
+	// mis-starts a sweep commits a different keyset than its peers.
 	if sdkCtx.BlockHeight()%100 == 0 {
 		if err := am.k.CleanupOldCounters(sdkCtx, params); err != nil {
-			sdkCtx.Logger().Error("BeginBlock: CleanupOldCounters failed; will retry next sweep", "err", err)
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:POW_COUNTER_CLEANUP BeginBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
 		}
 	}
 
@@ -753,11 +764,14 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 // is detected by the auto-recovery watchdog and state-synced from healthy
 // peers.
 //
-// Non-consensus-critical write failures (PruneExpiredNonces,
-// SetCurrentDifficulty, SetConsecutiveLowUsage, etc.) are still logged and
-// the corresponding state simply does not update this block; those failures
-// affect ALL nodes equally (same operation, same in-memory state) and so do
-// not cause divergence.
+// Difficulty, PoW-window, and calm-sequence writes also propagate. Every one
+// of them is an input to a later block's difficulty decision or to ante
+// admission, and a store failure is node-local rather than fleet-wide
+// (review M-5, L-2, L-3).
+//
+// PruneExpiredNonces remains deliberately best-effort: an expired nonce that
+// survives one extra block does not change which envelopes are admitted,
+// because admission tests the timestamp window independently.
 func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
@@ -818,20 +832,22 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		}
 		if newDifficulty != currentDifficulty {
 			if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
-				sdkCtx.Logger().Error("EndBlock: SetCurrentDifficulty (busy increase) failed; will retry next block",
-					"old", currentDifficulty, "new", newDifficulty, "err", err)
-			} else {
-				if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
-					sdkCtx.Logger().Error("EndBlock: ClearPoWWindow (busy increase) failed; counts may carry over",
-						"err", err)
-				}
-				sdkCtx.Logger().Info("Increased PoW difficulty due to busy window",
-					"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty)
+				sdkCtx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_BUSY_INCREASE EndBlock; halting chain (auto-recovery will state-sync)",
+					"height", sdkCtx.BlockHeight(), "old", currentDifficulty, "new", newDifficulty, "err", err)
+				return err
 			}
+			if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
+				sdkCtx.Logger().Error("CONSENSUS_FATAL:POW_WINDOW_CLEAR_BUSY EndBlock; halting chain (auto-recovery will state-sync)",
+					"height", sdkCtx.BlockHeight(), "err", err)
+				return err
+			}
+			sdkCtx.Logger().Info("Increased PoW difficulty due to busy window",
+				"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty)
 		}
 		if err := am.k.SetConsecutiveLowUsage(sdkCtx, 0); err != nil {
-			sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage reset failed after busy window",
-				"err", err)
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:CALM_SEQUENCE_RESET_BUSY EndBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
 		}
 		return nil
 	}
@@ -840,9 +856,9 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	if messageCount < params.PowCalmPeriodDefinition {
 		calmSeq++
 		if err := am.k.SetConsecutiveLowUsage(sdkCtx, calmSeq); err != nil {
-			sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage (calm increment) failed; sequence will not advance this block",
-				"calm_seq", calmSeq, "err", err)
-			return nil
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:CALM_SEQUENCE_INCREMENT EndBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "calm_seq", calmSeq, "err", err)
+			return err
 		}
 		if calmSeq >= params.PowCalmSequenceThreshold {
 			newDifficulty := currentDifficulty
@@ -851,22 +867,24 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 			}
 			if newDifficulty != currentDifficulty {
 				if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
-					sdkCtx.Logger().Error("EndBlock: SetCurrentDifficulty (calm decrease) failed; will retry next qualifying block",
-						"old", currentDifficulty, "new", newDifficulty, "err", err)
-				} else {
-					if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
-						sdkCtx.Logger().Error("EndBlock: ClearPoWWindow (calm decrease) failed; counts may carry over",
-							"err", err)
-					}
-					sdkCtx.Logger().Info("Decreased PoW difficulty due to calm sequence",
-						"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty,
-						"calm_sequence", calmSeq)
+					sdkCtx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_CALM_DECREASE EndBlock; halting chain (auto-recovery will state-sync)",
+						"height", sdkCtx.BlockHeight(), "old", currentDifficulty, "new", newDifficulty, "err", err)
+					return err
 				}
+				if err := am.k.ClearPoWWindow(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("CONSENSUS_FATAL:POW_WINDOW_CLEAR_CALM EndBlock; halting chain (auto-recovery will state-sync)",
+						"height", sdkCtx.BlockHeight(), "err", err)
+					return err
+				}
+				sdkCtx.Logger().Info("Decreased PoW difficulty due to calm sequence",
+					"old_difficulty", currentDifficulty, "new_difficulty", newDifficulty,
+					"calm_sequence", calmSeq)
 			}
 			// reset sequence after decreasing
 			if err := am.k.SetConsecutiveLowUsage(sdkCtx, 0); err != nil {
-				sdkCtx.Logger().Error("EndBlock: SetConsecutiveLowUsage reset failed after calm decrease",
-					"err", err)
+				sdkCtx.Logger().Error("CONSENSUS_FATAL:CALM_SEQUENCE_RESET_CALM EndBlock; halting chain (auto-recovery will state-sync)",
+					"height", sdkCtx.BlockHeight(), "err", err)
+				return err
 			}
 		}
 		return nil
@@ -874,7 +892,11 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 
 	// Neither busy nor calm → reset sequence
 	if calmSeq > 0 {
-		_ = am.k.SetConsecutiveLowUsage(sdkCtx, 0)
+		if err := am.k.SetConsecutiveLowUsage(sdkCtx, 0); err != nil {
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:CALM_SEQUENCE_RESET_NEUTRAL EndBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
+		}
 	}
 	return nil
 }

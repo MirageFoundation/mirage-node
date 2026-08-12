@@ -25,14 +25,15 @@ import (
 // mockStoreService implements store.KVStoreService for testing.
 //
 // Error-injection knobs are optional (nil maps → clean passthrough, default
-// behavior unchanged for existing callers). They let never-halt tests force
-// specific store operations to fail so we can exercise log-and-continue
-// paths in GetParams, BeginBlock, EndBlock, etc.
+// behavior unchanged for existing callers). They let tests force specific
+// store operations to fail so we can exercise the fail-fast paths in
+// GetParams, BeginBlock, EndBlock, etc.
 type mockStoreService struct {
-	store     map[string][]byte
-	getErrors map[string]error // per-key Get failures
-	setErrors map[string]error // per-key Set failures
-	iterError error            // global Iterator failure
+	store        map[string][]byte
+	getErrors    map[string]error // per-key Get failures
+	setErrors    map[string]error // per-key Set failures
+	deleteErrors map[string]error // per-key Delete failures
+	iterError    error            // global Iterator failure
 }
 
 func newMockStoreService() *mockStoreService {
@@ -41,18 +42,20 @@ func newMockStoreService() *mockStoreService {
 
 func (m *mockStoreService) OpenKVStore(ctx context.Context) store.KVStore {
 	return &mockKVStore{
-		store:     m.store,
-		getErrors: m.getErrors,
-		setErrors: m.setErrors,
-		iterError: m.iterError,
+		store:        m.store,
+		getErrors:    m.getErrors,
+		setErrors:    m.setErrors,
+		deleteErrors: m.deleteErrors,
+		iterError:    m.iterError,
 	}
 }
 
 type mockKVStore struct {
-	store     map[string][]byte
-	getErrors map[string]error
-	setErrors map[string]error
-	iterError error
+	store        map[string][]byte
+	getErrors    map[string]error
+	setErrors    map[string]error
+	deleteErrors map[string]error
+	iterError    error
 }
 
 func (m *mockKVStore) Get(key []byte) ([]byte, error) {
@@ -76,6 +79,9 @@ func (m *mockKVStore) Set(key, value []byte) error {
 }
 
 func (m *mockKVStore) Delete(key []byte) error {
+	if err, ok := m.deleteErrors[string(key)]; ok {
+		return err
+	}
 	delete(m.store, string(key))
 	return nil
 }
@@ -159,6 +165,13 @@ type mockBank struct {
 func (mockBank) IterateAllBalances(context.Context, func(sdk.AccAddress, sdk.Coin) bool) {}
 
 func (mockBank) GetSupply(_ context.Context, denom string) sdk.Coin {
+	return sdk.NewCoin(denom, sdkmath.ZeroInt())
+}
+
+// GetBalance reports every account as empty, which is what BeginBlock's
+// fee-collector burn needs to reach its early return. Without it the embedded
+// nil bankkeeper.Keeper panics and BeginBlock cannot be exercised at all.
+func (mockBank) GetBalance(_ context.Context, _ sdk.AccAddress, denom string) sdk.Coin {
 	return sdk.NewCoin(denom, sdkmath.ZeroInt())
 }
 
