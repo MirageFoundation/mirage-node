@@ -214,20 +214,32 @@ type failFastIterator struct {
 
 func (i failFastIterator) Domain() ([]byte, []byte) { return i.delegate.Domain() }
 
-func (i failFastIterator) Valid() bool {
-	valid := i.delegate.Valid()
-	if !valid && i.ctx.ExecMode() == sdk.ExecModeFinalize {
-		_ = haltFinalizeStoreError(i.ctx, "iterator_step", i.delegate.Error())
-	}
-	return valid
-}
-
+func (i failFastIterator) Valid() bool   { return i.delegate.Valid() }
 func (i failFastIterator) Next()         { i.delegate.Next() }
 func (i failFastIterator) Key() []byte   { return i.delegate.Key() }
 func (i failFastIterator) Value() []byte { return i.delegate.Value() }
 
+// iteratorExhausted reports whether err only means "iteration finished".
+// The cache layer every keeper iteration runs over reports exhaustion through
+// Error rather than leaving it nil: memIterator and cacheMergeIterator both
+// return these sentinels whenever Valid is false. Halting on them would kill
+// the node at the end of a healthy loop, so only a lower-layer error is fatal.
+// TestIteratorExhaustionIsNotAFault pins the wording against the linked store.
+func iteratorExhausted(err error) bool {
+	switch err.Error() {
+	case "invalid memIterator", "invalid cacheMergeIterator":
+		return true
+	default:
+		return false
+	}
+}
+
 func (i failFastIterator) Error() error {
-	return haltFinalizeStoreError(i.ctx, "iterator_step", i.delegate.Error())
+	err := i.delegate.Error()
+	if err == nil || iteratorExhausted(err) {
+		return nil
+	}
+	return haltFinalizeStoreError(i.ctx, "iterator_step", err)
 }
 
 func (i failFastIterator) Close() error {
