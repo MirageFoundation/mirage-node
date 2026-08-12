@@ -2,6 +2,8 @@ name: frontend
 
 on:
   push:
+    branches:
+      - dev
     paths:
       - 'web/frontend/**'
       - 'docs/FAQ.md'
@@ -52,9 +54,6 @@ jobs:
 
       - name: Audit (high+)
         run: npm audit --audit-level=high
-
-      - name: SBOM
-        run: npm sbom --omit dev -o sbom.json
 
       - name: Install Playwright
         run: npx playwright install --with-deps chromium
