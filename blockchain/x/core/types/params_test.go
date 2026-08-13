@@ -159,8 +159,10 @@ func TestParamsValidateRejectsNonFiniteFloats(t *testing.T) {
 	}{
 		{"mint_dynamic_split_nan", func(p *Params) { p.MintDynamicSplit = math.NaN() }},
 		{"mint_dynamic_split_inf", func(p *Params) { p.MintDynamicSplit = math.Inf(1) }},
-		{"subscription_reserve_percent_nan", func(p *Params) { p.SubscriptionReservePercent = math.NaN() }},
-		{"subscription_reserve_percent_inf", func(p *Params) { p.SubscriptionReservePercent = math.Inf(-1) }},
+		// subscription_reserve_percent is absent on purpose: v1.34.0 retired it in
+		// favour of subscription_reserve_bps, nothing reads it, and constraining it
+		// would break the from-genesis replay of the handlers that set it.
+		// TestSubscriptionReserveBpsIsBounded covers the field that is read.
 		{"pow_difficulty_step_nan", func(p *Params) { p.PowDifficultyStep = math.NaN() }},
 		{"pow_difficulty_step_inf", func(p *Params) { p.PowDifficultyStep = math.Inf(1) }},
 		{"pow_difficulty_step_too_small", func(p *Params) { p.PowDifficultyStep = MinPowDifficultyStep / 2 }},
@@ -175,6 +177,26 @@ func TestParamsValidateRejectsNonFiniteFloats(t *testing.T) {
 			require.Error(t, p.Validate())
 		})
 	}
+}
+
+// TestSubscriptionReserveBpsIsBounded covers the field that actually drives the
+// reserve/burn split. The retired float is unconstrained by design, so this is
+// the only bound standing between governance and an over-100% reserve.
+func TestSubscriptionReserveBpsIsBounded(t *testing.T) {
+	p := DefaultParams()
+	require.Equal(t, uint64(9_500), p.SubscriptionReserveBps, "default must be 95% in basis points")
+
+	p.SubscriptionReserveBps = BasisPointsDenominator
+	require.NoError(t, p.Validate(), "a full reserve is a legitimate setting")
+
+	p.SubscriptionReserveBps = BasisPointsDenominator + 1
+	require.Error(t, p.Validate(), "more than 100% must be rejected")
+
+	// The retired float must not affect validity in either direction.
+	p = DefaultParams()
+	p.SubscriptionReservePercent = 0.4
+	require.NoError(t, p.Validate(),
+		"a stored pre-upgrade percentage must still validate so a from-genesis replay can run")
 }
 
 func TestParamsValidateRejectsNilEntries(t *testing.T) {

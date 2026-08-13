@@ -502,6 +502,8 @@ def _build_pool():
     f_tiers.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_tiers.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_tiers.type_name = ".mirage.core.v1.TierConfig"
+    # Superseded by subscription_reserve_bps (field 54) and always 0 from v1.34.0.
+    # Kept so params blobs written before the upgrade still decode.
     add_f(msg4, "subscription_reserve_percent", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -514,6 +516,7 @@ def _build_pool():
     f_awards.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_awards.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_awards.type_name = ".mirage.core.v1.AwardConfig"
+    add_f(msg4, "subscription_reserve_bps", 54, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # MsgUpdateParams (authority + Params + update_mask)
     #

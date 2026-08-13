@@ -42,6 +42,11 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		}
 		name := protoFieldName(t, field)
 		actual[name] = true
+		if _, deprecated := deprecatedParamFields[name]; deprecated {
+			require.NotContains(t, paramFieldSetters, name,
+				"a deprecated field must stay ungovernable; remove it from paramFieldSetters")
+			continue
+		}
 		if _, ok := paramFieldSetters[name]; !ok {
 			missing = append(missing, name)
 		}
@@ -57,6 +62,31 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		}
 	}
 	require.Empty(t, stale, "these paramFieldSetters entries no longer exist in Params")
+
+	for name := range deprecatedParamFields {
+		require.Contains(t, actual, name,
+			"a deprecated entry names a field that no longer exists in Params")
+	}
+}
+
+// TestUpdateParamsRejectsDeprecatedField pins the replacement for validating the
+// retired float to 0: governance gets an explicit rejection instead of writing a
+// field nothing reads. Validating it to 0 was tried and reverted because the
+// v1.5.0, v1.8.0, and v1.11.0 handlers set it and call SetParams, so the check
+// made a from-genesis replay impossible.
+func TestUpdateParamsRejectsDeprecatedField(t *testing.T) {
+	base := types.DefaultParams()
+
+	_, _, err := applyParamUpdates(base, types.Params{SubscriptionReservePercent: 0.5},
+		mask("subscription_reserve_percent"))
+	require.Error(t, err, "a proposal naming the retired field must be rejected")
+
+	updated, changed, err := applyParamUpdates(base, types.Params{SubscriptionReserveBps: 8_000},
+		mask("subscription_reserve_bps"))
+	require.NoError(t, err)
+	require.Equal(t, []string{"subscription_reserve_bps"}, changed)
+	require.Equal(t, uint64(8_000), updated.SubscriptionReserveBps)
+	require.NoError(t, updated.Validate())
 }
 
 // TestUpdateParamsSettersAssignOnlyTheirOwnField proves each setter is wired to
@@ -167,10 +197,14 @@ func TestApplyParamUpdatesAppliesZeroValues(t *testing.T) {
 	require.Zero(t, updated.SubscriptionPeriod, "a masked zero must be applied")
 	require.NoError(t, updated.Validate(), "one-time-payment mode must remain valid params")
 
-	// The same holds for a float field.
-	updated, _, err = applyParamUpdates(base, types.Params{SubscriptionReservePercent: 0}, mask("subscription_reserve_percent"))
+	// The same holds for a float field. mint_dynamic_split carries the case now:
+	// subscription_reserve_percent is validated to 0, so masking it to 0 changes
+	// nothing and the "no selected field changed" guard rejects it.
+	require.NotZero(t, base.MintDynamicSplit)
+	updated, changed, err = applyParamUpdates(base, types.Params{MintDynamicSplit: 0}, mask("mint_dynamic_split"))
 	require.NoError(t, err)
-	require.Zero(t, updated.SubscriptionReservePercent)
+	require.Equal(t, []string{"mint_dynamic_split"}, changed)
+	require.Zero(t, updated.MintDynamicSplit, "a masked zero float must be applied")
 }
 
 func TestApplyParamUpdatesReplacesRepeatedFields(t *testing.T) {

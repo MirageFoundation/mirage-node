@@ -323,19 +323,59 @@ func TestValidatePoW(t *testing.T) {
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
 }
 
-// TestEmptyLastBlockHashSkipsStalenessCheck pins the behaviour L-7 describes
-// and the reason v1.34.0 could not simply reject it: under ABCI 2.0 the header
-// never carries LastBlockId, so an empty chainLastID is the normal case on
-// every path. The validator must skip the hash check rather than fail, because
-// failing here rejected every transaction on the local testnet.
-func TestEmptyLastBlockHashSkipsStalenessCheck(t *testing.T) {
+// TestStalenessEnforcedFromWindowNotHeader covers the L-7 contract. Under ABCI
+// 2.0 the header never carries LastBlockId, so currentLastID is empty on every
+// path and acceptance has to come from the on-chain window instead. These cases
+// fix the two failure modes that matter: an envelope referencing a hash outside
+// the window must be refused even though the header hash is empty (the gap that
+// left staleness unenforced), and an empty envelope hash must not slip through by
+// comparing equal to the empty header hash.
+func TestStalenessEnforcedFromWindowNotHeader(t *testing.T) {
 	const minDiff, step = uint64(8), 0.25
-	canonical := []byte("empty_chain_hash_envelope")
+	canonical := []byte("window_enforced_envelope")
+	inWindow, err := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
+	require.NoError(t, err)
+	outOfWindow, err := hex.DecodeString("ffee0011223344556677889900112233445566778899001122334455667788ff")
+	require.NoError(t, err)
+
+	ring := &mockHashLookup{seenHashes: map[string]bool{hex.EncodeToString(inWindow): true}}
+
+	// Mine against the skip path so the nonce is valid for the salt, then reuse
+	// it while enforcing: only the hash check differs between the assertions.
+	var nonce uint64
+	for ; nonce <= 10000; nonce++ {
+		if validatePoWBytesArgon2(canonical, inWindow, 0, nonce, "", ring.lookup, true, 0, 0, 0, 0, 2, minDiff, step) == nil {
+			break
+		}
+	}
+	require.LessOrEqual(t, nonce, uint64(10000), "could not mine a nonce at minimum difficulty")
+
+	require.NoError(t, validatePoWBytesArgon2(
+		canonical, inWindow, 0, nonce, "", ring.lookup, false, 0, 0, 0, 0, 2, minDiff, step,
+	), "a hash present in the window must be accepted with an empty header hash")
+
+	require.ErrorContains(t, validatePoWBytesArgon2(
+		canonical, outOfWindow, 0, nonce, "", ring.lookup, false, 0, 0, 0, 0, 2, minDiff, step,
+	), "invalid last_block_hash", "a hash absent from the window must be refused")
+
+	require.ErrorContains(t, validatePoWBytesArgon2(
+		canonical, nil, 0, nonce, "", ring.lookup, false, 0, 0, 0, 0, 2, minDiff, step,
+	), "empty", "an empty envelope hash must not match the empty header hash")
+}
+
+// TestEmptyWindowSkipsStalenessCheck pins the one case where enforcement is off:
+// a window with no real hash in it, which happens on a chain's first block and on
+// the v1.34.0 upgrade block that clears the stale all-empty window. Enforcing
+// there would reject every transaction, which is how the first attempt at this
+// guard broke the local testnet.
+func TestEmptyWindowSkipsStalenessCheck(t *testing.T) {
+	const minDiff, step = uint64(8), 0.25
+	canonical := []byte("bootstrap_window_envelope")
 	lastBlockHash, err := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
 	require.NoError(t, err)
 
 	lookup := func(string) (bool, error) {
-		t.Fatal("window lookup ran despite an empty chain hash")
+		t.Fatal("window lookup ran while the window was empty")
 		return false, nil
 	}
 
@@ -348,8 +388,8 @@ func TestEmptyLastBlockHashSkipsStalenessCheck(t *testing.T) {
 	require.LessOrEqual(t, nonce, uint64(10000), "could not mine a nonce at minimum difficulty")
 
 	require.NoError(t, validatePoWBytesArgon2(
-		canonical, lastBlockHash, 0, nonce, "", lookup, false, 0, 0, 0, 0, 2, minDiff, step,
-	), "an empty chain hash must skip the staleness check, not reject the envelope")
+		canonical, lastBlockHash, 0, nonce, "", lookup, true, 0, 0, 0, 0, 2, minDiff, step,
+	), "an empty window must skip the staleness check, not reject the envelope")
 }
 
 // BenchmarkValidatePoWBytesArgon2 records the per-envelope cost of the

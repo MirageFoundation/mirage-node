@@ -12,7 +12,7 @@
 
 ## Summary
 
-**All 7 Medium and 9 of 11 Low findings are fixed in v1.34.0.** The two remaining Lows are the accepted `ProcessProposal` validation boundary (**L-6**) and the store/v2 pruning policy in a vendored fork (**L-11**), which stays deferred to a store/v2 rebase. All seven Informational items keep their prior accepted, deferred, or ops-project status; none was silently closed.
+**All 7 Medium and 10 of 11 Low findings are fixed in v1.34.0.** The one remaining Low is the accepted `ProcessProposal` validation boundary (**L-6**). All seven Informational items keep their prior accepted, deferred, or ops-project status; none was silently closed.
 
 The release is one coherent change rather than eighteen patches: node-local store failures on a consensus path now fail closed instead of decoding as absence, zero, or a logged warning. That single contract covers M-1, M-2, M-3, M-5, M-6, L-1, L-2, L-3, L-8, and L-10. On top of it, three narrower corrections: exact integer economics for the subscription reserve split (M-4, L-4), bounded parameters with checked arithmetic everywhere they are converted or multiplied (M-7), and explicit field presence for governance parameter updates through a `FieldMask` (L-9).
 
@@ -34,10 +34,10 @@ The release is one coherent change rather than eighteen patches: node-local stor
 | L-1 | Profile mutation paths discard profile Get/decode errors | **Fixed** | v1.34.0 |
 | L-2 | `ClearPoWWindow` discards delete errors | **Fixed** | v1.34.0 |
 | L-3 | `SetCurrentDifficulty` discards secondary writes | **Fixed** | v1.34.0 |
-| L-4 | Reserve basis-point conversion uses `float64` | **Fixed** (runtime); wire migration deferred | v1.34.0 |
+| L-4 | Reserve basis-point conversion uses `float64` | **Fixed** (runtime and wire) | v1.34.0 |
 | L-5 | Relay registry and ante switches hand-maintained | **Fixed** (test-enforced parity) | v1.34.0 |
 | L-6 | `ProcessProposal` performs minimal validation | **Accepted risk** | unchanged |
-| L-7 | Stale PoW commentary and unused `PowDecorator.MinFee` | **Partly fixed** — dead field removed; envelope staleness proven unenforceable from the header and deferred | v1.34.0 |
+| L-7 | Stale PoW commentary and unused `PowDecorator.MinFee` | **Fixed** — dead field removed; envelope staleness now enforced from the on-chain window | v1.34.0 |
 | L-8 | Mutual-exclusion list cleanup discards delete errors | **Fixed** | v1.34.0 |
 | L-9 | Valid zero-valued params cannot be applied through governance | **Fixed** | v1.34.0 |
 | L-10 | Admin gas waiver treats all deduction errors as insufficient balance | **Fixed** | v1.34.0 |
@@ -119,13 +119,17 @@ The early `SubscriptionPeriod == 0` `continue` in `processSubscriptions` is gone
 
 Tests: `TestProcessSubscriptionsPeriodZeroExpiresProfile`, `TestProcessSubscriptionsCleansStaleFreeProfile`, `TestProcessSubscriptionsPersistsReserveBurnForFreeTier`, `TestProcessSubscriptionsDowngradesInvalidSubscriptionLevel`, `TestProcessSubscriptionsFailsFastOnCorruptProfileOneTimePayment`.
 
-### L-4 — exact reserve split (runtime portion)
+### L-4 — exact reserve split, runtime and wire
 
-`x/core/types/subscription_math.go` converts the reserve percentage to basis points with explicit rounding, rejects non-finite and out-of-range percentages independently of Params validation, and computes the split with checked multiplication so `reserve + burn == periodFee` exactly. Both the renewal and `Subscribe` calculations use it; the truncating `uint64(percent * 10000)` expressions are gone.
+`x/core/types/subscription_math.go` computes the split with checked multiplication so `reserve + burn == periodFee` exactly, and `SplitPeriodFee` now takes basis points directly instead of a percentage. Both the renewal and `Subscribe` calculations pass `params.SubscriptionReserveBps`; no float reaches the arithmetic and the truncating `uint64(percent * 10000)` expressions are gone.
 
-The integer-bps **wire** migration stays deferred. `subscription_reserve_percent` remains a `double` on the wire this release; changing it needs a new proto field, the raw-wire migration precedent from v1.11.0, Python and backend coordination, and an upgrade handler converting `round(oldPercent*10000)`. Trigger: the next subscription-economics change or Params wire-format migration.
+The wire migration is done in this same release rather than deferred. `Params.subscription_reserve_bps` is new field 54 (`uint64`, `[0,10000]`) and is the sole authority. Field 42 `subscription_reserve_percent` is marked `deprecated` and kept only so pre-upgrade Params blobs still decode. The v1.34.0 handler converts the stored percentage once through `ReserveBasisPoints` (`round(percent*10000)`, so the live 0.95 lands on exactly 9500), refuses to proceed if a pre-set bps disagrees with the converted percentage, then zeroes the float. `ReserveBasisPoints` now exists only for that one-time conversion.
 
-Tests: `TestReserveBasisPointsRounding`, `TestReserveBasisPointsRejectsInvalid`, `TestSplitPeriodFeeIsExact`, `TestSplitPeriodFeeRejectsOverflow`.
+**The retired field is blocked at the governance layer, not in `Validate()`, and that distinction was a caught mistake.** The first implementation rejected any non-zero `subscription_reserve_percent` in `Validate()`. That would have made a from-genesis replay impossible: the v1.5.0, v1.8.0, and v1.11.0 handlers set the field and call `SetParams`, which validates, so a node syncing from genesis on the v1.34.0 binary would have failed at those heights. `Validate()` therefore leaves the field unconstrained, and the field instead has **no `paramFieldSetters` entry**, so an `update_mask` naming it is rejected as an unsupported path — an explicit failure rather than a silent write to a field nothing reads. `deprecatedParamFields` records the exclusion so the exhaustive mask-coverage test still fails on genuine drift.
+
+Coordinated surfaces: `shared/datatypes.py` field 54 (parity verified against the proto — 24/24 fields, no number mismatches), `web/backend/params.py` requires the integer and no longer requires the float, `/api/get_parameters` exposes `subscription_reserve_bps` (no frontend consumer read the old key), `scripts/verify_upgrade.py` bounds the integer `[0,10000]` and pins the float to exactly `0.0` on a live upgraded chain so a missed migration surfaces, `docs/agents/agent-guide.md` documents the new key, and `proposal_change_reserve_percent.json` now selects the bps field.
+
+Tests: `TestReserveBasisPointsRounding`, `TestReserveBasisPointsRejectsInvalid`, `TestSplitPeriodFeeIsExact` (bps table), `TestSplitPeriodFeeRejectsOverflow` (now also rejects out-of-range bps rather than clamping), `TestReserveConversionMatchesTheRetiredFloat` (the upgrade's conversion reproduces the float path's split at every value the chain has used), `TestSubscriptionReserveBpsIsBounded` (including that a stored pre-upgrade percentage still validates, pinning the replay constraint), and `TestUpdateParamsRejectsDeprecatedField`.
 
 ### M-7 — bounded params and checked arithmetic
 
@@ -151,17 +155,25 @@ The wire change is intentionally strict: an old `MsgUpdateParams` proposal witho
 
 `relay_messages_test.go` adds two build-time protections. `TestRelayDecoratorSwitchParity` parses the `PowDecorator` and `RelaySigDecorator` switches and requires a concrete case for every registry prototype. `TestEveryEnvelopeMessageIsRoutedOrGovernanceOnly` walks the generated core messages and requires each one carrying envelope fields to be either relay-routed or on an explicit governance-only allowlist. Source/AST parity was chosen over refactoring both large switches purely for testability. The existing 25-message count pin and the fail-closed default tests are unchanged.
 
-### L-7 — PoW cleanup
+### L-7 — PoW cleanup and envelope staleness
 
-The unused `PowDecorator.MinFee` field and its construction in `ante_relay_chain.go` are removed. **The staleness half of this finding is not fixed and is worse than the original review described.**
+The unused `PowDecorator.MinFee` field and its construction in `ante_relay_chain.go` are removed. The staleness half is now **fixed**, after two wrong turns worth recording.
 
-v1.34.0 first added a `requireLastBlockHash` helper that rejected an empty `LastBlockId.Hash` above bootstrap height. The local testnet rejected every transaction: under ABCI 2.0 the `FinalizeBlock` request carries no `LastBlockId`, so the header the ante handler sees has an empty hash on *every* path — simulate, check, and finalize alike. Scoping the guard to finalization only moved the failure from the backend's gas simulation to `Tx rejected in ante` at DeliverTx. The guard is reverted; `ante_pow.go` now documents the constraint at the assignment.
+The first attempt added a `requireLastBlockHash` helper that rejected an empty `LastBlockId.Hash` above bootstrap height. It rejected every transaction on the local testnet: under ABCI 2.0 the `FinalizeBlock` request carries no `LastBlockId`, so the header the ante handler sees has an empty hash on *every* path — simulate, check, and finalize alike. The guard was reverted and the finding was written up as unenforceable from the header. That conclusion was wrong: it stopped at the field that does not work instead of the one that does. The whole mechanism already existed — `RecentBlockHashesKey`, `block_hash_window`, `RecordRecentBlockHash`/`GetRecentBlockHashes`, and the ante's `lookupHash` closure — and was inert only because `BeginBlock` fed it from that same empty field, filling the window with empty strings that `RecordRecentBlockHash` discards.
 
-The consequence is that envelope staleness is **not enforced at all today**, and the recent-block-hash window cannot compensate: `BeginBlock` feeds `RecordRecentBlockHash` from the same empty field, and that function ignores empty input, so the window never fills and the `lookupHash` branch is unreachable. An envelope built against any block is admitted as long as its proof-of-work is valid. Proof-of-work cost, the metasig timestamp window, and nonce replay protection are unaffected and still bound abuse.
+The fix has three parts:
 
-The fix is to source the hash from something ABCI 2.0 actually populates — `ctx.HeaderInfo().Hash` carries the block hash of the block being finalized, so feeding the window from it and anchoring `chainLastID` to the newest window entry would restore the check from state rather than the header. That is a consensus-behavior change requiring its own upgrade and coordinated rollout, so it is **deferred to a follow-up release** rather than rushed into v1.34.0.
+- **Source.** `x/core/module/module.go` BeginBlock records `sdkCtx.HeaderHash()`, which baseapp sets from `RequestFinalizeBlock.Hash` on both the finalize state (`baseapp/abci.go:827`) and the CheckTx state (`:852`), so it is populated and identical fleet-wide. A client can only have seen an already-committed block, so recording the current hash keeps the window a superset of what any honest envelope references. An absent hash (genesis/InitChain) records nothing rather than an empty entry.
+- **Enforcement.** `ante_pow.go` reads the window once per transaction and derives `skipHashCheck` from it, so every message in a tx is judged against one read and a read failure propagates instead of degrading to an empty window. The validator's gate no longer disables itself when `currentLastID` is empty, and an empty envelope hash is refused explicitly — without that it would compare equal to the empty header hash and bypass the window. Enforcement is off only while the window holds no real hash: a chain's first block and the upgrade block that clears it, bounded by one block and logged at info.
+- **Window width.** `block_hash_window` defaulted to 10 blocks (~30s at the ~3s block time these defaults assume), which is *stricter* than `max_envelope_age` (60s) and would have rejected work the age check still accepts — the same "rejects legitimate traffic" failure in slower form, and the backend would have served clients from the same too-narrow window since `get_recent_block_hashes` reads this param. The default is now 60 blocks (~3 min), `MinBlockHashWindow = 20` is enforced in `Validate()`, `verify_upgrade.py` bounds it `[20,1000]`, and the upgrade handler widens a stored value below the floor *before* validating.
 
-Tests: `TestEmptyLastBlockHashSkipsStalenessCheck` pins the current behavior and the reason rejecting is not an option.
+Enforcement is a consensus-behavior change, which is why it ships in this already-coordinated upgrade rather than alongside a normal release. Envelopes minted before the upgrade height reference hashes that were never recorded and are refused until clients refresh, bounded by `max_envelope_age` and falling inside the upgrade's own halt.
+
+Residual exposure before this fix, stated precisely: freshness rested on the metasig timestamp window and nonce replay protection, so replay of an identical action was blocked and envelopes still expired after 60s. The gap was that precomputed work could be spent against any block within that age bound rather than a recent one — a weakening of PoW freshness, not an authentication hole.
+
+**New operational coupling to monitor.** The backend hands clients `last_block_hash` from the indexer's `recent_blocks` table, bounded by the same `block_hash_window` param. Enforcement makes indexer freshness load-bearing for transaction submission: if the indexer falls further behind than the window (~3 min at 60 blocks), every hash it serves has aged out of the chain's window and submissions are refused chain-side. Before this change indexer lag could not block submission this way. The failure is loud — clients see `invalid last_block_hash` and the ante logs it — but the cause is one component away from the symptom, so indexer lag belongs on the watch list for this release.
+
+Tests: `TestStalenessEnforcedFromWindowNotHeader` (in-window accepted with an empty header hash, out-of-window refused, empty envelope hash refused), `TestEmptyWindowSkipsStalenessCheck` (the bootstrap boundary), `TestBeginBlockRecordsHeaderHash` and `TestBeginBlockRecordsNothingWithoutHeaderHash` (pin the recording source, so routing it back through a field `FinalizeBlock` does not carry fails the build rather than silently disabling the check).
 
 ### Carryover test gaps
 

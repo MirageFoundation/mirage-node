@@ -77,6 +77,10 @@ type Store struct {
 	listeners       map[types.StoreKey]*types.MemoryListener
 
 	commitHeader cmtproto.Header
+
+	// pruneFailures counts pruning failures since process start (Mirage patch,
+	// NOT upstream). See pruneDegradedMarker.
+	pruneFailures atomic.Uint64
 }
 
 var (
@@ -675,7 +679,28 @@ func (rs *Store) handlePruning(version int64) error {
 	return rs.PruneStores(pruneHeight)
 }
 
+// pruneDegradedMarker (Mirage patch, NOT upstream) prefixes every pruning
+// failure log with one distinctive token so a fleet-wide grep finds every node
+// whose history is no longer being reclaimed. Upstream logged the individual
+// per-store failures and then returned nil, so a node that had stopped pruning
+// (read-only volume, full disk, wedged substore) looked healthy to every caller
+// while its disk grew without bound.
+const pruneDegradedMarker = "MIRAGE_PRUNE_DEGRADED"
+
+// PruneFailures returns the number of pruning failures observed since process
+// start. Non-zero means this node is not reclaiming history; grep the logs for
+// pruneDegradedMarker for the individual causes.
+func (rs *Store) PruneFailures() uint64 {
+	return rs.pruneFailures.Load()
+}
+
 // PruneStores prunes all history up to the specific height of the multi store.
+//
+// Pruning is node-local housekeeping, never consensus input, so a failure must
+// not abort the pass or halt the node: the remaining stores are still pruned and
+// the caller decides. Every failure is counted, logged under
+// pruneDegradedMarker, and joined into the returned error (Commit logs it; the
+// `prune` CLI turns it into a non-zero exit) so none can be silently lost.
 func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 	if pruningHeight <= 0 {
 		rs.logger.Debug("pruning skipped, height is less than or equal to 0")
@@ -683,6 +708,8 @@ func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 	}
 
 	rs.logger.Debug("pruning store", "heights", pruningHeight)
+
+	var failures []error
 
 	for key, store := range rs.stores {
 		rs.logger.Debug("pruning store", "key", key) // Also log store.name (a private variable)?
@@ -701,10 +728,14 @@ func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 		}
 
 		if errors.Is(err, iavltree.ErrVersionDoesNotExist) {
+			rs.logger.Error(pruneDegradedMarker+" prune aborted on missing version", "key", key,
+				"prune_to", pruningHeight, "failures_total", rs.pruneFailures.Add(1), "err", err)
 			return err
 		}
 
-		rs.logger.Error("failed to prune store", "key", key, "err", err)
+		rs.logger.Error(pruneDegradedMarker+" failed to prune store", "key", key,
+			"prune_to", pruningHeight, "failures_total", rs.pruneFailures.Add(1), "err", err)
+		failures = append(failures, fmt.Errorf("prune store %s: %w", key.Name(), err))
 	}
 
 	// Update earliest version after successful pruning.
@@ -719,7 +750,9 @@ func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 		defer batch.Close()
 		flushEarliestVersion(batch, newEarliest)
 		if err := batch.WriteSync(); err != nil {
-			rs.logger.Error("failed to persist earliest version", "err", err)
+			rs.logger.Error(pruneDegradedMarker+" failed to persist earliest version", "earliest", newEarliest,
+				"failures_total", rs.pruneFailures.Add(1), "err", err)
+			failures = append(failures, fmt.Errorf("persist earliest version %d: %w", newEarliest, err))
 		}
 	}
 
@@ -733,14 +766,16 @@ func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 	// commit-info, and commit-info below the pruning height only describes
 	// already-pruned, unqueryable state (now also below s/earliest). Work is
 	// capped per pass so a large historical backlog drains across many prune
-	// passes instead of stalling a block; a failure here is logged but never
-	// aborts the prune pass.
+	// passes instead of stalling a block; a failure here does not abort the pass
+	// but is escalated and returned like every other pruning failure.
 	// See docs/troubleshooting/divergence-recovery.md (action item 12).
 	if err := rs.pruneCommitInfo(pruningHeight); err != nil {
-		rs.logger.Error("failed to prune commit-info", "prune_to", pruningHeight, "err", err)
+		rs.logger.Error(pruneDegradedMarker+" failed to prune commit-info", "prune_to", pruningHeight,
+			"failures_total", rs.pruneFailures.Add(1), "err", err)
+		failures = append(failures, fmt.Errorf("prune commit-info: %w", err))
 	}
 
-	return nil
+	return errors.Join(failures...)
 }
 
 // commitInfoPruneBatch bounds how many stale commit-info records a single

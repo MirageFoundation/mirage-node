@@ -1,6 +1,6 @@
 # Security Open Items — Cross-Component Register
 
-**As of:** 2026-08-13, at `dev` `5dc06fec` with the `v1.34.0` blockchain release tagged.
+**As of:** 2026-08-13, at the `v1.34.0` tag on `dev`. Pinned to the tag rather than a commit hash, which went stale the moment the release was amended.
 **Purpose:** one place to find every security item that is still open across components, so that an accepted risk or a deferred plan item cannot quietly become forgotten work. Every entry needs either a scheduled action or a recorded decision.
 
 Component detail lives in the retests, which stay authoritative for their own findings:
@@ -49,8 +49,6 @@ Component detail lives in the retests, which stay authoritative for their own fi
 
 | Component | Item | Trigger | Acceptance |
 | :--- | :--- | :--- | :--- |
-| Blockchain L-4 | Integer-bps wire migration for `subscription_reserve_percent` | Next subscription-economics change or Params wire-format migration | Integer field ≤ 10,000 authoritative everywhere; float field reserved; migration and replay tests prove exact conversion |
-| Blockchain L-11 | store/v2 per-store prune failures are logged and suppressed | A `failed to prune store` or `failed to persist earliest version` log, unexplained disk growth, or the next patch rebase | Injected prune failure either propagates safely or raises a tested actionable alert, with provenance and rootmulti tests passing |
 | Blockchain I-2 | `upgrades.go` decomposition and execution tests for already-run handlers | Handler 46+, the file exceeding 2,500 lines, or the next migration-framework change | Registrar-only top-level file, exhaustive registration still passing, seeded pre-upgrade state reaching exact post-upgrade invariants |
 | Blockchain I-5 | Historical bridge-burn forensics | A user loss report, a compliance request, or a scheduled historical audit | A documented block-range scan proving no unmatched burns, or enumerating every unmatched amount and transaction. No production mutation. |
 | Backend I-3 | Oversized route modules | The next feature that must substantially touch one of them | Only the quest-assignment extraction was ever in scope |

@@ -82,7 +82,10 @@ INTEGER_PARAM_BOUNDS = {
     "mint_interval": (1, 10_512_000),
     "mint_quantity": (1, 10_000_000_000_000),
     "mint_dynamic_credit_cap": (0, 18_446_744_073_709_551_615),
-    "block_hash_window": (1, 1_000),
+    # Floor is MinBlockHashWindow: below it the PoW window rejects envelopes that
+    # max_envelope_age still accepts, so the upgrade widens a stored value of 10.
+    "block_hash_window": (20, 1_000),
+    "subscription_reserve_bps": (0, 10_000),
     "pow_difficulty_allowance": (0, 18_446_744_073_709_551_615),
     "min_username_size": (1, 64),
     "max_username_size": (1, 128),
@@ -95,7 +98,9 @@ INTEGER_PARAM_BOUNDS = {
 }
 FLOAT_PARAM_BOUNDS = {
     "mint_dynamic_split": (0.0, 1.0),
-    "subscription_reserve_percent": (0.0, 1.0),
+    # Superseded by subscription_reserve_bps; v1.34.0 converts and zeroes it, and
+    # Params.Validate rejects any non-zero value from then on.
+    "subscription_reserve_percent": (0.0, 0.0),
     "pow_difficulty_step": (0.01, 1.0),
 }
 MAX_PROFILE_LIST_ENTRIES = 4_294_967_295
@@ -131,6 +136,7 @@ REQUIRED_PARAMS = (
     "max_envelope_age",
     "subscription_period",
     "subscription_reserve_percent",
+    "subscription_reserve_bps",
     "tiers",
     "relay_min_gas_price",
     "relay_max_gas_fee",

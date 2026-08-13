@@ -2207,6 +2207,57 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			params := app.CoreKeeper.GetParams(sdkCtx)
+
+			// Envelope staleness starts being enforced in this release, so the
+			// window has to be wide enough before the first block runs under it.
+			// Chains carrying the old default of 10 blocks (~30s) would otherwise
+			// reject work that MaxEnvelopeAge (60s) still considers fresh, on both
+			// the chain and the backend, which reads the same param.
+			if params.BlockHashWindow < coretypes.MinBlockHashWindow {
+				previous := params.BlockHashWindow
+				params.BlockHashWindow = coretypes.DefaultParams().BlockHashWindow
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, fmt.Errorf("v1.34.0: widening block_hash_window failed: %w", err)
+				}
+				sdkCtx.Logger().Info("v1.34.0: widened block_hash_window for envelope staleness enforcement",
+					"from", previous, "to", params.BlockHashWindow)
+			}
+
+			// Move the reserve share onto the integer field and retire the float.
+			// Conversion runs exactly once here, so the reserve/burn split reads an
+			// integer from this height on and no rounding can re-enter it. Zeroing
+			// the float is what makes Validate reject any later attempt to set it.
+			if params.SubscriptionReservePercent != 0 {
+				bps, err := coretypes.ReserveBasisPoints(params.SubscriptionReservePercent)
+				if err != nil {
+					return nil, fmt.Errorf("v1.34.0: converting subscription_reserve_percent failed: %w", err)
+				}
+				if params.SubscriptionReserveBps != 0 && params.SubscriptionReserveBps != bps {
+					return nil, fmt.Errorf("v1.34.0: subscription_reserve_bps %d disagrees with the stored percent %v (%d bps)",
+						params.SubscriptionReserveBps, params.SubscriptionReservePercent, bps)
+				}
+				previous := params.SubscriptionReservePercent
+				params.SubscriptionReserveBps = bps
+				params.SubscriptionReservePercent = 0
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, fmt.Errorf("v1.34.0: storing subscription_reserve_bps failed: %w", err)
+				}
+				sdkCtx.Logger().Info("v1.34.0: converted subscription reserve to basis points",
+					"from_percent", previous, "to_bps", bps)
+			}
+
+			// The window was fed from LastBlockId.Hash, empty on every ABCI 2.0
+			// path, so every stored entry is an empty string. Clearing them means
+			// the ante's "window not ready" branch governs exactly one block —
+			// this one — instead of the emptiness lingering as a real-looking
+			// entry. Envelopes minted before this height reference hashes that
+			// were never recorded and are refused until clients refresh, which is
+			// bounded by MaxEnvelopeAge and falls inside the upgrade's own halt.
+			if err := app.CoreKeeper.SetRecentBlockHashes(sdkCtx, nil); err != nil {
+				return nil, fmt.Errorf("v1.34.0: clearing recent_block_hashes failed: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.34.0: cleared recent_block_hashes; refills from HeaderHash starting this block")
+
 			if err := validateV1340Params(params); err != nil {
 				return nil, err
 			}

@@ -700,16 +700,30 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		}
 	}
 
-	// Record the previous block's hash into the on-chain recent-block-hashes
-	// window. This is consensus-critical state used by the PoW ante to
-	// validate that an envelope's last_block_hash references a recent
-	// committed block. The window MUST be identical across all nodes; a
-	// state-write failure here causes per-node window divergence -> later
-	// per-node tx-acceptance divergence -> app-hash divergence. Halt the
-	// chain via the propagated error so the auto-recovery watchdog can
-	// state-sync from healthy peers.
-	lastHash := strings.ToLower(hex.EncodeToString(sdkCtx.BlockHeader().LastBlockId.Hash))
-	if err := am.k.RecordRecentBlockHash(sdkCtx, lastHash, uint32(params.BlockHashWindow)); err != nil {
+	// Record this block's hash into the on-chain recent-block-hashes window.
+	// This is consensus-critical state used by the PoW ante to validate that an
+	// envelope's last_block_hash references a recent committed block. The window
+	// MUST be identical across all nodes; a state-write failure here causes
+	// per-node window divergence -> later per-node tx-acceptance divergence ->
+	// app-hash divergence. Halt the chain via the propagated error so the
+	// auto-recovery watchdog can state-sync from healthy peers.
+	//
+	// The source is HeaderHash, not BlockHeader().LastBlockId.Hash: under ABCI
+	// 2.0 FinalizeBlock carries no LastBlockId, so the old source was empty on
+	// every path and the window filled with empty strings, leaving envelope
+	// staleness unenforced (retest L-7). baseapp sets HeaderHash from
+	// RequestFinalizeBlock.Hash for both the finalize and the CheckTx state, so
+	// it is populated and identical fleet-wide. A client can only ever have seen
+	// an already-committed block, so recording the current hash keeps the window
+	// a superset of what any honest envelope can reference.
+	blockHash := strings.ToLower(hex.EncodeToString(sdkCtx.HeaderHash()))
+	if blockHash == "" {
+		// Genesis/InitChain has no block hash yet. Recording nothing keeps the
+		// window free of empty entries, which is what the ante treats as
+		// "window not ready" while it bootstraps.
+		sdkCtx.Logger().Debug("recent-block-hashes: empty HeaderHash, nothing recorded",
+			"height", sdkCtx.BlockHeight())
+	} else if err := am.k.RecordRecentBlockHash(sdkCtx, blockHash, uint32(params.BlockHashWindow)); err != nil {
 		sdkCtx.Logger().Error("CONSENSUS_FATAL:RECENT_HASHES_WRITE BeginBlock; halting chain (auto-recovery will state-sync)",
 			"height", sdkCtx.BlockHeight(), "err", err)
 		return err
@@ -1051,7 +1065,7 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
 			if balance.GTE(sdkmath.NewIntFromUint64(periodFee)) {
-				reserveAmount, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReservePercent)
+				reserveAmount, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReserveBps)
 				if err != nil {
 					return fmt.Errorf("processSubscriptions: fee split for %s: %w", sub.Address, err)
 				}
@@ -1308,31 +1322,49 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 // documented one-time-payment mode (review L-9). Selection now comes from
 // MsgUpdateParams.update_mask, so a masked field is applied even when its value
 // is zero, and an unmasked field is never touched.
+//
+// A Params field with no entry here is ungovernable, which is drift unless it is
+// deliberate — deprecatedParamFields records the deliberate cases and the
+// coverage test requires every other field to be present.
 var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
-	"min_difficulty":               func(d *types.Params, s types.Params) { d.MinDifficulty = s.MinDifficulty },
-	"pow_message_window":           func(d *types.Params, s types.Params) { d.PowMessageWindow = s.PowMessageWindow },
-	"pow_message_limit":            func(d *types.Params, s types.Params) { d.PowMessageLimit = s.PowMessageLimit },
-	"pow_calm_period_definition":   func(d *types.Params, s types.Params) { d.PowCalmPeriodDefinition = s.PowCalmPeriodDefinition },
-	"pow_calm_sequence_threshold":  func(d *types.Params, s types.Params) { d.PowCalmSequenceThreshold = s.PowCalmSequenceThreshold },
-	"pow_difficulty_allowance":     func(d *types.Params, s types.Params) { d.PowDifficultyAllowance = s.PowDifficultyAllowance },
-	"pow_difficulty_step":          func(d *types.Params, s types.Params) { d.PowDifficultyStep = s.PowDifficultyStep },
-	"mint_interval":                func(d *types.Params, s types.Params) { d.MintInterval = s.MintInterval },
-	"mint_quantity":                func(d *types.Params, s types.Params) { d.MintQuantity = s.MintQuantity },
-	"mint_dynamic_credit_cap":      func(d *types.Params, s types.Params) { d.MintDynamicCreditCap = s.MintDynamicCreditCap },
-	"mint_dynamic_split":           func(d *types.Params, s types.Params) { d.MintDynamicSplit = s.MintDynamicSplit },
-	"block_hash_window":            func(d *types.Params, s types.Params) { d.BlockHashWindow = s.BlockHashWindow },
-	"min_username_size":            func(d *types.Params, s types.Params) { d.MinUsernameSize = s.MinUsernameSize },
-	"max_username_size":            func(d *types.Params, s types.Params) { d.MaxUsernameSize = s.MaxUsernameSize },
-	"min_topic_size":               func(d *types.Params, s types.Params) { d.MinTopicSize = s.MinTopicSize },
-	"max_topic_size":               func(d *types.Params, s types.Params) { d.MaxTopicSize = s.MaxTopicSize },
-	"subscription_period":          func(d *types.Params, s types.Params) { d.SubscriptionPeriod = s.SubscriptionPeriod },
-	"subscription_reserve_percent": func(d *types.Params, s types.Params) { d.SubscriptionReservePercent = s.SubscriptionReservePercent },
-	"relay_min_gas_price":          func(d *types.Params, s types.Params) { d.RelayMinGasPrice = s.RelayMinGasPrice },
-	"relay_max_gas_fee":            func(d *types.Params, s types.Params) { d.RelayMaxGasFee = s.RelayMaxGasFee },
-	"max_envelope_age":             func(d *types.Params, s types.Params) { d.MaxEnvelopeAge = s.MaxEnvelopeAge },
+	"min_difficulty":              func(d *types.Params, s types.Params) { d.MinDifficulty = s.MinDifficulty },
+	"pow_message_window":          func(d *types.Params, s types.Params) { d.PowMessageWindow = s.PowMessageWindow },
+	"pow_message_limit":           func(d *types.Params, s types.Params) { d.PowMessageLimit = s.PowMessageLimit },
+	"pow_calm_period_definition":  func(d *types.Params, s types.Params) { d.PowCalmPeriodDefinition = s.PowCalmPeriodDefinition },
+	"pow_calm_sequence_threshold": func(d *types.Params, s types.Params) { d.PowCalmSequenceThreshold = s.PowCalmSequenceThreshold },
+	"pow_difficulty_allowance":    func(d *types.Params, s types.Params) { d.PowDifficultyAllowance = s.PowDifficultyAllowance },
+	"pow_difficulty_step":         func(d *types.Params, s types.Params) { d.PowDifficultyStep = s.PowDifficultyStep },
+	"mint_interval":               func(d *types.Params, s types.Params) { d.MintInterval = s.MintInterval },
+	"mint_quantity":               func(d *types.Params, s types.Params) { d.MintQuantity = s.MintQuantity },
+	"mint_dynamic_credit_cap":     func(d *types.Params, s types.Params) { d.MintDynamicCreditCap = s.MintDynamicCreditCap },
+	"mint_dynamic_split":          func(d *types.Params, s types.Params) { d.MintDynamicSplit = s.MintDynamicSplit },
+	"block_hash_window":           func(d *types.Params, s types.Params) { d.BlockHashWindow = s.BlockHashWindow },
+	"min_username_size":           func(d *types.Params, s types.Params) { d.MinUsernameSize = s.MinUsernameSize },
+	"max_username_size":           func(d *types.Params, s types.Params) { d.MaxUsernameSize = s.MaxUsernameSize },
+	"min_topic_size":              func(d *types.Params, s types.Params) { d.MinTopicSize = s.MinTopicSize },
+	"max_topic_size":              func(d *types.Params, s types.Params) { d.MaxTopicSize = s.MaxTopicSize },
+	"subscription_period":         func(d *types.Params, s types.Params) { d.SubscriptionPeriod = s.SubscriptionPeriod },
+	// subscription_reserve_percent is deliberately absent: it is superseded by
+	// subscription_reserve_bps, so a proposal naming it is rejected as an
+	// unsupported path instead of being applied to a field nothing reads.
+	// deprecatedParamFields records that choice for the coverage test.
+	"subscription_reserve_bps": func(d *types.Params, s types.Params) { d.SubscriptionReserveBps = s.SubscriptionReserveBps },
+	"relay_min_gas_price":      func(d *types.Params, s types.Params) { d.RelayMinGasPrice = s.RelayMinGasPrice },
+	"relay_max_gas_fee":        func(d *types.Params, s types.Params) { d.RelayMaxGasFee = s.RelayMaxGasFee },
+	"max_envelope_age":         func(d *types.Params, s types.Params) { d.MaxEnvelopeAge = s.MaxEnvelopeAge },
 	// Repeated fields are replaced wholesale; there is no per-element merge.
 	"tiers":         func(d *types.Params, s types.Params) { d.Tiers = s.Tiers },
 	"award_configs": func(d *types.Params, s types.Params) { d.AwardConfigs = s.AwardConfigs },
+}
+
+// deprecatedParamFields are Params fields that exist only so pre-upgrade stored
+// blobs still decode. They are intentionally not in paramFieldSetters, so a
+// proposal naming one is rejected rather than writing a field nothing reads.
+// Params.Validate deliberately does not constrain them either: historical
+// upgrade handlers set them and call SetParams, so a from-genesis replay must
+// still succeed.
+var deprecatedParamFields = map[string]string{
+	"subscription_reserve_percent": "superseded by subscription_reserve_bps in v1.34.0",
 }
 
 // applyParamUpdates merges the masked fields of updates into current. It rejects
@@ -3503,7 +3535,7 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 			}
 
-			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReservePercent)
+			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReserveBps)
 			if err != nil {
 				return nil, fmt.Errorf("Subscribe gift: fee split: %w", err)
 			}
@@ -3592,7 +3624,7 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 			}
 
-			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReservePercent)
+			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReserveBps)
 			if err != nil {
 				return nil, fmt.Errorf("Subscribe: fee split: %w", err)
 			}

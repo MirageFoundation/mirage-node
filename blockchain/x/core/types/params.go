@@ -44,6 +44,10 @@ const (
 	// MaxPowCalmSequenceThreshold keeps the calm counter in a range that can
 	// actually be reached, so difficulty can still fall.
 	MaxPowCalmSequenceThreshold = 1_000_000
+	// MinBlockHashWindow keeps the PoW recent-block-hash window from becoming a
+	// stricter freshness rule than MaxEnvelopeAge. 20 blocks is that param's 60s
+	// default at the ~3s block time assumed throughout these defaults.
+	MinBlockHashWindow = 20
 )
 
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
@@ -171,8 +175,12 @@ func DefaultParams() Params {
 		PowCalmPeriodDefinition:  10,  // if < this many pow msgs in window, calm period
 		PowCalmSequenceThreshold: 100, // consecutive calm periods before decreasing difficulty; 100 = 5 mins
 
-		// PoW validation
-		BlockHashWindow: 10, // in blocks; how many recent block hashes to accept for PoW validation
+		// PoW validation. Must stay above MaxEnvelopeAge expressed in blocks
+		// (60s / ~3s per block = 20), or the window rejects envelopes the age
+		// check still accepts. 60 blocks is ~3 min, three times that floor.
+		// The backend serves clients from the same window (get_recent_block_hashes
+		// reads this param), so both sides widen together.
+		BlockHashWindow: 60, // in blocks; how many recent block hashes to accept for PoW validation
 
 		// Grace window during a difficulty change where both old and new thresholds are accepted
 		PowDifficultyAllowance: 2, // in blocks
@@ -189,8 +197,9 @@ func DefaultParams() Params {
 		// Tier configurations
 		Tiers: DefaultTiers(),
 
-		// Fraction of period fee escrowed as gas reserve [0,1] (remainder burned)
-		SubscriptionReservePercent: 0.95,
+		// Fraction of period fee escrowed as gas reserve in basis points
+		// (remainder burned). The float field it replaces stays 0; see Validate.
+		SubscriptionReserveBps: 9_500,
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
@@ -237,8 +246,13 @@ func (p Params) Validate() error {
 		p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
 		return fmt.Errorf("mint_dynamic_split must be in [0,1]")
 	}
-	if p.BlockHashWindow == 0 || p.BlockHashWindow > 1000 {
-		return fmt.Errorf("block_hash_window must be in [1,1000]")
+	// The floor exists because the PoW ante rejects an envelope whose
+	// last_block_hash has aged out of this window. Set it below the envelope age
+	// limit in blocks and the window silently becomes the binding freshness rule,
+	// rejecting work the age check still accepts. 20 blocks is MaxEnvelopeAge's
+	// 60s default at the ~3s block time PowMessageWindow already assumes.
+	if p.BlockHashWindow < MinBlockHashWindow || p.BlockHashWindow > 1000 {
+		return fmt.Errorf("block_hash_window must be in [%d,1000]", MinBlockHashWindow)
 	}
 	allowanceCeiling, err := CheckedMulUint64(p.PowMessageWindow, 2)
 	if err != nil {
@@ -262,11 +276,15 @@ func (p Params) Validate() error {
 	if p.MinUsernameSize > p.MaxUsernameSize {
 		return fmt.Errorf("min_username_size must be <= max_username_size")
 	}
-	// SubscriptionReservePercent must be in [0,1]
-	if math.IsNaN(p.SubscriptionReservePercent) || math.IsInf(p.SubscriptionReservePercent, 0) ||
-		p.SubscriptionReservePercent < 0 || p.SubscriptionReservePercent > 1 {
-		return fmt.Errorf("subscription_reserve_percent must be in [0,1]")
+	if p.SubscriptionReserveBps > BasisPointsDenominator {
+		return fmt.Errorf("subscription_reserve_bps must be in [0,%d]", BasisPointsDenominator)
 	}
+	// SubscriptionReservePercent is deliberately unconstrained. It is superseded
+	// by SubscriptionReserveBps and nothing reads it, but rejecting a non-zero
+	// value here would make a from-genesis replay impossible: the v1.5.0, v1.8.0,
+	// and v1.11.0 handlers set it and call SetParams, which validates. Governance
+	// cannot reach it either way — it has no paramFieldSetters entry, so an
+	// update_mask naming it is rejected as an unsupported path.
 	// PowDifficultyStep must be large enough that exact rational
 	// exponentiation reaches its cap without unbounded intermediate growth.
 	if math.IsNaN(p.PowDifficultyStep) || math.IsInf(p.PowDifficultyStep, 0) ||

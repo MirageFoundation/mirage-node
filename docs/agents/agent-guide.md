@@ -1282,7 +1282,7 @@ Returns governance parameters including tier limits:
   "max_topic_size": 35,
   "min_topic_size": 2,
   "subscription_period": 43200,
-  "subscription_reserve_percent": 0.95,
+  "subscription_reserve_bps": 9500,
   "mint_interval": 200,
   "block_time": 3,
   "tiers": [
@@ -1317,7 +1317,7 @@ Returns governance parameters including tier limits:
 - `subscription_period` is in **minutes** (default `43200` = 30 days; `0` = one-time).
 - `mint_interval` is in **blocks** (default `200`; at ~3s block time that's a mint event every ~10 min).
 - `block_time` is the mean target block time in **seconds** (currently ~3s).
-- `subscription_reserve_percent` ∈ [0,1] is the fraction of each period fee escrowed as gas reserve; the remainder is burned (default 0.95 / 95%).
+- `subscription_reserve_bps` ∈ [0,10000] is the share of each period fee escrowed as gas reserve, in basis points; the remainder is burned (default 9500 / 95%). It replaced the `subscription_reserve_percent` fraction in v1.34.0.
 
 **Tiers** are indexed by tier index (0 = Free, 1 = Subscriber, 2 = Agent — Admins level ≥100 inherit the Agent tier). Title/content length limits, follow caps, and capability flags are enforced per tier. `max_biography_length` (uint64; `0` = biography disabled for this tier) was added in v1.16.0.
 

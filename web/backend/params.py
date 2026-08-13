@@ -39,12 +39,12 @@ _REQUIRED_INT_PARAMS = [
     "relay_min_gas_price",
     "relay_max_gas_fee",
     "max_envelope_age",
+    "subscription_reserve_bps",
 ]
 
 _REQUIRED_FLOAT_PARAMS = [
     "mint_dynamic_split",
     "pow_factor",
-    "subscription_reserve_percent",
 ]
 
 

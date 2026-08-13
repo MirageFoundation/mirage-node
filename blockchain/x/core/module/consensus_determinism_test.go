@@ -1,7 +1,9 @@
 package core
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -195,6 +197,42 @@ func TestRecordRecentBlockHashRestartEquivalence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, got, gotAfterRestart,
 		"window MUST be byte-identical across restarts (no in-memory cache divergence)")
+}
+
+// TestBeginBlockRecordsHeaderHash pins the source of the window. It was fed from
+// BlockHeader().LastBlockId.Hash, which ABCI 2.0 never populates, so the window
+// filled with empty strings and left envelope staleness unenforced (retest L-7).
+// If someone routes it back through a field FinalizeBlock does not carry, the
+// window silently stops holding real hashes and this fails.
+func TestBeginBlockRecordsHeaderHash(t *testing.T) {
+	mk := newMockKeeper()
+	am := newTestModule(mk)
+
+	const blockHash = "AABBCCDD00112233445566778899AABBCCDDEEFF00112233445566778899AABB"
+	hashBytes, err := hex.DecodeString(blockHash)
+	require.NoError(t, err)
+	ctx := newMockContext().WithHeaderHash(hashBytes)
+
+	require.NoError(t, am.BeginBlock(ctx))
+
+	got, err := mk.GetRecentBlockHashes(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{strings.ToLower(blockHash)}, got,
+		"BeginBlock must record this block's HeaderHash, lowercased, as the only window entry")
+}
+
+// TestBeginBlockRecordsNothingWithoutHeaderHash covers genesis and InitChain,
+// where no block hash exists yet. An empty entry would look like a real hash to
+// the ante's readiness check, so nothing is recorded at all.
+func TestBeginBlockRecordsNothingWithoutHeaderHash(t *testing.T) {
+	mk := newMockKeeper()
+	am := newTestModule(mk)
+
+	require.NoError(t, am.BeginBlock(newMockContext()))
+
+	got, err := mk.GetRecentBlockHashes(newMockContext())
+	require.NoError(t, err)
+	require.Empty(t, got, "an absent HeaderHash must leave the window empty, not add an empty entry")
 }
 
 // TestRecordRecentBlockHashTrimsToWindow: pushing N+k hashes with window=N

@@ -694,7 +694,7 @@ func TestSubscribeGiftRejectsReserveOverflow(t *testing.T) {
 
 	ensureUsername(t, mk, ctx, recipient, "gift-recipient")
 	params := mk.GetParams(ctx)
-	params.SubscriptionReservePercent = 1
+	params.SubscriptionReserveBps = types.BasisPointsDenominator
 	require.NoError(t, mk.SetParams(ctx, params))
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
@@ -833,7 +833,7 @@ func TestProcessSubscriptionsFailsClosedOnRenewalBurnFailure(t *testing.T) {
 
 	seedExpiredSubscription(t, mk, ctx, owner, 1_000_000_000, 0)
 	params := types.DefaultParams()
-	params.SubscriptionReservePercent = 0
+	params.SubscriptionReserveBps = 0
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
 	fundAccount(mk, owner, tier.PeriodFee)
@@ -852,7 +852,7 @@ func TestProcessSubscriptionsFailsClosedOnRenewalEscrowFailure(t *testing.T) {
 
 	seedExpiredSubscription(t, mk, ctx, owner, 1_000_000_000, 0)
 	params := types.DefaultParams()
-	params.SubscriptionReservePercent = 1
+	params.SubscriptionReserveBps = types.BasisPointsDenominator
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
 	fundAccount(mk, owner, tier.PeriodFee)

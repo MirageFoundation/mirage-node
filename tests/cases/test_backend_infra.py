@@ -213,19 +213,20 @@ def test_params(backend: str):
     else:
         _fail("params.award_configs defaults present", "award_configs missing or empty")
 
-    # 1.6b subscription_reserve_percent is 0.95
-    reserve_pct = cfg.get("subscription_reserve_percent") if isinstance(cfg, dict) else None
-    if reserve_pct is None:
-        _fail("params.subscription_reserve_percent_0.95", "missing")
+    # 1.6b subscription_reserve_bps is 9500 (exact: it is an integer field now,
+    # so a tolerance would only hide the rounding drift the field exists to stop)
+    reserve_bps = cfg.get("subscription_reserve_bps") if isinstance(cfg, dict) else None
+    if reserve_bps is None:
+        _fail("params.subscription_reserve_bps_9500", "missing")
     else:
         try:
-            reserve_val = float(reserve_pct)
-            if abs(reserve_val - 0.95) < 0.01:
-                _pass("params.subscription_reserve_percent_0.95", value=reserve_val)
+            reserve_val = int(reserve_bps)
+            if reserve_val == 9500:
+                _pass("params.subscription_reserve_bps_9500", value=reserve_val)
             else:
-                _fail("params.subscription_reserve_percent_0.95", f"got {reserve_pct}")
+                _fail("params.subscription_reserve_bps_9500", f"got {reserve_bps}")
         except Exception as e:
-            _fail("params.subscription_reserve_percent_0.95", str(e))
+            _fail("params.subscription_reserve_bps_9500", str(e))
 
     # 1.7 get_node_config returns valid
     code3b, ncfg = _get(f"{backend}/api/get_node_config")

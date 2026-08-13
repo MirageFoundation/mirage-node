@@ -15,6 +15,10 @@ const BasisPointsDenominator uint64 = 10000
 // reserve by one basis point (review L-4). Params validation also rejects
 // out-of-range percentages; this rejects them again so a raw imported or
 // upgraded params blob cannot reach the arithmetic.
+//
+// Only the v1.34.0 upgrade calls this now, to convert the stored float once.
+// The split itself reads params.SubscriptionReserveBps, so no float is involved
+// at runtime and the conversion cannot be repeated per block.
 func ReserveBasisPoints(reservePercent float64) (uint64, error) {
 	if math.IsNaN(reservePercent) || math.IsInf(reservePercent, 0) {
 		return 0, fmt.Errorf("reserve percent is not a finite number: %v", reservePercent)
@@ -32,10 +36,13 @@ func ReserveBasisPoints(reservePercent float64) (uint64, error) {
 // SplitPeriodFee splits a subscription period fee into the escrowed reserve and
 // the burned remainder. reserve + burn always equals periodFee exactly, so no
 // value is created or stranded by the split.
-func SplitPeriodFee(periodFee uint64, reservePercent float64) (reserve uint64, burn uint64, err error) {
-	bps, err := ReserveBasisPoints(reservePercent)
-	if err != nil {
-		return 0, 0, err
+//
+// bps comes straight from params and is rejected rather than clamped when out of
+// range: a params blob that never passed Validate must not silently escrow a
+// different share than governance approved.
+func SplitPeriodFee(periodFee uint64, bps uint64) (reserve uint64, burn uint64, err error) {
+	if bps > BasisPointsDenominator {
+		return 0, 0, fmt.Errorf("reserve basis points out of range: %d", bps)
 	}
 	if periodFee == 0 || bps == 0 {
 		return 0, periodFee, nil
