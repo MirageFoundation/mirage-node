@@ -10,6 +10,8 @@ import (
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"mirage/x/core/types"
 )
@@ -222,6 +224,48 @@ func TestDeleteUserSelfAuthAccepted(t *testing.T) {
 
 	require.NotContains(t, mk.storeService.store, types.UsernamesPrefix+"testuser",
 		"username mapping must be released with the profile")
+}
+
+// The indexer projects blocks after they commit, so it can read chain state for
+// an account that a later block deleted. It must be able to tell "this account
+// is gone" apart from "this node is broken" WITHOUT matching on the error text:
+// the first is skipped, the second aborts the block. If this status regresses to
+// a bare error, the indexer treats a deleted account as a node failure, the
+// checkpoint stops advancing, and it crash-loops on the same block forever.
+func TestGetProfileReturnsNotFoundAfterDelete(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+
+	core := types.ProfileCore{Owner: owner, Username: "testuser", Level: 0}
+	bz, _ := json.Marshal(core)
+	_ = mk.SetProfileCore(ctx, owner, bz)
+	_ = mk.ClaimUsername(ctx, "testuser", owner)
+
+	_, err := am.DeleteUser(ctx, &types.MsgDeleteUser{
+		Authority:      testAccAddressString(),
+		EnvelopePubkey: pub,
+		Target:         owner,
+	})
+	require.NoError(t, err)
+
+	_, err = am.GetProfile(ctx, &types.QueryProfileRequest{Address: owner})
+	require.Error(t, err, "querying a deleted profile must fail")
+	require.Equal(t, codes.NotFound, status.Code(err),
+		"deleted profile must be NOT_FOUND so callers can skip it instead of halting")
+}
+
+// An address that never had a profile is the same case as a deleted one.
+func TestGetProfileReturnsNotFoundForUnknownAddress(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	_, err := am.GetProfile(ctx, &types.QueryProfileRequest{Address: genAddr(0x7b)})
+	require.Error(t, err)
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
 func TestDeleteUserGovernanceAuthAccepted(t *testing.T) {

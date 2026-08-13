@@ -81,6 +81,17 @@ from scripts import fleet  # noqa: E402
 BACKUP_DIR = Path.home() / ".mirage" / "backups"
 SSH_USER = "root"
 
+# Must stay identical to PORTS in deploy/deploy.sh — a restored container has to
+# have the same exposure as a deployed one.
+#
+# Cosmos REST (1317) and gRPC (9090) are deliberately absent. ufw cannot restrict
+# a Docker-published port (DNAT traverses FORWARD/DOCKER-USER, never INPUT), so
+# publishing them puts an unauthenticated, un-rate-limited chain query API
+# straight on the internet, outside Caddy and the CDN — and app.toml sets
+# query-gas-limit = "0", making a single query an unbounded-CPU DoS. The backend
+# (5000) binds to 127.0.0.1 inside the container, so publishing it did nothing.
+CONTAINER_PORTS = "-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
+
 # Which servers --all visits comes from MIRAGE_FLEET_HOSTS in .env, not from
 # this file: the repo is public and the addresses are not. Resolved on use so
 # --help and single-host runs still work without an inventory.
@@ -966,7 +977,7 @@ echo "PostgreSQL restore complete"
                 --ulimit nofile=131072:131072 \\
                 -e SKIP_VALIDATOR_CHECK=1 \\
                 -v /root/.mirage:/root/.mirage \\
-                -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
+                {CONTAINER_PORTS} \\
                 '{image}'
         """,
         )
@@ -1072,7 +1083,7 @@ echo "PostgreSQL restore complete"
                 --ulimit nofile=131072:131072 \\
                 -v /root/.mirage:/root/.mirage \\
                 -v /root/.caddy:/root/.local/share/caddy \\
-                -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
+                {CONTAINER_PORTS} \\
                 '{image}'
         """,
         )
@@ -1092,7 +1103,7 @@ echo "PostgreSQL restore complete"
                 --ulimit nofile=131072:131072 \\
                 -v /root/.mirage:/root/.mirage \\
                 -v /root/.caddy:/root/.local/share/caddy \\
-                -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
+                {CONTAINER_PORTS} \\
                 '{image}'
         """,
         )

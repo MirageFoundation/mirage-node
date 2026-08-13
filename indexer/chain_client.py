@@ -9,6 +9,7 @@ import requests
 import websocket
 import grpc
 from datetime import datetime, timezone
+from typing import Optional
 from indexer.settings import (
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_MEDIUM,
@@ -176,8 +177,18 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
-    def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> dict:
-        """Query full profile (including per-entry lists) via gRPC."""
+    def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> Optional[dict]:
+        """Query full profile (including per-entry lists) via gRPC.
+
+        Returns None when the chain has no profile for `addr`. That is a normal
+        post-consensus state, not a failure: the block being projected can
+        predate a `MsgDeleteUser`, so by the time the indexer reads chain state
+        the profile is already gone. Callers skip the refresh in that case.
+
+        Only NOT_FOUND maps to None. Every other status still raises, so a real
+        node or transport failure keeps aborting the block instead of being
+        silently recorded as "user has nothing".
+        """
         from shared.datatypes import QueryProfileRequest, QueryProfileResponse
 
         with grpc.insecure_channel(self.grpc_target) as channel:
@@ -186,7 +197,13 @@ class ChainClient:
                 request_serializer=QueryProfileRequest.SerializeToString,
                 response_deserializer=QueryProfileResponse.FromString,
             )
-            resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
+            try:
+                resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    logger.warning("profile_absent grpc addr=%s (no chain profile; account deleted)", addr)
+                    return None
+                raise
 
         profile = self._profile_to_dict(resp)
         logger.debug(

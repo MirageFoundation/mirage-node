@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.34.0.
+Post-deploy verification for v1.35.0.
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes:
@@ -8,68 +8,70 @@ what THIS release changes:
   python scripts/verify_upgrade.py
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 
-What v1.34.0 changes (deploy-visible)
+What v1.35.0 changes (deploy-visible)
 -------------------------------------
-Consensus-breaking hardening from the 2026-08-07 blockchain review:
+The availability fix from the 2026-08-13 security review. GetProfile answered an
+absent profile with an unclassified error, so no caller could tell "this account
+is gone" — a normal state, since a block being projected can predate the
+MsgDeleteUser that removed the profile — from "this node is broken". The indexer
+took it as the latter, aborted the block, retried the same block forever, and
+stopped advancing for every reader on that host. GetProfile now returns the gRPC
+NOT_FOUND status and the indexer skips the refresh; every other status still
+aborts the block.
 
-  * store read/write failures on consensus inputs reject the tx or fail the
-    block instead of decoding as zero (M-1, M-2, M-3, M-5, M-6);
-  * Params gained operational upper bounds and every cast/multiply/expiry
-    computation is checked (M-7);
-  * MsgUpdateParams requires an explicit update_mask, so governance can set a
-    parameter to zero on purpose and cannot silently skip a field (L-9);
-  * subscription reserve/burn split is computed in basis points and sums exactly
-    to the period fee (L-4).
+Alongside it: the state-sync bootstrap output is parsed instead of eval'd, the
+restore path publishes the same host ports as a normal deploy, and the invite
+referral payout is confined to registration.
 
 Checks:
 
-  1. Frontend version.txt reports v1.34.1.
-  2. Chain binary version reports v1.34.1.
-  3. Upgrade handler name v1.34.0 is applied (applied_plan query) — the chain
-     upgrade stays v1.34.0 because v1.34.1 ships no consensus change.
+  1. Frontend version.txt reports v1.35.0.
+  2. Chain binary version reports v1.35.0.
+  3. Upgrade handler name v1.35.0 is applied (applied_plan query).
   4. Chain is live and has produced blocks past the upgrade height.
-  5. Every parameter the new runtime arithmetic reads is present in the params
-     query. A missing field is a hard failure: the runtime has no fallback.
-  6. Stored params satisfy the full Params.Validate rule set, including the new
-     operational bounds. The upgrade handler refuses to complete otherwise;
-     this re-checks the live chain after later governance proposals.
-  7. The indexer topic-attribution repair applied and left no drifted rows.
-  8. LEGACY_UNSIGNED_UNTIL is gone from backend.env, so reward claims cannot
-     fall through to the removed unsigned path.
+  5. An address with no profile answers 404 (gRPC NOT_FOUND through the
+     gateway), not 500. This is the fix, observed on the deployed binary.
+  6. An address that does have a profile still answers 200, so check 5 is
+     narrow rather than "the query broke".
+  7. The indexer is advancing. A wedged indexer is the symptom this release
+     exists to remove, and it is invisible in the chain's own health.
+  8. The deployed backend confines the invite referral payout to registration.
+  9. The running container publishes no Cosmos REST (1317) or gRPC (9090) port.
 
-Checks 7 and 8 read deployment artifacts (the indexer database, backend.env)
-that exist inside the container but not in a plain source checkout. When the
-artifact is absent they report NOTE and do not affect the exit code, because a
-missing artifact means "not verifiable from here", not "verified". Run the
-docker form above for the full set — a run that only prints NOTE for 7 and 8 has
-not checked them.
+Checks 7, 8 and 9 read deployment artifacts (the indexer database, the deployed
+backend source, the Docker port map) that are not all reachable from every
+vantage point: 7 and 8 need the container's filesystem or DB, 9 needs the Docker
+CLI on the host. When the artifact is absent they report NOTE and do not affect
+the exit code, because a missing artifact means "not verifiable from here", not
+"verified". Run both invocations above for the full set — a run that only prints
+NOTE for a check has not performed it.
 
 This script is read-only: it never broadcasts. Two properties of this release
 cannot be observed read-only and are proven by tests instead:
 
-  * mask-driven zero-value governance updates —
-    tests/test_blockchain.py --category params_mask
-  * fail-fast store semantics —
-    blockchain/x/core/module/store_failures_test.go
+  * the state-sync bootstrap is parsed and validated, never eval'd —
+    tests/test_backend.py --category node_join
+  * an unknown message type is logged and skipped instead of halting the
+    indexer, and an absent profile skips the refresh without touching the DB —
+    tests/test_backend.py --category indexer_profile_absent
 """
 from __future__ import annotations
 
 import json
-import math
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-# The shipped software version, checked against version.txt and the binary.
-RELEASE_VERSION = "v1.34.1"
-# The chain upgrade handler this release runs on. These diverge whenever a patch
-# ships without a consensus-breaking change: v1.34.1 is backend-only, so the
-# applied plan on chain is still the one v1.34.0 scheduled and there is no
-# v1.34.1 plan to query.
-UPGRADE_NAME = "v1.34.0"
+# The shipped software version, checked against version.txt and the binary. The
+# chain upgrade handler carries the same name this release: the query change is
+# not consensus-breaking, but the plan is what moves the whole fleet across one
+# coordinated height so no node is left running the wedging binary.
+RELEASE_VERSION = "v1.35.0"
+UPGRADE_NAME = "v1.35.0"
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
 
@@ -77,79 +79,18 @@ REST_URL = "http://127.0.0.1:1317"
 # upgrade counts as "live", not just "applied".
 MIN_BLOCKS_AFTER_UPGRADE = 5
 
-# Read-only mirror of Params.Validate() and its v1.34.0 bounds in
-# blockchain/x/core/types/params.go. Keep both the values and cross-field rules
-# in sync.
-INTEGER_PARAM_BOUNDS = {
-    "min_difficulty": (1, 256),
-    "pow_message_window": (1, 1_000),
-    "pow_message_limit": (1, 18_446_744_073_709_551_615),
-    "pow_calm_period_definition": (0, 18_446_744_073_709_551_615),
-    "pow_calm_sequence_threshold": (1, 1_000_000),
-    "mint_interval": (1, 10_512_000),
-    "mint_quantity": (1, 10_000_000_000_000),
-    "mint_dynamic_credit_cap": (0, 18_446_744_073_709_551_615),
-    # Floor is MinBlockHashWindow: below it the PoW window rejects envelopes that
-    # max_envelope_age still accepts, so the upgrade widens a stored value of 10.
-    "block_hash_window": (20, 1_000),
-    "subscription_reserve_bps": (0, 10_000),
-    "pow_difficulty_allowance": (0, 18_446_744_073_709_551_615),
-    "min_username_size": (1, 64),
-    "max_username_size": (1, 128),
-    "min_topic_size": (1, 100),
-    "max_topic_size": (1, 100),
-    "relay_min_gas_price": (0, 1_000_000_000),
-    "relay_max_gas_fee": (0, 100_000_000_000),
-    "max_envelope_age": (1, 86_400),
-    "subscription_period": (0, 525_600),
-}
-FLOAT_PARAM_BOUNDS = {
-    "mint_dynamic_split": (0.0, 1.0),
-    # Superseded by subscription_reserve_bps; v1.34.0 converts and zeroes it, and
-    # Params.Validate rejects any non-zero value from then on.
-    "subscription_reserve_percent": (0.0, 0.0),
-    "pow_difficulty_step": (0.01, 1.0),
-}
-MAX_PROFILE_LIST_ENTRIES = 4_294_967_295
-MAX_VOTE_WEIGHT = 100.0
-MAX_AWARD_CONFIG_COST = 1_000_000_000_000
-PROFILE_LIST_LIMIT_FIELDS = (
-    "max_enabled_agents",
-    "max_followed_users",
-    "max_followed_topics",
-    "max_blocked_users",
-    "max_blocked_posts",
-    "max_blocked_topics",
-)
+# An address that is well-formed enough for the query (GetProfile lowercases and
+# looks up; it does not parse bech32) and that no account can hold, so the only
+# correct answer is NOT_FOUND.
+ABSENT_PROFILE_ADDRESS = "mirage1verifyupgradeabsentprofilenobodyholdsthis"
 
-# Every field in Params. Presence is checked separately from value validation so
-# a generated-query/schema mismatch cannot hide behind a numeric default.
-REQUIRED_PARAMS = (
-    "min_difficulty",
-    "pow_message_window",
-    "pow_message_limit",
-    "pow_calm_period_definition",
-    "pow_calm_sequence_threshold",
-    "pow_difficulty_allowance",
-    "mint_interval",
-    "mint_quantity",
-    "mint_dynamic_credit_cap",
-    "mint_dynamic_split",
-    "block_hash_window",
-    "min_username_size",
-    "max_username_size",
-    "min_topic_size",
-    "max_topic_size",
-    "max_envelope_age",
-    "subscription_period",
-    "subscription_reserve_percent",
-    "subscription_reserve_bps",
-    "tiers",
-    "relay_min_gas_price",
-    "relay_max_gas_fee",
-    "pow_difficulty_step",
-    "award_configs",
-)
+# The indexer must gain height across this window. timeout_commit is 3s, so this
+# spans several blocks even on a slow host.
+INDEXER_PROGRESS_WINDOW_SEC = 10
+
+# Ports that must never be published to the host: the Cosmos REST and gRPC
+# listeners are unauthenticated and belong on loopback behind Caddy.
+FORBIDDEN_HOST_PORTS = ("1317", "9090")
 
 passed = 0
 failed = 0
@@ -183,11 +124,29 @@ def http_json(url: str, timeout: float = 10.0) -> dict:
         raise RuntimeError(f"HTTP {e.code} from {url}: {e.read().decode()[:300]}") from None
 
 
+def http_status(url: str, timeout: float = 10.0) -> tuple[int, str]:
+    """Return (status, body) without raising for an error status.
+
+    The status code is the subject of check 5, so it has to be observable
+    instead of being folded into an exception.
+    """
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status, resp.read().decode()[:300]
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()[:300]
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
 def check_version_txt() -> None:
     candidates = [
         Path("/opt/mirage/web/frontend/build/version.txt"),
         Path("/opt/mirage/web/frontend/public/version.txt"),
-        Path(__file__).resolve().parent.parent / "web" / "frontend" / "public" / "version.txt",
+        repo_root() / "web" / "frontend" / "public" / "version.txt",
     ]
     for p in candidates:
         if p.is_file():
@@ -204,8 +163,8 @@ def check_binary_version() -> None:
     bin_candidates = [
         "/usr/local/bin/miraged",
         "/root/go/bin/miraged",
-        str(Path(__file__).resolve().parent.parent / "blockchain" / "bin" / "miraged"),
-        str(Path(__file__).resolve().parent.parent / "blockchain" / "miraged"),
+        str(repo_root() / "blockchain" / "bin" / "miraged"),
+        str(repo_root() / "blockchain" / "miraged"),
     ]
     for b in bin_candidates:
         if not os.path.isfile(b):
@@ -215,10 +174,21 @@ def check_binary_version() -> None:
         except Exception as e:
             fail(f"miraged version failed ({b}): {e}")
             return
-        if RELEASE_VERSION.lstrip("v") in out or RELEASE_VERSION in out:
-            ok(f"binary version contains {RELEASE_VERSION} ({b})")
+        # Parse the version: line rather than searching the whole output. The
+        # long form lists every dependency, and a substring match reports the
+        # release as shipped when some module happens to carry that version —
+        # github.com/rs/zerolog@v1.35.0 passed this check on a v1.34.0 binary.
+        reported = ""
+        for line in out.splitlines():
+            if line.startswith("version:"):
+                reported = line.split(":", 1)[1].strip()
+                break
+        if not reported:
+            fail(f"miraged version --long printed no version: line ({b}): {out.strip()[:200]!r}")
+        elif reported.lstrip("v") == RELEASE_VERSION.lstrip("v"):
+            ok(f"binary version={reported} ({b})")
         else:
-            fail(f"binary version {out.strip()[:120]!r} does not contain {RELEASE_VERSION} ({b})")
+            fail(f"binary version={reported!r} want {RELEASE_VERSION} ({b})")
         return
     fail("miraged binary not found")
 
@@ -241,13 +211,13 @@ def check_upgrade_applied() -> None:
     ok(f"upgrade {UPGRADE_NAME} applied at height={height}")
 
 
+def comet_head() -> int:
+    return int(http_json(f"{COMET_RPC_URL}/status")["result"]["sync_info"]["latest_block_height"])
+
+
 def check_chain_live_past_upgrade() -> None:
-    """The fail-fast contract in this release turns a bad consensus write into a
-    halted block, so 'applied' is not enough: the chain must keep producing
-    blocks after the upgrade height.
-    """
     try:
-        head = int(http_json(f"{COMET_RPC_URL}/status")["result"]["sync_info"]["latest_block_height"])
+        head = comet_head()
     except Exception as e:
         fail(f"comet status failed: {e}")
         return
@@ -271,187 +241,48 @@ def check_chain_live_past_upgrade() -> None:
         )
 
 
-def query_params() -> dict:
-    return (http_json(f"{REST_URL}/mirage/core/v1/params").get("params")) or {}
+def check_absent_profile_is_not_found() -> None:
+    """The fix itself, observed on the deployed binary.
 
-
-def check_required_params_present() -> None:
-    try:
-        params = query_params()
-    except Exception as e:
-        fail(f"params query failed: {e}")
-        return
-    missing = [name for name in REQUIRED_PARAMS if params.get(name) is None]
-    if missing:
-        fail(f"params query is missing required field(s): {missing}")
-        return
-    ok(f"all {len(REQUIRED_PARAMS)} runtime-required params present")
-
-
-def check_param_bounds() -> None:
-    try:
-        params = query_params()
-    except Exception as e:
-        fail(f"params bounds check: params query failed: {e}")
-        return
-
-    violations: list[str] = []
-    checked = 0
-    int_values: dict[str, int] = {}
-    for name, (low, high) in INTEGER_PARAM_BOUNDS.items():
-        checked += 1
-        raw = params.get(name)
-        if raw is None:
-            violations.append(f"{name} missing")
-            continue
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            violations.append(f"{name}={raw!r} not an integer")
-            continue
-        int_values[name] = value
-        if value < low or value > high:
-            violations.append(f"{name}={value} outside [{low}, {high}]")
-
-    for name, (low, high) in FLOAT_PARAM_BOUNDS.items():
-        checked += 1
-        raw = params.get(name)
-        try:
-            value = float(raw)
-            if not math.isfinite(value):
-                violations.append(f"{name}={value} is not finite")
-            elif value < low or value > high:
-                violations.append(f"{name}={value} outside [{low}, {high}]")
-        except (TypeError, ValueError):
-            violations.append(f"{name}={raw!r} not a number")
-
-    pow_limit = int_values.get("pow_message_limit")
-    calm_definition = int_values.get("pow_calm_period_definition")
-    if pow_limit is not None and calm_definition is not None and calm_definition >= pow_limit:
-        violations.append(
-            f"pow_calm_period_definition={calm_definition} must be < pow_message_limit={pow_limit}"
+    404 is how the gRPC gateway renders NOT_FOUND. Before this release the same
+    query produced a 500, which is what the indexer could not tell apart from a
+    node fault.
+    """
+    status, body = http_status(f"{REST_URL}/mirage/core/v1/profile/{ABSENT_PROFILE_ADDRESS}")
+    if status == 404:
+        ok(f"absent profile answers 404 NOT_FOUND ({ABSENT_PROFILE_ADDRESS})")
+    elif status == 200:
+        fail(f"absent profile answered 200; {ABSENT_PROFILE_ADDRESS} should hold no profile: {body}")
+    else:
+        fail(
+            f"absent profile answered HTTP {status}, want 404 NOT_FOUND — this node still cannot tell a "
+            f"deleted account apart from a node fault, and its indexer will wedge on the next deletion: {body}"
         )
 
-    pow_window = int_values.get("pow_message_window")
-    allowance = int_values.get("pow_difficulty_allowance")
-    if pow_window is not None and allowance is not None and allowance > 2 * pow_window:
-        violations.append(
-            f"pow_difficulty_allowance={allowance} must be <= 2*pow_message_window={2 * pow_window}"
-        )
 
-    min_username = int_values.get("min_username_size")
-    max_username = int_values.get("max_username_size")
-    if min_username is not None and max_username is not None and min_username > max_username:
-        violations.append(f"min_username_size={min_username} exceeds max_username_size={max_username}")
-
-    min_topic = int_values.get("min_topic_size")
-    max_topic = int_values.get("max_topic_size")
-    if min_topic is not None and max_topic is not None and min_topic > max_topic:
-        violations.append(f"min_topic_size={min_topic} exceeds max_topic_size={max_topic}")
-
-    tiers = params.get("tiers")
-    if not isinstance(tiers, list) or len(tiers) != 3:
-        violations.append(f"tiers must contain exactly 3 entries, got {tiers!r}")
-    else:
-        for index, tier in enumerate(tiers):
-            if not isinstance(tier, dict):
-                violations.append(f"tiers[{index}] is not an object")
-                continue
-            for name in PROFILE_LIST_LIMIT_FIELDS:
-                checked += 1
-                raw = tier.get(name)
-                try:
-                    value = int(raw)
-                except (TypeError, ValueError):
-                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
-                    continue
-                if value < 0 or value > MAX_PROFILE_LIST_ENTRIES:
-                    violations.append(
-                        f"tiers[{index}].{name}={value} outside [0, {MAX_PROFILE_LIST_ENTRIES}]"
-                    )
-            for name in ("period_fee", "max_title_length", "max_content_length"):
-                checked += 1
-                raw = tier.get(name)
-                try:
-                    value = int(raw)
-                except (TypeError, ValueError):
-                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
-                    continue
-                if value < 0:
-                    violations.append(f"tiers[{index}].{name}={value} must be non-negative")
-                if name in ("max_title_length", "max_content_length") and value == 0:
-                    violations.append(f"tiers[{index}].{name} must be > 0")
-                if index == 0 and name == "period_fee" and value != 0:
-                    violations.append(f"tiers[0].period_fee={value} must be 0")
-
-            checked += 1
-            raw_vote_weight = tier.get("vote_weight")
-            try:
-                vote_weight = float(raw_vote_weight)
-                if not math.isfinite(vote_weight):
-                    violations.append(f"tiers[{index}].vote_weight={vote_weight} is not finite")
-                elif vote_weight < 0.0 or vote_weight > MAX_VOTE_WEIGHT:
-                    violations.append(
-                        f"tiers[{index}].vote_weight={vote_weight} outside [0.0, {MAX_VOTE_WEIGHT}]"
-                    )
-            except (TypeError, ValueError):
-                violations.append(f"tiers[{index}].vote_weight={raw_vote_weight!r} not a number")
-
-    award_configs = params.get("award_configs")
-    if not isinstance(award_configs, list) or not award_configs:
-        violations.append(f"award_configs must be a non-empty list, got {award_configs!r}")
-    else:
-        award_names: set[str] = set()
-        for index, award in enumerate(award_configs):
-            if not isinstance(award, dict):
-                violations.append(f"award_configs[{index}] is not an object")
-                continue
-            checked += 2
-            name = award.get("name")
-            if not isinstance(name, str) or name == "":
-                violations.append(f"award_configs[{index}].name must be non-empty")
-            elif name in award_names:
-                violations.append(f"award_configs[{index}].name={name!r} is duplicated")
-            else:
-                award_names.add(name)
-            raw_cost = award.get("cost")
-            try:
-                cost = int(raw_cost)
-            except (TypeError, ValueError):
-                violations.append(f"award_configs[{index}].cost={raw_cost!r} not an integer")
-                continue
-            if cost < 0 or cost > MAX_AWARD_CONFIG_COST:
-                violations.append(
-                    f"award_configs[{index}].cost={cost} outside [0, {MAX_AWARD_CONFIG_COST}]"
-                )
-
-    if violations:
-        fail("stored params violate Params.Validate(): " + "; ".join(violations))
+def check_present_profile_is_served() -> None:
+    """Control for the check above: profiles that exist must still be served."""
+    try:
+        listing = http_json(f"{REST_URL}/mirage/core/v1/profiles?pagination.limit=1")
+    except Exception as e:
+        fail(f"profiles listing failed: {e}")
         return
-    ok(f"stored params satisfy the v1.34.0 Params.Validate() rules ({checked} values checked)")
 
+    profiles = listing.get("profiles") or []
+    if not profiles:
+        note("chain has no profiles yet: the positive profile query is not verifiable from here")
+        return
 
-INDEXER_REPAIR_MIGRATION = "v1.34.0_repair_topic_attribution"
+    owner = str(profiles[0].get("owner") or "").strip()
+    if not owner:
+        fail(f"profiles listing returned an entry with no owner: {profiles[0]}")
+        return
 
-# Canonical definition of a (owner, topic) stats row, mirroring
-# DatabaseManager._VOTE_STATS_FROM_CANONICAL and the rebuild migration. A row
-# that disagrees means a topic edit stranded attribution again.
-DRIFTED_TOPIC_ROWS_SQL = """
-    SELECT COUNT(*) FROM (
-        SELECT s.owner, s.topic
-        FROM user_topic_stats s
-        LEFT JOIN (
-            SELECT LOWER(v.owner) AS owner,
-                   LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
-                   SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
-            FROM votes v
-            JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-            WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
-            GROUP BY 1, 2
-        ) d ON d.owner = s.owner AND d.topic = s.topic
-        WHERE s.net_votes <> COALESCE(d.net, 0)
-    ) mismatched
-"""
+    status, body = http_status(f"{REST_URL}/mirage/core/v1/profile/{owner}")
+    if status == 200:
+        ok(f"existing profile still answers 200 ({owner})")
+    else:
+        fail(f"existing profile {owner} answered HTTP {status}, want 200: {body}")
 
 
 def indexer_db_url() -> str:
@@ -474,60 +305,100 @@ def indexer_db_url() -> str:
     return ""
 
 
-def check_topic_attribution_repaired() -> None:
-    """The repair migration asserts this invariant before it writes its marker,
-    so a missing marker plus drifted rows means it never ran on this host.
+def check_indexer_advancing() -> None:
+    """A wedged indexer is the failure this release removes, and the chain's own
+    health says nothing about it: blocks keep being produced while the indexer
+    retries one block forever. Sampling twice is what distinguishes "behind and
+    catching up" from "stuck", so lag alone is reported, not asserted.
     """
     db_url = indexer_db_url()
     if not db_url:
-        note("no INDEXER_DB_URL in the environment or /root/.mirage/env: "
-             "topic-attribution repair not verifiable from here")
+        note("no INDEXER_DB_URL in the environment or /root/.mirage/env: indexer progress not verifiable from here")
         return
     try:
         import psycopg
     except ImportError:
-        note("psycopg unavailable: topic-attribution repair not verifiable from here")
+        note("psycopg unavailable: indexer progress not verifiable from here")
         return
 
-    try:
+    def _last_height() -> int:
+        """Read in its own connection: holding a snapshot across the sleep would
+        both risk reading stale data and pin the database's vacuum horizon."""
         with psycopg.connect(db_url, connect_timeout=10) as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT value FROM meta WHERE key = %s",
-                    (f"migration_{INDEXER_REPAIR_MIGRATION}",),
-                )
+                cur.execute("SELECT value FROM meta WHERE key = 'last_height'")
                 row = cur.fetchone()
-                cur.execute(DRIFTED_TOPIC_ROWS_SQL)
-                drifted = int(cur.fetchone()[0])
+        if row is None:
+            raise RuntimeError("meta.last_height is missing from the indexer database")
+        return int(row[0])
+
+    try:
+        first = _last_height()
+        head = comet_head()
+        time.sleep(INDEXER_PROGRESS_WINDOW_SEC)
+        second = _last_height()
     except Exception as e:
-        fail(f"topic-attribution check failed: {e}")
+        fail(f"indexer progress check failed: {e}")
         return
 
-    if row is None:
-        fail(f"indexer migration {INDEXER_REPAIR_MIGRATION} has not been applied")
-    elif drifted:
-        fail(f"{drifted} (owner, topic) row(s) disagree with their canonical votes after the repair")
+    if second > first:
+        ok(f"indexer advancing: {first} -> {second} in {INDEXER_PROGRESS_WINDOW_SEC}s (chain head was {head})")
     else:
-        ok(f"topic attribution repaired ({INDEXER_REPAIR_MIGRATION}) with no drifted rows")
+        fail(
+            f"indexer stuck at height {second} for {INDEXER_PROGRESS_WINDOW_SEC}s while the chain is at {head}; "
+            f"check the indexer log for a block it cannot project"
+        )
 
 
-def check_claim_grace_removed() -> None:
-    """v1.34.0 ends the unsigned reward-claim window early; the deploy migration
-    removes the key so nothing can re-open it by setting a future date.
+def check_referral_payout_guarded() -> None:
+    """The deployed backend, not the repo: this release is also the one that
+    stopped the invite referral reward from being re-paid on a later username
+    change, and a host that did not receive the new code keeps paying.
     """
-    env_path = Path("/root/.mirage/env/backend.env")
-    if not env_path.is_file():
-        note(f"{env_path} absent: claim-grace removal not verifiable from here")
-        return
-    offending = [
-        line.strip()
-        for line in env_path.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("LEGACY_UNSIGNED_UNTIL=")
+    candidates = [
+        Path("/opt/mirage/web/backend/routes/core.py"),
+        repo_root() / "web" / "backend" / "routes" / "core.py",
     ]
+    for p in candidates:
+        if not p.is_file():
+            continue
+        src = p.read_text(encoding="utf-8")
+        if "_process_invite_quest_completion" not in src:
+            fail(f"{p} no longer calls _process_invite_quest_completion")
+            return
+        if "if is_new_user and code == 0:" in src:
+            ok(f"invite referral payout is confined to registration ({p})")
+        else:
+            fail(
+                f"{p} calls _process_invite_quest_completion without the registration guard; "
+                f"a username change re-pays the referral reward"
+            )
+        return
+    note("backend source not present: referral payout guard not verifiable from here")
+
+
+def check_no_forbidden_host_ports() -> None:
+    """The restore path used to publish 1317 and 9090, so a host that had been
+    rebuilt from backup served unauthenticated REST and gRPC to the internet.
+    Read the live port map rather than the script that wrote it.
+    """
+    try:
+        out = subprocess.check_output(
+            ["docker", "port", "mirage"], stderr=subprocess.STDOUT, timeout=15
+        ).decode()
+    except FileNotFoundError:
+        note("docker CLI unavailable (this is the in-container invocation): host port map not verifiable from here")
+        return
+    except Exception as e:
+        fail(f"docker port mirage failed: {e}")
+        return
+
+    published = [line.strip() for line in out.splitlines() if line.strip()]
+    offending = [line for line in published if any(line.startswith(f"{p}/") for p in FORBIDDEN_HOST_PORTS)]
     if offending:
-        fail(f"backend.env still defines {offending[0]}")
+        fail(f"container publishes {offending}; Cosmos REST and gRPC must stay on loopback behind Caddy")
     else:
-        ok("backend.env has no LEGACY_UNSIGNED_UNTIL")
+        ok(f"container publishes no REST/gRPC port ({len(published)} mapping(s))")
 
 
 def main() -> int:
@@ -536,14 +407,15 @@ def main() -> int:
     check_binary_version()
     check_upgrade_applied()
     check_chain_live_past_upgrade()
-    check_required_params_present()
-    check_param_bounds()
-    check_topic_attribution_repaired()
-    check_claim_grace_removed()
+    check_absent_profile_is_not_found()
+    check_present_profile_is_served()
+    check_indexer_advancing()
+    check_referral_payout_guarded()
+    check_no_forbidden_host_ports()
     note(
-        "mask-driven zero-value governance updates are proven by "
-        "tests/test_blockchain.py --category params_mask (local testnet only); "
-        "fail-fast store semantics by blockchain/x/core/module/store_failures_test.go"
+        "the state-sync bootstrap parser (never eval, validated values) is proven by "
+        "tests/test_backend.py --category node_join; the indexer's skip-and-log behaviour for absent "
+        "profiles and unknown message types by tests/test_backend.py --category indexer_profile_absent"
     )
     print(f"\nResult: {passed} passed, {failed} failed")
     return 1 if failed else 0

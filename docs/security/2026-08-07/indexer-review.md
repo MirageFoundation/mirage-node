@@ -1,11 +1,11 @@
 # Indexer Security and Correctness Review — 2026-08-07
 
 **Scope:** `indexer/` — all 18 tracked Python files (7,092 lines), including block ingestion, WebSocket catch-up, protobuf decoding, all 26 message handlers, PostgreSQL schema and writes, chain queries, parameter caching, media enrichment, and all 10 indexer migrations. Directly relevant backend health checks, recovery behavior, chain validation, backup tooling, and indexer tests were reviewed at the trust boundary.
-**Out of scope:** `web/frontend/`, backend route/authentication internals, blockchain consensus internals already covered by [`../blockchain/review-2026-08-06.md`](../blockchain/review-2026-08-06.md), production servers, and the correctness of external media providers. Local `127.0.0.1` RPC was used only to verify response encoding.
+**Out of scope:** `web/frontend/`, backend route/authentication internals, blockchain consensus internals already covered by [`2026-08-06/blockchain-review.md`](../2026-08-06/blockchain-review.md), production servers, and the correctness of external media providers. Local `127.0.0.1` RPC was used only to verify response encoding.
 **Baseline:** `dev` at `d9dbf87a5c0632c5a95ce0e369bbc559fe3c4185` (`v1.32.4` + review commit). Working tree clean under `indexer/`. There is no `indexer/` delta between `public/prod` and this baseline; the last indexer change in history is part of the v1.31.0 remediation commit.
-**Previous review:** No prior dedicated indexer review. Backend finding [`2026-08-05 M-8`](../backend/review-2026-08-05.md#M-8-the-backend-cannot-detect-wrong-data-in-the-indexer-db-and-the-indexer-enforces-authorization-the-chain-deliberately-does-not) identified the indexer trust boundary, non-atomic writes, silent handler failures, and lookback truncation. Its retest marked drift tests Partially Fixed and the authorization boundary Accepted Risk. This review audits the full implementation rather than only that boundary.
+**Previous review:** No prior dedicated indexer review. Backend finding [`2026-08-05 M-8`](../2026-08-05/backend-review.md#M-8-the-backend-cannot-detect-wrong-data-in-the-indexer-db-and-the-indexer-enforces-authorization-the-chain-deliberately-does-not) identified the indexer trust boundary, non-atomic writes, silent handler failures, and lookback truncation. Its retest marked drift tests Partially Fixed and the authorization boundary Accepted Risk. This review audits the full implementation rather than only that boundary.
 
-> **Retest:** [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md) is
+> **Retest:** [`2026-08-07/indexer-retest.md`](indexer-retest.md) is
 > authoritative for present-day status (v1.33.0 / v1.33.2). This review is
 > preserved as written at its baseline.
 
@@ -433,5 +433,5 @@ The existing `indexer` backend category checks API shape, current balances/profi
 
 ## Follow-up Retest Guidance
 
-**Done.** See [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md).
+**Done.** See [`2026-08-07/indexer-retest.md`](indexer-retest.md).
 

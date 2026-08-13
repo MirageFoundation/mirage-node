@@ -3,7 +3,7 @@
 **Scope:** `blockchain/` — all tracked Go/proto/module files, including app/ante handlers, core module, keeper, types, params, genesis, all 44 upgrade handlers, the two vendored consensus-critical forks under `blockchain/patches/`, and security-relevant tests.
 **Out of scope:** `web/`, `indexer/`, `deploy/`, `scripts/` except patch-provenance verification, external programs, and production servers. No fleet hosts were contacted.
 **Baseline:** `dev` at `d9dbf87a5c0632c5a95ce0e369bbc559fe3c4185` (`v1.32.4-1-gd9dbf87a`). The working tree has unrelated backend-review documentation changes, but is clean under `blockchain/`. There is no `blockchain/` delta from the Aug 6 audit baseline `589133443eac331fed67321902ef0e9ca353b456`.
-**Previous review:** [`review-2026-08-06.md`](review-2026-08-06.md). This is a fresh full-tree review with independent app/ante, core-handler, keeper/state, and upgrades/patch passes. Because source is byte-identical, prior open findings are revalidated rather than treated as remediations.
+**Previous review:** [`2026-08-06/blockchain-review.md`](../2026-08-06/blockchain-review.md). This is a fresh full-tree review with independent app/ante, core-handler, keeper/state, and upgrades/patch passes. Because source is byte-identical, prior open findings are revalidated rather than treated as remediations.
 
 ---
 
@@ -404,7 +404,7 @@ The highest-value operational prevention remains separating public query load fr
 
 ## Follow-up Retest Guidance
 
-After remediation, create `docs/security/blockchain/review-2026-08-07-retest.md` and include:
+After remediation, create `docs/security/2026-08-07/blockchain-retest.md` and include:
 
 - a status row for M-1–M-7 and L-1–L-11;
 - injected store failures proving no write-discard success path remains;

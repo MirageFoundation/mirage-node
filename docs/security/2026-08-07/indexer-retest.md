@@ -1,6 +1,6 @@
 # Indexer Security Review — Retest of 2026-08-07
 
-**Retest of:** [`review-2026-08-07.md`](review-2026-08-07.md) — first dedicated indexer security/correctness review (5 High, 9 Medium, 3 Low, 3 Informational).
+**Retest of:** [`2026-08-07/indexer-review.md`](indexer-review.md) — first dedicated indexer security/correctness review (5 High, 9 Medium, 3 Low, 3 Informational).
 **Review baseline:** `dev` at `d9dbf87a` (`v1.32.4`).
 **Retest state:** remediation implemented against baseline tag **v1.32.4** and shipped as **v1.33.0** (migrations keyed `v1_33_0_*`).
 **Scope of this document:** status of every finding, evidence, and residuals that remain accepted or deferred.

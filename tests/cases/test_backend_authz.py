@@ -3,7 +3,7 @@
 The suite already covers cross-user *writes* and input validation heavily. This
 module covers the authorization surface instead: who may call a route at all,
 who may read another user's private data, and whether the money path is
-authenticated. See docs/security/backend/review-2026-08-05.md (C-2, H-1, H-2).
+authenticated. See docs/security/2026-08-05/backend-review.md (C-2, H-1, H-2).
 """
 
 from __future__ import annotations

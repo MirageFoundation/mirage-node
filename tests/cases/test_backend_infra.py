@@ -1537,6 +1537,136 @@ def test_indexer_fail_hard(backend):
         )
 
 
+def test_indexer_profile_absent(backend):
+    """C-1: an account deleted on chain must not wedge the indexer.
+
+    A block being projected can predate the MsgDeleteUser that removed the
+    profile, so GetProfile legitimately answers "gone" for a message the
+    indexer still has to project. Before v1.35.0 the chain returned that as an
+    unclassified error and the indexer aborted the block, retried the same
+    block forever, and stopped advancing for everyone.
+
+    Runs fully offline: gRPC is faked, the DB is a recorder. The point is that
+    absence is skipped while a real outage still aborts, and a test that needed
+    a live chain would not run when it matters.
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    try:
+        import grpc
+
+        from indexer.chain_client import ChainClient
+        from indexer.message_processor import MessageProcessor
+    except Exception as e:
+        _skip("indexer_profile_absent.not_found_returns_none", f"indexer modules not importable: {e}")
+        return
+
+    class _FakeRpcError(grpc.RpcError):
+        def __init__(self, code):
+            super().__init__()
+            self._code = code
+
+        def code(self):
+            return self._code
+
+    class _FakeChannel:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+        def unary_unary(self, *_a, **_kw):
+            def _call(_req, timeout=None):
+                raise self._exc
+
+            return _call
+
+    client = ChainClient("http://127.0.0.1:26657")
+    original_channel = grpc.insecure_channel
+    try:
+        grpc.insecure_channel = lambda *_a, **_kw: _FakeChannel(_FakeRpcError(grpc.StatusCode.NOT_FOUND))
+        try:
+            result = client.query_profile_full("mirage1deletedaccount")
+        except Exception as e:
+            _fail("indexer_profile_absent.not_found_returns_none", f"raised {type(e).__name__}: {e}")
+        else:
+            if result is None:
+                _pass("indexer_profile_absent.not_found_returns_none")
+            else:
+                _fail("indexer_profile_absent.not_found_returns_none", f"returned {result!r} instead of None")
+
+        # The narrowness is the whole safety property: if any status collapsed
+        # to None, a node outage would be recorded as "user has nothing" and
+        # the indexer would wipe live users' lists instead of aborting.
+        grpc.insecure_channel = lambda *_a, **_kw: _FakeChannel(_FakeRpcError(grpc.StatusCode.UNAVAILABLE))
+        try:
+            client.query_profile_full("mirage1liveaccount")
+        except grpc.RpcError:
+            _pass("indexer_profile_absent.outage_still_raises")
+        except Exception as e:
+            _fail("indexer_profile_absent.outage_still_raises", f"raised {type(e).__name__} instead of RpcError: {e}")
+        else:
+            _fail("indexer_profile_absent.outage_still_raises", "a node outage was swallowed as an absent profile")
+    finally:
+        grpc.insecure_channel = original_channel
+
+    class _RecordingDB:
+        """Any DB call at all is a failure, so record every attribute touched."""
+
+        def __init__(self):
+            self.calls = []
+
+        def __getattr__(self, name):
+            def _record(*_a, **_kw):
+                self.calls.append(name)
+                return None
+
+            return _record
+
+    class _AbsentChain:
+        def query_profile_full(self, *_a, **_kw):
+            return None
+
+    db = _RecordingDB()
+    mp = MessageProcessor(db, _AbsentChain(), lambda *_a, **_kw: None, lambda _ts: "")
+
+    if mp._load_chain_profile("mirage1deletedaccount") is None:
+        _pass("indexer_profile_absent.load_returns_none")
+    else:
+        _fail("indexer_profile_absent.load_returns_none", "_load_chain_profile invented a profile for a deleted account")
+
+    for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_followed_topics"):
+        try:
+            getattr(mp, helper)("mirage1deletedaccount", 0)
+        except Exception as e:
+            _fail(f"indexer_profile_absent.{helper}", f"raised {type(e).__name__} for an absent profile: {e}")
+        else:
+            _pass(f"indexer_profile_absent.{helper}")
+
+    if db.calls:
+        _fail(
+            "indexer_profile_absent.no_db_writes",
+            f"touched the DB for an absent profile: {sorted(set(db.calls))}",
+        )
+    else:
+        _pass("indexer_profile_absent.no_db_writes")
+
+    # Same class of wedge from the other direction: a message type this build
+    # does not know (older indexer, newer chain) must be logged and skipped,
+    # never raised into the block loop.
+    try:
+        mp.process_core_message("/mirage.core.v1.MsgFromTheFuture", b"", "DEADBEEF", 0, 1)
+    except Exception as e:
+        _fail("indexer_profile_absent.unknown_type_skipped", f"raised {type(e).__name__}: {e}")
+    else:
+        _pass("indexer_profile_absent.unknown_type_skipped")
+
+
 def test_node_join_bootstrap(backend: str):
     """A new node must join mirage-1 or refuse, never invent its own chain.
 
@@ -1623,6 +1753,18 @@ def test_node_join_bootstrap(backend: str):
         else:
             _fail("node_join.derives_trust_below_head", f"height={height} hash={thash}")
 
+        # H-2: the trust hash lands in a shell variable on the joining node, so
+        # a bootstrap peer that answers with a command instead of a hash must be
+        # refused here. Both endpoints agree on the payload, so agreement alone
+        # would have let it through.
+        payload = 'A" ; touch /tmp/pwned #'
+        bj.rpc = _rpc_factory(hashes={"http://a": payload, "http://b": payload})
+        try:
+            bj.derive_trust(["http://a", "http://b"])
+            _fail("node_join.rejects_malformed_trust_hash", f"accepted a non-hash trust value: {payload!r}")
+        except SystemExit:
+            _pass("node_join.rejects_malformed_trust_hash")
+
         # A single endpoint cannot cross-check itself, so it is refused rather
         # than silently duplicated into the light client's server list.
         os.environ.update(BOOTSTRAP_RPC="http://only-one", CHAIN_ID="mirage-1", NODE_HOME=tmpdir)
@@ -1644,6 +1786,28 @@ def test_node_join_bootstrap(backend: str):
         _pass("node_join.local_testnet_exempt")
     else:
         _fail("node_join.local_testnet_exempt", "init.sh no longer gates the join bootstrap on SKIP_PEERS")
+
+    # H-2: init.sh runs as root, in the same window the operator pipes in a
+    # mnemonic, on output it just fetched from a remote node. eval there is
+    # remote code execution, so the shape of the parser is pinned: no eval, an
+    # allowlist of keys, and the trust hash checked against 64 hex chars.
+    code_lines = [ln for ln in init_src.splitlines() if not ln.lstrip().startswith("#")]
+    eval_lines = [ln.strip() for ln in code_lines if re.search(r"\beval\b", ln)]
+    if eval_lines:
+        _fail("node_join.no_eval_of_bootstrap_output", f"init.sh evals again: {eval_lines}")
+    else:
+        _pass("node_join.no_eval_of_bootstrap_output")
+
+    code_src = "\n".join(code_lines)
+    missing = [
+        pattern
+        for pattern in ("^[0-9A-Fa-f]{64}$", "unexpected key", "STATESYNC_TRUST_HASH)")
+        if pattern not in code_src
+    ]
+    if missing:
+        _fail("node_join.validates_statesync_values", f"init.sh no longer validates bootstrap output: {missing}")
+    else:
+        _pass("node_join.validates_statesync_values")
 
 
 def test_runner_accounting(backend: str):

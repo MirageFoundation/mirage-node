@@ -1,6 +1,6 @@
 # Mirage Frontend Security Retest — 2026-08-09
 
-Companion to [`review-2026-08-07.md`](review-2026-08-07.md).
+Companion to [`2026-08-07/frontend-review.md`](../2026-08-07/frontend-review.md).
 
 ## Finding closure map
 

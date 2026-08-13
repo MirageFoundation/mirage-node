@@ -1,6 +1,6 @@
 # Blockchain Security Review — Retest of 2026-08-07
 
-**Retest of:** [`review-2026-08-07.md`](review-2026-08-07.md) — full `blockchain/` audit, 7 Medium, 11 Low, 7 Informational.
+**Retest of:** [`2026-08-07/blockchain-review.md`](blockchain-review.md) — full `blockchain/` audit, 7 Medium, 11 Low, 7 Informational.
 **Review baseline:** `dev` at `d9dbf87a` (`v1.32.4-1-gd9dbf87a`).
 **Remediation baseline:** `dev` at `4acbf0b9` (`v1.33.10`). Ten releases landed between the review and the start of remediation; no blockchain remediation was among them, so every M and L finding was re-verified as present before being fixed.
 **Retest state:** remediation implemented on `dev` for **v1.34.0**, a coordinated consensus upgrade. Not yet committed, tagged, or deployed at the time of writing.
@@ -43,7 +43,7 @@ The release is one coherent change rather than eighteen patches: node-local stor
 | L-10 | Admin gas waiver treats all deduction errors as insufficient balance | **Fixed** | v1.34.0 |
 | L-11 | Store/v2 pruning logs and suppresses per-store failures | **Fixed** (escalated and counted, deliberately not halting) | v1.34.0 |
 
-Every accepted and deferred row below is also carried in the cross-component register at [`docs/security/open-items.md`](../open-items.md), together with the still-open backend, indexer, and frontend items. There is no longer a calendar-bound action: the backend claim grace that was due to expire 2026-10-05 UTC was removed in this same release.
+Every accepted and deferred row below is also carried in the cross-component register at [`open-items.md`](../open-items.md), together with the still-open backend, indexer, and frontend items. There is no longer a calendar-bound action: the backend claim grace that was due to expire 2026-10-05 UTC was removed in this same release.
 
 Informational items:
 

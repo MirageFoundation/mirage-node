@@ -1,12 +1,12 @@
 # Backend Security Review — Retest of 2026-08-07
 
-**Retest of:** [`review-2026-08-07.md`](review-2026-08-07.md) — full backend audit, 2 Medium, 8 Low, 3 Informational.
+**Retest of:** [`2026-08-07/backend-review.md`](backend-review.md) — full backend audit, 2 Medium, 8 Low, 3 Informational.
 **Review baseline:** `dev` at `d9dbf87a` (v1.32.4 plus review commit).
 **Retest state:** remediation committed as `5dec8f59` / `bd2c294f`, released as **v1.33.3**, and deployed to all four validators on 2026-08-09.
 **Scope of this document:** status of every Aug 7 finding, regression evidence, and residuals that remain accepted or deferred. Where this document and the original disagree about present-day state, **this one is authoritative**; the original is preserved as written, with its line references frozen at its baseline.
 
-> **Earlier reviews.** [`review-2026-08-06.md`](review-2026-08-06.md) and
-> [`review-2026-08-05-retest.md`](review-2026-08-05-retest.md) remain the record of
+> **Earlier reviews.** [`2026-08-06/backend-review.md`](../2026-08-06/backend-review.md) and
+> [`2026-08-05/backend-retest.md`](../2026-08-05/backend-retest.md) remain the record of
 > how prior Critical/High remediations were closed. The Aug 6 payout residuals
 > restated in Aug 7 as L-2/L-3 are closed here.
 

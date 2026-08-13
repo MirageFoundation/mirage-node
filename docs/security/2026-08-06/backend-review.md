@@ -1,12 +1,12 @@
 # Backend Security Review — 2026-08-06
 
 **Scope:** `web/backend/` — all 33 tracked Python files (~25 110 lines), the 87 registered HTTP routes across `routes/public.py`, `routes/core.py`, and `routes/quests.py`, the quest/reward payout subsystem, media upload providers, the `shared/` modules the backend depends on (`canon.py`, `config.py`, `push.py`, `inbox.py`, `client.py`, `datatypes.py`, `logging_setup.py` — ~4 205 lines), and `indexer/` **at the trust boundary only**: what the backend is forced to believe because it reads chain state from the indexer DB.
-**Out of scope:** `web/frontend/`, blockchain module internals (audited separately in [`../blockchain/review-2026-08-06.md`](../blockchain/review-2026-08-06.md)), external storage providers, production servers. `deploy/` is referenced where a backend security property depends on it (Caddy, env templates, keyring) but is not itself audited.
+**Out of scope:** `web/frontend/`, blockchain module internals (audited separately in [`2026-08-06/blockchain-review.md`](blockchain-review.md)), external storage providers, production servers. `deploy/` is referenced where a backend security property depends on it (Caddy, env templates, keyring) but is not itself audited.
 **Baseline:** `dev` at `d9dbf87a5c0632c5a95ce0e369bbc559fe3c4185` (`v1.32.4` + blockchain review commit). Working tree clean under backend scope. Post-retest backend delta is essentially `d628eec6` (2026-08-06 lag incident: catching-up semantics, ante timestamp mapping, claim grace extension to 2026-10-05).
-**Previous review:** [`review-2026-08-05.md`](review-2026-08-05.md) (baseline `3ccf8c70`, v1.31.0) and its authoritative retest [`review-2026-08-05-retest.md`](review-2026-08-05-retest.md) (remediation through v1.32.1 / fleet v1.32.2). This cycle re-audits the full backend surface after that remediation wave plus the Aug 6 incident fixes.
+**Previous review:** [`2026-08-05/backend-review.md`](../2026-08-05/backend-review.md) (baseline `3ccf8c70`, v1.31.0) and its authoritative retest [`2026-08-05/backend-retest.md`](../2026-08-05/backend-retest.md) (remediation through v1.32.1 / fleet v1.32.2). This cycle re-audits the full backend surface after that remediation wave plus the Aug 6 incident fixes.
 
-> **Later full review / retest:** [`review-2026-08-07.md`](review-2026-08-07.md)
-> and its authoritative retest [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md)
+> **Later full review / retest:** [`2026-08-07/backend-review.md`](../2026-08-07/backend-review.md)
+> and its authoritative retest [`2026-08-07/backend-retest.md`](../2026-08-07/backend-retest.md)
 > (v1.33.3). The payout crash-window and CLI-ambiguity residuals below (L-1/L-2)
 > were restated there as L-2/L-3 and are **Fixed** in that retest. Use the Aug 7
 > retest for present-day status of those items.
@@ -222,4 +222,4 @@ Ordering is relative priority within the backlog, per the Urgency Assessment —
 
 ## Follow-up Retest Guidance
 
-**Done via the Aug 7 cycle.** There is no separate `review-2026-08-06-retest.md`. The open Aug 6 items (L-1–L-4, I-1) were restated in [`review-2026-08-07.md`](review-2026-08-07.md) and closed or accepted in [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md) (v1.33.3). Post-cutoff smoke for the claim grace (**I-1**) remains a calendar item after 2026-10-05 UTC.
+**Done via the Aug 7 cycle.** There is no separate `2026-08-06/backend-retest.md`. The open Aug 6 items (L-1–L-4, I-1) were restated in [`2026-08-07/backend-review.md`](../2026-08-07/backend-review.md) and closed or accepted in [`2026-08-07/backend-retest.md`](../2026-08-07/backend-retest.md) (v1.33.3). Post-cutoff smoke for the claim grace (**I-1**) remains a calendar item after 2026-10-05 UTC.

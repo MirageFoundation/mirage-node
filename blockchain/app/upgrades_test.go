@@ -143,6 +143,7 @@ var expectedUpgradeHandlers = []string{
 	"v1.31.0",
 	"v1.32.0",
 	"v1.34.0",
+	"v1.35.0",
 }
 
 // TestUpgradeHandlersRegistered verifies every expected handler is registered
@@ -152,7 +153,7 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	app := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
 	require.NoError(t, app.Load(true))
 
-	require.Len(t, expectedUpgradeHandlers, 45, "update the expected handler list and this count together")
+	require.Len(t, expectedUpgradeHandlers, 46, "update the expected handler list and this count together")
 
 	seen := make(map[string]struct{}, len(expectedUpgradeHandlers))
 	for _, name := range expectedUpgradeHandlers {

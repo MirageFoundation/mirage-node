@@ -3,7 +3,7 @@
 **Scope:** `blockchain/` — all tracked Go/proto/module files, including app/ante handlers, core module, keeper, types, params, genesis, upgrade handlers, the two vendored consensus-critical forks under `blockchain/patches/`, and security-relevant tests. The orchestrator package is confirmed absent (removed with the bridge).
 **Out of scope:** `web/`, `indexer/`, `deploy/`, `scripts/`, external Solana programs, production servers. Ops-layer tooling is referenced where a blockchain-side design choice depends on it, but is not itself audited. The backend C-1 finding is cited only for the chain-side remediation that closed it.
 **Baseline:** `dev` at `589133443eac331fed67321902ef0e9ca353b456` (`v1.32.4`). `prod` tip is `d628eec6` (`v1.32.3`); the only `blockchain/` delta between `prod` and this baseline is a one-line comment edit in `app/upgrades.go` plus the version-bump commit. Working tree clean under `blockchain/`.
-**Previous review:** [`review-2026-08-04.md`](review-2026-08-04.md) (baseline `v1.30.0`) and its authoritative retest [`review-2026-08-04-retest.md`](review-2026-08-04-retest.md) (`prod` `870afabd`, `v1.32.2`). This cycle re-audits the full tree after that remediation wave plus the v1.32.0–v1.32.1 C-1 / fee-ceiling work.
+**Previous review:** [`2026-08-04/blockchain-review.md`](../2026-08-04/blockchain-review.md) (baseline `v1.30.0`) and its authoritative retest [`2026-08-04/blockchain-retest.md`](../2026-08-04/blockchain-retest.md) (`prod` `870afabd`, `v1.32.2`). This cycle re-audits the full tree after that remediation wave plus the v1.32.0–v1.32.1 C-1 / fee-ceiling work.
 
 > **Relationship to the Aug 4 retest.** The retest recorded remediation status for the
 > prior 23 findings. This document is a new full audit, not another retest. Prior
@@ -364,9 +364,9 @@ Ordering is relative priority within the backlog, per the Urgency Assessment abo
 
 ## Follow-up Retest Guidance
 
-If remediation lands in this release cycle, produce `docs/security/blockchain/review-2026-08-06-retest.md` following [`review-2026-08-04-retest.md`](review-2026-08-04-retest.md):
+If remediation lands in this release cycle, produce `docs/security/2026-08-06/blockchain-retest.md` following [`2026-08-04/blockchain-retest.md`](../2026-08-04/blockchain-retest.md):
 
-- Header with Scope, Baseline (post-remediation commit), Previous review: `review-2026-08-06`.
+- Header with Scope, Baseline (post-remediation commit), Previous review: `2026-08-06/blockchain-review`.
 - Remediation Status table covering every finding: `M-1`–`M-5`, `L-1`–`L-7`, `I-1`–`I-7`.
 - Minimum evidence:
   - **M-1**: injected `SetSubscription` / `SetProfileCore` failures reject the tx or halt EndBlock; no success path after value move.

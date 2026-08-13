@@ -1,14 +1,41 @@
 # Security Open Items — Cross-Component Register
 
-**As of:** 2026-08-13, at the `v1.34.0` tag on `dev`. Pinned to the tag rather than a commit hash, which went stale the moment the release was amended.
+**As of:** 2026-08-13, at the `v1.34.1` tag on `dev`. Pinned to the tag rather than a commit hash, which went stale the moment the release was amended.
 **Purpose:** one place to find every security item that is still open across components, so that an accepted risk or a deferred plan item cannot quietly become forgotten work. Every entry needs either a scheduled action or a recorded decision.
 
 Component detail lives in the retests, which stay authoritative for their own findings:
 
-- [blockchain](blockchain/review-2026-08-07-retest.md) — staged for `v1.34.0`
-- [backend](backend/review-2026-08-07-retest.md) — shipped `v1.33.3`, plus the 2026-08-12 delta appendix
-- [indexer](indexer/review-2026-08-07-retest.md) — shipped `v1.33.0`–`v1.33.2`, plus the 2026-08-12 delta appendix and the topic-attribution fix in `v1.34.0`
-- [frontend](frontend/retest-2026-08-09.md) — plus the 2026-08-12 delta appendix
+- [blockchain](2026-08-07/blockchain-retest.md) — staged for `v1.34.0`
+- [backend](2026-08-07/backend-retest.md) — shipped `v1.33.3`, plus the 2026-08-12 delta appendix
+- [indexer](2026-08-07/indexer-retest.md) — shipped `v1.33.0`–`v1.33.2`, plus the 2026-08-12 delta appendix and the topic-attribution fix in `v1.34.0`
+- [frontend](2026-08-09/frontend-retest.md) — plus the 2026-08-12 delta appendix
+- [cross-component sweep 2026-08-13](2026-08-13/cross-component-review.md) — Critical/High only, all five components; staged for `v1.35.0`; **authoritative for the unfixed items in the next section**
+
+---
+
+## Open Critical / High — action required
+
+**None.** The [2026-08-13 sweep](2026-08-13/cross-component-review.md) found 1 Critical and 5 High; four were fixed the same day and two were accepted as non-issues by the operator. The fixes are staged for **`v1.35.0`** and are code-complete and test-verified, but **not yet released** — the chain change takes effect only after the binary is rebuilt and the fleet crosses the `v1.35.0` upgrade height.
+
+| ID | Component | Item | Outcome |
+| :--- | :--- | :--- | :--- |
+| **C-1** | Indexer | Account self-delete permanently wedged the indexer on an earlier block | **Fixed** — `GetProfile` returns `codes.NotFound`; indexer skips and logs `profile_absent`; unknown message types no longer halt either. Two regression tests pin the status code. |
+| **H-1** | Deploy | Fleet addresses in public git history | **Non-issue (accepted)** — addresses are public knowledge; keeping them out of the tree is the only requirement and it already holds |
+| **H-2** | Deploy | Remote RPC `block_id.hash` reached `eval` as root during `--init` | **Fixed** — `eval` removed in favour of a validated four-key parser; hash also hex-checked at the source. Verified against injection payloads. |
+| **H-3** | Deploy | `backup_restore.py` published `1317`/`9090`, which ufw cannot restrict | **Fixed** — single `CONTAINER_PORTS` constant matching `deploy.sh`. Live check: no host was ever in the exposed state. |
+| **H-4** | Deploy | Backup archive mode `0644` in `/tmp` | **Non-issue (accepted)** — operator's own backups on single-tenant hosts; live check found no archive present |
+| **H-5** | Backend | Invite-referral reward re-payable to the same pair | **Fixed** — gated on `is_new_user and code == 0`. **It had already fired in production:** one referee was paid twice (2026-04-15 and 2026-04-18), both claimed. |
+
+---
+
+## Deferred from the 2026-08-13 sweep
+
+| Item | Why deferred | Trigger |
+| :--- | :--- | :--- |
+| Default-deny `DOCKER-USER` firewall rule | The structural version of the H-3 fix: it makes *any* stray `docker run -p` non-public instead of relying on port lists staying correct. Changes packet filtering on live validators, so it needs its own change window rather than riding a source fix. | Next infrastructure window, or the next time a container's port set changes |
+| Pair-level idempotency for invite rewards + missing `QUESTS_ENABLED` check | The `is_new_user` gate already makes the H-5 replay unreachable, so this is thoroughness rather than closure. `pending_rewards` records no `(referrer, referee)` pair, which is why referrer-side replay could not be distinguished from legitimate multi-recruit during the investigation. | Before referral rewards are switched back on, or the next time invite accounting needs auditing |
+| End-to-end reindex test over a self-delete block | C-1 is covered by chain-side unit tests, but the actual wedge was an indexer projection failure. A replay test needs local docker and the raised PoW limit. | Next local-testnet test pass |
+| Reconciling the ~20k MIRAGE over-issued in April | Recorded so the number is not lost; reversing it is a product decision, not a security fix. | Operator decision |
 
 ---
 
@@ -34,6 +61,9 @@ Component detail lives in the retests, which stay authoritative for their own fi
 | Frontend L-1 | Photon/wsrv thumbnail proxies | Keep the viewer's IP off origin hosts and apply upstream abuse filtering that a direct fetch would not. |
 | Frontend L-4 | Click-to-load media gate removed | Inline media on unknown hosts now loads without consent, so a post author can learn a passing reader's IP. Accepted for reading experience; recorded separately because the proxy rationale does not cover a direct inline fetch. |
 | Dependencies | `GO-2026-5932` (OpenPGP), `GO-2026-4479` (Pion DTLS) | No upstream fix exists. Reached only through the SDK keyring CLI and CometBFT's optional libp2p transport; production uses the `test` keyring backend and `[p2p.libp2p] enabled=false`. Revisit immediately if a deployment template enables libp2p. |
+| Deploy H-1 (2026-08-13) | Validator addresses present in public git history | Addresses are public knowledge — a validator must be reachable to peer. The requirement is only that they stay out of the source tree, which holds at the tip. No rotation, no history rewrite. |
+| Deploy H-4 (2026-08-13) | Backup archive left mode `0644` in `/tmp` | Operator's own backups, on single-tenant hosts with key-only root SSH. Accepted as operator risk. One-line fix recorded in the review if ever revisited. |
+| Indexer (2026-08-13) | Unknown message types are skipped, not fatal | Halting on an unknown type takes the whole platform down *and* makes the block permanently unprojectable, for what is really a deploy-skew mistake. A skipped message means an incomplete index for that height, resolved by upgrading and replaying; the skip is logged at error level with type, height and tx hash. |
 
 ---
 
@@ -59,4 +89,4 @@ Component detail lives in the retests, which stay authoritative for their own fi
 
 ## Maintaining this file
 
-Add an entry when a review closes with an accepted or deferred item, and remove it when the trigger fires and the work lands. An item that is fixed belongs in its component retest, not here. If an entry sits with a fired trigger and no action, that is the signal to escalate rather than to soften the wording.
+Add an entry when a review closes with an accepted or deferred item, and remove it when the trigger fires and the work lands. An item that is fixed belongs in its component retest, not here. Unfixed Critical/High items go in the first section instead, and are removed only once a retest records them as closed — never by downgrading them into an accepted decision. If an entry sits with a fired trigger and no action, that is the signal to escalate rather than to soften the wording.

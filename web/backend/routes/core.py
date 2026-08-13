@@ -1354,10 +1354,14 @@ def core_set_username():
             log_event(rid, "set_username.referral_settings_init_error", error=str(settings_err))
 
         # Check for invite quest completion (referrer has invite_recruit, new user used their code)
-        try:
-            _process_invite_quest_completion(rid, user_addr.lower())
-        except Exception as invite_err:
-            log_event(rid, "set_username.invite_quest_error", error=str(invite_err))
+        # Registration only. The invite_codes redemption row is permanent, so running
+        # this for an already-registered user re-pays both sides 10k MIRAGE every time
+        # the referrer is re-assigned the quest — a username change is enough to trigger it.
+        if is_new_user and code == 0:
+            try:
+                _process_invite_quest_completion(rid, user_addr.lower())
+            except Exception as invite_err:
+                log_event(rid, "set_username.invite_quest_error", error=str(invite_err))
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:

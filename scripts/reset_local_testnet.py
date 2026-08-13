@@ -212,7 +212,7 @@ def ensure_local_container(image_ref: str):
         [
             "bash",
             "-lc",
-            f"docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
+            f"docker run -d {backup_restore.CONTAINER_PORTS} "
             f"--name mirage --hostname testnet --restart no "
             f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
             f"--entrypoint /bin/bash "
@@ -1112,7 +1112,7 @@ def start_with_entrypoint(image_ref: str):
             f"-e CREATE_EMPTY_BLOCKS=true "
             f"-e CREATE_EMPTY_BLOCKS_INTERVAL={LOCAL_BLOCK_TIME_SECONDS}s "
             f"-e TIMEOUT_COMMIT={LOCAL_BLOCK_TIME_SECONDS}s "
-            f"-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
+            f"{backup_restore.CONTAINER_PORTS} "
             f"-v {home}/.mirage:/root/.mirage "
             f"-v {home}/.caddy:/root/.local/share/caddy "
             f"'{image_ref}'",

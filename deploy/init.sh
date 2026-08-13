@@ -132,8 +132,49 @@ fi
 
 # Derived state sync wins over the node.env defaults: those are static and
 # cannot carry a trust height, which is only valid relative to the live head.
+#
+# Parsed, never eval'd. The trust hash and height originate from a remote node's
+# RPC response, so shell metacharacters in either must not be executable — this
+# runs as root, in the same window the operator's mnemonic is piped in. Only the
+# four expected keys are accepted, and each value is validated before use.
 if [ -n "$BOOTSTRAP_STATESYNC" ]; then
-  eval "$BOOTSTRAP_STATESYNC"
+  while IFS='=' read -r ss_key ss_val; do
+    [ -n "$ss_key" ] || continue
+    case "$ss_key" in
+      STATESYNC_ENABLE)
+        if [ "$ss_val" != "true" ]; then
+          echo "ERROR: bootstrap returned STATESYNC_ENABLE=$ss_val, expected 'true'" >&2
+          exit 1
+        fi
+        STATESYNC_ENABLE="$ss_val"
+        ;;
+      STATESYNC_RPC_SERVERS)
+        if [ -z "$ss_val" ]; then
+          echo "ERROR: bootstrap returned an empty STATESYNC_RPC_SERVERS" >&2
+          exit 1
+        fi
+        STATESYNC_RPC_SERVERS="$ss_val"
+        ;;
+      STATESYNC_TRUST_HEIGHT)
+        if ! [[ "$ss_val" =~ ^[0-9]+$ ]] || [ "$ss_val" -le 0 ]; then
+          echo "ERROR: bootstrap returned a non-numeric STATESYNC_TRUST_HEIGHT" >&2
+          exit 1
+        fi
+        STATESYNC_TRUST_HEIGHT="$ss_val"
+        ;;
+      STATESYNC_TRUST_HASH)
+        if ! [[ "$ss_val" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+          echo "ERROR: bootstrap returned a STATESYNC_TRUST_HASH that is not 64 hex chars" >&2
+          exit 1
+        fi
+        STATESYNC_TRUST_HASH="$ss_val"
+        ;;
+      *)
+        echo "ERROR: bootstrap returned an unexpected key: $ss_key" >&2
+        exit 1
+        ;;
+    esac
+  done <<< "$BOOTSTRAP_STATESYNC"
   echo "==> State sync enabled from trust height $STATESYNC_TRUST_HEIGHT"
 fi
 

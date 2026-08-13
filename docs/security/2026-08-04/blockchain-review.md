@@ -11,7 +11,7 @@
 > describes the 2026-08-04 baseline and is stale — including the six headings that
 > read "Not Started", H-2's "Conditional on Operator Verification", the Prior
 > Finding Status table, and all eleven Prioritized Recommendations. See
-> [`review-2026-08-04-retest.md`](review-2026-08-04-retest.md), which is
+> [`2026-08-04/blockchain-retest.md`](blockchain-retest.md), which is
 > authoritative wherever the two disagree. The analysis below is preserved as
 > written, with its line references frozen at its baseline.
 >
@@ -68,7 +68,7 @@ No new privilege-escalation, signature-bypass, or unauthorized-mint vector was f
 > M-8, L-1, L-2, L-4 Fixed**, **M-5 Fixed** (its regression test still missing),
 > **L-3 Documented**, **I-2 Not Started** (informational), **I-3 and I-4 Accepted
 > Risk** (unchanged carryovers). Full evidence per finding is in the
-> [retest](review-2026-08-04-retest.md).
+> [retest](blockchain-retest.md).
 
 ### H-1: `CONSENSUS_FATAL` Panics Produce Consensus Zombies, Not Process Exits — A Deterministic Trigger Halts the Whole Chain With No Automatic Recovery (High)
 
@@ -484,7 +484,7 @@ Unchanged from 2026-05-09 I-1 and prior. Documented architecture boundary.
 
 > **This table describes the 2026-08-04 baseline and is stale.** Every "Not
 > Started" below was remediated in v1.31.0. The bridge row's deferral is moot —
-> the bridge was removed. See the [retest](review-2026-08-04-retest.md).
+> the bridge was removed. See the [retest](blockchain-retest.md).
 
 | Prior finding | Current status |
 | :--- | :--- |
@@ -524,7 +524,7 @@ Unchanged from 2026-05-09 I-1 and prior. Documented architecture boundary.
 > **Seven of these eleven gaps are now closed** and one is moot. Only three remain
 > open: the PoW verification benchmark, the M-5 wedged-user regression, and the
 > M-6 bootstrap idempotence test. The relay-parity gap is half closed. Current
-> state is tabulated in the [retest](review-2026-08-04-retest.md).
+> state is tabulated in the [retest](blockchain-retest.md).
 
 - **No test enumerating `CONSENSUS_FATAL` sites or asserting the halt mechanism terminates the process.** The 2026-07-12 halt is unrepresented in the test suite. See H-1.
 - **No test asserting the end state of `params.BridgeChains` after applying all upgrade handlers in order.** Would have caught H-2 mechanically. See H-2 and I-2.
@@ -600,15 +600,15 @@ Unchanged from 2026-05-09 I-1 and prior. Documented architecture boundary.
 
 ## Follow-up Retest Guidance
 
-> **Done 2026-08-06:** [`review-2026-08-04-retest.md`](review-2026-08-04-retest.md).
+> **Done 2026-08-06:** [`2026-08-04/blockchain-retest.md`](blockchain-retest.md).
 > Note that `review-2026-03-12-retest.md`, named below as the pattern to follow,
 > **does not exist in this repository** — the retest follows
-> [`../backend/review-2026-08-05-retest.md`](../backend/review-2026-08-05-retest.md)
+> [`2026-08-05/backend-retest.md`](../2026-08-05/backend-retest.md)
 > instead, the only retest precedent actually present.
 
-If remediation lands in the same release cycle, produce `docs/security/blockchain/review-2026-08-04-retest.md` following the pattern in `review-2026-03-12-retest.md`:
+If remediation lands in the same release cycle, produce `docs/security/2026-08-04/blockchain-retest.md` following the pattern in `review-2026-03-12-retest.md`:
 
-- Header with `Scope`, `Baseline` (post-remediation commit), and `Previous review: review-2026-08-04`.
+- Header with `Scope`, `Baseline` (post-remediation commit), and `Previous review: 2026-08-04/blockchain-review`.
 - `## Remediation Status — Review 2026-08-04` table with columns `ID`, `Title`, `Status` (Fixed / Accepted Risk / Documented / Not Started), `Notes`.
 - Include every finding: `H-1`–`H-2`, `M-1`–`M-9`, `L-1`–`L-8`, `I-1`–`I-4`.
 - For bridge-scoped findings, only mark `Fixed` once the kill-switch exists in code — params-only remediation is not sufficient, since params-only dormancy is exactly what H-2 shows cannot be relied upon.

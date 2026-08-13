@@ -1486,6 +1486,42 @@ def test_invite_code_hygiene(backend):
     else:
         _pass("invite_code.no_owner_disclosure")
 
+    # H-5: the referral payout must fire once, at registration. The redemption
+    # row in invite_codes is permanent and the quest is re-assignable, so an
+    # unguarded call re-pays referrer and invitee 10k MIRAGE each every time the
+    # invitee renames — which is exactly what happened in production. Every call
+    # site has to sit under a test that reads both is_new_user and the tx code.
+    target = "_process_invite_quest_completion"
+    guard_sets: list[frozenset] = []
+
+    def _scan(node, guards: frozenset):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == target:
+            guard_sets.append(guards)
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.If):
+                names = frozenset(n.id for n in ast.walk(child.test) if isinstance(n, ast.Name))
+                for stmt in child.body:
+                    _scan(stmt, guards | names)
+                for stmt in child.orelse:
+                    _scan(stmt, guards)
+                continue
+            _scan(child, guards)
+
+    core_path = os.path.join(backend_src, "routes", "core.py")
+    _scan(ast.parse(open(core_path, encoding="utf-8").read()), frozenset())
+
+    unguarded = [sorted(g) for g in guard_sets if not {"is_new_user", "code"} <= set(g)]
+    if not guard_sets:
+        _skip("invite_code.referral_payout_registration_only", f"no call to {target} found")
+    elif unguarded:
+        _fail(
+            "invite_code.referral_payout_registration_only",
+            f"H-5: {target} is reachable outside registration (enclosing guards: {unguarded}); "
+            f"a repeat call re-pays the referral reward",
+        )
+    else:
+        _pass("invite_code.referral_payout_registration_only", call_sites=len(guard_sets))
+
 
 def test_indexer_drift(backend):
     """M-8: state served from the indexer DB must match the chain.

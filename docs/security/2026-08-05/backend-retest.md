@@ -1,14 +1,14 @@
 # Backend Security Review — Retest of 2026-08-05
 
-**Retest of:** [`review-2026-08-05.md`](review-2026-08-05.md) — the first security review of the Mirage backend, 25 findings (2 Critical, 3 High, 8 Medium, 8 Low, 4 Informational).
+**Retest of:** [`2026-08-05/backend-review.md`](backend-review.md) — the first security review of the Mirage backend, 25 findings (2 Critical, 3 High, 8 Medium, 8 Low, 4 Informational).
 **Review baseline:** `dev` at `3ccf8c70` (v1.31.0).
 **Retest state:** remediation committed as `b7c8b258` and released as **v1.32.1**; deployed to all four validators at **v1.32.2** on 2026-08-06. Chain-side remediation shipped in the **v1.32.0** consensus upgrade; the backend-only items landed on v1.32.1.
 **Scope of this document:** current status of every finding, the evidence for each claim, and the rationale for each item accepted rather than fixed. Where this document and the original disagree about present-day state, **this one is authoritative**; the original is preserved as written, with its line references frozen at its baseline.
 
-> **Later full reviews:** [`review-2026-08-06.md`](review-2026-08-06.md) and
-> [`review-2026-08-07.md`](review-2026-08-07.md) re-audit the backend after this
+> **Later full reviews:** [`2026-08-06/backend-review.md`](../2026-08-06/backend-review.md) and
+> [`2026-08-07/backend-review.md`](../2026-08-07/backend-review.md) re-audit the backend after this
 > remediation wave. The Aug 6 payout residual (unfinished claim-before-pay) was
-> restated in Aug 7 and closed in [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md)
+> restated in Aug 7 and closed in [`2026-08-07/backend-retest.md`](../2026-08-07/backend-retest.md)
 > (v1.33.3). This retest remains the record of how the Aug 5 findings were closed.
 
 > **Count correction.** Earlier planning notes for this retest said "22 findings".

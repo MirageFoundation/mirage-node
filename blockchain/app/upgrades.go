@@ -2287,6 +2287,37 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// v1.35.0 — no state migration.
+	//
+	// This release's only chain change is that Query/GetProfile returns a gRPC
+	// NotFound status for an address with no profile instead of a generic error.
+	// That is query-path only: it never runs during block execution, so it does
+	// not touch state, params, store keys or the app hash, and there is nothing
+	// for this handler to migrate.
+	//
+	// It is registered anyway, deliberately. A named plan makes every validator
+	// switch binaries at the same height instead of rolling through the fleet one
+	// host at a time, which is what keeps a single node from running different
+	// query semantics to its peers while the deploy is in flight. The indexer
+	// depends on that status code to distinguish a deleted account from a node
+	// failure — without it, it treats a deleted account as an outage, stops
+	// advancing its checkpoint, and crash-loops on the same block forever.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.35.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.35.0 (GetProfile NotFound status; no state migration)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.35.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.35.0 complete")
+			return toVM, nil
+		},
+	)
+
 	// Register the store loader for v1.28.0's store deletions. This must run
 	// before app.Load() (called later in App.New) so the deleted stores are
 	// dropped while loading the multistore at the upgrade height.

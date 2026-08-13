@@ -28,6 +28,8 @@ import (
 	// txtypes removed; no longer needed
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"mirage/x/core/keeper"
 	"mirage/x/core/types"
@@ -1206,7 +1208,10 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 	}
 
 	if !found {
-		return nil, fmt.Errorf("profile not found for address: %s", address)
+		// NotFound, not a generic error: a deleted account is a legitimate state,
+		// and callers must be able to tell it apart from a node failure without
+		// matching on the message text.
+		return nil, status.Errorf(codes.NotFound, "profile not found for address: %s", address)
 	}
 
 	return &types.QueryProfileResponse{

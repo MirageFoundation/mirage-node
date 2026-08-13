@@ -9,8 +9,9 @@ State sync is not optional here. Genesis carries initial_height 2096156 while
 nodes retain RETENTION_BLOCKS (~7 days) of blocks, so no peer can serve the
 several million blocks a block-syncing node would ask for.
 
-Writes genesis.json and prints STATESYNC_* assignments on stdout for the caller
-to eval. Any verification failure exits non-zero without touching genesis.json.
+Writes genesis.json and prints STATESYNC_* KEY=VALUE lines on stdout for the
+caller to parse (init.sh validates each key and never evals them). Any
+verification failure exits non-zero without touching genesis.json.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.request
@@ -32,6 +34,10 @@ GENESIS_SHA256 = "79eb6a81a83707cfd34f69e6f17bf6006ffa9f521b130f51dded92e04c6cfc
 TRUST_LOOKBACK = 2000
 
 HTTP_TIMEOUT = 60
+
+# A CometBFT block hash is exactly 32 bytes hex-encoded. Nothing else may reach
+# the caller's shell.
+BLOCK_HASH_RE = re.compile(r"^[0-9A-Fa-f]{64}$")
 
 
 def fail(msg: str) -> None:
@@ -113,6 +119,10 @@ def derive_trust(endpoints: list[str]) -> tuple[int, str]:
         h = str(((block.get("block_id") or {}).get("hash") or ""))
         if not h:
             fail(f"{ep} returned no block_id.hash for height {trust_height}")
+        # The caller puts this value into a shell variable, so anything that is
+        # not a bare block hash is rejected here rather than passed on.
+        if not BLOCK_HASH_RE.match(h):
+            fail(f"{ep} returned a malformed block_id.hash for height {trust_height}: {h!r}")
         hashes[ep] = h
 
     distinct = set(hashes.values())

@@ -5,6 +5,7 @@ Message processing logic for the indexer.
 import base64
 import logging
 import time
+from typing import Optional
 from google.protobuf.json_format import MessageToDict
 from shared.datatypes import (
     MsgPost,
@@ -242,7 +243,18 @@ class MessageProcessor:
         elif type_url == "/mirage.core.v1.MsgBridgeAttestMinted":
             pass
         else:
-            raise RuntimeError(f"Unhandled message type {type_url}")
+            # A type this build does not know can only come from a chain upgrade
+            # that shipped ahead of the indexer. Halting here would take the whole
+            # platform down and, worse, make the block permanently unprojectable
+            # on every restart. Skip loudly instead: the operator upgrades the
+            # indexer and replays the range.
+            logger.error(
+                "unhandled_message_type type_url=%s height=%s tx=%s SKIPPED - "
+                "this build cannot index it; upgrade the indexer and replay this height",
+                type_url,
+                height,
+                tx_hash,
+            )
 
     def _handle_post(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgPost (with tag support)."""
@@ -1115,9 +1127,16 @@ class MessageProcessor:
 
         return get_award_configs()
 
-    def _require_chain_profile(self, addr: str) -> dict:
-        """Fetch the authoritative chain profile via gRPC. Never soft-fails."""
+    def _load_chain_profile(self, addr: str) -> Optional[dict]:
+        """Fetch the authoritative chain profile via gRPC.
+
+        Returns None only when the chain reports no profile (deleted account).
+        A malformed or empty response still fails hard — that is a bug or an
+        outage, not a deleted user.
+        """
         profile = self.chain.query_profile_full(addr)
+        if profile is None:
+            return None
         if not isinstance(profile, dict) or not profile:
             raise RuntimeError(f"empty profile response for {addr}")
         return profile
@@ -1142,6 +1161,9 @@ class MessageProcessor:
             agents = []
 
             profile = self.chain.query_profile_full(addr)
+            if profile is None:
+                logger.warning("profile_absent set_username: skipping refresh for %s", addr)
+                return
             if "username" not in profile:
                 raise RuntimeError(f"missing username for {addr}")
             if "level" not in profile:
@@ -1188,7 +1210,10 @@ class MessageProcessor:
             if not addr:
                 raise RuntimeError("Rejected set_biography: missing target")
             # Authoritative biography comes from chain state after the tx applied.
-            profile_data = self._require_chain_profile(addr)
+            profile_data = self._load_chain_profile(addr)
+            if profile_data is None:
+                logger.warning("profile_absent set_biography: skipping refresh for %s", addr)
+                return
             biography = str(profile_data.get("biography", "") or "")
 
             self.db.update_profile_biography(addr, biography, ts)
@@ -1209,6 +1234,9 @@ class MessageProcessor:
     def _refresh_enabled_agents(self, addr: str, ts: int):
         """Query full profile via gRPC and replace enabled_agents in DB."""
         profile = self.chain.query_profile_full(addr)
+        if profile is None:
+            logger.warning("profile_absent enabled_agents: skipping refresh for %s", addr)
+            return
         if "enabled_agents" not in profile:
             raise RuntimeError(f"missing enabled_agents for {addr}")
         agents = profile["enabled_agents"]
@@ -1230,6 +1258,9 @@ class MessageProcessor:
     def _refresh_followed_users(self, addr: str, ts: int):
         """Query full profile via gRPC and replace followed_users in DB."""
         profile = self.chain.query_profile_full(addr)
+        if profile is None:
+            logger.warning("profile_absent followed_users: skipping refresh for %s", addr)
+            return
         if "followed_users" not in profile:
             raise RuntimeError(f"missing followed_users for {addr}")
         users = profile["followed_users"]
@@ -1251,6 +1282,9 @@ class MessageProcessor:
     def _refresh_followed_topics(self, addr: str, ts: int):
         """Query full profile via gRPC and replace followed_topics in DB."""
         profile = self.chain.query_profile_full(addr)
+        if profile is None:
+            logger.warning("profile_absent followed_topics: skipping refresh for %s", addr)
+            return
         if "followed_topics" not in profile:
             raise RuntimeError(f"missing followed_topics for {addr}")
         topics = profile["followed_topics"]
@@ -1736,7 +1770,10 @@ class MessageProcessor:
             if not owner:
                 raise RuntimeError("Rejected subscribe: could not derive owner")
 
-            profile_data = self._require_chain_profile(owner)
+            profile_data = self._load_chain_profile(owner)
+            if profile_data is None:
+                logger.warning("profile_absent subscribe: skipping refresh for %s", owner)
+                return
             level = int(profile_data.get("level", requested_level))
             subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
             auto_renew = bool(profile_data.get("auto_renew", False))
@@ -1791,7 +1828,10 @@ class MessageProcessor:
             if not owner:
                 raise RuntimeError("Rejected set_auto_renewal: could not derive owner")
 
-            profile_data = self._require_chain_profile(owner)
+            profile_data = self._load_chain_profile(owner)
+            if profile_data is None:
+                logger.warning("profile_absent set_auto_renewal: skipping refresh for %s", owner)
+                return
             level = int(profile_data.get("level", 0) or 0)
             subscription_expiry = int(profile_data.get("subscription_expiry", 0) or 0)
             auto_renew = bool(profile_data.get("auto_renew", requested_flag))

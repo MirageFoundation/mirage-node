@@ -1,7 +1,7 @@
 # Backend Security Review — 2026-08-05
 
 > **STATUS: superseded for remediation status. See
-> [`review-2026-08-05-retest.md`](review-2026-08-05-retest.md).**
+> [`2026-08-05/backend-retest.md`](backend-retest.md).**
 >
 > This document is the original review, preserved as written at its baseline. Its
 > findings and analysis stand, but its *status claims and line references are
@@ -10,13 +10,13 @@
 > fixed, what is accepted risk, and where each item lives now. Where the two
 > disagree on current state, the retest is authoritative.
 >
-> Later full reviews: [`review-2026-08-06.md`](review-2026-08-06.md),
-> [`review-2026-08-07.md`](review-2026-08-07.md). Present-day backend status for
+> Later full reviews: [`2026-08-06/backend-review.md`](../2026-08-06/backend-review.md),
+> [`2026-08-07/backend-review.md`](../2026-08-07/backend-review.md). Present-day backend status for
 > the payout/claim residual chain is in
-> [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md) (v1.33.3).
+> [`2026-08-07/backend-retest.md`](../2026-08-07/backend-retest.md) (v1.33.3).
 
 **Scope:** `web/backend/` — all 33 tracked Python files (24,431 lines), the 87 registered HTTP routes across `routes/public.py`, `routes/core.py`, and `routes/quests.py`, the quest/reward payout subsystem, media upload providers, the `shared/` modules the backend depends on (`canon.py`, `config.py`, `push.py`, `inbox.py`, `client.py`, `datatypes.py`, `logging_setup.py` — 4,195 lines), and `indexer/` (7,092 lines) **at the trust boundary only**: what the backend is forced to believe because it reads chain state from the indexer DB.
-**Out of scope:** `web/frontend/`, the blockchain module internals (audited separately in [`../blockchain/review-2026-08-04.md`](../blockchain/review-2026-08-04.md)), external storage providers, production servers. `deploy/` is referenced where a backend security property depends on it (Caddy rate limits, env templates, keyring backend) but is not itself audited.
+**Out of scope:** `web/frontend/`, the blockchain module internals (audited separately in [`2026-08-04/blockchain-review.md`](../2026-08-04/blockchain-review.md)), external storage providers, production servers. `deploy/` is referenced where a backend security property depends on it (Caddy rate limits, env templates, keyring backend) but is not itself audited.
 **Baseline (as reviewed, unchanged):** `dev` at `3ccf8c70be615e48f5a73824506aa4eecddd596b` (v1.31.0, "remove bridge permanently and land security review remediations"). Working tree clean. `prod` was at `1d3ab707` (v1.30.0); the backend delta between them is the bridge removal (`routes/bridge.py`, −541 lines) plus small `error_utils`/`pow`/`params` changes.
 **Line references in this document are relative to that baseline** and have drifted where remediation edited the file. C-1 through M-4 were fixed in v1.32.0 and the remaining code-level items in v1.32.1; both changed `routes/core.py` and `routes/public.py`. Current locations are in the retest.
 **Previous review:** none. **This is the first security review of the backend.** All seven prior reviews in `docs/security/` cover `blockchain/` only.
@@ -79,7 +79,7 @@ Updated after the v1.32.0 backend auth hardening. Each **Fixed** status below is
 
 > **This table is the v1.32.0 pass and is no longer current.** Everything marked
 > *Not re-verified* above was worked in v1.32.1, and both H-3 and M-8 moved.
-> **See [`review-2026-08-05-retest.md`](review-2026-08-05-retest.md)** for the
+> **See [`2026-08-05/backend-retest.md`](backend-retest.md)** for the
 > current status of all 25 findings, including the finding that **C-2's own
 > regression test was proving nothing** — it was gated on a closed grace period,
 > read a field name that does not exist in the response, and asserted a condition
@@ -974,9 +974,9 @@ Gaps marked **[closed]** were filled after the review; the test named is the one
 
 ## Follow-up Retest Guidance
 
-If remediation lands in the same release cycle, produce `docs/security/backend/review-2026-08-05-retest.md` following the retest convention described in [`../blockchain/review-2026-08-04.md`](../blockchain/review-2026-08-04.md):
+If remediation lands in the same release cycle, produce `docs/security/2026-08-05/backend-retest.md` following the retest convention described in [`2026-08-04/blockchain-review.md`](../2026-08-04/blockchain-review.md):
 
-- Header with `Scope`, `Baseline` (post-remediation commit), and `Previous review: review-2026-08-05`.
+- Header with `Scope`, `Baseline` (post-remediation commit), and `Previous review: 2026-08-05/backend-review`.
 - A `## Remediation Status — Review 2026-08-05` table with columns `ID`, `Title`, `Status` (Fixed / Accepted Risk / Documented / Not Started), `Notes`.
 - Include every finding: `C-1`–`C-2`, `H-1`–`H-3`, `M-1`–`M-8`, `L-1`–`L-8`, `I-1`–`I-4`.
 - For C-1 and C-2, **do not mark `Fixed` on the basis of a code change alone** — both require a test that fails against the pre-fix code, because both are concurrency- or protocol-level defects that a reading of the diff cannot confirm.

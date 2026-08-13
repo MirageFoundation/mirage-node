@@ -23,7 +23,7 @@ made two exceptions:
    `DeductFeeFromOwner` failure (bank or store level) rejects the transaction:
    those failures are node-local, so skipping the deduction on the failing node
    while peers deduct and burn is exactly the asymmetric skip this ADR does not
-   accept. See review L-10 in `docs/security/blockchain/review-2026-08-07.md`.
+   accept. See review L-10 in `docs/security/2026-08-07/blockchain-review.md`.
 
 ## Revised decision
 
@@ -64,5 +64,5 @@ continue from a state no healthy peer has.
 
 - Code: `mintAndDistribute`, `MintIfNeeded`, `BeginBlock`,
   `deductRelayGasFee` admin branch
-- `docs/security/blockchain/review-2026-08-04.md` (M-9, H-1)
+- `docs/security/2026-08-04/blockchain-review.md` (M-9, H-1)
 - `docs/troubleshooting/postmortems/` (2026-07-12 / related halt notes)

@@ -1,11 +1,11 @@
 # Backend Security Review — 2026-08-07
 
 **Scope:** `web/backend/` — all 33 tracked Python files (~25,110 lines), all 87 registered HTTP routes, quest/reward accounting, transaction construction, media providers, push delivery, analytics, database access, and the backend-facing `shared/` modules. `indexer/` and `deploy/` were inspected only where they define a backend trust or configuration boundary.
-**Out of scope:** `web/frontend/`, blockchain consensus internals (audited separately in [`../blockchain/review-2026-08-06.md`](../blockchain/review-2026-08-06.md)), external storage-provider implementations, and production servers.
+**Out of scope:** `web/frontend/`, blockchain consensus internals (audited separately in [`2026-08-06/blockchain-review.md`](../2026-08-06/blockchain-review.md)), external storage-provider implementations, and production servers.
 **Baseline:** `dev` at `d9dbf87a5c0632c5a95ce0e369bbc559fe3c4185` (`v1.32.4` plus the blockchain review commit). Audited backend source is unchanged from the Aug 6 backend baseline. The working tree had documentation-only changes outside the audited runtime code.
-**Previous review:** [`review-2026-08-06.md`](review-2026-08-06.md), with the Aug 5 review and authoritative retest linked from there. This is a new full audit, not a diff review or remediation retest.
+**Previous review:** [`2026-08-06/backend-review.md`](../2026-08-06/backend-review.md), with the Aug 5 review and authoritative retest linked from there. This is a new full audit, not a diff review or remediation retest.
 
-> **Retest:** [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md) is
+> **Retest:** [`2026-08-07/backend-retest.md`](backend-retest.md) is
 > authoritative for present-day status. Remediation shipped as **v1.33.3** and was
 > deployed fleet-wide on 2026-08-09. This review is preserved as written at its
 > baseline; do not treat open findings below as current open work without checking
@@ -354,4 +354,4 @@ Several existing attack tests also accept both rejection and successful submissi
 
 ## Follow-up Retest Guidance
 
-**Done.** See [`review-2026-08-07-retest.md`](review-2026-08-07-retest.md). Post-cutoff smoke for **I-1** (unsigned/bad-proof claims return 401 on or after 2026-10-05 UTC) remains a calendar item, not a code gap.
+**Done.** See [`2026-08-07/backend-retest.md`](backend-retest.md). Post-cutoff smoke for **I-1** (unsigned/bad-proof claims return 401 on or after 2026-10-05 UTC) remains a calendar item, not a code gap.

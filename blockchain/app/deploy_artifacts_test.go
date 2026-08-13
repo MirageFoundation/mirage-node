@@ -3,6 +3,8 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -235,4 +237,75 @@ func TestWeeklyRestartDayIsConfigurable(t *testing.T) {
 	require.Contains(t, backup, "docker stop mirage",
 		"backup_restore.py is expected to stop the container mid-backup; if "+
 			"that changed, revisit the restart-day constraint")
+}
+
+// publishedPorts pulls a `-p host:container` list out of a shell/python string
+// assignment and returns the pairs sorted, so two lists can be compared
+// regardless of the order they were written in.
+func publishedPorts(t *testing.T, src, assignment string) []string {
+	t.Helper()
+	m := regexp.MustCompile(assignment).FindStringSubmatch(src)
+	require.Len(t, m, 2, "could not find the port list matching %s", assignment)
+
+	pairs := []string{}
+	for _, p := range regexp.MustCompile(`-p (\d+:\d+)`).FindAllStringSubmatch(m[1], -1) {
+		pairs = append(pairs, p[1])
+	}
+	require.NotEmpty(t, pairs, "port list %q parsed to nothing", m[1])
+	sort.Strings(pairs)
+	return pairs
+}
+
+// TestRestorePublishesSamePortsAsDeploy pins the v1.35.0 fix for H-3.
+//
+// backup_restore.py starts the same container as deploy.sh, so it has to
+// publish the same host ports. The two lists were maintained separately and
+// drifted: the restore path additionally published 1317 (Cosmos REST) and 9090
+// (gRPC), which are meant to stay on the loopback interface behind Caddy. A
+// host that had been restored from backup was therefore serving unauthenticated
+// REST/gRPC to the internet, and nothing in the repo noticed, because deploy.sh
+// — the file anyone would read to answer "what do we expose?" — was correct.
+//
+// The invariant is stronger than list equality: no docker run in
+// backup_restore.py may spell its ports out inline, since that is how the two
+// drifted apart in the first place.
+func TestRestorePublishesSamePortsAsDeploy(t *testing.T) {
+	deploySh := readRepoFile(t, "deploy/deploy.sh")
+	restore := readRepoFile(t, "scripts/backup_restore.py")
+
+	deployPorts := publishedPorts(t, deploySh, `(?m)^PORTS="([^"]*)"`)
+	restorePorts := publishedPorts(t, restore, `(?m)^CONTAINER_PORTS = "([^"]*)"`)
+
+	require.Equal(t, deployPorts, restorePorts,
+		"scripts/backup_restore.py publishes a different port set than deploy/deploy.sh; "+
+			"a restored host must expose exactly what a deployed host exposes")
+
+	for _, port := range deployPorts {
+		host := strings.SplitN(port, ":", 2)[0]
+		require.NotEqual(t, "1317", host,
+			"Cosmos REST must not be published to the host; it belongs behind Caddy on loopback")
+		require.NotEqual(t, "9090", host,
+			"Cosmos gRPC must not be published to the host; it belongs on loopback")
+	}
+
+	// Every long-lived container start has to go through the constant. --rm
+	// helper containers publish nothing and are not counted.
+	starts := strings.Count(restore, "docker run -d --name mirage")
+	require.NotZero(t, starts, "backup_restore.py no longer starts the mirage container")
+	require.Equal(t, starts, strings.Count(restore, "{CONTAINER_PORTS}"),
+		"all %d container starts in backup_restore.py must publish {CONTAINER_PORTS}; "+
+			"an inline port list is how this drifted from deploy.sh before", starts)
+
+	inline := regexp.MustCompile(`(?m)^\s+.*-p \d+:\d+`).FindAllString(restore, -1)
+	require.Empty(t, inline, "backup_restore.py spells out ports inline instead of using CONTAINER_PORTS: %v", inline)
+
+	// reset_local_testnet.py starts the same container for the local testnet and
+	// held a third copy of the list. It imports backup_restore already, so it
+	// uses the constant rather than being a third thing to keep in sync.
+	reset := readRepoFile(t, "scripts/reset_local_testnet.py")
+	resetInline := regexp.MustCompile(`(?m)^\s+.*-p \d+:\d+`).FindAllString(reset, -1)
+	require.Empty(t, resetInline,
+		"reset_local_testnet.py spells out ports inline instead of using backup_restore.CONTAINER_PORTS: %v", resetInline)
+	require.Contains(t, reset, "backup_restore.CONTAINER_PORTS",
+		"reset_local_testnet.py must publish the shared CONTAINER_PORTS list")
 }

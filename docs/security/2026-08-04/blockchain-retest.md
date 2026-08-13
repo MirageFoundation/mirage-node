@@ -1,12 +1,12 @@
 # Blockchain Security Review — Retest of 2026-08-04
 
-**Retest of:** [`review-2026-08-04.md`](review-2026-08-04.md) — 23 findings (2 High, 9 Medium, 8 Low, 4 Informational).
+**Retest of:** [`2026-08-04/blockchain-review.md`](blockchain-review.md) — 23 findings (2 High, 9 Medium, 8 Low, 4 Informational).
 **Review baseline:** `prod` at `1d3ab707` (v1.30.0).
 **Retest state:** `prod` at `870afabd` (v1.32.2), deployed to all four validators on 2026-08-06.
 **Remediation landed in:** `3ccf8c70` (v1.31.0 — bridge removal and the bulk of the findings), `3fd4f59e` (v1.32.0 — C-1 relay gas payer consent), `94274101` (ante-order pinning and authorization tests), `6d25f71a` (relay fee ceiling removal).
 **Scope of this document:** the current status of every finding, the evidence behind each claim, and the rationale for each item accepted rather than fixed. Where this document and the original disagree about present-day state, **this one is authoritative**; the original is preserved as written, with its line references frozen at its baseline.
 
-> **Later full review:** [`review-2026-08-06.md`](review-2026-08-06.md) re-audits the
+> **Later full review:** [`2026-08-06/blockchain-review.md`](../2026-08-06/blockchain-review.md) re-audits the
 > tree after this remediation wave (baseline `v1.32.4`). Use that document for
 > new findings and for present-day status of carryovers; this retest remains the
 > record of how the Aug 4 findings were closed.
@@ -22,7 +22,7 @@
 >
 > The retest guidance also names `review-2026-03-12-retest.md` as the pattern to
 > follow. **That file does not exist.** This document follows the structure of
-> [`../backend/review-2026-08-05-retest.md`](../backend/review-2026-08-05-retest.md)
+> [`2026-08-05/backend-retest.md`](../2026-08-05/backend-retest.md)
 > instead, which is the only retest precedent actually in the repository.
 
 ---
