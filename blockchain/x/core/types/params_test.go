@@ -1,9 +1,12 @@
 package types
 
 import (
+	"bytes"
 	"math"
+	"os"
 	"testing"
 
+	"github.com/cosmos/gogoproto/jsonpb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -197,6 +200,50 @@ func TestSubscriptionReserveBpsIsBounded(t *testing.T) {
 	p.SubscriptionReservePercent = 0.4
 	require.NoError(t, p.Validate(),
 		"a stored pre-upgrade percentage must still validate so a from-genesis replay can run")
+}
+
+// TestGenesisParamsStillValidate is the general form of the block_hash_window
+// regression below: every bound added to Validate() must still accept the params
+// a real genesis carries, because InitGenesis panics when SetParams fails and a
+// genesis file cannot be edited after the fact. The fixture is the core params
+// from the genesis a chain actually boots from, which is what
+// scripts/reset_local_testnet.py builds from a state export.
+//
+// InitGenesis substitutes DefaultParams() only when min_difficulty,
+// pow_message_window, mint_interval, mint_quantity or block_hash_window is zero,
+// so a set-but-now-out-of-bounds value is passed straight through and panics. A
+// new bound that this test rejects must either widen to admit the fixture or be
+// enforced outside Validate(), the way MinBlockHashWindow is.
+func TestGenesisParamsStillValidate(t *testing.T) {
+	raw, err := os.ReadFile("testdata/genesis_core_params.json")
+	require.NoError(t, err)
+
+	var p Params
+	require.NoError(t, (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(raw), &p),
+		"fixture must decode through the same proto-JSON path InitGenesis uses")
+
+	require.NoError(t, p.Validate(),
+		"a real genesis must validate on this binary or every from-genesis node panics in InitGenesis")
+}
+
+// TestBlockHashWindowAcceptsTheGenesisValue guards a from-genesis start. The
+// live genesis stores block_hash_window 10 and InitGenesis panics when SetParams
+// fails, so raising the Validate() lower bound to MinBlockHashWindow would stop
+// every node that starts from genesis from ever producing a block. The floor is
+// enforced by the v1.34.0 handler and verify_upgrade.py instead.
+func TestBlockHashWindowAcceptsTheGenesisValue(t *testing.T) {
+	p := DefaultParams()
+	require.Equal(t, uint64(60), p.BlockHashWindow, "default must span more than MaxEnvelopeAge")
+
+	p.BlockHashWindow = 10
+	require.NoError(t, p.Validate(),
+		"the value stored in the live genesis must validate or InitGenesis panics")
+
+	p.BlockHashWindow = 0
+	require.Error(t, p.Validate(), "an unset window must still be rejected")
+
+	p.BlockHashWindow = 1001
+	require.Error(t, p.Validate(), "an unbounded window must still be rejected")
 }
 
 func TestParamsValidateRejectsNilEntries(t *testing.T) {

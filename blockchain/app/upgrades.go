@@ -43,6 +43,16 @@ func validateV1340Params(params coretypes.Params) error {
 	if err := params.Validate(); err != nil {
 		return fmt.Errorf("v1.34.0: stored params violate the new bounds: %w", err)
 	}
+	// Validate() cannot enforce this floor without panicking every from-genesis
+	// node, since the live genesis stores 10 (see MinBlockHashWindow). The
+	// upgrade is the one place that both knows the value is post-migration and
+	// can refuse to proceed, so assert it here: a window narrower than the floor
+	// is a stricter freshness rule than MaxEnvelopeAge and would reject work the
+	// age check still accepts.
+	if params.BlockHashWindow < coretypes.MinBlockHashWindow {
+		return fmt.Errorf("v1.34.0: block_hash_window %d is below the %d-block floor after migration",
+			params.BlockHashWindow, coretypes.MinBlockHashWindow)
+	}
 	return nil
 }
 

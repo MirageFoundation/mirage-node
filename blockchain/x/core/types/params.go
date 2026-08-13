@@ -45,8 +45,17 @@ const (
 	// actually be reached, so difficulty can still fall.
 	MaxPowCalmSequenceThreshold = 1_000_000
 	// MinBlockHashWindow keeps the PoW recent-block-hash window from becoming a
-	// stricter freshness rule than MaxEnvelopeAge. 20 blocks is that param's 60s
-	// default at the ~3s block time assumed throughout these defaults.
+	// stricter freshness rule than MaxEnvelopeAge, which would reject work the
+	// age check still accepts. At the 2s block time the local chain runs and the
+	// 3s the node template configures, 20 blocks is 40-60s against that param's
+	// 60s default, so this is a floor and not a target; DefaultParams uses 60.
+	//
+	// It is deliberately NOT enforced in Validate(). The live genesis carries
+	// block_hash_window 10, and InitGenesis only substitutes defaults when the
+	// value is zero, so a floor in Validate() would panic InitGenesis on this
+	// binary and break every node that starts from genesis. It is enforced where
+	// it can be: the v1.34.0 handler widens a stored value below the floor, and
+	// verify_upgrade.py bounds the live chain.
 	MinBlockHashWindow = 20
 )
 
@@ -251,8 +260,11 @@ func (p Params) Validate() error {
 	// limit in blocks and the window silently becomes the binding freshness rule,
 	// rejecting work the age check still accepts. 20 blocks is MaxEnvelopeAge's
 	// 60s default at the ~3s block time PowMessageWindow already assumes.
-	if p.BlockHashWindow < MinBlockHashWindow || p.BlockHashWindow > 1000 {
-		return fmt.Errorf("block_hash_window must be in [%d,1000]", MinBlockHashWindow)
+	// The lower bound stays at 1, not MinBlockHashWindow: the live genesis stores
+	// 10 and InitGenesis panics on a SetParams error, so a floor here would stop
+	// every from-genesis node from producing a block. See MinBlockHashWindow.
+	if p.BlockHashWindow == 0 || p.BlockHashWindow > 1000 {
+		return fmt.Errorf("block_hash_window must be in [1,1000]")
 	}
 	allowanceCeiling, err := CheckedMulUint64(p.PowMessageWindow, 2)
 	if err != nil {

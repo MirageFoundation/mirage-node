@@ -28,6 +28,14 @@ func TestValidateV1340Params(t *testing.T) {
 	invalid := coretypes.DefaultParams()
 	invalid.PowMessageWindow = coretypes.MaxPowMessageWindow + 1
 	require.ErrorContains(t, validateV1340Params(invalid), "stored params violate the new bounds")
+
+	// The block_hash_window floor lives here rather than in Validate(), which has
+	// to keep accepting the 10 the live genesis stores. This is the only gate that
+	// stops the upgrade completing with a window stricter than max_envelope_age.
+	narrow := coretypes.DefaultParams()
+	narrow.BlockHashWindow = coretypes.MinBlockHashWindow - 1
+	require.NoError(t, narrow.Validate(), "Validate must stay permissive for from-genesis nodes")
+	require.ErrorContains(t, validateV1340Params(narrow), "below the 20-block floor")
 }
 
 // TestStoreLoaderWithExistingStore tests that using StoreUpgrades.Added for
