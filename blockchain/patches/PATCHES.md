@@ -50,7 +50,8 @@ Subscribe to GitHub security advisories for `cosmos/iavl`. Rebase review at leas
 ### Functional changes (only these)
 
 1. **`rootmulti/store.go`** — `pruneCommitInfo` called from `PruneStores`; deletes `s/<version>` commit-info records below `pruningHeight`, capped at `commitInfoPruneBatch = 20000` per pass. Collect-then-close-then-write to avoid MemDB iterator/writer deadlock.
-2. **`go.mod` / `go.sum`** — security-only dependency floors track the release
+2. **`rootmulti/store.go`** — `PruneStores` no longer returns `nil` after a failure. Upstream logged each per-store failure and then reported success, so a node that had stopped reclaiming disk (read-only volume, full disk, wedged substore) looked healthy to `Commit` and to the `prune` CLI alike. Every failure — per-store `DeleteVersionsTo`, the `s/earliest` write, and `pruneCommitInfo` — now increments `pruneFailures` (exposed by `PruneFailures()`), logs at error level under the greppable `MIRAGE_PRUNE_DEGRADED` marker, and is joined into the returned error. The pass still attempts the remaining stores, and the node never halts: pruning is node-local housekeeping and never consensus input, so `Commit` logs and continues while the `prune` CLI exits non-zero. Upstream's early return on `ErrVersionDoesNotExist` is unchanged apart from the added log and counter, so it still skips the remaining stores.
+3. **`go.mod` / `go.sum`** — security-only dependency floors track the release
    toolchain and patched gRPC / `x/net` / `x/text` versions. No module API or
    store behavior is changed by these pins.
 
