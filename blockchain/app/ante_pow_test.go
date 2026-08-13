@@ -329,16 +329,31 @@ func TestValidatePoW(t *testing.T) {
 func TestRequireLastBlockHashBootstrapBoundary(t *testing.T) {
 	const hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
-	require.NoError(t, requireLastBlockHash("", 1), "height 1 has no previous block")
-	require.NoError(t, requireLastBlockHash("", 0), "pre-genesis contexts carry no header")
+	require.NoError(t, requireLastBlockHash("", 1, sdk.ExecModeFinalize), "height 1 has no previous block")
+	require.NoError(t, requireLastBlockHash("", 0, sdk.ExecModeFinalize), "pre-genesis contexts carry no header")
 
-	err := requireLastBlockHash("", 2)
+	err := requireLastBlockHash("", 2, sdk.ExecModeFinalize)
 	require.Error(t, err, "empty hash above bootstrap height must reject")
 	require.Contains(t, err.Error(), "missing LastBlockId.Hash at height 2")
 
-	require.NoError(t, requireLastBlockHash(hash, 2))
-	require.NoError(t, requireLastBlockHash(hash, 1))
-	require.Error(t, requireLastBlockHash("   ", 2), "whitespace is not a hash")
+	require.NoError(t, requireLastBlockHash(hash, 2, sdk.ExecModeFinalize))
+	require.NoError(t, requireLastBlockHash(hash, 1, sdk.ExecModeFinalize))
+	require.Error(t, requireLastBlockHash("   ", 2, sdk.ExecModeFinalize), "whitespace is not a hash")
+}
+
+// TestRequireLastBlockHashSkipsNonFinalizeModes pins the regression that broke
+// every backend transaction on the local testnet: the simulate and check
+// contexts carry a partial header, so enforcing the hash there fails gas
+// estimation for txs that would finalize perfectly well.
+func TestRequireLastBlockHashSkipsNonFinalizeModes(t *testing.T) {
+	for _, mode := range []sdk.ExecMode{
+		sdk.ExecModeSimulate,
+		sdk.ExecModeCheck,
+		sdk.ExecModeReCheck,
+	} {
+		require.NoError(t, requireLastBlockHash("", 2, mode),
+			"mode %d must not reject a partial header", mode)
+	}
 }
 
 // TestPowDecoratorRejectsMissingLastBlockHash proves the header check runs
@@ -348,6 +363,7 @@ func TestRequireLastBlockHashBootstrapBoundary(t *testing.T) {
 func TestPowDecoratorRejectsMissingLastBlockHash(t *testing.T) {
 	ctx := sdk.Context{}.
 		WithBlockHeight(2).
+		WithExecMode(sdk.ExecModeFinalize).
 		WithLogger(cosmoslog.NewNopLogger())
 
 	decorator := &PowDecorator{}

@@ -217,7 +217,16 @@ const bootstrapHeight = int64(1)
 // requireLastBlockHash rejects a header whose LastBlockId.Hash is empty above
 // bootstrap height. An empty hash disables the entire envelope-staleness check,
 // so tolerating it would let an envelope built against any block be admitted.
-func requireLastBlockHash(chainLastID string, height int64) error {
+//
+// Only the finalization header is guaranteed to carry that hash. The check and
+// simulate contexts are built from a partial header, so enforcing it there
+// rejects every gas simulation the backend runs before broadcasting — which is
+// exactly what happened on the local testnet. Admission into a block is the
+// boundary that matters, and that is decided during finalization.
+func requireLastBlockHash(chainLastID string, height int64, mode sdk.ExecMode) error {
+	if mode != sdk.ExecModeFinalize {
+		return nil
+	}
 	if strings.TrimSpace(chainLastID) != "" {
 		return nil
 	}
@@ -234,7 +243,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	// window by BeginBlock so older envelopes within the window pass the
 	// list-check branch.
 	chainLastID := strings.ToLower(hex.EncodeToString(ctx.BlockHeader().LastBlockId.Hash))
-	if err := requireLastBlockHash(chainLastID, ctx.BlockHeight()); err != nil {
+	if err := requireLastBlockHash(chainLastID, ctx.BlockHeight(), ctx.ExecMode()); err != nil {
 		ctx.Logger().Error("PoW: unusable header", "err", err.Error())
 		return ctx, err
 	}
