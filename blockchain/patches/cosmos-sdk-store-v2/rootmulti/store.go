@@ -696,11 +696,13 @@ func (rs *Store) PruneFailures() uint64 {
 
 // PruneStores prunes all history up to the specific height of the multi store.
 //
-// Pruning is node-local housekeeping, never consensus input, so a failure must
-// not abort the pass or halt the node: the remaining stores are still pruned and
-// the caller decides. Every failure is counted, logged under
-// pruneDegradedMarker, and joined into the returned error (Commit logs it; the
-// `prune` CLI turns it into a non-zero exit) so none can be silently lost.
+// Pruning is node-local housekeeping, never consensus input, so a failure never
+// halts the node: Commit logs the returned error and continues, while the
+// `prune` CLI turns it into a non-zero exit. Every failure is counted, logged
+// under pruneDegradedMarker, and joined into the returned error so none can be
+// silently lost. A per-store failure does not abort the pass; the one exception
+// is upstream's ErrVersionDoesNotExist, which still returns immediately and so
+// skips the remaining stores and the earliest-version and commit-info steps.
 func (rs *Store) PruneStores(pruningHeight int64) (err error) {
 	if pruningHeight <= 0 {
 		rs.logger.Debug("pruning skipped, height is less than or equal to 0")

@@ -364,10 +364,11 @@ func TestStalenessEnforcedFromWindowNotHeader(t *testing.T) {
 }
 
 // TestEmptyWindowSkipsStalenessCheck pins the one case where enforcement is off:
-// a window with no real hash in it, which happens on a chain's first block and on
-// the v1.34.0 upgrade block that clears the stale all-empty window. Enforcing
-// there would reject every transaction, which is how the first attempt at this
-// guard broke the local testnet.
+// a window with no real hash in it, i.e. a chain that has not committed a block
+// yet. Enforcing there would reject every transaction, which is how the first
+// attempt at this guard broke the local testnet. Note this does NOT cover the
+// upgrade block: BeginBlock refills the window right after the handler clears
+// it, so that block enforces.
 func TestEmptyWindowSkipsStalenessCheck(t *testing.T) {
 	const minDiff, step = uint64(8), 0.25
 	canonical := []byte("bootstrap_window_envelope")

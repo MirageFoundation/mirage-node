@@ -2225,8 +2225,9 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// Move the reserve share onto the integer field and retire the float.
 			// Conversion runs exactly once here, so the reserve/burn split reads an
-			// integer from this height on and no rounding can re-enter it. Zeroing
-			// the float is what makes Validate reject any later attempt to set it.
+			// integer from this height on and no rounding can re-enter it. The float
+			// is zeroed so nothing carries a stale second opinion; governance cannot
+			// set it again because it has no paramFieldSetters entry.
 			if params.SubscriptionReservePercent != 0 {
 				bps, err := coretypes.ReserveBasisPoints(params.SubscriptionReservePercent)
 				if err != nil {
@@ -2247,12 +2248,15 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			// The window was fed from LastBlockId.Hash, empty on every ABCI 2.0
-			// path, so every stored entry is an empty string. Clearing them means
-			// the ante's "window not ready" branch governs exactly one block —
-			// this one — instead of the emptiness lingering as a real-looking
-			// entry. Envelopes minted before this height reference hashes that
-			// were never recorded and are refused until clients refresh, which is
-			// bounded by MaxEnvelopeAge and falls inside the upgrade's own halt.
+			// path, so every stored entry is an empty string. Clearing them keeps
+			// the emptiness from lingering as a real-looking entry that an
+			// envelope could match. This does not open a gap at this height:
+			// baseapp runs preBlock before beginBlock, so core's BeginBlock
+			// records this block's real hash immediately after and the ante
+			// enforces for this block's transactions too. Envelopes minted before
+			// this height reference hashes that were never recorded and are
+			// refused until clients refresh, which is bounded by MaxEnvelopeAge
+			// and falls inside the upgrade's own halt.
 			if err := app.CoreKeeper.SetRecentBlockHashes(sdkCtx, nil); err != nil {
 				return nil, fmt.Errorf("v1.34.0: clearing recent_block_hashes failed: %w", err)
 			}

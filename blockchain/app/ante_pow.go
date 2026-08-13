@@ -42,9 +42,9 @@ import (
 // The last_block_hash check runs in CheckTx and DeliverTx alike, and acceptance
 // comes from the on-chain window rather than the header: ABCI 2.0 gives
 // FinalizeBlock no LastBlockId, so the header field is always empty. The only
-// case where the check is disabled is a window with no real hash in it — the
-// first block of a chain and the upgrade block that resets it — because
-// enforcing against an empty window would reject every transaction.
+// case where the check is disabled is a window with no real hash in it, which
+// means a chain that has not committed its first block yet, because enforcing
+// against an empty window would reject every transaction.
 //
 // The window must span at least params.MaxEnvelopeAge worth of blocks, or it
 // becomes a stricter freshness bound than the envelope age check and rejects
@@ -53,31 +53,6 @@ type PowDecorator struct {
 	// Keeper provides access to dynamic difficulty, params, and the on-chain
 	// recent-block-hash window.
 	Keeper corekeeper.Keeper
-}
-
-// recentHashSeen returns true if `hash` (lowercase hex) appears in the
-// on-chain recent-block-hashes window. The window is written by BeginBlock
-// before any tx in the current block runs, so by the time this is called the
-// window contains the previous BlockHashWindow committed block hashes.
-//
-// Decode/store errors propagate so the caller can reject the tx; silent
-// "false" would route a legitimate tx to rejection on this node only and
-// produce divergence on the very thing this refactor is fixing.
-func (d *PowDecorator) recentHashSeen(ctx sdk.Context, hash string) (bool, error) {
-	cmp := strings.ToLower(strings.TrimSpace(hash))
-	if cmp == "" {
-		return false, nil
-	}
-	hashes, err := d.Keeper.GetRecentBlockHashes(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, h := range hashes {
-		if h == cmp {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // getUserLevel returns the user level for the address derived from pubkey.
@@ -250,11 +225,13 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 		return false, nil
 	}
 
-	// Staleness is enforced only once the window holds at least one real hash.
-	// It is empty for the first block of a new chain and for the upgrade block
-	// that resets it, and enforcing against an empty window would reject every
-	// transaction — the failure mode that made the first attempt at this guard
-	// unusable. The gap is bounded by one block and is logged.
+	// Staleness is enforced only once the window holds at least one real hash,
+	// because enforcing against an empty window would reject every transaction —
+	// the failure mode that made the first attempt at this guard unusable. In
+	// practice that only covers a chain with no committed block yet: BeginBlock
+	// records this block's hash before any tx runs, and it runs after the upgrade
+	// handler that clears the stale window (baseapp preBlock precedes
+	// beginBlock), so even the upgrade block itself enforces.
 	windowReady := false
 	for _, h := range recentHashes {
 		if strings.TrimSpace(h) != "" {
@@ -1469,9 +1446,10 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	if effectiveRequired < minRequired {
 		effectiveRequired = minRequired
 	}
-	// M-1: reject stale/fabricated last_block_hash BEFORE Argon2id. The hash
-	// check is O(1) (string compare + optional store read) and independent of
-	// the PoW work product, so paying 1.76ms+4MB first was pure DoS amplification.
+	// M-1: reject stale/fabricated last_block_hash BEFORE Argon2id. The check is
+	// a string compare against a window the caller already read, so it costs
+	// nothing next to the work product; paying 1.76ms+4MB first was pure DoS
+	// amplification.
 	if !skipHashCheck {
 		lb := strings.ToLower(hex.EncodeToString(lastBlockHash))
 		// currentLastID is empty under ABCI 2.0, so an empty envelope hash would

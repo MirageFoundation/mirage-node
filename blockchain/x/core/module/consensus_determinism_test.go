@@ -235,6 +235,28 @@ func TestBeginBlockRecordsNothingWithoutHeaderHash(t *testing.T) {
 	require.Empty(t, got, "an absent HeaderHash must leave the window empty, not add an empty entry")
 }
 
+// TestClearedWindowReadsBackEmpty covers the v1.34.0 upgrade step that clears
+// the stale window. Clearing writes a marshalled nil, so if that did not read
+// back as an empty window the PoW ante would return a decode error for every
+// transaction on every node from the upgrade height onward.
+func TestClearedWindowReadsBackEmpty(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	require.NoError(t, mk.RecordRecentBlockHash(ctx, "aa11", 10))
+	require.NoError(t, mk.SetRecentBlockHashes(ctx, nil))
+
+	got, err := mk.GetRecentBlockHashes(ctx)
+	require.NoError(t, err, "a cleared window must read back cleanly, not as a decode failure")
+	require.Empty(t, got)
+
+	// And it must refill normally afterwards.
+	require.NoError(t, mk.RecordRecentBlockHash(ctx, "bb22", 10))
+	got, err = mk.GetRecentBlockHashes(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"bb22"}, got)
+}
+
 // TestRecordRecentBlockHashTrimsToWindow: pushing N+k hashes with window=N
 // MUST keep only the N most-recent entries (most-recent-first ordering).
 // All peers and restarts share the same trimmed window.

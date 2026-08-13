@@ -1361,10 +1361,12 @@ func (k Keeper) SetRecentBlockHashes(ctx sdk.Context, hashes []string) error {
 }
 
 // RecordRecentBlockHash prepends a new block-hash to the rolling window and
-// trims to `window` entries. Called from BeginBlock with the previous block's
-// hash (ctx.BlockHeader().LastBlockId.Hash). The empty hash is ignored — at
-// genesis there is no previous block. Duplicate-of-newest is also ignored to
-// keep the window monotonic.
+// trims to `window` entries. Called from BeginBlock with this block's hash from
+// sdkCtx.HeaderHash(); it must NOT be fed from ctx.BlockHeader().LastBlockId,
+// which ABCI 2.0 leaves empty, because the empty hash below then silently keeps
+// the window empty and envelope staleness stops being enforced (retest L-7).
+// The empty hash is ignored — genesis has no block hash yet. Duplicate-of-newest
+// is also ignored to keep the window monotonic.
 func (k Keeper) RecordRecentBlockHash(ctx sdk.Context, hashLower string, window uint32) error {
 	if hashLower == "" {
 		return nil
