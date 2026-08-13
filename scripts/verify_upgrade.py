@@ -441,13 +441,34 @@ DRIFTED_TOPIC_ROWS_SQL = """
 """
 
 
+def indexer_db_url() -> str:
+    """INDEXER_DB_URL from the environment, or from the deployed env files.
+
+    `docker exec mirage python3 .../verify_upgrade.py` — the invocation in this
+    file's docstring — does not source the env files, so reading them directly is
+    what makes the check run instead of reporting NOTE for a solvable reason.
+    """
+    from_env = os.environ.get("INDEXER_DB_URL", "").strip()
+    if from_env:
+        return from_env
+    env_dir = Path("/root/.mirage/env")
+    if not env_dir.is_dir():
+        return ""
+    for env_file in sorted(env_dir.glob("*.env")):
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("INDEXER_DB_URL="):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
+
+
 def check_topic_attribution_repaired() -> None:
     """The repair migration asserts this invariant before it writes its marker,
     so a missing marker plus drifted rows means it never ran on this host.
     """
-    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    db_url = indexer_db_url()
     if not db_url:
-        note("INDEXER_DB_URL unset: topic-attribution repair not verifiable from here")
+        note("no INDEXER_DB_URL in the environment or /root/.mirage/env: "
+             "topic-attribution repair not verifiable from here")
         return
     try:
         import psycopg
