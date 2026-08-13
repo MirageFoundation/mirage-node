@@ -23,9 +23,10 @@ Consensus-breaking hardening from the 2026-08-07 blockchain review:
 
 Checks:
 
-  1. Frontend version.txt reports v1.34.0.
-  2. Chain binary version reports v1.34.0.
-  3. Upgrade handler name v1.34.0 is applied (applied_plan query).
+  1. Frontend version.txt reports v1.34.1.
+  2. Chain binary version reports v1.34.1.
+  3. Upgrade handler name v1.34.0 is applied (applied_plan query) — the chain
+     upgrade stays v1.34.0 because v1.34.1 ships no consensus change.
   4. Chain is live and has produced blocks past the upgrade height.
   5. Every parameter the new runtime arithmetic reads is present in the params
      query. A missing field is a hard failure: the runtime has no fallback.
@@ -62,7 +63,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-RELEASE_VERSION = "v1.34.0"
+# The shipped software version, checked against version.txt and the binary.
+RELEASE_VERSION = "v1.34.1"
+# The chain upgrade handler this release runs on. These diverge whenever a patch
+# ships without a consensus-breaking change: v1.34.1 is backend-only, so the
+# applied plan on chain is still the one v1.34.0 scheduled and there is no
+# v1.34.1 plan to query.
+UPGRADE_NAME = "v1.34.0"
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
 
@@ -217,11 +224,11 @@ def check_binary_version() -> None:
 
 
 def applied_upgrade_height() -> int:
-    """Height at which the RELEASE_VERSION plan was applied. Raises if not applied."""
-    data = http_json(f"{REST_URL}/cosmos/upgrade/v1beta1/applied_plan/{RELEASE_VERSION}")
+    """Height at which the UPGRADE_NAME plan was applied. Raises if not applied."""
+    data = http_json(f"{REST_URL}/cosmos/upgrade/v1beta1/applied_plan/{UPGRADE_NAME}")
     height = int(data.get("height") or data.get("Height") or 0)
     if height <= 0:
-        raise RuntimeError(f"upgrade {RELEASE_VERSION} not applied: {data}")
+        raise RuntimeError(f"upgrade {UPGRADE_NAME} not applied: {data}")
     return height
 
 
@@ -231,7 +238,7 @@ def check_upgrade_applied() -> None:
     except Exception as e:
         fail(f"applied_plan check failed: {e}")
         return
-    ok(f"upgrade {RELEASE_VERSION} applied at height={height}")
+    ok(f"upgrade {UPGRADE_NAME} applied at height={height}")
 
 
 def check_chain_live_past_upgrade() -> None:

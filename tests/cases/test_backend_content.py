@@ -252,6 +252,13 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.award appears in feed")
 
+    # 3.4e Warm the feed's vote-totals cache before voting, so the check at 3.5b
+    # is meaningful. The home feed serves totals from post_vote_totals_cache
+    # (60s TTL) while get_user_posts and the post page sum votes live. Reading as
+    # a guest here stores the pre-vote total, which is exactly the value that used
+    # to be served back to the voter afterwards.
+    _get(f"{backend}/api/get_posts", {"limit": 50, "feed": "home", "by": "newest"})
+
     # 3.5 Vote up (poll up to INDEX_TIMEOUT_SEC)
     vote_resp = _do_vote(backend, wallet, txh, 1)
     if vote_resp and vote_resp.get("error"):
@@ -270,6 +277,35 @@ def test_post_lifecycle(backend: str):
             _pass("post.vote_up reflected", votes=votes_after_up)
         else:
             _fail("post.vote_up reflected", f"votes={votes_after_up}")
+
+        # 3.5b The voter's own vote must also show on the cached feed path, not
+        # just in get_user_posts. The two disagreed until v1.34.1: get_user_posts
+        # and the post page sum votes live, while the home feed read a total that
+        # could be up to 60s old, so a user saw their fresh upvote on the post but
+        # not on the front page. The fix exempts posts the viewer has voted on
+        # from the cache. INDEX_TIMEOUT_SEC (45s) is below the 60s TTL on purpose:
+        # if the exemption regresses, the stale total outlives this loop.
+        feed_points = 0.0
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
+            time.sleep(1)
+            code, feed_c = _get(
+                f"{backend}/api/get_posts",
+                {"limit": 50, "feed": "home", "by": "newest", "address": addr},
+            )
+            posts_c = (feed_c or {}).get("posts") or []
+            p_c = next((p for p in posts_c if str(p.get("post_id", "")).lower() == txh), None)
+            if p_c:
+                feed_points = float(p_c.get("points", 0) or 0)
+                if feed_points >= 1:
+                    break
+        if feed_points >= 1:
+            _pass("post.vote_up in cached feed path", points=feed_points)
+        else:
+            _fail(
+                "post.vote_up in cached feed path",
+                f"points={feed_points} while get_user_posts reported {votes_after_up} — "
+                f"the home feed served a stale cached total for the voter's own vote",
+            )
 
     # 3.5a Vote tx_status includes relayer
     vote_txh = str((vote_resp or {}).get("tx_hash", "") or "").lower()

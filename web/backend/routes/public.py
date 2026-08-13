@@ -1204,27 +1204,36 @@ def _load_candidate_posts(
     return candidates
 
 
-def _load_vote_totals_cached(cur, post_ids: list[str], backend_cur=None) -> dict[str, float]:
+def _load_vote_totals_cached(
+    cur, post_ids: list[str], backend_cur=None, force_live: set[str] | None = None
+) -> dict[str, float]:
     """
     Return {post_id: total_weight} via a 60s backend-DB cache. Only valid when
     the viewer has no blocked users (the totals here are unfiltered). Callers
     with blocked_users must use the live LATERAL query directly.
+
+    force_live names post_ids that must not be served from the cache — in
+    practice the ones the requesting viewer has voted on, where a stale total
+    would read as their own vote having failed. They take the live-sum path and
+    then refresh the cache, so the fresh value also benefits later readers.
     """
     post_ids = list({str(pid).lower() for pid in post_ids if pid})
     if not post_ids:
         return {}
 
+    force_live = {str(pid).lower() for pid in (force_live or set())}
     now_ts = int(time.time())
     result: dict[str, float] = {}
 
     def _read_and_fill_cache(bcur):
+        cacheable = [pid for pid in post_ids if pid not in force_live]
         bcur.execute(
             """
             SELECT post_id, total_weight
             FROM post_vote_totals_cache
             WHERE post_id = ANY(%s) AND expires_at > %s
             """,
-            (post_ids, now_ts),
+            (cacheable, now_ts),
         )
         for pid, total in bcur.fetchall():
             result[pid] = float(total or 0.0)
@@ -1303,6 +1312,24 @@ def _load_vote_and_comment_stats(
     def _ms_since(t0: float) -> float:
         return round((_time.monotonic() - t0) * 1000, 2)
 
+    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution.
+    # Already fast (~2ms) via uniq_votes_owner_target index — kept as its own query.
+    # Loaded before the points sum, because which posts the viewer has voted on is
+    # what decides which totals are allowed to come from the 60s cache below.
+    _t = _time.monotonic()
+    viewer_lower = (viewer or "").strip().lower()
+    if viewer_lower and viewer_lower != "guest":
+        cur.execute(
+            f"""SELECT LOWER(target), user_vote, user_weight FROM votes
+                WHERE LOWER(owner) = %s AND LOWER(target) IN ({id_ph})""",
+            [viewer_lower] + post_ids,
+        )
+        for tgt, vote, weight in cur.fetchall():
+            if tgt:
+                user_votes[tgt] = int(vote) if vote else 0
+                user_weight_map[tgt] = float(weight) if weight else 0.0
+    stats_uv_ms = _ms_since(_t)
+
     # Points (sum of user_weight, excluding blocked users).
     # Use a LATERAL join driven from the 200-row post_id set: the `IN (...)`
     # form was getting hash-joined with a seq-scan of the full votes table
@@ -1327,7 +1354,15 @@ def _load_vote_and_comment_stats(
             if tgt:
                 vote_totals[tgt] = float(total or 0.0)
     else:
-        vote_totals = _load_vote_totals_cached(cur, post_ids, backend_cur=backend_cur)
+        # Posts this viewer has voted on skip the cache. A cached total can be up
+        # to _VOTE_TOTALS_CACHE_TTL out of date, and the viewer's own vote is the
+        # only one they can perceive as missing: user_vote is always read live, so
+        # a total computed before their vote was indexed renders as a vote that
+        # visibly did not count, while the post page — which sums live — shows it.
+        # Other users' votes stay cached; nobody can tell those are seconds late.
+        vote_totals = _load_vote_totals_cached(
+            cur, post_ids, backend_cur=backend_cur, force_live=set(user_votes)
+        )
     stats_vt_ms = _ms_since(_t)
 
     # Comment counts
@@ -1359,22 +1394,6 @@ def _load_vote_and_comment_stats(
         if root_id:
             comment_counts[root_id] = int(cnt or 0)
     stats_cc_ms = _ms_since(_t)
-
-    # Viewer's votes (user_vote: 1=up, -1=down, 0=none) and user_weight contribution.
-    # Already fast (~2ms) via uniq_votes_owner_target index — kept as its own query.
-    _t = _time.monotonic()
-    viewer_lower = (viewer or "").strip().lower()
-    if viewer_lower and viewer_lower != "guest":
-        cur.execute(
-            f"""SELECT LOWER(target), user_vote, user_weight FROM votes
-                WHERE LOWER(owner) = %s AND LOWER(target) IN ({id_ph})""",
-            [viewer_lower] + post_ids,
-        )
-        for tgt, vote, weight in cur.fetchall():
-            if tgt:
-                user_votes[tgt] = int(vote) if vote else 0
-                user_weight_map[tgt] = float(weight) if weight else 0.0
-    stats_uv_ms = _ms_since(_t)
 
     return (
         vote_totals,
