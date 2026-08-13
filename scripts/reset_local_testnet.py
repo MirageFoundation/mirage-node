@@ -1103,6 +1103,11 @@ def start_with_entrypoint(image_ref: str):
             "bash",
             "-lc",
             f"docker run -d --name mirage --hostname testnet --restart no "
+            # Containers inherit the Docker daemon's 1024 soft nofile limit and
+            # never see /etc/security/limits.d/99-mirage.conf, so the node,
+            # Postgres, indexer and backend shared 1024 descriptors. Matches the
+            # deploy path and what harden_server.sh already intends.
+            f"--ulimit nofile=131072:131072 "
             f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
             f"-e CREATE_EMPTY_BLOCKS=true "
             f"-e CREATE_EMPTY_BLOCKS_INTERVAL={LOCAL_BLOCK_TIME_SECONDS}s "

@@ -963,6 +963,7 @@ echo "PostgreSQL restore complete"
             conn,
             f"""
             docker run -d --name mirage \\
+                --ulimit nofile=131072:131072 \\
                 -e SKIP_VALIDATOR_CHECK=1 \\
                 -v /root/.mirage:/root/.mirage \\
                 -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
@@ -1068,6 +1069,7 @@ echo "PostgreSQL restore complete"
             conn,
             f"""
             docker run -d --name mirage --restart unless-stopped \\
+                --ulimit nofile=131072:131072 \\
                 -v /root/.mirage:/root/.mirage \\
                 -v /root/.caddy:/root/.local/share/caddy \\
                 -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
@@ -1087,6 +1089,7 @@ echo "PostgreSQL restore complete"
             conn,
             f"""
             docker run -d --name mirage --restart unless-stopped \\
+                --ulimit nofile=131072:131072 \\
                 -v /root/.mirage:/root/.mirage \\
                 -v /root/.caddy:/root/.local/share/caddy \\
                 -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\

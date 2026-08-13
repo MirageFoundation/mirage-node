@@ -41,7 +41,7 @@ The release is one coherent change rather than eighteen patches: node-local stor
 | L-8 | Mutual-exclusion list cleanup discards delete errors | **Fixed** | v1.34.0 |
 | L-9 | Valid zero-valued params cannot be applied through governance | **Fixed** | v1.34.0 |
 | L-10 | Admin gas waiver treats all deduction errors as insufficient balance | **Fixed** | v1.34.0 |
-| L-11 | Store/v2 pruning logs and suppresses per-store failures | **Deferred** | trigger below |
+| L-11 | Store/v2 pruning logs and suppresses per-store failures | **Fixed** (escalated and counted, deliberately not halting) | v1.34.0 |
 
 Every accepted and deferred row below is also carried in the cross-component register at [`docs/security/open-items.md`](../open-items.md), together with the still-open backend, indexer, and frontend items. There is no longer a calendar-bound action: the backend claim grace that was due to expire 2026-10-05 UTC was removed in this same release.
 
@@ -179,6 +179,22 @@ Residual exposure before this fix, stated precisely: freshness rested on the met
 
 Tests: `TestStalenessEnforcedFromWindowNotHeader` (in-window accepted with an empty header hash, out-of-window refused, empty envelope hash refused), `TestEmptyWindowSkipsStalenessCheck` (the bootstrap boundary), `TestBeginBlockRecordsHeaderHash` and `TestBeginBlockRecordsNothingWithoutHeaderHash` (pin the recording source, so routing it back through a field `FinalizeBlock` does not carry fails the build rather than silently disabling the check).
 
+### L-11 — store/v2 prune failures escalated instead of suppressed
+
+Upstream logged each per-store prune failure and then returned `nil`, so a node that had stopped reclaiming history — read-only volume, full disk, wedged substore — looked healthy to every caller while its disk grew without bound. In `patches/cosmos-sdk-store-v2/rootmulti/store.go`, per-store prune failures, earliest-version persistence and commit-info pruning now each log at error level behind the single token `MIRAGE_PRUNE_DEGRADED`, increment a process-lifetime counter exposed as `PruneFailures()`, and are joined into the returned error so none is dropped. One marker makes a fleet-wide grep sufficient to find every degraded node.
+
+**It deliberately does not halt, which is the opposite of this release's contract elsewhere and is a considered exception.** Pruning is node-local housekeeping over already-committed history and is never consensus input: the app hash comes from the current commit-info, and everything below the pruning height is already unqueryable. Halting a validator because it could not delete old versions would trade a live node for a disk-space problem. `Commit` therefore logs the returned error and continues, while the `prune` CLI turns the same error into a non-zero exit where a human is watching.
+
+Residual, stated rather than smoothed over: upstream's `ErrVersionDoesNotExist` still returns immediately, so that one case skips the remaining stores and both the earliest-version and commit-info steps for that pass. It is now logged under the marker and counted instead of being invisible. The deviation is documented in `blockchain/patches/PATCHES.md`, and the escalation is covered by the `rootmulti` prune tests.
+
+### Found during the pre-deployment run — container file-descriptor limit
+
+Not a review finding, and the causal link to the symptom that led here is inferred rather than proven. Late in an 865-test local backend run, one `upload_media` assertion failed with a client-side name-resolution error for `127.0.0.1` while the backend logged that same upload succeeding — a resolver that cannot obtain a socket, not a rejected request. Chasing it found something real regardless of whether it explains that one failure. Every process in the container — `miraged`, `postgres`, the indexer and gunicorn — ran with a **1024** soft `nofile` limit (hard 524288), which is Docker's daemon default. `deploy/harden_server.sh` writes `nofile 131072` to `/etc/security/limits.d/99-mirage.conf`, but that file governs PAM login sessions on the host and is never consulted for container processes, so the intended limit had never applied to a single service, in production or locally.
+
+This release makes the gap materially more dangerous than it was: descriptor exhaustion presents as a store read or write failure, and node-local store failures on a consensus path now halt the validator by design. What used to be a stray error or a silent degradation is now a stopped node — on a process sharing 1024 descriptors between the WAL, per-substore IAVL files, peer sockets and the RPC surface.
+
+Fixed by passing `--ulimit nofile=131072:131072`, matching the value `harden_server.sh` already intends, at all six persistent container creations: both branches of `deploy/deploy.sh` (local and the remote path over SSH), `scripts/reset_local_testnet.py`, and the three in `scripts/backup_restore.py`, including the temporary restore container that runs the Postgres restore. Verified directly: a container without the flag reports a 1024 soft limit, one with it reports 131072. It takes effect on container recreation, so the fleet picks it up at the next deploy rather than immediately.
+
 ### Carryover test gaps
 
 - **PoW per-envelope benchmark.** `BenchmarkValidatePoWBytesArgon2`. Baseline on an Intel Core Ultra 9 285K, `-benchmem`: **1,653,845 ns/op, 4,196,854 B/op, 24 allocs/op**. Recorded here rather than as a wall-clock CI threshold, which would be flaky across machines.
@@ -199,10 +215,6 @@ Handler `"v1.34.0"` is registered as handler 45 in `blockchain/app/upgrades.go`.
 ### L-6 — `ProcessProposal` minimal validation (accepted risk)
 
 A proposer can make peers perform full DeliverTx ante work. Signature-before-PoW ordering and fee-payer consent materially reduce exposure. Revisit only on evidence of proposer-driven DoS or a threat-model change; otherwise the cheap non-mutating ante subset is not worth the divergence surface.
-
-### L-11 — store/v2 pruning policy (deferred)
-
-Non-`ErrVersionDoesNotExist` IAVL prune failures, earliest-version persistence, and commit-info persistence remain logged and suppressed in `patches/cosmos-sdk-store-v2/rootmulti/store.go`. This is an operational and query-history risk rather than a current app-hash risk, and changing local-pruning error propagation needs an ops decision about halt versus alert. Trigger: a `failed to prune store` or `failed to persist earliest version` log, unexplained disk growth, or the next patch rebase. Acceptance: an injected per-store prune failure either propagates safely or produces a tested actionable alert, with provenance and rootmulti tests still passing.
 
 ### I-2 — historical upgrade handlers (deferred, posture changed)
 
@@ -236,6 +248,12 @@ All gates were run at the remediation baseline `4acbf0b9` plus this working tree
   The target exits nonzero because of these two; that result is recorded rather than suppressed. Production mitigations were not reverified against hosts.
 
 Not run for this retest, deliberately: the Docker-based `tests/test_blockchain.py` suites and `scripts/reset_local_testnet.py --latest`. Both require a local testnet and must run before deployment. `test_params_schema` is stateless and was exercised on the host through the `mirage-node` conda environment; `test_params_mask_governance` needs a running chain and has not been executed.
+
+**Since this section was written, both local suites have run against an upgraded local chain** and the paragraph above is superseded on those two points. The reset → upgrade-proposal → `deploy.sh --local --update` flow was exercised end to end, including the export → transform → init → start path across the proto change. `tests/test_backend.py`: 864 passed, 0 skipped, 1 failed of 865, the single failure being the `upload_media` name-resolution flake described above. `tests/test_blockchain.py`: **288 passed, 0 skipped, 0 failed of 288**, a full run, so `params_schema` and `params_mask` both executed against a live chain rather than being deferred.
+
+Two signals matter more than the totals. No `invalid last_block_hash` rejection appeared anywhere in either run, which is the evidence that L-7 enforcement accepts ordinary traffic instead of refusing it — the failure mode that made the first attempt at this guard unusable, and the one that would have been catastrophic to discover on the fleet. And the two param categories cover this release's riskiest wire changes from opposite directions: `params_mask` drives a masked zero-valued update through real governance on a live chain, which is L-9's core claim, while `params_schema` compares proto field numbers against `shared/datatypes.py` and so is what actually verifies the new `subscription_reserve_bps` field 54 parity from L-4. Neither suite covers the retired `subscription_reserve_percent` being rejected as an unsupported governance path — that rests on the Go unit test `TestUpdateParamsRejectsDeprecatedField`, which is adequate but is a unit-level guarantee rather than a live-chain one.
+
+Still outstanding from the gate below: the corrupt or unreadable indexer profile row exercise, and the coordinated upgrade validation on UAT.
 
 **Pre-deployment gate.** Before v1.34.0 ships to any validator: run `scripts/reset_local_testnet.py --latest` to confirm the export → transform → init → start flow across the proto change, run the local `tests/test_blockchain.py` suites including `params_schema` and `params_mask` after raising `pow_message_limit`, exercise a corrupt or unreadable profile row against a local indexer and record whether it degrades or halts, and validate the coordinated upgrade on UAT (`val2` / `mirage.vote`). This is a consensus-breaking release: every validator must cross the same height on the same binary.
 
