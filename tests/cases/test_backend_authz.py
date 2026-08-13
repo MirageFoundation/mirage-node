@@ -377,36 +377,14 @@ def test_admin_authz(backend):
 def test_reward_claim_authz(backend):
     """C-2: the money path must be authenticated and must not pay twice.
 
-    /api/rewards/claim takes `owner` from the request body. After the grace
-    period it requires a valid signature; during LEGACY_UNSIGNED_UNTIL a claim
-    whose proof is absent OR fails verification is still served (logged), so
-    installed clients keep working either way. Concurrent claims must not
-    double-pay.
+    /api/rewards/claim takes `owner` from the request body, so it always
+    requires a proof that verifies for that owner: a missing proof and one that
+    fails verification are both 401. The grace window that served them was
+    removed in v1.34.0. Concurrent claims must not double-pay.
     """
-    from datetime import datetime, timezone
-
     from cosmpy.aerial.wallet import LocalWallet
     from cosmpy.crypto.keypairs import PrivateKey
     from shared.client import sign_canonical
-
-    # The cutoff is required configuration; the test process loads the same env
-    # files as the backend and must not invent a default when it is absent.
-    settings_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "web",
-        "backend",
-        "settings.py",
-    )
-    settings_src = open(settings_path, encoding="utf-8").read()
-    if 'os.environ["LEGACY_UNSIGNED_UNTIL"]' not in settings_src:
-        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL is not required by settings.py")
-        return
-    grace_until = os.environ.get("LEGACY_UNSIGNED_UNTIL", "").strip()
-    if not grace_until:
-        _fail("reward_claim.grace_period_wired", "LEGACY_UNSIGNED_UNTIL is missing from the test environment")
-        return
-    cutoff = datetime.strptime(grace_until, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    in_grace = datetime.now(tz=timezone.utc) < cutoff
 
     victim_wallet = LocalWallet(PrivateKey(), prefix="mirage")
     victim = str(victim_wallet.address()).lower()
@@ -425,37 +403,23 @@ def test_reward_claim_authz(backend):
             "owner": owner,
         }
 
-    # 1. A proof that fails verification. After the cutoff it must be refused.
-    #    During the grace window it must fall through to the legacy path instead:
-    #    an unsigned claim for the same owner is accepted anyway, so refusing the
-    #    signed-but-unverifiable form denies an attacker nothing while breaking
-    #    every installed client that signs under an older scheme (the mobile
-    #    builds did, and got a hard 401 on every claim).
+    # 1. A proof signed by a different address must be refused. The grace window
+    #    that used to serve these was removed in v1.34.0.
     forged = _sign_claim(other_wallet, victim)
     code, resp = _post(f"{backend}/api/rewards/claim", forged)
     if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
-        _skip("reward_claim.bad_proof", f"rewards not configured: {resp}")
-    elif in_grace:
-        if code in _UNAUTHENTICATED:
-            _fail(
-                "reward_claim.bad_proof_falls_through_during_grace",
-                f"LEGACY_UNSIGNED_UNTIL={grace_until} but a proof that fails verification got "
-                f"{code}. During the window it must be served like an unsigned claim, or clients "
-                f"that sign under an older scheme cannot claim at all. resp={resp}",
-            )
-        else:
-            _pass("reward_claim.bad_proof_falls_through_during_grace", code=code, until=grace_until)
+        _skip("reward_claim.cross_address_rejected", f"rewards not configured: {resp}")
     elif code in _UNAUTHENTICATED:
-        _pass("reward_claim.cross_address_rejected_after_grace", code=code)
+        _pass("reward_claim.cross_address_rejected", code=code)
     else:
         _fail(
-            "reward_claim.cross_address_rejected_after_grace",
+            "reward_claim.cross_address_rejected",
             f"C-2: claim signed by a different address was processed (code={code}). resp={resp}",
         )
 
-    # 1a. The exact mobile failure mode: the owner's own key signing a payload
-    #     the backend does not expect. Verification fails, so during the window
-    #     this must be served, not 401'd.
+    # 1a. The owner's own key signing a payload the backend does not expect —
+    #     the scheme installed mobile builds used. Verification fails, so this
+    #     is a 401 now that the grace window is gone.
     legacy_scheme = _sign_claim(victim_wallet, victim)
     legacy_payload = f"claim_rewards:{victim}:{legacy_scheme['timestamp']}"
     legacy_scheme["signature"] = _b64(sign_canonical(victim_wallet, legacy_payload.encode("utf-8")))
@@ -463,22 +427,12 @@ def test_reward_claim_authz(backend):
     code, resp = _post(f"{backend}/api/rewards/claim", legacy_scheme)
     if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
         _skip("reward_claim.legacy_scheme_signature", f"rewards not configured: {resp}")
-    elif in_grace:
-        if code in _UNAUTHENTICATED:
-            _fail(
-                "reward_claim.legacy_scheme_signature",
-                f"a claim signed under an older payload scheme got {code} during the grace window "
-                f"(LEGACY_UNSIGNED_UNTIL={grace_until}). This is the regression that 401'd every "
-                f"installed mobile build. resp={resp}",
-            )
-        else:
-            _pass("reward_claim.legacy_scheme_signature", code=code, until=grace_until)
     elif code in _UNAUTHENTICATED:
-        _pass("reward_claim.legacy_scheme_signature", code=code, note="enforced after grace")
+        _pass("reward_claim.legacy_scheme_signature", code=code)
     else:
         _fail(
             "reward_claim.legacy_scheme_signature",
-            f"unverifiable signature accepted after the grace window (code={code}). resp={resp}",
+            f"unverifiable signature accepted (code={code}). resp={resp}",
         )
 
     # 1b. A correctly signed claim must clear the auth gate (even if there is
@@ -510,45 +464,34 @@ def test_reward_claim_authz(backend):
     else:
         _fail("reward_claim.signed_accepted", f"unexpected code={code}: {resp}")
 
-    # 2. Unsigned claim: behaviour depends on the grace-period date.
+    # 2. Unsigned claim must be refused outright.
     code, resp = _post(f"{backend}/api/rewards/claim", {"owner": victim})
-    if in_grace:
-        if code in _UNAUTHENTICATED:
-            _fail(
-                "reward_claim.unsigned_during_grace",
-                f"LEGACY_UNSIGNED_UNTIL={grace_until} but unsigned got {code}: {resp}",
-            )
-        elif code in (200, 503):
-            _pass("reward_claim.unsigned_during_grace", code=code, until=grace_until)
-        else:
-            _fail("reward_claim.unsigned_during_grace", f"unexpected code={code}: {resp}")
-    else:
-        if code in _UNAUTHENTICATED:
-            _pass("reward_claim.unsigned_after_grace", code=code, until=grace_until)
-        elif code == 503:
-            _skip("reward_claim.unsigned_after_grace", f"rewards not configured: {resp}")
-        else:
-            _fail(
-                "reward_claim.unsigned_after_grace",
-                f"C-2: unsigned claim after grace period was processed (code={code}). resp={resp}",
-            )
-
-    # 3. Source guard: the claim handler must reference the self-expiring window.
-    quests_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "web",
-        "backend",
-        "routes",
-        "quests.py",
-    )
-    quests_src = open(quests_path, encoding="utf-8").read()
-    if "legacy_unsigned_claim_allowed" in quests_src and "authz.legacy_unsigned" in quests_src:
-        _pass("reward_claim.grace_period_wired")
+    if code in _UNAUTHENTICATED:
+        _pass("reward_claim.unsigned_rejected", code=code)
+    elif code == 503:
+        _skip("reward_claim.unsigned_rejected", f"rewards not configured: {resp}")
     else:
         _fail(
-            "reward_claim.grace_period_wired",
-            "claim handler missing legacy_unsigned_claim_allowed / authz.legacy_unsigned logging",
+            "reward_claim.unsigned_rejected",
+            f"C-2: unsigned claim was processed (code={code}). resp={resp}",
         )
+
+    # 3. Source guard: no path may reintroduce the removed grace window.
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    quests_src = open(os.path.join(root, "web", "backend", "routes", "quests.py"), encoding="utf-8").read()
+    settings_src = open(os.path.join(root, "web", "backend", "settings.py"), encoding="utf-8").read()
+    leftovers = [
+        name
+        for name, src in (("routes/quests.py", quests_src), ("settings.py", settings_src))
+        if "legacy_unsigned" in src.lower() or "LEGACY_UNSIGNED_UNTIL" in src
+    ]
+    if leftovers:
+        _fail(
+            "reward_claim.grace_window_removed",
+            f"the unsigned-claim grace window is referenced again in {', '.join(leftovers)}",
+        )
+    else:
+        _pass("reward_claim.grace_window_removed")
 
     # 4. Double-pay race under the advisory lock. Each concurrent claim is signed
     #    with its own nonce: an unsigned probe only worked while the grace period

@@ -48,7 +48,6 @@ from settings import (
     QUESTS_INVITE_EARNER_INTERVAL,
     QUESTS_INVITE_RECRUIT_CHANCE,
     require_bool_env,
-    legacy_unsigned_claim_allowed,
 )
 from user_last_seen import update_user_last_seen
 
@@ -498,8 +497,7 @@ def claim_rewards():
 
     Body:
     - owner: User address (required)
-    - pubkey, signature, timestamp, envelope_nonce: identity proof (required
-      after LEGACY_UNSIGNED_UNTIL; optional during the grace period)
+    - pubkey, signature, timestamp, envelope_nonce: identity proof (required)
 
     Signed payload: rewards_claim:<owner-lowercased>:<timestamp>:<nonce>
 
@@ -526,13 +524,6 @@ def claim_rewards():
             log_event(rid, "rewards.claim.not_configured", owner=owner)
             return api_error_code("not_configured", 503, success=False)
 
-        # While the grace window is open, ANY failed proof falls through to the
-        # legacy path instead of 401. Installed mobile builds already send an
-        # identity block signed under an older scheme, so gating the window on
-        # the mere presence of pubkey+signature rejects exactly the clients the
-        # window exists to protect. Accepting an unverifiable proof is the same
-        # accepted risk as accepting no proof at all (the payout always goes to
-        # `owner`), and it ends when the window does.
         has_sig = bool(str(data.get("pubkey", "") or "").strip() and str(data.get("signature", "") or "").strip())
         signed_owner, aerr = None, None
         if has_sig:
@@ -541,16 +532,11 @@ def claim_rewards():
                 # Nonce-guard DB unavailable (503) — infrastructure, not a bad proof.
                 return aerr
 
-        if signed_owner:
-            owner = signed_owner
-        elif legacy_unsigned_claim_allowed():
-            reason = "unsigned"
-            if aerr is not None:
-                reason = (aerr[0].get_json(silent=True) or {}).get("error_code") or "invalid_proof"
-            log_event(rid, "authz.legacy_unsigned", endpoint="rewards/claim", owner=owner, reason=reason)
-        else:
+        if not signed_owner:
             log_event(rid, "rewards.claim.unauthenticated", owner=owner, had_signature=has_sig)
             return aerr if aerr is not None else api_error_code("signature_required", 401)
+
+        owner = signed_owner
 
         update_user_last_seen(owner, source=request.path)
 

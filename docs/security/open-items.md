@@ -12,15 +12,9 @@ Component detail lives in the retests, which stay authoritative for their own fi
 
 ---
 
-## Calendar-bound — the only item with a hard deadline
+## Calendar-bound
 
-### Backend I-1 — unsigned reward-claim grace expires 2026-10-05 UTC
-
-Reward claims with a missing or unverifiable proof are still served, and logged, until the `LEGACY_UNSIGNED_UNTIL` date so that installed mobile builds keep working. The date is required configuration validated at startup in `web/backend/settings.py`; there is no code default, and `deploy/migrations/v1_33_3_require_explicit_settings.py` pins it.
-
-The regression coverage is already in place and self-flipping: `test_reward_claim_authz` in `tests/cases/test_backend_authz.py` reads the configured cutoff, asserts that unsigned and unverifiable claims are served *before* it, and asserts they are rejected as unauthenticated *after* it. That means the enforcement cannot be silently re-disabled — but it also means the suite starts failing the day the date passes if the deployment has not been checked.
-
-**Owner action, due before 2026-10-05:** confirm the mobile builds in the wild all sign correctly, then verify on a deployed node that an unsigned claim and a claim with an unverifiable proof both return 401. Do not extend the date without a new product decision; it has already moved once, from 2026-09-05 to 2026-10-05.
+**None.** The unsigned reward-claim grace, which was the only dated item, was closed early in `v1.34.0` rather than left to expire on 2026-10-05. `/api/rewards/claim` now verifies a proof for the claimed owner or returns 401; the `LEGACY_UNSIGNED_UNTIL` setting, its handler branch, and the env key are gone, and `test_reward_claim_authz` asserts the rejection unconditionally with a source guard against reintroducing the window. Users on a client that signs under the older scheme cannot claim until they update — that was the accepted cost of ending it 54 days early.
 
 ---
 

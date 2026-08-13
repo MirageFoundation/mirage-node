@@ -80,6 +80,9 @@ RUN npm run check:bundle-policy
 WORKDIR /opt/mirage
 COPY blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
 COPY blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
+# Proto sources, not Go source: test_blockchain_params compares them against
+# shared/datatypes.py, and the suites only run inside this container.
+COPY blockchain/proto/ /opt/mirage/blockchain/proto/
 COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
@@ -151,10 +154,13 @@ WORKDIR /opt/mirage
 # Copy compiled binaries (not Go source)
 COPY --from=builder /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
 COPY --from=builder /opt/mirage/blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
+COPY --from=builder /opt/mirage/blockchain/proto /opt/mirage/blockchain/proto
 RUN chmod +x /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/compact-db
 
-# Copy built frontend (not source)
+# Copy built frontend, plus the source the suites diff against (error copy,
+# quest payout transport). Those checks are release gates and cannot skip.
 COPY --from=builder /opt/mirage/web/frontend/build /opt/mirage/web/frontend/build
+COPY --from=builder /opt/mirage/web/frontend/src /opt/mirage/web/frontend/src
 
 # Copy Python runtime scripts and modules
 COPY --from=builder /opt/mirage/scripts /opt/mirage/scripts

@@ -43,7 +43,7 @@ The release is one coherent change rather than eighteen patches: node-local stor
 | L-10 | Admin gas waiver treats all deduction errors as insufficient balance | **Fixed** | v1.34.0 |
 | L-11 | Store/v2 pruning logs and suppresses per-store failures | **Deferred** | trigger below |
 
-Every accepted and deferred row below is also carried in the cross-component register at [`docs/security/open-items.md`](../open-items.md), together with the still-open backend, indexer, and frontend items and the one calendar-bound action (the backend claim grace expiring 2026-10-05 UTC).
+Every accepted and deferred row below is also carried in the cross-component register at [`docs/security/open-items.md`](../open-items.md), together with the still-open backend, indexer, and frontend items. There is no longer a calendar-bound action: the backend claim grace that was due to expire 2026-10-05 UTC was removed in this same release.
 
 Informational items:
 

@@ -256,13 +256,13 @@ def _find_proposal_id(title: str) -> str:
     """Find the proposal id for a title. Queries voting-period proposals so old
     passed proposals (which may reference removed message types) are not
     deserialized."""
-    for status in ("voting_period", "deposit_period"):
+    for status in ("voting-period", "deposit-period"):
         code, out = _run_miraged(
             [
                 "q",
                 "gov",
                 "proposals",
-                "--status",
+                "--proposal-status",
                 status,
                 "--home",
                 NODE_HOME,
@@ -273,7 +273,11 @@ def _find_proposal_id(title: str) -> str:
             ],
             timeout=20,
         )
-        if code != 0 or not out:
+        # A rejected flag or an unreachable node must not read as "no such
+        # proposal": that turns a broken query into a timeout ten minutes later.
+        if code != 0:
+            raise RuntimeError(f"gov proposals query failed (exit {code}): {out[:300]}")
+        if not out:
             continue
         data = _parse_cli_json(out) or {}
         for proposal in reversed(data.get("proposals") or []):

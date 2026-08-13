@@ -14,7 +14,7 @@
 
 ## Summary
 
-**11 findings fully fixed, 1 accepted until a calendar cutoff, 1 deferred.** No Medium or Low finding from the Aug 7 review remains open in code. The unsigned-claim grace (**I-1**) is still an explicit product decision through 2026-10-05 UTC. The oversized route modules (**I-3**) stay deferred; the quest-assignment duplication that made them security-relevant was extracted without a broad route refactor.
+**12 findings fully fixed, 1 deferred.** No Medium or Low finding from the Aug 7 review remains open in code. The unsigned-claim grace (**I-1**) was closed early in v1.34.0 instead of being left to expire on 2026-10-05. The oversized route modules (**I-3**) stay deferred; the quest-assignment duplication that made them security-relevant was extracted without a broad route refactor.
 
 The first remediation pass closed the review findings, then a second audit of that implementation corrected several defects before release: CheckTx acceptance is no longer reported as a completed payout; reward-summary polling drives reconciliation and exposes pending state; failed Expo sends release their throttle slot; mention pushes use one outbox row per recipient; analytics bind an address only after a successful signed route; and daily/flash assignment share one owner lock.
 
@@ -34,7 +34,7 @@ The first remediation pass closed the review findings, then a second audit of th
 | L-6 | Test skips reported as passes | **Fixed** | v1.33.3 |
 | L-7 | Query `address` mutates last-seen / analytics | **Fixed** | v1.33.3 |
 | L-8 | Invite gate trusts client `Host` header | **Fixed** | v1.33.3 |
-| I-1 | Unsigned/bad-proof claim grace until 2026-10-05 | **Accepted until cutoff** | setting required |
+| I-1 | Unsigned/bad-proof claim grace until 2026-10-05 | **Fixed** (grace removed early) | v1.34.0 |
 | I-2 | Soft defaults for media uploads / indexer enable | **Fixed** | v1.33.3 |
 | I-3 | Oversized route modules | **Deferred** | quest assignment extracted only |
 
@@ -46,7 +46,7 @@ Prior Aug 6 residuals restated by Aug 7:
 | 2026-08-06 L-2 — CLI assumes non-JSON success | **Fixed** (as Aug 7 L-3) |
 | 2026-08-06 L-3 — invite Host policy | **Fixed** (as Aug 7 L-8) |
 | 2026-08-06 L-4 — soft defaults | **Fixed** (as Aug 7 I-2) |
-| 2026-08-06 I-1 — claim grace | **Accepted until 2026-10-05** (as Aug 7 I-1) |
+| 2026-08-06 I-1 — claim grace | **Fixed** in v1.34.0 (as Aug 7 I-1) |
 
 ---
 
@@ -100,7 +100,9 @@ Media uploads, achievements, quest controls, claim grace, and indexer enablement
 
 ### I-1 — unsigned claim grace
 
-**Accepted until the existing cutoff.** Missing or invalid reward-claim proofs remain allowed and logged until 2026-10-05 UTC. The setting is required and date-validated at startup; there is no code default. Do not extend the cutoff without a new product decision. After that date, verify unsigned and unverifiable proofs return 401 on a deployed node.
+**Fixed in v1.34.0 — the grace was ended 54 days early rather than allowed to expire.** `/api/rewards/claim` now verifies an identity proof for the claimed owner or returns 401; a missing proof and one that fails verification are treated identically. `legacy_unsigned_claim_allowed()`, the `LEGACY_UNSIGNED_UNTIL` setting, the handler branch, and the `authz.legacy_unsigned` log line are all removed, `deploy/migrations/v1_34_0_end_claim_grace_window.py` drops the key from deployed `backend.env`, and `test_reward_claim_authz` asserts the 401s unconditionally plus a source guard that fails if the window is reintroduced in `settings.py` or `routes/quests.py`.
+
+The accepted cost: a client still signing under the older payload scheme cannot claim rewards until it updates. That is the same breakage the grace existed to avoid, taken deliberately and early instead of on the calendar date.
 
 ### I-3 — route module size
 
