@@ -1347,10 +1347,10 @@ def test_block_hash_window_margin(backend):
     is_node_catching_up already prevents it — /api/get_parameters returns 503
     node_catching_up first — but only because its thresholds happen to be far
     tighter than the window. Nothing structural held those two apart, so this
-    asserts the margin: a hash served at the worst lag the backend tolerates
-    must stay inside the window for the whole life of an envelope. Raising the
-    lag thresholds, or governing block_hash_window down, now fails here instead
-    of in production.
+    asserts the two properties the design rests on: the worst lag the backend
+    tolerates stays inside the window, and the window covers max_envelope_age.
+    Raising the lag thresholds, or governing block_hash_window down, now fails
+    here instead of in production.
     """
     backend_src = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
@@ -1386,6 +1386,14 @@ def test_block_hash_window_margin(backend):
     # The height threshold is counted in blocks, so it only becomes comparable
     # to a deadline in seconds after conversion - the exact mismatch that made
     # the 2s-vs-3s local block time misleading.
+    #
+    # max, not min, and deliberately so. is_node_catching_up ORs its triggers, so
+    # in practice the tightest one stops serving first and the real tolerance is
+    # the minimum. Asserting against the minimum would assume every trigger is
+    # live, and the height one is not: it is guarded on chain_head > 0, so an
+    # absent chain_head_height leaves it permanently false. Taking the maximum
+    # asserts the weaker property that holds even when only the loosest surviving
+    # trigger fires, which is the one worth guaranteeing.
     worst_tolerated_lag_s = max(
         chain_mod._MAX_PROCESSING_LAG_SECONDS,
         chain_mod._MAX_HEIGHT_LAG_BLOCKS * block_time,

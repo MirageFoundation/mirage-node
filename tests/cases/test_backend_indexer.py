@@ -1570,6 +1570,13 @@ def _indexer_hardening_corrupt_profile_check(backend: str) -> None:
     owner that is not a valid address. What must hold is that the request fails
     or degrades visibly, the process survives, and nothing about it can reach
     consensus - the row exists only in this node's index.
+
+    created_at is negative on purpose, not arbitrarily. This category runs in the
+    parallel stateless set, so for the ~1s the row exists it is visible to other
+    categories, and test_backend_stats aggregates profiles by created_at. A
+    negative value falls outside every time-windowed query (stats bounds its scan
+    to the last 120 days), so it cannot shift a bucket, a COUNT or a MIN. A
+    plausible recent timestamp would look tidier and would make that test flaky.
     """
     db_url = os.environ.get("INDEXER_DB_URL", "").strip()
     if not db_url:
@@ -1601,13 +1608,31 @@ def _indexer_hardening_corrupt_profile_check(backend: str) -> None:
 
     try:
         code, data = _get(f"{backend}/api/get_profile", {"address": owner})
-        # Either verdict is acceptable: a clean error, or a degraded profile with
-        # coerced defaults. A hung request, a dead worker (502/504) or a 500 with
-        # no body would mean the row took the node down with it.
+        # Two verdicts are acceptable degradations: a served profile, or a clean
+        # error. What is not acceptable is a dead worker, which is what 502/504
+        # indicate here since the backend sits behind the container's own proxy.
+        # A hang shows up as the _get timeout rather than as a code.
         if code in (502, 504):
             _fail("indexer_hardening.corrupt_profile_degrades", f"worker died on the corrupt row: code={code}")
         elif code == 200 and isinstance(data, dict):
-            _pass("indexer_hardening.corrupt_profile_degrades", verdict="degraded_to_defaults", level=data.get("level"))
+            # Pin what actually happens, which is narrower than "sanitised": the
+            # NULL is coerced to a default because the reader guards for None,
+            # while a type-valid but nonsensical number is passed through to the
+            # client verbatim. Both are degradations rather than halts, but only
+            # the first is coercion, and saying so keeps the recorded answer
+            # honest if someone later assumes the row is cleaned.
+            if data.get("username") != "":
+                _fail(
+                    "indexer_hardening.corrupt_profile_degrades",
+                    f"a NULL username must read as empty, got {data.get('username')!r}",
+                )
+            else:
+                _pass(
+                    "indexer_hardening.corrupt_profile_degrades",
+                    verdict="degraded",
+                    null_coerced=True,
+                    level_passed_through=(data.get("level") == -1),
+                )
         elif 400 <= code < 600:
             _pass("indexer_hardening.corrupt_profile_degrades", verdict=f"clean_error_{code}")
         else:
