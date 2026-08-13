@@ -46,9 +46,9 @@ const (
 	MaxPowCalmSequenceThreshold = 1_000_000
 	// MinBlockHashWindow keeps the PoW recent-block-hash window from becoming a
 	// stricter freshness rule than MaxEnvelopeAge, which would reject work the
-	// age check still accepts. At the 2s block time the local chain runs and the
-	// 3s the node template configures, 20 blocks is 40-60s against that param's
-	// 60s default, so this is a floor and not a target; DefaultParams uses 60.
+	// age check still accepts. At the 3s block time the fleet and the local
+	// testnet run, 20 blocks is exactly MaxEnvelopeAge's 60s default, so this is
+	// a hard floor with no margin, not a target; DefaultParams uses 60 (180s).
 	//
 	// It is deliberately NOT enforced in Validate(). The live genesis carries
 	// block_hash_window 10, and InitGenesis only substitutes defaults when the

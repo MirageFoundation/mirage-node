@@ -689,8 +689,13 @@ def _synthesize_log_from_events(events: list) -> str:
     return json.dumps([{"events": decoded_events}])
 
 
-def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
-    """Wait for a tx to land in a block by scanning block_results (tx_index disabled)."""
+def _wait_for_tx_result(tx_hash: str, timeout: float = 20.0) -> tuple[int, str]:
+    """Wait for a tx to land in a block by scanning block_results (tx_index disabled).
+
+    The budget is ~6 blocks at the 3s block time the local testnet now shares with
+    the fleet. It was 10s when local ran at 2s, which is only 3 blocks at 3s and
+    close enough to a single slow block to flake.
+    """
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
     h = tx_hash.strip().upper().removeprefix("0X")

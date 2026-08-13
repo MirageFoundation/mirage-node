@@ -41,7 +41,11 @@ def read_positive_int(key: str) -> int:
     return int(value)
 
 
-LOCAL_BLOCK_TIME_SECONDS = 2
+# Matches the fleet's timeout_commit (deploy/templates/node/config.toml default).
+# Local used to run 2s, which made block-derived windows look 33% tighter here
+# than in production: block_hash_window at 60 blocks is 120s at 2s but 180s at
+# 3s, and that gap is exactly where a too-narrow window hides during testing.
+LOCAL_BLOCK_TIME_SECONDS = 3
 LOCAL_RETENTION_BLOCKS = read_positive_int("RETENTION_BLOCKS")
 LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_BLOCKS * LOCAL_BLOCK_TIME_SECONDS
 
@@ -1084,9 +1088,11 @@ def start_with_entrypoint(image_ref: str):
     Local testnet overrides are passed as container env vars:
     - SKIP_PEERS=1: no peer connections
     - SKIP_VALIDATOR_CHECK=1: skip key validation in init.sh
-    - CREATE_EMPTY_BLOCKS=true: produce blocks even with no txs
-    - CREATE_EMPTY_BLOCKS_INTERVAL=2s: fast block time
-    - TIMEOUT_COMMIT=2s: fast consensus
+    - CREATE_EMPTY_BLOCKS=true: produce blocks even with no txs. The fleet
+      leaves this false because real traffic keeps it advancing; an idle local
+      chain would otherwise never move, stalling anything that waits on height.
+    - CREATE_EMPTY_BLOCKS_INTERVAL / TIMEOUT_COMMIT: both the fleet's 3s, so
+      block-derived windows span the same wall-clock here as in production.
     """
     status("Starting container with normal entrypoint (like production) ...")
     run(["bash", "-lc", "docker rm -f mirage 2>/dev/null || true"])
@@ -1099,8 +1105,8 @@ def start_with_entrypoint(image_ref: str):
             f"docker run -d --name mirage --hostname testnet --restart no "
             f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
             f"-e CREATE_EMPTY_BLOCKS=true "
-            f"-e CREATE_EMPTY_BLOCKS_INTERVAL=2s "
-            f"-e TIMEOUT_COMMIT=2s "
+            f"-e CREATE_EMPTY_BLOCKS_INTERVAL={LOCAL_BLOCK_TIME_SECONDS}s "
+            f"-e TIMEOUT_COMMIT={LOCAL_BLOCK_TIME_SECONDS}s "
             f"-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
             f"-v {home}/.mirage:/root/.mirage "
             f"-v {home}/.caddy:/root/.local/share/caddy "
