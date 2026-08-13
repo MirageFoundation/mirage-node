@@ -894,6 +894,11 @@ class MessageProcessor:
                 logger.exception("Failed to recompute topic_content_stats for edit %s", tx_hash)
                 raise
 
+        # Vote and post standing is keyed by the topic the post carries now, so a
+        # topic change has to carry the thread's existing attribution with it.
+        if is_root and new_topic and (existing_topic or "").lower() != (new_topic or "").lower():
+            self.db.reattribute_topic_stats(override, existing_topic or "", new_topic)
+
         # Recompute thumbnail on root edits (content change). Deterministic derivation only.
         if is_root:
             thumb = derive_from_content("thumbnail(edit)", self.discover_post_thumbnail, content)

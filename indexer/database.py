@@ -1627,6 +1627,111 @@ class DatabaseManager:
                     ),
                 )
 
+    # Canonical definition of a (owner, topic) stats row, shared by the live
+    # re-attribution below and indexer/migrations/v1_33_0_rebuild_derived_stats.
+    # Both must agree with tests indexer_hardening.net_votes_matches_canonical_votes.
+    _VOTE_STATS_FROM_CANONICAL = """
+        INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+        SELECT
+            LOWER(v.owner),
+            LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)),
+            COUNT(*) FILTER (WHERE v.user_vote <> 0),
+            COALESCE(SUM(CASE
+                WHEN v.user_vote > 0 THEN 1
+                WHEN v.user_vote < 0 THEN -1
+                ELSE 0
+            END), 0)::int,
+            COUNT(DISTINCT LOWER(COALESCE(NULLIF(p.root_post_id, ''), p.txhash)))
+                FILTER (WHERE v.user_vote <> 0),
+            0
+        FROM votes v
+        JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
+        WHERE LOWER(v.owner) = ANY(%s)
+          AND LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) = ANY(%s)
+        GROUP BY 1, 2
+    """
+
+    _POST_STATS_FROM_CANONICAL = """
+        INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+        SELECT
+            LOWER(p.owner),
+            LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)),
+            0, 0, 0,
+            COUNT(*)::int
+        FROM posts p
+        WHERE LOWER(p.owner) = ANY(%s)
+          AND LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) = ANY(%s)
+          AND COALESCE(p.deleted, FALSE) = FALSE
+        GROUP BY 1, 2
+        ON CONFLICT (owner, topic) DO UPDATE SET
+            post_count = EXCLUDED.post_count
+    """
+
+    def reattribute_topic_stats(self, root_post_id: str, old_topic: str, new_topic: str) -> int:
+        """Move a thread's vote/post standing after its root topic changed.
+
+        `user_topic_stats` is maintained by deltas, but its meaning is defined by
+        the topic the post row carries *now*. An edit that changes a root post's
+        topic therefore silently invalidates every delta already applied under the
+        old topic — including the author's post-time auto-upvote — and the drift
+        is permanent because nothing revisits it. Descendant comments denormalise
+        `root_topic` at creation, so they have to follow the root as well or the
+        thread ends up split across two topics.
+
+        Both affected topics are recomputed from the canonical tables rather than
+        patched by a guessed delta, so the result is identical to a full rebuild
+        no matter how many votes or edits came before. Returns the number of rows
+        rewritten.
+        """
+        root_norm = str(root_post_id or "").strip().lower()
+        old_norm = str(old_topic or "").strip().lower()
+        new_norm = str(new_topic or "").strip().lower()
+        if not root_norm or not new_norm or old_norm == new_norm:
+            return 0
+
+        topics = [t for t in (old_norm, new_norm) if t]
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                # The root and every descendant share root_post_id, so the whole
+                # thread follows the root in one statement.
+                cur.execute(
+                    "UPDATE posts SET root_topic = %s WHERE LOWER(root_post_id) = %s",
+                    (new_norm, root_norm),
+                )
+                threads_moved = cur.rowcount
+
+                cur.execute(
+                    """
+                    SELECT LOWER(owner) FROM posts WHERE LOWER(root_post_id) = %s
+                    UNION
+                    SELECT LOWER(v.owner)
+                    FROM votes v
+                    JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
+                    WHERE LOWER(p.root_post_id) = %s
+                    """,
+                    (root_norm, root_norm),
+                )
+                owners = [row[0] for row in cur.fetchall() if row[0]]
+                if not owners:
+                    return threads_moved
+
+                cur.execute(
+                    "DELETE FROM user_topic_stats WHERE owner = ANY(%s) AND topic = ANY(%s)",
+                    (owners, topics),
+                )
+                cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, topics))
+                cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, topics))
+
+        logger.info(
+            "user_topic_stats reattributed root=%s %s->%s posts_moved=%d owners=%d",
+            root_norm[:12],
+            old_norm or "(none)",
+            new_norm,
+            threads_moved,
+            len(owners),
+        )
+        return threads_moved
+
     def update_preference(self, owner: str, pref_type: str, target: str, delta: float, updated_at: int) -> None:
         """
         Update per-user preference (topic or author) using exponential decay.

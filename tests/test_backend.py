@@ -85,7 +85,12 @@ from tests.cases.test_backend_authz import (
     test_cross_user_reads,
 )
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
-from tests.cases.test_backend_indexer import test_indexer, test_tx_index, test_indexer_hardening
+from tests.cases.test_backend_indexer import (
+    test_indexer,
+    test_tx_index,
+    test_indexer_hardening,
+    test_indexer_topic_edit,
+)
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_quests import test_quest_config, test_quest_assignment
 from tests.cases.test_backend_payouts import (
@@ -154,6 +159,7 @@ ALL_CATEGORIES = {
     "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer": test_indexer,
     "indexer_hardening": test_indexer_hardening,
+    "indexer_topic_edit": test_indexer_topic_edit,
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
     "subscribe_gift_agent": test_subscribe_gift_agent,

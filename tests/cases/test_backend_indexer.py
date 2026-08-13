@@ -37,12 +37,140 @@ from tests.backend_helpers import (
     _do_follow_user,
     _do_follow_user_with_nonce,
     _do_set_biography,
+    _do_post,
+    _do_vote,
+    _do_edit,
     _wait_indexed,
     _wait_tx_deliver,
     _wait_tx_status,
     _wait_tx_status_failure,
     _wait_next_block,
 )
+
+
+def _topic_stats(owner: str, topic: str) -> tuple[int, int, int]:
+    """Return (vote_count, net_votes, post_count) for one (owner, topic) row."""
+    db_name = _get_indexer_db_name()
+    rc, out = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT vote_count, net_votes, post_count
+FROM user_topic_stats WHERE owner = LOWER('{owner}') AND topic = LOWER('{topic}');\\" 2>&1" """,
+        timeout=15,
+    )
+    if rc != 0:
+        raise RuntimeError(f"user_topic_stats query failed rc={rc} out={out}")
+    line = out.strip()
+    if not line:
+        return (0, 0, 0)
+    vote_count, net_votes, post_count = line.split("|")
+    return (int(vote_count), int(net_votes), int(post_count))
+
+
+def test_indexer_topic_edit(backend: str):
+    """Editing a root post's topic must carry the thread's standing with it.
+
+    `user_topic_stats` is applied as deltas but means "votes whose post is in this
+    topic now", so before v1.34.0 a topic edit stranded every earlier delta —
+    including the author's post-time auto-upvote — on the old topic forever. The
+    comment is here because its own denormalised root_topic has to follow the root
+    too, otherwise a vote on it stays counted against the original topic.
+    """
+
+    if not _check_local_docker():
+        _skip("topic_edit.reattribution", "not running in local-docker")
+        return
+
+    author = WALLETS["sub1"]
+    voter = WALLETS["sub2"]
+    author_addr = str(author.address()).lower()
+    voter_addr = str(voter.address()).lower()
+
+    suffix = _rand_str(6).lower()
+    old_topic = f"tea{suffix}"
+    new_topic = f"teb{suffix}"
+
+    root_hash = _do_post(backend, author, old_topic, f"Topic edit {suffix}", "reattribution probe", skip_pow=True)
+    if not root_hash:
+        _fail("topic_edit.setup", "root post was not accepted")
+        return
+    if not _wait_indexed(backend, author_addr, root_hash):
+        _fail("topic_edit.setup", f"root post {root_hash[:12]} never indexed")
+        return
+
+    comment_hash = _do_post(backend, voter, "", "", "comment under the probe", target=root_hash, skip_pow=True)
+    if not comment_hash or not _wait_indexed(backend, voter_addr, comment_hash):
+        _fail("topic_edit.setup", "comment under the root post never indexed")
+        return
+
+    _do_vote(backend, voter, root_hash, 1, skip_pow=True)
+    _do_vote(backend, author, comment_hash, 1, skip_pow=True)
+    _wait_next_block()
+    time.sleep(3)
+
+    before_author = _topic_stats(author_addr, old_topic)
+    before_voter = _topic_stats(voter_addr, old_topic)
+    _debug(f"topic_edit: before edit {old_topic} author={before_author} voter={before_voter}")
+    if before_author == (0, 0, 0) and before_voter == (0, 0, 0):
+        _fail("topic_edit.setup", f"no standing recorded under {old_topic}; nothing to re-attribute")
+        return
+
+    edit = _do_edit(
+        backend,
+        author,
+        root_hash,
+        new_topic,
+        f"Topic edit {suffix}",
+        "reattribution probe",
+        skip_pow=True,
+    )
+    edit_hash = str((edit or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(edit_hash) if edit_hash else None
+    if not delivered or delivered[0] != 0:
+        _fail("topic_edit.setup", f"topic edit was not delivered cleanly: {edit} result={delivered}")
+        return
+    _wait_next_block()
+    time.sleep(3)
+
+    after_old_author = _topic_stats(author_addr, old_topic)
+    after_old_voter = _topic_stats(voter_addr, old_topic)
+    after_new_author = _topic_stats(author_addr, new_topic)
+    after_new_voter = _topic_stats(voter_addr, new_topic)
+    _debug(
+        f"topic_edit: after edit {old_topic} author={after_old_author} voter={after_old_voter} "
+        f"| {new_topic} author={after_new_author} voter={after_new_voter}"
+    )
+
+    stranded = [
+        f"{label}={stats}"
+        for label, stats in (("author", after_old_author), ("voter", after_old_voter))
+        if stats != (0, 0, 0)
+    ]
+    if stranded:
+        _fail("topic_edit.old_topic_released", f"standing left on {old_topic}: {', '.join(stranded)}")
+    else:
+        _pass("topic_edit.old_topic_released")
+
+    if after_new_author == before_author and after_new_voter == before_voter:
+        _pass("topic_edit.new_topic_holds_standing")
+    else:
+        _fail(
+            "topic_edit.new_topic_holds_standing",
+            f"expected author={before_author} voter={before_voter}, "
+            f"got author={after_new_author} voter={after_new_voter}",
+        )
+
+    # The whole thread must agree on the topic, or a vote on the comment keeps
+    # being counted against the topic the root left behind.
+    db_name = _get_indexer_db_name()
+    rc, out = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT COALESCE(root_topic, '')
+FROM posts WHERE LOWER(txhash) = LOWER('{comment_hash}');\\" 2>&1" """,
+        timeout=15,
+    )
+    comment_root_topic = out.strip().lower() if rc == 0 else f"query failed: {out}"
+    if comment_root_topic == new_topic:
+        _pass("topic_edit.comment_follows_root")
+    else:
+        _fail("topic_edit.comment_follows_root", f"comment root_topic={comment_root_topic!r}, expected {new_topic!r}")
 
 
 def test_indexer(backend: str):

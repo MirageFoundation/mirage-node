@@ -80,6 +80,22 @@ As in the status table. Derived-stat repair ships as `indexer/migrations/v1_33_0
 
 ---
 
+## Found after this retest — fixed in v1.34.0
+
+### A topic-changing edit stranded vote and post attribution on the old topic
+
+M-8 fixed how a vote's contribution is computed but not what happens when the topic it was credited to changes underneath it. `user_topic_stats` is maintained incrementally, while its canonical meaning — the definition shared by `v1_33_0_rebuild_derived_stats` and `indexer_hardening.net_votes_matches_canonical_votes` — resolves a vote's topic from the post row *as it reads now*. `_process_edit` rewrote a root post's `topic`/`root_topic` and recomputed `topic_content_stats` for both topics, but moved none of the `net_votes`, `vote_count`, `unique_root_posts`, or `post_count` already credited under the old one. Every vote counted before the edit, including the author's post-time auto-upvote, stayed on a topic the post had left, so one row read high and another read low permanently. Descendant comments were the second half of it: they denormalise `root_topic` at creation and nothing propagated the root's new topic to them, so a thread could sit split across two topics and votes on those comments kept counting against the original.
+
+Found while retesting v1.34.0, not introduced by it — the imported database carried two already-drifted rows (one topic reading 3 against a canonical 2, another 8 against 9), traced in UAT indexer logs to a root post created in one topic and edited into another 35 seconds later. Impact was bounded to community vote weighting and personalisation inputs; chain state, balances, and consensus never read these columns.
+
+`DatabaseManager.reattribute_topic_stats` now points the whole thread at the new topic in one statement and recomputes both affected topics from the canonical `votes` and `posts` rows for exactly the owners involved, rather than guessing a delta — so the result equals a full rebuild regardless of how many votes or prior edits came before. `_process_edit` calls it whenever a root post's topic actually changes. `MsgAnnotate` needs no equivalent: it writes only the `agent_edits` overlay and never touches `posts.topic`.
+
+Deployed databases are repaired by `indexer/migrations/v1_34_0_repair_topic_attribution.py`, which realigns stale descendant `root_topic` values first (canonical attribution reads each comment's own row, so the rebuild is only correct once comments agree with their root) and then reuses the v1.33.0 rebuild helpers, keeping one definition of a stats row in the tree. It asserts the canonical invariant before its marker is written and raises rather than recording success if any row still disagrees. On the local database it realigned 79 comments and cleared both drifted rows.
+
+`indexer_topic_edit` is the regression test: it posts, comments, votes from two accounts, edits the topic, and asserts the old topic is released, the new topic holds the identical standing, and the comment followed its root. All three assertions fail against the pre-fix indexer and pass after it.
+
+---
+
 ## Accepted / deferred residuals
 
 ### M-1 — automatic continue on pruned history

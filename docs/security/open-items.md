@@ -1,13 +1,13 @@
 # Security Open Items — Cross-Component Register
 
-**As of:** 2026-08-12, at `dev` `7c8e9454` with the `v1.34.0` blockchain release staged.
-**Purpose:** one place to find every security item that is still open across components, so that an accepted risk or a deferred plan item cannot quietly become forgotten work. Nothing here is a defect awaiting a fix in the current release; each entry needs either a scheduled action or a recorded decision.
+**As of:** 2026-08-13, at `dev` `5dc06fec` with the `v1.34.0` blockchain release tagged.
+**Purpose:** one place to find every security item that is still open across components, so that an accepted risk or a deferred plan item cannot quietly become forgotten work. Every entry needs either a scheduled action or a recorded decision.
 
 Component detail lives in the retests, which stay authoritative for their own findings:
 
 - [blockchain](blockchain/review-2026-08-07-retest.md) — staged for `v1.34.0`
 - [backend](backend/review-2026-08-07-retest.md) — shipped `v1.33.3`, plus the 2026-08-12 delta appendix
-- [indexer](indexer/review-2026-08-07-retest.md) — shipped `v1.33.0`–`v1.33.2`, plus the 2026-08-12 delta appendix
+- [indexer](indexer/review-2026-08-07-retest.md) — shipped `v1.33.0`–`v1.33.2`, plus the 2026-08-12 delta appendix and the topic-attribution fix in `v1.34.0`
 - [frontend](frontend/retest-2026-08-09.md) — plus the 2026-08-12 delta appendix
 
 ---

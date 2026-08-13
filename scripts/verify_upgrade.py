@@ -32,6 +32,16 @@ Checks:
   6. Stored params satisfy the full Params.Validate rule set, including the new
      operational bounds. The upgrade handler refuses to complete otherwise;
      this re-checks the live chain after later governance proposals.
+  7. The indexer topic-attribution repair applied and left no drifted rows.
+  8. LEGACY_UNSIGNED_UNTIL is gone from backend.env, so reward claims cannot
+     fall through to the removed unsigned path.
+
+Checks 7 and 8 read deployment artifacts (the indexer database, backend.env)
+that exist inside the container but not in a plain source checkout. When the
+artifact is absent they report NOTE and do not affect the exit code, because a
+missing artifact means "not verifiable from here", not "verified". Run the
+docker form above for the full set — a run that only prints NOTE for 7 and 8 has
+not checked them.
 
 This script is read-only: it never broadcasts. Two properties of this release
 cannot be observed read-only and are proven by tests instead:
@@ -408,6 +418,84 @@ def check_param_bounds() -> None:
     ok(f"stored params satisfy the v1.34.0 Params.Validate() rules ({checked} values checked)")
 
 
+INDEXER_REPAIR_MIGRATION = "v1.34.0_repair_topic_attribution"
+
+# Canonical definition of a (owner, topic) stats row, mirroring
+# DatabaseManager._VOTE_STATS_FROM_CANONICAL and the rebuild migration. A row
+# that disagrees means a topic edit stranded attribution again.
+DRIFTED_TOPIC_ROWS_SQL = """
+    SELECT COUNT(*) FROM (
+        SELECT s.owner, s.topic
+        FROM user_topic_stats s
+        LEFT JOIN (
+            SELECT LOWER(v.owner) AS owner,
+                   LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
+                   SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
+            FROM votes v
+            JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
+            WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
+            GROUP BY 1, 2
+        ) d ON d.owner = s.owner AND d.topic = s.topic
+        WHERE s.net_votes <> COALESCE(d.net, 0)
+    ) mismatched
+"""
+
+
+def check_topic_attribution_repaired() -> None:
+    """The repair migration asserts this invariant before it writes its marker,
+    so a missing marker plus drifted rows means it never ran on this host.
+    """
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        note("INDEXER_DB_URL unset: topic-attribution repair not verifiable from here")
+        return
+    try:
+        import psycopg
+    except ImportError:
+        note("psycopg unavailable: topic-attribution repair not verifiable from here")
+        return
+
+    try:
+        with psycopg.connect(db_url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT value FROM meta WHERE key = %s",
+                    (f"migration_{INDEXER_REPAIR_MIGRATION}",),
+                )
+                row = cur.fetchone()
+                cur.execute(DRIFTED_TOPIC_ROWS_SQL)
+                drifted = int(cur.fetchone()[0])
+    except Exception as e:
+        fail(f"topic-attribution check failed: {e}")
+        return
+
+    if row is None:
+        fail(f"indexer migration {INDEXER_REPAIR_MIGRATION} has not been applied")
+    elif drifted:
+        fail(f"{drifted} (owner, topic) row(s) disagree with their canonical votes after the repair")
+    else:
+        ok(f"topic attribution repaired ({INDEXER_REPAIR_MIGRATION}) with no drifted rows")
+
+
+def check_claim_grace_removed() -> None:
+    """v1.34.0 ends the unsigned reward-claim window early; the deploy migration
+    removes the key so nothing can re-open it by setting a future date.
+    """
+    env_path = Path("/root/.mirage/env/backend.env")
+    if not env_path.is_file():
+        note(f"{env_path} absent: claim-grace removal not verifiable from here")
+        return
+    offending = [
+        line.strip()
+        for line in env_path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("LEGACY_UNSIGNED_UNTIL=")
+    ]
+    if offending:
+        fail(f"backend.env still defines {offending[0]}")
+    else:
+        ok("backend.env has no LEGACY_UNSIGNED_UNTIL")
+
+
 def main() -> int:
     print(f"verify_upgrade.py for {RELEASE_VERSION}")
     check_version_txt()
@@ -416,6 +504,8 @@ def main() -> int:
     check_chain_live_past_upgrade()
     check_required_params_present()
     check_param_bounds()
+    check_topic_attribution_repaired()
+    check_claim_grace_removed()
     note(
         "mask-driven zero-value governance updates are proven by "
         "tests/test_blockchain.py --category params_mask (local testnet only); "
