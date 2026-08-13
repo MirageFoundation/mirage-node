@@ -1424,20 +1424,22 @@ def test_indexer_hardening(backend: str):
     else:
         _pass("indexer_hardening.obsolete_surface_removed")
 
-    _indexer_hardening_db_checks()
+    _indexer_hardening_db_checks(backend)
 
 
-def _indexer_hardening_db_checks() -> None:
+def _indexer_hardening_db_checks(backend: str) -> None:
     """Live indexer DB assertions. Skipped when local docker is unavailable."""
 
     if not _check_local_docker():
         _skip("indexer_hardening.checkpoint_has_provenance", "not running in local-docker")
         _skip("indexer_hardening.net_votes_matches_canonical_votes", "not running in local-docker")
         _skip("indexer_hardening.block_transaction_rolls_back", "not running in local-docker")
+        _skip("indexer_hardening.corrupt_profile_degrades", "not running in local-docker")
         return
 
     db_name = _get_indexer_db_name()
     _indexer_hardening_txn_check()
+    _indexer_hardening_corrupt_profile_check(backend)
 
     # H-1/H-2: last_height is never written without the chain_id and block hash
     # that let the next startup prove the rows belong to this chain.
@@ -1552,6 +1554,82 @@ def _indexer_hardening_txn_check() -> None:
             _fail("indexer_hardening.block_transaction_rolls_back", f"meta survived rollback: {after!r}")
     except Exception as e:
         _fail("indexer_hardening.block_transaction_rolls_back", f"{type(e).__name__}: {e}")
+
+
+def _indexer_hardening_corrupt_profile_check(backend: str) -> None:
+    """A corrupt or unreadable profile row must degrade this node, never halt it.
+
+    The blockchain retest left this as a manual pre-deployment exercise: read a
+    damaged profile row and record whether the backend degrades or halts. It is
+    automated here instead, because the answer only stays true if something keeps
+    checking it.
+
+    The row is written straight into the indexer DB, bypassing the indexer, so it
+    holds shapes the indexer would never produce: a NULL username where the
+    reader coerces, a negative level and expiry that no handler can emit, and an
+    owner that is not a valid address. What must hold is that the request fails
+    or degrades visibly, the process survives, and nothing about it can reach
+    consensus - the row exists only in this node's index.
+    """
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        code, out = _docker_exec("printenv INDEXER_DB_URL")
+        if code == 0 and out:
+            db_url = out.strip()
+    if not db_url:
+        _skip("indexer_hardening.corrupt_profile_degrades", "INDEXER_DB_URL unavailable")
+        return
+
+    owner = f"not_a_valid_address_{_rand_str(10)}"
+    try:
+        import psycopg
+    except Exception as e:
+        _skip("indexer_hardening.corrupt_profile_degrades", f"psycopg unavailable: {e}")
+        return
+
+    try:
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO profiles(owner, username, level, created_at, subscription_expiry)
+                       VALUES(%s, NULL, %s, %s, %s)""",
+                    (owner, -1, -1, -1),
+                )
+    except Exception as e:
+        _fail("indexer_hardening.corrupt_profile_degrades", f"could not seed the corrupt row: {e}")
+        return
+
+    try:
+        code, data = _get(f"{backend}/api/get_profile", {"address": owner})
+        # Either verdict is acceptable: a clean error, or a degraded profile with
+        # coerced defaults. A hung request, a dead worker (502/504) or a 500 with
+        # no body would mean the row took the node down with it.
+        if code in (502, 504):
+            _fail("indexer_hardening.corrupt_profile_degrades", f"worker died on the corrupt row: code={code}")
+        elif code == 200 and isinstance(data, dict):
+            _pass("indexer_hardening.corrupt_profile_degrades", verdict="degraded_to_defaults", level=data.get("level"))
+        elif 400 <= code < 600:
+            _pass("indexer_hardening.corrupt_profile_degrades", verdict=f"clean_error_{code}")
+        else:
+            _fail("indexer_hardening.corrupt_profile_degrades", f"unexpected code={code} data={str(data)[:200]}")
+
+        # Liveness: the process must still serve the next request. This is the
+        # half that distinguishes "degraded" from "halted".
+        code_after, _ = _get(f"{backend}/api/get_parameters")
+        if code_after in (200, 503):
+            _pass("indexer_hardening.corrupt_profile_leaves_node_alive", code=code_after)
+        else:
+            _fail(
+                "indexer_hardening.corrupt_profile_leaves_node_alive",
+                f"backend unhealthy after reading the corrupt row: code={code_after}",
+            )
+    finally:
+        try:
+            with psycopg.connect(db_url, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM profiles WHERE owner = %s", (owner,))
+        except Exception as e:
+            _fail("indexer_hardening.corrupt_profile_cleanup", f"left the corrupt row behind: {e}")
 
 
 def test_tx_index(backend: str):

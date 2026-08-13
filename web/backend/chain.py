@@ -202,12 +202,26 @@ def max_envelope_future_skew_seconds() -> int:
     return min(max(max_age // 2, 5), 30)
 
 
+# These two thresholds are what keep indexer lag from becoming a chain-side
+# transaction rejection, so they are named rather than inline: since v1.34.0 the
+# PoW ante enforces that an envelope's last_block_hash is still inside the
+# on-chain block_hash_window, and the only hash the backend can serve comes from
+# the indexer's recent_blocks. If the backend kept serving hashes while the
+# indexer fell further behind than that window, every submission would be
+# refused by the chain with a cause one component away from the symptom.
+# Tripping first, by a wide margin, means clients get an explicit 503
+# node_catching_up instead. test_backend_infra pins the margin so neither these
+# values nor a narrower governed window can silently close it.
+_MAX_PROCESSING_LAG_SECONDS = 30
+_MAX_HEIGHT_LAG_BLOCKS = 10
+
+
 def is_node_catching_up(timeout_s: int = 2) -> bool:
     """Check if the node/indexer pair is too far behind to relay writes.
 
     Returns True if:
-    - Last processed time is >30s ago (time-based lag), OR
-    - Indexer is >10 blocks behind chain head (height-based lag), OR
+    - Last processed time is >_MAX_PROCESSING_LAG_SECONDS ago (time-based lag), OR
+    - Indexer is >_MAX_HEIGHT_LAG_BLOCKS behind chain head (height-based lag), OR
     - The newest committed block is older than the ante handler's future-skew
       allowance (the node trails the network), OR
     - The indexer has not processed anything yet
@@ -248,8 +262,8 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
     if not last_ts:
         result = True
     else:
-        time_lag = int(time.time()) - last_ts > 30
-        height_lag = chain_head > 0 and (chain_head - last_height) > 10
+        time_lag = int(time.time()) - last_ts > _MAX_PROCESSING_LAG_SECONDS
+        height_lag = chain_head > 0 and (chain_head - last_height) > _MAX_HEIGHT_LAG_BLOCKS
         head_stale = False
         if head_block_time:
             head_stale_s = int(time.time()) - head_block_time

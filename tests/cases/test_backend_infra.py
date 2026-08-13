@@ -1333,6 +1333,98 @@ def test_error_registry(backend):
         _pass("error_registry.frontend_copy", checked=len(mapped))
 
 
+def test_block_hash_window_margin(backend):
+    """The catching-up gate must trip before a served block hash ages out of the chain's window.
+
+    Since v1.34.0 the PoW ante enforces that an envelope's last_block_hash is
+    still inside the on-chain block_hash_window, and the only hash the backend
+    can hand a client comes from the indexer's recent_blocks. That makes indexer
+    freshness load-bearing for submission in a way it never was before: if the
+    backend kept serving while the indexer fell further behind than the window,
+    every submission would be refused chain-side, with the cause one component
+    away from the symptom.
+
+    is_node_catching_up already prevents it — /api/get_parameters returns 503
+    node_catching_up first — but only because its thresholds happen to be far
+    tighter than the window. Nothing structural held those two apart, so this
+    asserts the margin: a hash served at the worst lag the backend tolerates
+    must stay inside the window for the whole life of an envelope. Raising the
+    lag thresholds, or governing block_hash_window down, now fails here instead
+    of in production.
+    """
+    backend_src = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "web",
+        "backend",
+    )
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        import chain as chain_mod
+        from params import load_params
+    except Exception as e:
+        _skip("block_hash_window.margin", f"backend modules not importable: {e}")
+        return
+
+    try:
+        # load_params rather than expect_params: the cache is populated by the
+        # backend process at startup, so a test running in its own interpreter
+        # has to fill it. The default retry budget is an hour, which is a startup
+        # policy, not a test one.
+        p = load_params(max_retries=1, retry_interval=0.0)
+        window_blocks = int(p["block_hash_window"])
+        max_envelope_age = int(p["max_envelope_age"])
+        block_time = int(chain_mod.get_block_time_seconds())
+        skew_s = int(chain_mod.max_envelope_future_skew_seconds())
+    except Exception as e:
+        # Not a skip: this category is a release gate, so an unevaluated
+        # invariant has to read as a failure rather than as silence.
+        _fail("block_hash_window.margin", f"live params unreadable, invariant unchecked: {e}")
+        return
+
+    window_span_s = window_blocks * block_time
+    # The height threshold is counted in blocks, so it only becomes comparable
+    # to a deadline in seconds after conversion - the exact mismatch that made
+    # the 2s-vs-3s local block time misleading.
+    worst_tolerated_lag_s = max(
+        chain_mod._MAX_PROCESSING_LAG_SECONDS,
+        chain_mod._MAX_HEIGHT_LAG_BLOCKS * block_time,
+        skew_s,
+    )
+
+    # Deliberately not "worst_lag + envelope_age <= window": that is stricter
+    # than the chain guarantees. MinBlockHashWindow is 20 blocks, which at a 3s
+    # block time is exactly max_envelope_age, so the tighter form would fail on a
+    # window the chain considers legal. These are the two invariants the design
+    # actually rests on.
+    if worst_tolerated_lag_s < window_span_s:
+        _pass(
+            "block_hash_window.margin",
+            window=f"{window_blocks}blk={window_span_s}s",
+            worst_lag=f"{worst_tolerated_lag_s}s",
+        )
+    else:
+        _fail(
+            "block_hash_window.margin",
+            f"the backend keeps serving block hashes at up to {worst_tolerated_lag_s}s of lag, which "
+            f"reaches or exceeds the chain's window ({window_blocks} blocks = {window_span_s}s at "
+            f"{block_time}s/block), so the chain can refuse every submission while the backend still "
+            f"reports healthy. A pre-upgrade chain stores 10 and fails here by design",
+        )
+
+    # The window must also cover the envelope lifetime, independent of lag: the
+    # chain-side floor exists because a window shorter than max_envelope_age
+    # rejects work the age check still accepts.
+    if window_span_s >= max_envelope_age:
+        _pass("block_hash_window.covers_envelope_age", window_s=window_span_s, envelope_age=max_envelope_age)
+    else:
+        _fail(
+            "block_hash_window.covers_envelope_age",
+            f"window {window_span_s}s is shorter than max_envelope_age {max_envelope_age}s, so the "
+            f"block-hash check is stricter than the expiry it is supposed to sit inside",
+        )
+
+
 def test_indexer_fail_hard(backend):
     """M-6: an indexer DB outage must surface as an outage, not as sync lag.
 
