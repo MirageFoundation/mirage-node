@@ -37,7 +37,7 @@ The release is one coherent change rather than eighteen patches: node-local stor
 | L-4 | Reserve basis-point conversion uses `float64` | **Fixed** (runtime); wire migration deferred | v1.34.0 |
 | L-5 | Relay registry and ante switches hand-maintained | **Fixed** (test-enforced parity) | v1.34.0 |
 | L-6 | `ProcessProposal` performs minimal validation | **Accepted risk** | unchanged |
-| L-7 | Stale PoW commentary and unused `PowDecorator.MinFee` | **Fixed** | v1.34.0 |
+| L-7 | Stale PoW commentary and unused `PowDecorator.MinFee` | **Partly fixed** — dead field removed; envelope staleness proven unenforceable from the header and deferred | v1.34.0 |
 | L-8 | Mutual-exclusion list cleanup discards delete errors | **Fixed** | v1.34.0 |
 | L-9 | Valid zero-valued params cannot be applied through governance | **Fixed** | v1.34.0 |
 | L-10 | Admin gas waiver treats all deduction errors as insufficient balance | **Fixed** | v1.34.0 |
@@ -153,9 +153,15 @@ The wire change is intentionally strict: an old `MsgUpdateParams` proposal witho
 
 ### L-7 — PoW cleanup
 
-The unused `PowDecorator.MinFee` field and its construction in `ante_relay_chain.go` are removed. Comments now state that hash membership runs in CheckTx and DeliverTx whenever `LastBlockId.Hash` exists. An empty `LastBlockId.Hash` is legal only at bootstrap height (≤ 1) via a new `requireLastBlockHash` helper, and is rejected afterward before any keeper access.
+The unused `PowDecorator.MinFee` field and its construction in `ante_relay_chain.go` are removed. **The staleness half of this finding is not fixed and is worse than the original review described.**
 
-Tests: `TestRequireLastBlockHashBootstrapBoundary`, `TestPowDecoratorRejectsMissingLastBlockHash`.
+v1.34.0 first added a `requireLastBlockHash` helper that rejected an empty `LastBlockId.Hash` above bootstrap height. The local testnet rejected every transaction: under ABCI 2.0 the `FinalizeBlock` request carries no `LastBlockId`, so the header the ante handler sees has an empty hash on *every* path — simulate, check, and finalize alike. Scoping the guard to finalization only moved the failure from the backend's gas simulation to `Tx rejected in ante` at DeliverTx. The guard is reverted; `ante_pow.go` now documents the constraint at the assignment.
+
+The consequence is that envelope staleness is **not enforced at all today**, and the recent-block-hash window cannot compensate: `BeginBlock` feeds `RecordRecentBlockHash` from the same empty field, and that function ignores empty input, so the window never fills and the `lookupHash` branch is unreachable. An envelope built against any block is admitted as long as its proof-of-work is valid. Proof-of-work cost, the metasig timestamp window, and nonce replay protection are unaffected and still bound abuse.
+
+The fix is to source the hash from something ABCI 2.0 actually populates — `ctx.HeaderInfo().Hash` carries the block hash of the block being finalized, so feeding the window from it and anchoring `chainLastID` to the newest window entry would restore the check from state rather than the header. That is a consensus-behavior change requiring its own upgrade and coordinated rollout, so it is **deferred to a follow-up release** rather than rushed into v1.34.0.
+
+Tests: `TestEmptyLastBlockHashSkipsStalenessCheck` pins the current behavior and the reason rejecting is not an option.
 
 ### Carryover test gaps
 

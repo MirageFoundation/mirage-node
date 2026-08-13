@@ -323,58 +323,33 @@ func TestValidatePoW(t *testing.T) {
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
 }
 
-// TestRequireLastBlockHashBootstrapBoundary pins L-7: an empty
-// LastBlockId.Hash disables envelope-staleness checking entirely, so it is
-// legal only at bootstrap height (1), where no previous block exists.
-func TestRequireLastBlockHashBootstrapBoundary(t *testing.T) {
-	const hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+// TestEmptyLastBlockHashSkipsStalenessCheck pins the behaviour L-7 describes
+// and the reason v1.34.0 could not simply reject it: under ABCI 2.0 the header
+// never carries LastBlockId, so an empty chainLastID is the normal case on
+// every path. The validator must skip the hash check rather than fail, because
+// failing here rejected every transaction on the local testnet.
+func TestEmptyLastBlockHashSkipsStalenessCheck(t *testing.T) {
+	const minDiff, step = uint64(8), 0.25
+	canonical := []byte("empty_chain_hash_envelope")
+	lastBlockHash, err := hex.DecodeString("0011223344556677889900112233445566778899001122334455667788990011")
+	require.NoError(t, err)
 
-	require.NoError(t, requireLastBlockHash("", 1, sdk.ExecModeFinalize), "height 1 has no previous block")
-	require.NoError(t, requireLastBlockHash("", 0, sdk.ExecModeFinalize), "pre-genesis contexts carry no header")
-
-	err := requireLastBlockHash("", 2, sdk.ExecModeFinalize)
-	require.Error(t, err, "empty hash above bootstrap height must reject")
-	require.Contains(t, err.Error(), "missing LastBlockId.Hash at height 2")
-
-	require.NoError(t, requireLastBlockHash(hash, 2, sdk.ExecModeFinalize))
-	require.NoError(t, requireLastBlockHash(hash, 1, sdk.ExecModeFinalize))
-	require.Error(t, requireLastBlockHash("   ", 2, sdk.ExecModeFinalize), "whitespace is not a hash")
-}
-
-// TestRequireLastBlockHashSkipsNonFinalizeModes pins the regression that broke
-// every backend transaction on the local testnet: the simulate and check
-// contexts carry a partial header, so enforcing the hash there fails gas
-// estimation for txs that would finalize perfectly well.
-func TestRequireLastBlockHashSkipsNonFinalizeModes(t *testing.T) {
-	for _, mode := range []sdk.ExecMode{
-		sdk.ExecModeSimulate,
-		sdk.ExecModeCheck,
-		sdk.ExecModeReCheck,
-	} {
-		require.NoError(t, requireLastBlockHash("", 2, mode),
-			"mode %d must not reject a partial header", mode)
-	}
-}
-
-// TestPowDecoratorRejectsMissingLastBlockHash proves the header check runs
-// before any keeper access, so an unusable header cannot reach PoW routing.
-// The decorator carries a zero keeper on purpose: if the guard were moved
-// after GetParams this test would panic instead of returning an error.
-func TestPowDecoratorRejectsMissingLastBlockHash(t *testing.T) {
-	ctx := sdk.Context{}.
-		WithBlockHeight(2).
-		WithExecMode(sdk.ExecModeFinalize).
-		WithLogger(cosmoslog.NewNopLogger())
-
-	decorator := &PowDecorator{}
-	next := func(ctx sdk.Context, _ sdk.Tx, _ bool) (sdk.Context, error) {
-		t.Fatal("unusable header reached the next ante decorator")
-		return ctx, nil
+	lookup := func(string) (bool, error) {
+		t.Fatal("window lookup ran despite an empty chain hash")
+		return false, nil
 	}
 
-	_, err := decorator.AnteHandle(ctx, mockTx{msgs: []sdk.Msg{&coretypes.MsgPost{}}}, false, next)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing LastBlockId.Hash at height 2")
+	var nonce uint64
+	for ; nonce <= 10000; nonce++ {
+		if validatePoWBytesArgon2(canonical, lastBlockHash, 0, nonce, "", lookup, true, 0, 0, 0, 0, 2, minDiff, step) == nil {
+			break
+		}
+	}
+	require.LessOrEqual(t, nonce, uint64(10000), "could not mine a nonce at minimum difficulty")
+
+	require.NoError(t, validatePoWBytesArgon2(
+		canonical, lastBlockHash, 0, nonce, "", lookup, false, 0, 0, 0, 0, 2, minDiff, step,
+	), "an empty chain hash must skip the staleness check, not reject the envelope")
 }
 
 // BenchmarkValidatePoWBytesArgon2 records the per-envelope cost of the

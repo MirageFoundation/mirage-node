@@ -210,43 +210,20 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 	return nil
 }
 
-// bootstrapHeight is the only height at which a header may legally lack a
-// previous-block hash: at height 1 no block has been committed yet.
-const bootstrapHeight = int64(1)
-
-// requireLastBlockHash rejects a header whose LastBlockId.Hash is empty above
-// bootstrap height. An empty hash disables the entire envelope-staleness check,
-// so tolerating it would let an envelope built against any block be admitted.
-//
-// Only the finalization header is guaranteed to carry that hash. The check and
-// simulate contexts are built from a partial header, so enforcing it there
-// rejects every gas simulation the backend runs before broadcasting — which is
-// exactly what happened on the local testnet. Admission into a block is the
-// boundary that matters, and that is decided during finalization.
-func requireLastBlockHash(chainLastID string, height int64, mode sdk.ExecMode) error {
-	if mode != sdk.ExecModeFinalize {
-		return nil
-	}
-	if strings.TrimSpace(chainLastID) != "" {
-		return nil
-	}
-	if height <= bootstrapHeight {
-		return nil
-	}
-	return fmt.Errorf("missing LastBlockId.Hash at height %d", height)
-}
-
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
 	// chainLastID is the hash of the immediately-previous committed block.
 	// This is always accepted by the equality branch of the PoW validator;
 	// it is also already prepended to the on-chain recent-block-hashes
 	// window by BeginBlock so older envelopes within the window pass the
 	// list-check branch.
+	//
+	// Under ABCI 2.0 this is empty on every path: FinalizeBlock carries no
+	// LastBlockId, so the header the ante handler sees never has one, and the
+	// window BeginBlock feeds from the same field stays empty too. Envelope
+	// staleness is therefore not enforced today. Rejecting the empty hash was
+	// tried in v1.34.0 and rejected every transaction on the local testnet;
+	// L-7 in the retest tracks sourcing the hash from somewhere populated.
 	chainLastID := strings.ToLower(hex.EncodeToString(ctx.BlockHeader().LastBlockId.Hash))
-	if err := requireLastBlockHash(chainLastID, ctx.BlockHeight(), ctx.ExecMode()); err != nil {
-		ctx.Logger().Error("PoW: unusable header", "err", err.Error())
-		return ctx, err
-	}
 
 	// Refresh params from the blockchain state.
 	params := d.Keeper.GetParams(ctx)
