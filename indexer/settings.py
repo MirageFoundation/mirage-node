@@ -35,8 +35,19 @@ WS_RECONNECT_DELAY = 5
 # Progress reporting
 CATCHUP_PROGRESS_INTERVAL = 1000
 
+# Startup profile reconciliation: refuse to soft-delete more than this fraction of
+# known profiles in one sync. The blocked_* rows dropped alongside a soft-delete are
+# the indexer's own retained history, which the chain does not keep and cannot
+# rebuild, so a suspicious inventory has to stop startup rather than destroy them.
+PROFILE_SYNC_MAX_ABSENT_FRACTION = 0.10
+
 # gRPC timeout
 GRPC_TIMEOUT = 3
+
+# Overall budget for one balance batch. Bounds the whole prefetch for a block, which
+# per-call timeouts alone do not: a block touching many distinct addresses would
+# otherwise cost addresses * GRPC_TIMEOUT before the block transaction even opens.
+BALANCE_BATCH_DEADLINE = 30
 
 # RPC readiness wait
 RPC_READY_MAX_WAIT = 60

@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 INDEXER_LIST_CAP = 100_000
 TX_INDEX_CAP = 5000
 
+# Matches the max_depth of the root walk in get_root_topic_for_post.
+MAX_ANCESTOR_WALK_DEPTH = 100
+
 # Meta keys forming the atomic block checkpoint.
 META_LAST_HEIGHT = "last_height"
 META_LAST_BLOCK_HASH = "last_block_hash"
@@ -854,14 +857,23 @@ class DatabaseManager:
                     if not parent:
                         final_topic = topic_str.lower() if topic_str else None
                         final_root_id = current_id
+                        # Best-effort backfill for legacy rows. This runs inside the
+                        # block transaction, where a failed statement aborts the whole
+                        # transaction — so swallowing the error is not enough to keep
+                        # the caller alive, and the block would die later pointing at
+                        # the wrong statement. The savepoint is what actually makes it
+                        # best-effort.
+                        cur.execute("SAVEPOINT root_topic_backfill")
                         try:
                             cur.execute(
                                 "UPDATE posts SET root_topic = %s, root_post_id = %s WHERE LOWER(txhash) = LOWER(%s)",
                                 (final_topic, final_root_id, current_id),
                             )
                         except Exception:
-                            # Best-effort backfill; do not fail caller if this update fails.
-                            pass
+                            cur.execute("ROLLBACK TO SAVEPOINT root_topic_backfill")
+                            logger.warning("root_topic backfill failed for %s; continuing", current_id)
+                        else:
+                            cur.execute("RELEASE SAVEPOINT root_topic_backfill")
                         return final_topic, final_root_id
 
                     # Otherwise, walk up the parent chain.
@@ -1630,6 +1642,14 @@ class DatabaseManager:
     # Canonical definition of a (owner, topic) stats row, shared by the live
     # re-attribution below and indexer/migrations/v1_33_0_rebuild_derived_stats.
     # Both must agree with tests indexer_hardening.net_votes_matches_canonical_votes.
+    #
+    # A deleted post grants its author no standing: post_count excludes deleted rows,
+    # and so does the author's own vote on them (the post-time auto-upvote). Without
+    # that, posting and deleting in a loop is a free way to manufacture the topic
+    # standing that gates downvote weight, leaving no visible content behind.
+    # Votes cast by OTHER users on a post that was later deleted are deliberately
+    # kept: they were earned by participating, and retracting them would let an
+    # author strip a voter's standing by deleting their own content.
     _VOTE_STATS_FROM_CANONICAL = """
         INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
@@ -1648,6 +1668,7 @@ class DatabaseManager:
         JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
         WHERE LOWER(v.owner) = ANY(%s)
           AND LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) = ANY(%s)
+          AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
         GROUP BY 1, 2
     """
 
@@ -1666,6 +1687,22 @@ class DatabaseManager:
         ON CONFLICT (owner, topic) DO UPDATE SET
             post_count = EXCLUDED.post_count
     """
+
+    def _recompute_topic_stats(self, cur, owners: list[str], topics: list[str]) -> None:
+        """Rebuild user_topic_stats for these (owner, topic) pairs from the canonical rows.
+
+        Used by every mutation that invalidates an already-applied delta — a topic
+        edit, or a delete — so the result is identical to a full rebuild instead of
+        depending on a guessed reversal.
+        """
+        if not owners or not topics:
+            return
+        cur.execute(
+            "DELETE FROM user_topic_stats WHERE owner = ANY(%s) AND topic = ANY(%s)",
+            (owners, topics),
+        )
+        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, topics))
+        cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, topics))
 
     def reattribute_topic_stats(self, root_post_id: str, old_topic: str, new_topic: str) -> int:
         """Move a thread's vote/post standing after its root topic changed.
@@ -1715,12 +1752,7 @@ class DatabaseManager:
                 if not owners:
                     return threads_moved
 
-                cur.execute(
-                    "DELETE FROM user_topic_stats WHERE owner = ANY(%s) AND topic = ANY(%s)",
-                    (owners, topics),
-                )
-                cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, topics))
-                cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, topics))
+                self._recompute_topic_stats(cur, owners, topics)
 
         logger.info(
             "user_topic_stats reattributed root=%s %s->%s posts_moved=%d owners=%d",
@@ -2213,11 +2245,18 @@ class DatabaseManager:
             raise ValueError("topic cannot be empty")
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # `target` is stored user content, so a literal % or _ in it would act
+                # as a SQL wildcard and clear more blocks than the pattern names. Only
+                # `*` is meant to be a wildcard. The pattern lives in a column rather
+                # than a parameter, so the escaping has to happen in SQL: neutralise
+                # %, _ and the escape character itself, then translate the glob.
                 cur.execute(
                     """
                     DELETE FROM blocked_topics
                     WHERE LOWER(owner) = LOWER(%s)
-                      AND LOWER(%s) LIKE LOWER(REPLACE(target, '*', '%%'))
+                      AND LOWER(%s) LIKE LOWER(
+                          REPLACE(REPLACE(REPLACE(REPLACE(target, '#', '##'), '%%', '#%%'), '_', '#_'), '*', '%%')
+                      ) ESCAPE '#'
                     """,
                     (owner, t),
                 )
@@ -2246,17 +2285,20 @@ class DatabaseManager:
                 if was_deleted:
                     return 0
 
+                _RETURN_STANDING = " RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_topic, ''), topic))"
                 if owner is None:
                     cur.execute(
-                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND deleted = FALSE",
+                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND deleted = FALSE" + _RETURN_STANDING,
                         (target,),
                     )
                 else:
                     cur.execute(
-                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND LOWER(owner) = LOWER(%s) AND deleted = FALSE",
+                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND LOWER(owner) = LOWER(%s) "
+                        "AND deleted = FALSE" + _RETURN_STANDING,
                         (target, owner),
                     )
-                deleted_count = cur.rowcount
+                affected = [(r[0], r[1]) for r in cur.fetchall() if r[0] and r[1]]
+                deleted_count = len(affected)
 
                 if deleted_count > 0:
                     # Cascade soft-delete to all descendants so orphaned
@@ -2274,12 +2316,27 @@ class DatabaseManager:
                         UPDATE posts SET deleted = TRUE
                         WHERE txhash IN (SELECT tx FROM descendants)
                           AND deleted = FALSE
+                        RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_topic, ''), topic))
                         """,
                         (target,),
                     )
+                    affected.extend((r[0], r[1]) for r in cur.fetchall() if r[0] and r[1])
 
                     if parent_id:
                         self._update_ancestor_comment_counts(cur, parent_id, delta=-(1 + subtree_count))
+
+                    # A deleted post grants no standing to its author, so every
+                    # (owner, topic) it contributed to has to be recomputed rather
+                    # than left carrying the delta applied when it was indexed.
+                    owners = sorted({o for o, _ in affected})
+                    topics = sorted({t for _, t in affected})
+                    self._recompute_topic_stats(cur, owners, topics)
+                    logger.debug(
+                        "user_topic_stats recomputed after delete target=%s owners=%d topics=%d",
+                        str(target)[:12],
+                        len(owners),
+                        len(topics),
+                    )
                 return deleted_count
 
     def increment_ancestor_comment_counts(self, target_post_id: str) -> None:
@@ -2303,11 +2360,16 @@ class DatabaseManager:
         """
         if not post_id or delta == 0:
             return
-        # Walk up the chain and update the post and its ancestors
+        # Walk up the chain and update the post and its ancestors. Bounded like the
+        # root walk in get_root_topic_for_post: this runs one UPDATE per level inside
+        # the block transaction, so an unbounded chain makes indexing cost grow with
+        # thread depth on every new comment.
         visited = set()
         current = post_id
-        while current and current not in visited:
+        depth = 0
+        while current and current not in visited and depth < MAX_ANCESTOR_WALK_DEPTH:
             visited.add(current)
+            depth += 1
             cur.execute(
                 """
                 UPDATE posts 

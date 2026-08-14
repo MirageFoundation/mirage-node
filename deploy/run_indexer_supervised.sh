@@ -25,6 +25,18 @@ RESTART_BACKOFF_SECONDS="${INDEXER_RESTART_BACKOFF_SECONDS:-5}"
 
 mkdir -p "$LOGS_DIR/indexer"
 
+# A disabled indexer is a configuration choice, not a crash. main.py raises on
+# startup when INDEXER_ENABLED=false, and the loop below restarts on any exit, so
+# without this the operator's own setting burns the entire restart budget and ends
+# with a crash-loop ACTION ITEM. Only an explicit "false" skips: an absent or
+# malformed value still falls through so shared/config.py can fail hard on it.
+if [ "${INDEXER_ENABLED:-}" = "false" ]; then
+  printf '[%s] [indexer-supervisor] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "INDEXER_ENABLED=false; not starting the indexer" \
+    | tee -a "$LOGS_DIR/indexer/indexer-$(date -u +%Y-%m-%d).log"
+  exit 0
+fi
+
 STOP_REQUESTED=0
 
 log_supervisor() {

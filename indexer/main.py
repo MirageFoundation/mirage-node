@@ -40,11 +40,12 @@ from indexer.database import (
     META_LAST_HEIGHT,
 )
 from indexer.chain_client import ChainClient
-from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO
+from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
 from indexer.migrations import run_migrations
 from indexer.params import load_params as load_chain_params, get_raw_params
 from indexer.settings import (
     CATCHUP_PROGRESS_INTERVAL,
+    PROFILE_SYNC_MAX_ABSENT_FRACTION,
     WS_RECONNECT_DELAY,
     RPC_READY_MAX_WAIT,
     RPC_READY_RETRY_DELAY,
@@ -82,8 +83,8 @@ def _synthesize_raw_log(tx_result: dict, height: int, tx_hash: str) -> str:
     events = tx_result.get("events")
     if not events:
         raise RuntimeError(f"tx_index raw_log missing (empty log AND no events) height={height} txhash={tx_hash}")
-    # CometBFT events use base64-encoded attribute values; decode them so
-    # downstream JSON consumers (push_listener) see plain strings.
+    # Attributes arrive as plain text (see attr_text); normalise only so downstream
+    # JSON consumers (push_listener) get a consistent shape.
     decoded_events: list[dict] = []
     for ev in events:
         if not isinstance(ev, dict):
@@ -93,17 +94,7 @@ def _synthesize_raw_log(tx_result: dict, height: int, tx_hash: str) -> str:
         for attr in attrs_raw:
             if not isinstance(attr, dict):
                 continue
-            k = attr.get("key", "")
-            v = attr.get("value", "")
-            try:
-                k = base64.b64decode(k).decode() if k else ""
-            except Exception:
-                pass
-            try:
-                v = base64.b64decode(v).decode() if v else ""
-            except Exception:
-                pass
-            attrs.append({"key": k, "value": v})
+            attrs.append({"key": attr_text(attr.get("key")), "value": attr_text(attr.get("value"))})
         decoded_events.append({"type": ev.get("type", ""), "attributes": attrs})
     synthesized = json.dumps([{"events": decoded_events}])
     logger.debug(
@@ -176,6 +167,7 @@ class Indexer:
         )
 
         self._last_height = self.db.get_last_height()
+        self._expected_chain_id: str | None = None
 
         # Replay into a populated database would double-apply cumulative rows
         # (topic stats, preferences, vote deltas). Only allowed on an empty DB.
@@ -248,6 +240,25 @@ class Indexer:
         self._lock_file = None
         logger.debug("instance_lock.released path=%s", getattr(self, "_lock_path", LOCK_PATH))
 
+    def _verify_chain_id(self, height: int, chain_id: str) -> None:
+        """Reject a block whose chain_id differs from the one this run has been projecting.
+
+        `set_checkpoint` rewrites `meta.chain_id` from this value on every block, and the
+        stored value is what the next startup verifies against. Left unchecked, a node
+        restarted onto a different network mid-run would be absorbed silently and would
+        overwrite the evidence that continuity verification exists to catch. Latched from
+        the first block rather than queried per block, so this costs no round-trip;
+        startup verification separately compares the stored id against the node.
+        """
+        if self._expected_chain_id is None:
+            self._expected_chain_id = chain_id
+            return
+        if chain_id != self._expected_chain_id:
+            raise RuntimeError(
+                f"chain_id changed mid-run at height {height}: block header says {chain_id!r} "
+                f"but this indexer has been projecting {self._expected_chain_id!r}"
+            )
+
     def _handle_signal(self, signum, _frame):
         logger.info("Signal %s received; cleaning up lock and exiting.", signum)
         self.running = False
@@ -258,7 +269,10 @@ class Indexer:
             except Exception:
                 pass
         self._release_lock()
-        sys.exit(0)
+        # Conventional 128+signum rather than 0: this is an interruption, and a
+        # supervisor reading 0 as a clean shutdown would leave the node unindexed
+        # with nothing to alert on. Any in-flight block transaction rolls back.
+        sys.exit(128 + int(signum))
 
     def _log_yaml(self, title: str, data: dict):
         try:
@@ -297,6 +311,7 @@ class Indexer:
         chain_id = str(header.get("chain_id", "") or "")
         if not chain_id:
             raise RuntimeError(f"Missing header.chain_id at height {height}")
+        self._verify_chain_id(height, chain_id)
         txs = (block.get("data") or {}).get("txs") or []
         ts = self.chain.parse_header_time(str(header.get("time", "")))
 
@@ -318,22 +333,26 @@ class Indexer:
         touched = self._collect_touched_addresses(result_obj)
         balances = self.chain.get_balances_batch(sorted(touched)) if touched else None
 
-        with self.db.transaction(label="block", height=height):
-            for idx, tx_b64 in enumerate(txs):
-                try:
-                    self._process_tx(idx, tx_b64, txs_results[idx], height, ts)
-                except Exception as tx_err:
-                    raise RuntimeError(f"Error processing tx {idx} at height {height}: {tx_err}") from tx_err
+        self.chain.begin_block_profile_cache()
+        try:
+            with self.db.transaction(label="block", height=height):
+                for idx, tx_b64 in enumerate(txs):
+                    try:
+                        self._process_tx(idx, tx_b64, txs_results[idx], height, ts)
+                    except Exception as tx_err:
+                        raise RuntimeError(f"Error processing tx {idx} at height {height}: {tx_err}") from tx_err
 
-            self._process_governance_events(result_obj, ts, height)
-            self._process_subscription_events(result_obj, ts, height)
+                self._process_governance_events(result_obj, ts, height)
+                self._process_subscription_events(result_obj, ts, height)
 
-            self.db.upsert_recent_block(height, block_hash, ts)
-            if balances is not None:
-                self.db.upsert_balances_batch(sorted(balances.items()), now)
-                logger.debug("balances.refreshed height=%s addresses=%d", height, len(balances))
-            self.db.set_indexer_state("last_processed_time", str(now), now)
-            self.db.set_checkpoint(height, block_hash, chain_id)
+                self.db.upsert_recent_block(height, block_hash, ts)
+                if balances is not None:
+                    self.db.upsert_balances_batch(sorted(balances.items()), now)
+                    logger.debug("balances.refreshed height=%s addresses=%d", height, len(balances))
+                self.db.set_indexer_state("last_processed_time", str(now), now)
+                self.db.set_checkpoint(height, block_hash, chain_id)
+        finally:
+            self.chain.end_block_profile_cache()
 
         self._last_height = height
         logger.debug("block.committed height=%s", height)
@@ -395,7 +414,7 @@ class Indexer:
             event_type = event.get("type", "")
             if event_type not in ("subscription_expired", "subscription_renewed"):
                 continue
-            attrs = {a["key"]: a.get("value", "") for a in event.get("attributes", [])}
+            attrs = {attr_text(a.get("key")): attr_text(a.get("value")) for a in event.get("attributes", [])}
             address = attrs.get("address", "")
             if not address:
                 raise RuntimeError(f"{event_type} event without address at height {height}")
@@ -474,16 +493,8 @@ class Indexer:
             if ev.get("type", "") not in ("transfer", "coin_spent", "coin_received"):
                 continue
             for attr in ev.get("attributes") or []:
-                key = attr.get("key", "")
-                val = attr.get("value", "")
-                try:
-                    key = base64.b64decode(key).decode("utf-8")
-                except Exception:
-                    pass
-                try:
-                    val = base64.b64decode(val).decode("utf-8")
-                except Exception:
-                    pass
+                key = attr_text(attr.get("key"))
+                val = attr_text(attr.get("value"))
                 if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
                     touched.add(val.lower())
         return touched
@@ -742,6 +753,13 @@ class Indexer:
             start = max(1, self._start_height_override)
             gap_reason = "height_override"
             logger.info("Starting from height %s (--height override)", start)
+            if start > 1:
+                # Only allowed on an empty database, so everything below `start` is
+                # simply never indexed. Recorded here because the check below only
+                # fires when the range was pruned, and without a gap row the backend
+                # defaults history_complete to true and reports a partial index as
+                # complete.
+                self._record_history_gap(1, start - 1, gap_reason)
         elif last_height > 0:
             start = last_height + 1
             gap_reason = "checkpoint_behind_pruning_window"
@@ -1053,15 +1071,41 @@ class Indexer:
         )
 
     def _soft_delete_absent_owners(self, chain_owners: set[str], now: int) -> int:
-        """Soft-delete profiles the chain no longer has and drop their list rows."""
+        """Soft-delete profiles the chain no longer has and drop their list rows.
+
+        Partly irreversible: the blocked_* rows dropped here are the indexer's own
+        retained history, which the chain keeps only as a small deque and cannot
+        rebuild. Both guards below abort startup rather than act on an inventory
+        that looks wrong, because there is no way back once the rows are gone.
+        """
         with self.db._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT owner FROM profiles WHERE deleted_at IS NULL")
                 db_owners = [str(r[0]) for r in cur.fetchall()]
 
+        if not db_owners:
+            return 0
+
+        if not chain_owners:
+            # An empty-but-successful GetProfiles is indistinguishable from "the chain
+            # has no users". Against a populated index it can only mean the query was
+            # wrong, and acting on it would delete every profile and every blocked list.
+            raise RuntimeError(
+                f"chain returned an empty profile inventory while {len(db_owners)} profile(s) are indexed; "
+                "refusing to soft-delete every user"
+            )
+
         absent = [o for o in db_owners if o.strip().lower() not in chain_owners]
         if not absent:
             return 0
+
+        fraction = len(absent) / len(db_owners)
+        if fraction > PROFILE_SYNC_MAX_ABSENT_FRACTION:
+            raise RuntimeError(
+                f"profile sync would soft-delete {len(absent)} of {len(db_owners)} profile(s) "
+                f"({fraction:.1%} > {PROFILE_SYNC_MAX_ABSENT_FRACTION:.1%}); refusing — "
+                "verify the chain profile inventory before re-running"
+            )
 
         for owner in absent:
             self.db.soft_delete_profile(owner, now)

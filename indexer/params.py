@@ -90,12 +90,7 @@ def _build_cache_from_params(p: dict) -> dict[str, Any]:
         raise RuntimeError("missing or empty tiers in chain params")
     result["tiers"] = tiers
 
-    # Build vote weight lookup: {level: weight}
-    # Tier index → user level: 0→0, 1→1, 2→10
-    _idx_to_level = {0: 0, 1: 1, 2: 10}
-    vote_weights = {_idx_to_level.get(i, i): float(t.get("vote_weight", 1.0)) for i, t in enumerate(tiers)}
-    vote_weights[100] = vote_weights[10]  # admin = agent-tier weight
-    result["vote_weights"] = vote_weights
+    result["tier_vote_weights"] = [float(t.get("vote_weight", 1.0)) for t in tiers]
 
     # Award configs
     award_configs = p.get("award_configs")
@@ -185,12 +180,32 @@ def get_min_username_size() -> int:
     return expect_params()["min_username_size"]
 
 
+def level_to_tier_index(level: int) -> int:
+    """Map a user level to a tier index, mirroring the chain's LevelToTierIndex.
+
+    The chain accepts ANY level >= LevelAdminMin (100) as admin, not just 100
+    exactly (blockchain/x/core/types/params.go:70-83). An exact-match lookup here
+    raises on a level the chain considers valid, which aborts the block and wedges
+    the indexer permanently, so this must stay a range check.
+    """
+    if level == 0:
+        return 0
+    if level == 1:
+        return 1
+    if level == 10:
+        return 2
+    if level >= 100:
+        return 2  # admins get agent-tier capabilities
+    return -1
+
+
 def get_vote_weight(level: int) -> float:
-    """Get vote weight for tier level. Cached at startup."""
-    weights = expect_params()["vote_weights"]
-    if level not in weights:
+    """Get vote weight for a user level. Cached at startup."""
+    weights = expect_params()["tier_vote_weights"]
+    idx = level_to_tier_index(int(level))
+    if idx < 0 or idx >= len(weights):
         raise ValueError(f"Unknown tier level: {level}")
-    return weights[level]
+    return weights[idx]
 
 
 def get_award_configs() -> list:
@@ -207,5 +222,6 @@ __all__ = [
     "get_max_username_size",
     "get_min_username_size",
     "get_vote_weight",
+    "level_to_tier_index",
     "get_award_configs",
 ]

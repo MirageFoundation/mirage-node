@@ -2,7 +2,6 @@
 Message processing logic for the indexer.
 """
 
-import base64
 import logging
 import time
 from typing import Optional
@@ -109,9 +108,30 @@ def _vote_direction(value) -> int:
     return 0
 
 
+def attr_text(raw) -> str:
+    """Return an event attribute as text.
+
+    CometBFT types EventAttribute.Key/.Value as `string` (v0.38+; this chain is on
+    v0.39.3), so /block_results returns them as plain text and there is nothing to
+    decode. Attempting base64 on a `str` is a shape guess rather than a decode: it
+    succeeds on any plain value that happens to be well-formed base64 with valid
+    UTF-8 bytes and silently returns something else. Proposal id "1401" decodes that
+    way, and the int() that follows then raises inside the block transaction, which
+    rolls the block back and re-fails on every restart forever.
+
+    Only genuine `bytes` are decoded, which is a type difference rather than a guess.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8")
+    return str(raw)
+
+
 TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgPost": MsgPost,
     "/mirage.core.v1.MsgEdit": MsgEdit,
+    "/mirage.core.v1.MsgAnnotate": MsgAnnotate,
     "/mirage.core.v1.MsgVote": MsgVote,
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
     "/mirage.core.v1.MsgSetBiography": MsgSetBiography,
@@ -2094,7 +2114,13 @@ class MessageProcessor:
         pid = attrs.get("proposal_id") or attrs.get("proposalID") or attrs.get("proposal-id") or attrs.get("proposalId")
         if pid is None:
             return None
-        return int(pid)
+        try:
+            return int(pid)
+        except (TypeError, ValueError) as e:
+            # Deliberately fatal: skipping the event would advance the checkpoint past
+            # a governance action that was never projected. Named explicitly so the
+            # operator sees the offending value instead of a bare int() traceback.
+            raise RuntimeError(f"Governance event carried an unparseable proposal_id {pid!r}") from e
 
     @staticmethod
     def decode_events(events: list) -> list[tuple[str, dict]]:
@@ -2109,26 +2135,12 @@ class MessageProcessor:
             event_attrs = event.get("attributes", []) if isinstance(event, dict) else []
 
             for attr in event_attrs or []:
-                key_b64 = attr.get("key") if isinstance(attr, dict) else None
-                val_b64 = attr.get("value") if isinstance(attr, dict) else None
-                if key_b64:
-                    try:
-                        key = base64.b64decode(key_b64, validate=True).decode("utf-8")
-                    except Exception:
-                        if isinstance(key_b64, bytes):
-                            key = key_b64.decode("utf-8")
-                        else:
-                            key = str(key_b64)
-                    if key:
-                        if val_b64:
-                            try:
-                                val = base64.b64decode(val_b64, validate=True).decode("utf-8")
-                            except Exception:
-                                if isinstance(val_b64, bytes):
-                                    val = val_b64.decode("utf-8")
-                                else:
-                                    val = str(val_b64)
-                            attrs[key] = val
+                if not isinstance(attr, dict):
+                    continue
+                key = attr_text(attr.get("key"))
+                val = attr_text(attr.get("value"))
+                if key and val:
+                    attrs[key] = val
 
             decoded.append((ev_type, attrs))
 

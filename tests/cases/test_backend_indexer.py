@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import signal
 import time
 from urllib.parse import urlparse
 
@@ -1424,7 +1425,422 @@ def test_indexer_hardening(backend: str):
     else:
         _pass("indexer_hardening.obsolete_surface_removed")
 
+    _indexer_hardening_2026_08_14_checks()
     _indexer_hardening_db_checks(backend)
+
+
+def _indexer_hardening_2026_08_14_checks() -> None:
+    """Regressions for the 2026-08-14 indexer review.
+
+    All stub-level: no docker, no chain, no DB. Each one pins a value that used to
+    make a required code path raise inside the block transaction, which rolls the
+    block back and re-fails at the same height on every restart forever.
+    """
+    from contextlib import contextmanager
+
+    import indexer.main as indexer_main
+    from indexer import params as indexer_params
+    from indexer.chain_client import ChainClient
+    from indexer.database import DatabaseManager
+    from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
+
+    # ── H-1: event attributes are plain text, never base64-guessed ───────
+    #
+    # CometBFT types EventAttribute.Key/.Value as `string`, so a plain value that
+    # happens to be well-formed base64 must survive untouched. Proposal id "1401"
+    # is the first four-digit id that decodes to something int() rejects.
+    poisoned = ["1400", "1401", "1412", "2400", "7768"]
+    events = [{"type": "active_proposal", "attributes": [{"key": "proposal_id", "value": pid}]} for pid in poisoned]
+    decoded = MessageProcessor.decode_events(events)
+    mangled = [
+        (pid, attrs.get("proposal_id"))
+        for pid, (_t, attrs) in zip(poisoned, decoded)
+        if attrs.get("proposal_id") != pid
+    ]
+    if mangled:
+        _fail("indexer_hardening.event_attrs_not_base64_decoded", f"mangled: {mangled}")
+    else:
+        _pass("indexer_hardening.event_attrs_not_base64_decoded", ids=len(poisoned))
+
+    try:
+        pids = [MessageProcessor.extract_proposal_id(attrs) for _t, attrs in decoded]
+        if pids == [int(p) for p in poisoned]:
+            _pass("indexer_hardening.proposal_id_parses_after_decode")
+        else:
+            _fail("indexer_hardening.proposal_id_parses_after_decode", f"got {pids}")
+    except Exception as e:
+        _fail("indexer_hardening.proposal_id_parses_after_decode", f"{type(e).__name__}: {e}")
+
+    # A genuinely unparseable id must still be fatal: skipping it would advance the
+    # checkpoint past a governance action that was never projected.
+    try:
+        MessageProcessor.extract_proposal_id({"proposal_id": "not-a-number"})
+        _fail("indexer_hardening.proposal_id_unparseable_fatal", "did not raise")
+    except RuntimeError:
+        _pass("indexer_hardening.proposal_id_unparseable_fatal")
+    except Exception as e:
+        _fail("indexer_hardening.proposal_id_unparseable_fatal", f"raised {type(e).__name__}, expected RuntimeError")
+
+    if attr_text(b"already-bytes") == "already-bytes" and attr_text(None) == "":
+        _pass("indexer_hardening.attr_text_decodes_bytes_only")
+    else:
+        _fail("indexer_hardening.attr_text_decodes_bytes_only", "bytes/None handling changed")
+
+    # ── H-2: any admin level >= 100 resolves, matching the chain ─────────
+
+    idx_map = {lvl: indexer_params.level_to_tier_index(lvl) for lvl in (0, 1, 10, 100, 101, 110, 150, 999)}
+    expected_idx = {0: 0, 1: 1, 10: 2, 100: 2, 101: 2, 110: 2, 150: 2, 999: 2}
+    if idx_map == expected_idx:
+        _pass("indexer_hardening.admin_levels_resolve_to_agent_tier")
+    else:
+        _fail("indexer_hardening.admin_levels_resolve_to_agent_tier", f"got {idx_map}")
+
+    if indexer_params.level_to_tier_index(50) == -1 and indexer_params.level_to_tier_index(2) == -1:
+        _pass("indexer_hardening.unknown_levels_still_rejected")
+    else:
+        _fail("indexer_hardening.unknown_levels_still_rejected", "a level the chain rejects was accepted")
+
+    # ── M-3: deleting a post retracts the standing it granted ────────────
+    #
+    # post_count and the author's own auto-upvote must both drop out of the
+    # canonical definition, or post-and-delete cycling manufactures the topic
+    # standing that gates downvote weight while leaving no visible content.
+    post_sql = " ".join(DatabaseManager._POST_STATS_FROM_CANONICAL.split())
+    vote_sql = " ".join(DatabaseManager._VOTE_STATS_FROM_CANONICAL.split())
+    problems = []
+    if "COALESCE(p.deleted, FALSE) = FALSE" not in post_sql:
+        problems.append("post_count counts deleted posts")
+    if "COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner)" not in vote_sql:
+        problems.append("author's own vote on a deleted post still counts")
+    if problems:
+        _fail("indexer_hardening.deleted_posts_grant_no_standing", "; ".join(problems))
+    else:
+        _pass("indexer_hardening.deleted_posts_grant_no_standing")
+
+    # The wiring that makes the above take effect on delete is exercised for real
+    # in _indexer_hardening_sql_behaviour_checks; this only pins the definition.
+
+    # ── M-2: a suspicious profile inventory must not wipe the index ──────
+    #
+    # Driven against a stub DB rather than read from source: what matters is that
+    # the guards refuse, and equally that a fresh chain and ordinary churn still pass.
+
+    class _StubDb:
+        def __init__(self, owners):
+            self._owners = owners
+            self.soft_deleted = []
+
+        @contextmanager
+        def _connect(self):
+            rows = [(o,) for o in self._owners]
+
+            class _Cur:
+                def __enter__(inner):
+                    return inner
+
+                def __exit__(inner, *a):
+                    return False
+
+                def execute(inner, *a, **k):
+                    return None
+
+                def fetchall(inner):
+                    return rows
+
+            class _Conn:
+                def cursor(inner):
+                    return _Cur()
+
+            yield _Conn()
+
+        def soft_delete_profile(self, owner, now):
+            self.soft_deleted.append(owner)
+
+    def _run_sync(db_owners, chain_owners):
+        idx = indexer_main.Indexer.__new__(indexer_main.Indexer)
+        idx.db = _StubDb(db_owners)
+        return idx, idx._soft_delete_absent_owners({o.lower() for o in chain_owners}, 0)
+
+    many = [f"mirage1u{i:03d}" for i in range(100)]
+
+    try:
+        _run_sync(many, [])
+        _fail("indexer_hardening.profile_sync_rejects_empty_inventory", "an empty chain inventory was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.profile_sync_rejects_empty_inventory")
+
+    try:
+        _run_sync(many, many[:50])
+        _fail("indexer_hardening.profile_sync_bounds_blast_radius", "a 50% wipe was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.profile_sync_bounds_blast_radius")
+
+    try:
+        _, absent = _run_sync([], [])
+        if absent == 0:
+            _pass("indexer_hardening.profile_sync_allows_fresh_chain")
+        else:
+            _fail("indexer_hardening.profile_sync_allows_fresh_chain", f"returned {absent}")
+    except Exception as e:
+        _fail("indexer_hardening.profile_sync_allows_fresh_chain", f"fresh chain refused: {type(e).__name__}: {e}")
+
+    try:
+        idx, absent = _run_sync(many, many[:97])
+        if absent == 3 and len(idx.db.soft_deleted) == 3:
+            _pass("indexer_hardening.profile_sync_allows_normal_churn", absent=absent)
+        else:
+            _fail("indexer_hardening.profile_sync_allows_normal_churn", f"absent={absent}")
+    except Exception as e:
+        _fail("indexer_hardening.profile_sync_allows_normal_churn", f"{type(e).__name__}: {e}")
+
+    # ── L-2: governance cannot silently drop a core message ──────────────
+
+    class _Any:
+        def __init__(self, type_url, value=b""):
+            self.type_url = type_url
+            self.value = value
+
+    try:
+        ChainClient._filter_trackable_anys([_Any("/mirage.core.v1.MsgTotallyNew")], TYPE_URL_TO_PROTO)
+        _fail("indexer_hardening.untracked_core_message_fatal", "an untracked core message was silently dropped")
+    except RuntimeError:
+        _pass("indexer_hardening.untracked_core_message_fatal")
+
+    kept = ChainClient._filter_trackable_anys(
+        [_Any("/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade"), _Any("/mirage.core.v1.MsgPost")],
+        TYPE_URL_TO_PROTO,
+    )
+    if [k["type_url"] for k in kept] == ["/mirage.core.v1.MsgPost"]:
+        _pass("indexer_hardening.cosmos_messages_still_ignored")
+    else:
+        _fail("indexer_hardening.cosmos_messages_still_ignored", f"kept={kept}")
+
+    if "/mirage.core.v1.MsgAnnotate" in TYPE_URL_TO_PROTO:
+        _pass("indexer_hardening.annotate_is_governance_trackable")
+    else:
+        _fail("indexer_hardening.annotate_is_governance_trackable", "MsgAnnotate is dispatched but not trackable")
+
+    # ── L-3: a mid-run chain_id change is rejected ───────────────────────
+    #
+    # Exercised against a bare instance rather than asserted from source: the
+    # latch is the whole behaviour, and a source check would pass on a version
+    # that latched but never compared.
+
+    probe = indexer_main.Indexer.__new__(indexer_main.Indexer)
+    probe._expected_chain_id = None
+    probe._verify_chain_id(100, "mirage-1")
+    probe._verify_chain_id(101, "mirage-1")
+    try:
+        probe._verify_chain_id(102, "mirage-other")
+        _fail("indexer_hardening.chain_id_checked_per_block", "a mid-run chain_id change was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.chain_id_checked_per_block")
+
+    # ── minor: an interrupted indexer must not look like a clean stop ────
+
+    sig_probe = indexer_main.Indexer.__new__(indexer_main.Indexer)
+    sig_probe.running = True
+    sig_probe._lock_file = None
+    sig_probe._lock_path = "/tmp/does-not-exist.lock"
+    try:
+        sig_probe._handle_signal(signal.SIGTERM, None)
+        _fail("indexer_hardening.signal_exit_nonzero", "_handle_signal did not exit")
+    except SystemExit as e:
+        if e.code == 128 + int(signal.SIGTERM):
+            _pass("indexer_hardening.signal_exit_nonzero", code=e.code)
+        else:
+            _fail("indexer_hardening.signal_exit_nonzero", f"exit code {e.code}, expected {128 + int(signal.SIGTERM)}")
+
+    _indexer_hardening_sql_behaviour_checks()
+
+
+def _indexer_hardening_sql_behaviour_checks() -> None:
+    """Execute the SQL-level fixes against a real PostgreSQL, in a scratch schema.
+
+    The guards these cover (SAVEPOINT, the LIKE escaping, the walk depth cap, the
+    delete-time recompute) can all be satisfied by a source-level string match while
+    being behaviourally broken, so they are run rather than read. A throwaway schema
+    is created, the real `DatabaseManager` builds the real tables inside it via
+    `search_path`, and the schema is dropped afterwards — nothing touches live rows.
+
+    Needs a psycopg-reachable INDEXER_DB_URL, which only holds inside the container.
+    """
+    import psycopg
+
+    from indexer.database import DatabaseManager, MAX_ANCESTOR_WALK_DEPTH
+
+    names = [
+        "indexer_hardening.legacy_backfill_uses_savepoint",
+        "indexer_hardening.unblock_pattern_escaped",
+        "indexer_hardening.ancestor_walk_bounded",
+        "indexer_hardening.delete_retracts_topic_standing",
+    ]
+
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        code, out = _docker_exec("printenv INDEXER_DB_URL")
+        if code == 0 and out:
+            db_url = out.strip()
+    if not db_url:
+        for n in names:
+            _skip(n, "INDEXER_DB_URL unavailable")
+        return
+
+    schema = f"hardening_{_rand_str(8)}"
+    try:
+        with psycopg.connect(db_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE SCHEMA "{schema}"')
+    except Exception as e:
+        for n in names:
+            _skip(n, f"indexer DB not reachable from here: {e}")
+        return
+
+    sep = "&" if "?" in db_url else "?"
+    scoped_url = f"{db_url}{sep}options=-csearch_path%3D{schema},public"
+
+    try:
+        db = DatabaseManager(scoped_url)
+
+        # ── L-1: the legacy backfill must not poison the block transaction ──
+        #
+        # A CHECK constraint makes only the backfill UPDATE fail, leaving the read
+        # that precedes it working — otherwise the function would fail for an
+        # unrelated reason and prove nothing. Without a SAVEPOINT, PostgreSQL aborts
+        # the whole transaction and the *next* statement raises, which is the
+        # misattribution the finding described.
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO posts(txhash, owner, topic, created_at) VALUES('legacy1','u','tech',1)")
+                cur.execute("ALTER TABLE posts ADD CONSTRAINT no_backfill CHECK (root_topic IS NULL)")
+        try:
+            with db.transaction(label="hardening_savepoint"):
+                resolved = db.get_root_topic_for_post("legacy1")
+                # The real assertion: the transaction is still usable afterwards.
+                with db._connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                        survived = cur.fetchone()[0] == 1
+            if survived and resolved == ("tech", "legacy1"):
+                _pass("indexer_hardening.legacy_backfill_uses_savepoint")
+            else:
+                _fail(
+                    "indexer_hardening.legacy_backfill_uses_savepoint",
+                    f"survived={survived} resolved={resolved}",
+                )
+        except Exception as e:
+            _fail("indexer_hardening.legacy_backfill_uses_savepoint", f"transaction was poisoned: {e}")
+
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE posts DROP CONSTRAINT no_backfill")
+                cur.execute("DELETE FROM posts")
+
+        # ── I-1: stored %/_ are literals; only * globs ──────────────────────
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO blocked_topics(owner, target, position) VALUES('u', %s, %s)",
+                    [("100%", 1), ("a_b", 2), ("spo*", 3)],
+                )
+        wildcard_bugs = []
+        if db.unblock_topics_matching("u", "1000") != 0:
+            wildcard_bugs.append("stored % matched an unrelated topic")
+        if db.unblock_topics_matching("u", "axb") != 0:
+            wildcard_bugs.append("stored _ matched an unrelated topic")
+        if db.unblock_topics_matching("u", "sports") != 1:
+            wildcard_bugs.append("* no longer globs")
+        if wildcard_bugs:
+            _fail("indexer_hardening.unblock_pattern_escaped", "; ".join(wildcard_bugs))
+        else:
+            _pass("indexer_hardening.unblock_pattern_escaped")
+
+        # ── minor: the ancestor walk stops at the cap ───────────────────────
+        depth = MAX_ANCESTOR_WALK_DEPTH + 25
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM posts")
+                cur.execute(
+                    "INSERT INTO posts(txhash, owner, topic, comment_count, created_at) "
+                    "VALUES('d0','u','tech',0,1)"
+                )
+                for i in range(1, depth):
+                    cur.execute(
+                        "INSERT INTO posts(txhash, owner, topic, target, comment_count, created_at) "
+                        "VALUES(%s,'u','tech',%s,0,1)",
+                        (f"d{i}", f"d{i - 1}"),
+                    )
+                db._update_ancestor_comment_counts(cur, f"d{depth - 1}", delta=1)
+                cur.execute("SELECT COUNT(*) FROM posts WHERE comment_count > 0")
+                touched = int(cur.fetchone()[0])
+        if touched == MAX_ANCESTOR_WALK_DEPTH:
+            _pass("indexer_hardening.ancestor_walk_bounded", touched=touched)
+        else:
+            _fail(
+                "indexer_hardening.ancestor_walk_bounded",
+                f"walked {touched} levels, expected the cap of {MAX_ANCESTOR_WALK_DEPTH}",
+            )
+
+        # ── M-3: deleting retracts the author's standing, not the voters' ───
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM posts")
+                for i in range(3):
+                    cur.execute(
+                        "INSERT INTO posts(txhash, owner, topic, root_topic, root_post_id, created_at) "
+                        "VALUES(%s,'attacker','tech','tech',%s,1)",
+                        (f"p{i}", f"p{i}"),
+                    )
+                    cur.execute(
+                        "INSERT INTO votes(txhash, owner, target, user_vote, created_at) "
+                        "VALUES(%s,'attacker',%s,1.0,1)",
+                        (f"v{i}", f"p{i}"),
+                    )
+                cur.execute(
+                    "INSERT INTO votes(txhash, owner, target, user_vote, created_at) "
+                    "VALUES('vh','honest','p0',1.0,1)"
+                )
+                db._recompute_topic_stats(cur, ["attacker", "honest"], ["tech"])
+                cur.execute("SELECT post_count FROM user_topic_stats WHERE owner='attacker' AND topic='tech'")
+                seeded = cur.fetchone()
+
+        for i in range(3):
+            db.delete_post(f"p{i}")
+
+        with psycopg.connect(scoped_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT vote_count, net_votes, unique_root_posts, post_count "
+                    "FROM user_topic_stats WHERE owner='attacker' AND topic='tech'"
+                )
+                attacker = cur.fetchone()
+                cur.execute(
+                    "SELECT vote_count, net_votes, unique_root_posts "
+                    "FROM user_topic_stats WHERE owner='honest' AND topic='tech'"
+                )
+                honest = cur.fetchone()
+
+        problems = []
+        if not seeded or int(seeded[0]) != 3:
+            problems.append(f"setup did not credit the author (post_count={seeded})")
+        if attacker not in (None, (0, 0, 0, 0)):
+            problems.append(f"author kept standing after deleting: {attacker}")
+        if honest != (1, 1, 1):
+            problems.append(f"an unrelated voter lost standing they earned: {honest}")
+        if problems:
+            _fail("indexer_hardening.delete_retracts_topic_standing", "; ".join(problems))
+        else:
+            _pass("indexer_hardening.delete_retracts_topic_standing")
+
+    except Exception as e:
+        _fail("indexer_hardening.sql_behaviour_harness", f"{type(e).__name__}: {e}")
+    finally:
+        try:
+            with psycopg.connect(db_url, autocommit=True) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        except Exception as e:
+            _fail("indexer_hardening.sql_behaviour_harness", f"scratch schema {schema} not dropped: {e}")
 
 
 def _indexer_hardening_db_checks(backend: str) -> None:

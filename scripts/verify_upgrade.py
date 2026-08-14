@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.35.0.
+Post-deploy verification for v1.36.0.
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes:
@@ -8,52 +8,54 @@ what THIS release changes:
   python scripts/verify_upgrade.py
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 
-What v1.35.0 changes (deploy-visible)
--------------------------------------
-The availability fix from the 2026-08-13 security review. GetProfile answered an
-absent profile with an unclassified error, so no caller could tell "this account
-is gone" — a normal state, since a block being projected can predate the
-MsgDeleteUser that removed the profile — from "this node is broken". The indexer
-took it as the latter, aborted the block, retried the same block forever, and
-stopped advancing for every reader on that host. GetProfile now returns the gRPC
-NOT_FOUND status and the indexer skips the refresh; every other status still
-aborts the block.
+What v1.36.0 changes (deploy-visible)
+--------------------------------------
+Indexer hardening from the 2026-08-14 security review. No chain code changed, so
+every check here is about the deployed indexer rather than about state:
 
-Alongside it: the state-sync bootstrap output is parsed instead of eval'd, the
-restore path publishes the same host ports as a normal deploy, and the invite
-referral payout is confined to registration.
+  * Governance event attributes were base64-decoded on a guess. Roughly one
+    four-digit proposal ID in nine decodes to something unparseable, which aborts
+    the block and re-fails at the same height forever. The fuse is the global
+    proposal counter reaching 1400; it was at 108 when this was written.
+  * Vote weight was looked up from a fixed set of levels {0, 1, 10, 100} while
+    the chain treats any level >= 100 as admin. One governance MsgSetLevel to 101
+    plus one ordinary message from that account wedged the indexer identically.
+  * A deleted post kept granting its author the topic standing that gates
+    downvote weight, so post/self-vote/delete could be banked indefinitely.
+  * Startup profile reconciliation would soft-delete every profile if the chain
+    reported an empty inventory.
 
 Checks:
 
-  1. Frontend version.txt reports v1.35.0.
-  2. Chain binary version reports v1.35.0.
-  3. Upgrade handler name v1.35.0 is applied (applied_plan query).
+  1. Frontend version.txt reports v1.36.0.
+  2. Chain binary version reports v1.36.0.
+  3. Upgrade handler name v1.36.0 is applied (applied_plan query).
   4. Chain is live and has produced blocks past the upgrade height.
-  5. An address with no profile answers 404 (gRPC NOT_FOUND through the
-     gateway), not 500. This is the fix, observed on the deployed binary.
-  6. An address that does have a profile still answers 200, so check 5 is
-     narrow rather than "the query broke".
-  7. The indexer is advancing. A wedged indexer is the symptom this release
-     exists to remove, and it is invisible in the chain's own health.
-  8. The deployed backend confines the invite referral payout to registration.
-  9. The running container publishes no Cosmos REST (1317) or gRPC (9090) port.
+  5. The indexer is advancing. Both wedges this release removes present as a
+     stuck indexer, and that is invisible in the chain's own health.
+  6. The deployed indexer does not base64-decode event attributes, and reads
+     them through the single shared helper.
+  7. The deployed indexer resolves admin levels by range, not by a fixed set.
+  8. The deployed indexer retracts topic standing when a post is deleted.
+  9. The standing-repair migration has been recorded as applied.
+ 10. No live user holds topic standing sourced only from deleted posts, which
+     is the exploit's fingerprint and the migration's job to have removed.
 
-Checks 7, 8 and 9 read deployment artifacts (the indexer database, the deployed
-backend source, the Docker port map) that are not all reachable from every
-vantage point: 7 and 8 need the container's filesystem or DB, 9 needs the Docker
-CLI on the host. When the artifact is absent they report NOTE and do not affect
-the exit code, because a missing artifact means "not verifiable from here", not
-"verified". Run both invocations above for the full set — a run that only prints
-NOTE for a check has not performed it.
+Checks 6 through 10 read deployment artifacts (the deployed indexer source, the
+indexer database) that are not reachable from every vantage point. When the
+artifact is absent they report NOTE and do not affect the exit code, because a
+missing artifact means "not verifiable from here", not "verified". Run both
+invocations above for the full set — a run that only prints NOTE for a check has
+not performed it.
 
-This script is read-only: it never broadcasts. Two properties of this release
-cannot be observed read-only and are proven by tests instead:
+This script is read-only: it never broadcasts and never writes. Properties that
+cannot be observed read-only are proven by tests instead:
 
-  * the state-sync bootstrap is parsed and validated, never eval'd —
-    tests/test_backend.py --category node_join
-  * an unknown message type is logged and skipped instead of halting the
-    indexer, and an absent profile skips the refresh without touching the DB —
-    tests/test_backend.py --category indexer_profile_absent
+  * every fix in this release —
+    tests/test_backend.py --category indexer_hardening
+
+  That category is offline (no chain, no transactions) and includes the
+  database-backed behavioural checks, which build their own throwaway schema.
 """
 from __future__ import annotations
 
@@ -67,11 +69,11 @@ import urllib.request
 from pathlib import Path
 
 # The shipped software version, checked against version.txt and the binary. The
-# chain upgrade handler carries the same name this release: the query change is
-# not consensus-breaking, but the plan is what moves the whole fleet across one
-# coordinated height so no node is left running the wedging binary.
-RELEASE_VERSION = "v1.35.0"
-UPGRADE_NAME = "v1.35.0"
+# chain upgrade handler carries the same name this release: nothing here is
+# consensus-breaking, but mixed binaries compute different topic standing from
+# the same blocks and a node left behind keeps both wedge fuses lit.
+RELEASE_VERSION = "v1.36.0"
+UPGRADE_NAME = "v1.36.0"
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
 
@@ -79,18 +81,12 @@ REST_URL = "http://127.0.0.1:1317"
 # upgrade counts as "live", not just "applied".
 MIN_BLOCKS_AFTER_UPGRADE = 5
 
-# An address that is well-formed enough for the query (GetProfile lowercases and
-# looks up; it does not parse bech32) and that no account can hold, so the only
-# correct answer is NOT_FOUND.
-ABSENT_PROFILE_ADDRESS = "mirage1verifyupgradeabsentprofilenobodyholdsthis"
-
 # The indexer must gain height across this window. timeout_commit is 3s, so this
 # spans several blocks even on a slow host.
 INDEXER_PROGRESS_WINDOW_SEC = 10
 
-# Ports that must never be published to the host: the Cosmos REST and gRPC
-# listeners are unauthenticated and belong on loopback behind Caddy.
-FORBIDDEN_HOST_PORTS = ("1317", "9090")
+# Key written by indexer/migrations/v1_36_0_repair_deleted_post_standing.py.
+STANDING_MIGRATION_KEY = "v1.36.0_repair_deleted_post_standing"
 
 passed = 0
 failed = 0
@@ -124,22 +120,21 @@ def http_json(url: str, timeout: float = 10.0) -> dict:
         raise RuntimeError(f"HTTP {e.code} from {url}: {e.read().decode()[:300]}") from None
 
 
-def http_status(url: str, timeout: float = 10.0) -> tuple[int, str]:
-    """Return (status, body) without raising for an error status.
-
-    The status code is the subject of check 5, so it has to be observable
-    instead of being folded into an exception.
-    """
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read().decode()[:300]
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()[:300]
-
-
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
+
+
+def deployed_source(relative: str) -> Path | None:
+    """The deployed copy of an indexer file, preferring the container path.
+
+    Checks read the deployed tree rather than the repo: a host that did not
+    receive the new code is exactly what this script exists to make visible.
+    """
+    for base in (Path("/opt/mirage"), repo_root()):
+        p = base / relative
+        if p.is_file():
+            return p
+    return None
 
 
 def check_version_txt() -> None:
@@ -241,50 +236,6 @@ def check_chain_live_past_upgrade() -> None:
         )
 
 
-def check_absent_profile_is_not_found() -> None:
-    """The fix itself, observed on the deployed binary.
-
-    404 is how the gRPC gateway renders NOT_FOUND. Before this release the same
-    query produced a 500, which is what the indexer could not tell apart from a
-    node fault.
-    """
-    status, body = http_status(f"{REST_URL}/mirage/core/v1/profile/{ABSENT_PROFILE_ADDRESS}")
-    if status == 404:
-        ok(f"absent profile answers 404 NOT_FOUND ({ABSENT_PROFILE_ADDRESS})")
-    elif status == 200:
-        fail(f"absent profile answered 200; {ABSENT_PROFILE_ADDRESS} should hold no profile: {body}")
-    else:
-        fail(
-            f"absent profile answered HTTP {status}, want 404 NOT_FOUND — this node still cannot tell a "
-            f"deleted account apart from a node fault, and its indexer will wedge on the next deletion: {body}"
-        )
-
-
-def check_present_profile_is_served() -> None:
-    """Control for the check above: profiles that exist must still be served."""
-    try:
-        listing = http_json(f"{REST_URL}/mirage/core/v1/profiles?pagination.limit=1")
-    except Exception as e:
-        fail(f"profiles listing failed: {e}")
-        return
-
-    profiles = listing.get("profiles") or []
-    if not profiles:
-        note("chain has no profiles yet: the positive profile query is not verifiable from here")
-        return
-
-    owner = str(profiles[0].get("owner") or "").strip()
-    if not owner:
-        fail(f"profiles listing returned an entry with no owner: {profiles[0]}")
-        return
-
-    status, body = http_status(f"{REST_URL}/mirage/core/v1/profile/{owner}")
-    if status == 200:
-        ok(f"existing profile still answers 200 ({owner})")
-    else:
-        fail(f"existing profile {owner} answered HTTP {status}, want 200: {body}")
-
-
 def indexer_db_url() -> str:
     """INDEXER_DB_URL from the environment, or from the deployed env files.
 
@@ -306,10 +257,10 @@ def indexer_db_url() -> str:
 
 
 def check_indexer_advancing() -> None:
-    """A wedged indexer is the failure this release removes, and the chain's own
-    health says nothing about it: blocks keep being produced while the indexer
-    retries one block forever. Sampling twice is what distinguishes "behind and
-    catching up" from "stuck", so lag alone is reported, not asserted.
+    """Both wedges this release removes present as a stuck indexer, and the
+    chain's own health says nothing about it: blocks keep being produced while
+    the indexer retries one block forever. Sampling twice is what distinguishes
+    "behind and catching up" from "stuck", so lag alone is reported, not asserted.
     """
     db_url = indexer_db_url()
     if not db_url:
@@ -350,55 +301,157 @@ def check_indexer_advancing() -> None:
         )
 
 
-def check_referral_payout_guarded() -> None:
-    """The deployed backend, not the repo: this release is also the one that
-    stopped the invite referral reward from being re-paid on a later username
-    change, and a host that did not receive the new code keeps paying.
+def check_event_attrs_not_decoded() -> None:
+    """The base64 guess must be gone from the deployed indexer.
+
+    All four readers of the same event object share one helper now; a host that
+    kept its own copy of the old logic is still holding a lit fuse.
     """
-    candidates = [
-        Path("/opt/mirage/web/backend/routes/core.py"),
-        repo_root() / "web" / "backend" / "routes" / "core.py",
-    ]
-    for p in candidates:
-        if not p.is_file():
-            continue
-        src = p.read_text(encoding="utf-8")
-        if "_process_invite_quest_completion" not in src:
-            fail(f"{p} no longer calls _process_invite_quest_completion")
-            return
-        if "if is_new_user and code == 0:" in src:
-            ok(f"invite referral payout is confined to registration ({p})")
-        else:
-            fail(
-                f"{p} calls _process_invite_quest_completion without the registration guard; "
-                f"a username change re-pays the referral reward"
-            )
+    p = deployed_source("indexer/message_processor.py")
+    if p is None:
+        note("indexer source not present: event attribute decoding not verifiable from here")
         return
-    note("backend source not present: referral payout guard not verifiable from here")
+    src = p.read_text(encoding="utf-8")
+    if "b64decode" in src:
+        fail(f"{p} still base64-decodes event attributes; the proposal-ID wedge is live on this host")
+        return
+    if "def attr_text" not in src:
+        fail(f"{p} has no attr_text helper: this host is not running the v1.36.0 indexer")
+        return
+
+    main = deployed_source("indexer/main.py")
+    if main is None:
+        note("indexer/main.py not present: attribute readers not verifiable from here")
+        return
+    if "attr_text" not in main.read_text(encoding="utf-8"):
+        fail(f"{main} does not use attr_text; a reader was left on the old decoding path")
+        return
+    ok("event attributes are read as text, through one shared helper")
 
 
-def check_no_forbidden_host_ports() -> None:
-    """The restore path used to publish 1317 and 9090, so a host that had been
-    rebuilt from backup served unauthenticated REST and gRPC to the internet.
-    Read the live port map rather than the script that wrote it.
-    """
+def check_admin_levels_by_range() -> None:
+    """Vote weight must resolve any level >= 100, not a fixed set."""
+    p = deployed_source("indexer/params.py")
+    if p is None:
+        note("indexer/params.py not present: admin level handling not verifiable from here")
+        return
+    src = p.read_text(encoding="utf-8")
+    if "def level_to_tier_index" not in src:
+        fail(f"{p} has no level_to_tier_index: any admin level other than 100 still wedges this host")
+        return
+
+    # Import rather than trust the text: the mapping is the whole fix, and a
+    # present-but-wrong function would satisfy a source match.
+    sys.path.insert(0, str(p.parent.parent))
     try:
-        out = subprocess.check_output(
-            ["docker", "port", "mirage"], stderr=subprocess.STDOUT, timeout=15
-        ).decode()
-    except FileNotFoundError:
-        note("docker CLI unavailable (this is the in-container invocation): host port map not verifiable from here")
-        return
+        from indexer.params import level_to_tier_index
     except Exception as e:
-        fail(f"docker port mirage failed: {e}")
+        note(f"indexer.params not importable here ({e}); level mapping checked by source only")
+        ok("level_to_tier_index is present")
         return
 
-    published = [line.strip() for line in out.splitlines() if line.strip()]
-    offending = [line for line in published if any(line.startswith(f"{p}/") for p in FORBIDDEN_HOST_PORTS)]
-    if offending:
-        fail(f"container publishes {offending}; Cosmos REST and gRPC must stay on loopback behind Caddy")
+    agent_tier = level_to_tier_index(100)
+    bad = [lvl for lvl in (100, 101, 150, 1000) if level_to_tier_index(lvl) != agent_tier]
+    if bad:
+        fail(f"level(s) {bad} do not resolve to the admin tier {agent_tier}")
     else:
-        ok(f"container publishes no REST/gRPC port ({len(published)} mapping(s))")
+        ok(f"admin levels 100..1000 all resolve to tier {agent_tier}")
+
+
+def check_delete_retracts_standing() -> None:
+    """Deleting a post must withdraw the standing it granted its author."""
+    p = deployed_source("indexer/database.py")
+    if p is None:
+        note("indexer/database.py not present: standing retraction not verifiable from here")
+        return
+    src = p.read_text(encoding="utf-8")
+    missing = [
+        marker
+        for marker in ("_recompute_topic_stats", "COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner)")
+        if marker not in src
+    ]
+    if missing:
+        fail(f"{p} is missing {missing}; deleted posts still buy topic standing on this host")
+    else:
+        ok("deleted posts no longer grant their author topic standing")
+
+
+def check_standing_migration_applied() -> None:
+    """The repair migration must have run: the fix stops new banking, the
+    migration is what removes what was banked before it."""
+    db_url = indexer_db_url()
+    if not db_url:
+        note("no INDEXER_DB_URL: standing repair migration not verifiable from here")
+        return
+    try:
+        import psycopg
+    except ImportError:
+        note("psycopg unavailable: standing repair migration not verifiable from here")
+        return
+    try:
+        with psycopg.connect(db_url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM meta WHERE key = %s", (f"migration_{STANDING_MIGRATION_KEY}",))
+                row = cur.fetchone()
+    except Exception as e:
+        fail(f"standing repair migration check failed: {e}")
+        return
+    if row:
+        ok(f"standing repair migration recorded ({STANDING_MIGRATION_KEY})")
+    else:
+        fail(
+            f"migration {STANDING_MIGRATION_KEY} is not recorded; standing banked before this release "
+            f"is still credited on this host"
+        )
+
+
+def check_no_standing_from_deleted_posts() -> None:
+    """The exploit's fingerprint, read from data rather than from code.
+
+    An author whose only posts in a topic are deleted must hold no standing there.
+    This is what the migration was for, so a row here means the repair did not
+    take effect on this host.
+    """
+    db_url = indexer_db_url()
+    if not db_url:
+        note("no INDEXER_DB_URL: residual standing not verifiable from here")
+        return
+    try:
+        import psycopg
+    except ImportError:
+        note("psycopg unavailable: residual standing not verifiable from here")
+        return
+    try:
+        with psycopg.connect(db_url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT s.owner, s.topic, s.net_votes, s.vote_count
+                      FROM user_topic_stats s
+                     WHERE (s.net_votes <> 0 OR s.vote_count <> 0 OR s.unique_root_posts <> 0)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM posts p
+                            WHERE LOWER(p.owner) = LOWER(s.owner)
+                              AND LOWER(COALESCE(p.root_topic, p.topic)) = LOWER(s.topic)
+                              AND NOT COALESCE(p.deleted, FALSE)
+                       )
+                       AND EXISTS (
+                           SELECT 1 FROM posts p
+                            WHERE LOWER(p.owner) = LOWER(s.owner)
+                              AND LOWER(COALESCE(p.root_topic, p.topic)) = LOWER(s.topic)
+                              AND COALESCE(p.deleted, FALSE)
+                       )
+                     LIMIT 5
+                    """
+                )
+                rows = cur.fetchall()
+    except Exception as e:
+        fail(f"residual standing check failed: {e}")
+        return
+    if rows:
+        fail(f"{len(rows)} owner/topic pair(s) hold standing sourced only from deleted posts, e.g. {rows[0]}")
+    else:
+        ok("no owner holds topic standing sourced only from deleted posts")
 
 
 def main() -> int:
@@ -407,15 +460,15 @@ def main() -> int:
     check_binary_version()
     check_upgrade_applied()
     check_chain_live_past_upgrade()
-    check_absent_profile_is_not_found()
-    check_present_profile_is_served()
     check_indexer_advancing()
-    check_referral_payout_guarded()
-    check_no_forbidden_host_ports()
+    check_event_attrs_not_decoded()
+    check_admin_levels_by_range()
+    check_delete_retracts_standing()
+    check_standing_migration_applied()
+    check_no_standing_from_deleted_posts()
     note(
-        "the state-sync bootstrap parser (never eval, validated values) is proven by "
-        "tests/test_backend.py --category node_join; the indexer's skip-and-log behaviour for absent "
-        "profiles and unknown message types by tests/test_backend.py --category indexer_profile_absent"
+        "the full behaviour of every fix in this release, including the database-level ones, is proven by "
+        "tests/test_backend.py --category indexer_hardening (offline; no chain traffic)"
     )
     print(f"\nResult: {passed} passed, {failed} failed")
     return 1 if failed else 0

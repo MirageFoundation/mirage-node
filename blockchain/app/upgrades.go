@@ -2318,6 +2318,35 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// v1.36.0: indexer hardening from the 2026-08-14 security review. Nothing in
+	// this release touches chain code — no state, params, store keys or app hash —
+	// so there is nothing for this handler to migrate.
+	//
+	// It is registered anyway, for a reason stronger than v1.35.0's. Two of the
+	// fixes remove permanent indexer wedges that arm themselves from ordinary
+	// chain activity: a governance proposal whose ID decodes to garbage, and any
+	// admin level other than exactly 100. A node left on the old binary keeps both
+	// fuses lit. A third changes what topic standing *means* — a deleted post no
+	// longer grants its author standing — so a fleet running mixed binaries would
+	// compute different user_topic_stats from the same blocks and answer the same
+	// query differently depending on which host served it. The named plan is what
+	// moves every validator across one height instead of rolling through the fleet.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.36.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.36.0 (indexer hardening; no state migration)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.36.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.36.0 complete")
+			return toVM, nil
+		},
+	)
+
 	// Register the store loader for v1.28.0's store deletions. This must run
 	// before app.Load() (called later in App.New) so the deleted stores are
 	// dropped while loading the multistore at the upgrade height.

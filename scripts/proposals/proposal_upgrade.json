@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.35.0 (GetProfile answers NOT_FOUND for absent profiles)",
-    "summary": "Availability fix from the 2026-08-13 security review. The GetProfile query returned an unclassified error when an address had no profile, which is a normal post-consensus state: an account can be deleted while blocks that reference it are still being projected. Callers could not tell 'this account is gone' from 'this node is broken', so the indexer aborted the block, retried it forever, and stopped advancing for every reader on that host. GetProfile now returns the gRPC NOT_FOUND status for an absent profile and the indexer skips the refresh instead of failing the block; every other status still aborts, so a real node or transport fault is not silently recorded as 'this user has nothing'. This is a query-path change only. Transaction handling, state writes and the app hash are untouched, so this upgrade is not consensus-breaking and mixed binaries do not diverge. The plan exists to move the fleet across one coordinated height and keep every validator on the same binary, since a node left behind keeps wedging its own indexer.",
+    "title": "Upgrade to v1.36.0 (indexer hardening from the 2026-08-14 security review)",
+    "summary": "Indexer fixes from the 2026-08-14 security review. Two of them close permanent wedges that arm themselves from ordinary chain activity, with no attacker required. Governance event attributes were being base64-decoded on a guess, and roughly one in nine four-digit proposal IDs decodes to something the indexer cannot parse: once the global proposal counter reaches 1400, the block fails, rolls back, and every node re-fails at that same height forever, which a rebuild does not fix. Separately the indexer recognised admin level 100 exactly while the chain accepts any level at or above 100, so a single governance MsgSetLevel setting 101 plus one ordinary post by that account wedged every indexer the same way. This release also stops a deleted post from continuing to grant its author the topic standing that gates downvote weight, guards the startup profile reconciliation against wiping every user on an empty inventory, and makes governance refuse to silently drop a core message type it cannot project. No chain code changed: no state, params, store keys or app hash are touched, so this upgrade is not consensus-breaking and mixed binaries do not diverge on the chain itself. The plan exists because mixed binaries DO diverge in the index — a node left behind keeps both wedge fuses lit and computes different topic standing from the same blocks — so the fleet must cross one coordinated height.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.35.0",
+                "name": "v1.36.0",
                 "height": "T+50",
                 "info": ""
             }

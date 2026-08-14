@@ -11,6 +11,7 @@ import grpc
 from datetime import datetime, timezone
 from typing import Optional
 from indexer.settings import (
+    BALANCE_BATCH_DEADLINE,
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_MEDIUM,
     GRPC_TIMEOUT,
@@ -20,6 +21,10 @@ from indexer.settings import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Messages the indexer is responsible for projecting. Anything outside this prefix
+# belongs to cosmos modules and is deliberately not indexed.
+CORE_TYPE_URL_PREFIX = "/mirage.core.v1."
 
 # Profile listing pages are far larger than a normal point query, so they get
 # their own (longer) budget instead of the 3s GRPC_TIMEOUT.
@@ -40,6 +45,7 @@ class ChainClient:
         self.jsonrpc_url = jsonrpc_url
         self.ws_url = jsonrpc_url.replace("http://", "ws://") + "/websocket"
         self.grpc_target = self._derive_grpc_target(jsonrpc_url)
+        self._profile_cache: dict[str, Optional[dict]] | None = None
 
     @staticmethod
     def _derive_grpc_target(jsonrpc_url: str) -> str:
@@ -177,6 +183,22 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
+    def begin_block_profile_cache(self) -> None:
+        """Memoise profile reads for the duration of one block.
+
+        These reads happen inside the block's PostgreSQL transaction, so each one
+        holds row locks for up to GRPC_TIMEOUT. A block packed with profile-mutating
+        transactions from the same accounts would otherwise pay that cost once per
+        transaction. Every read returns chain HEAD regardless of which height is being
+        projected, so collapsing repeats within a block returns the same answer the
+        second call would have given, without the node advancing underneath it.
+        """
+        self._profile_cache: dict[str, Optional[dict]] | None = {}
+
+    def end_block_profile_cache(self) -> None:
+        """Drop the per-block memo so the next block reads fresh chain state."""
+        self._profile_cache = None
+
     def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> Optional[dict]:
         """Query full profile (including per-entry lists) via gRPC.
 
@@ -191,6 +213,10 @@ class ChainClient:
         """
         from shared.datatypes import QueryProfileRequest, QueryProfileResponse
 
+        key = str(addr).lower()
+        if self._profile_cache is not None and key in self._profile_cache:
+            return self._profile_cache[key]
+
         with grpc.insecure_channel(self.grpc_target) as channel:
             method = channel.unary_unary(
                 "/mirage.core.v1.Query/GetProfile",
@@ -198,14 +224,18 @@ class ChainClient:
                 response_deserializer=QueryProfileResponse.FromString,
             )
             try:
-                resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
+                resp = method(QueryProfileRequest(address=key), timeout=timeout)
             except grpc.RpcError as e:
                 if e.code() == grpc.StatusCode.NOT_FOUND:
                     logger.warning("profile_absent grpc addr=%s (no chain profile; account deleted)", addr)
+                    if self._profile_cache is not None:
+                        self._profile_cache[key] = None
                     return None
                 raise
 
         profile = self._profile_to_dict(resp)
+        if self._profile_cache is not None:
+            self._profile_cache[key] = profile
         logger.debug(
             "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
             addr,
@@ -375,7 +405,27 @@ class ChainClient:
 
     @staticmethod
     def _filter_trackable_anys(anys, type_url_to_proto: dict) -> list[dict]:
-        """Keep only the Anys the indexer knows how to decode, as base64 payloads."""
+        """Keep only the Anys the indexer knows how to decode, as base64 payloads.
+
+        A core message that is not in the map would be dropped here while the block
+        still advanced its checkpoint, recording a governance action as applied when
+        it was never projected. Since the map is maintained by hand and the dispatcher
+        it has to mirror is a separate if/elif chain, that drift is caught here rather
+        than trusted: an untracked core message is fatal.
+
+        Everything else — cosmos gov, upgrade, bank — is deliberately not the indexer's
+        business, which is the same rule _process_tx applies to ordinary transactions.
+        """
+        untracked = sorted(
+            {
+                any_msg.type_url
+                for any_msg in anys
+                if any_msg.type_url.startswith(CORE_TYPE_URL_PREFIX) and any_msg.type_url not in type_url_to_proto
+            }
+        )
+        if untracked:
+            raise RuntimeError(f"proposal carries core message type(s) the indexer cannot project: {untracked}")
+
         return [
             {
                 "type_url": any_msg.type_url,
@@ -514,6 +564,13 @@ class ChainClient:
         per_call_timeout = GRPC_TIMEOUT if timeout is None else float(timeout)
         balances: dict[str, int] = {}
 
+        # Per-call timeouts bound each request but not the batch, so a block touching
+        # many distinct addresses had no overall budget: N addresses could stall the
+        # indexer for N * per_call_timeout. The deadline below is what the caller
+        # actually waits on, and exceeding it raises rather than returning a partial
+        # map, because a balance the indexer did not read must never be persisted.
+        deadline = time.monotonic() + BALANCE_BATCH_DEADLINE
+
         with grpc.insecure_channel(self.grpc_target) as channel:
             stub = bank_query_pb2_grpc.QueryStub(channel)
             for address in addresses:
@@ -522,9 +579,15 @@ class ChainClient:
                 key = str(address).lower()
                 if key in balances:
                     continue
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        f"get_balances_batch exceeded its {BALANCE_BATCH_DEADLINE}s budget after "
+                        f"{len(balances)} of {len(addresses)} address(es)"
+                    )
                 try:
                     req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
-                    resp = stub.Balance(req, timeout=per_call_timeout)
+                    resp = stub.Balance(req, timeout=min(per_call_timeout, remaining))
                     balances[key] = int(resp.balance.amount or "0")
                 except Exception as e:
                     raise RuntimeError(f"Failed to query umirage balance for {address}: {e}") from e
