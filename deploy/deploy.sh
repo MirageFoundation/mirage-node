@@ -251,6 +251,27 @@ maybe_proto_gen_and_go_build() {
     fi
   fi
 
+  # Check the embedded version. It comes from `git describe` at build time, not
+  # from any file, so moving a tag onto an existing commit changes what the
+  # binary should report while leaving every source mtime and the content hash
+  # untouched. Both checks above then say "up to date" and the fleet keeps
+  # serving a binary that reports e.g. v1.36.0-1-gd783da08 for a v1.36.0
+  # release — which is exactly what verify_upgrade fails on.
+  # The `-dirty` suffix is deliberately ignored on both sides: it flips on any
+  # edit anywhere in the tree, including docs, and rebuilding Go for that would
+  # make every deploy from a working tree pay a full build. The tag and commit
+  # are what must match.
+  if [ "$need_build" -eq 0 ]; then
+    local want_version have_version
+    want_version="$(cd "$REPO_ROOT" && git describe --tags --always 2>/dev/null || echo "")"
+    have_version="$("$miraged_bin" version 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
+    have_version="${have_version%-dirty}"
+    if [ -n "$want_version" ] && [ "$want_version" != "$have_version" ]; then
+      echo "==> miraged reports '$have_version' but the tree is '$want_version'; rebuild needed"
+      need_build=1
+    fi
+  fi
+
   # Check hash for content changes
   if [ "$need_build" -eq 0 ]; then
     local old_go_hash=""

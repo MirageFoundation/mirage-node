@@ -355,6 +355,24 @@ def test_backend_hardening(backend: str):
         "print('OK' if 'out[:200]' not in src and 'out}' not in src else ('BAD', src[-200:]))\n",
     )
 
+    # One response counts one impression per image, however many posts in it
+    # carry that image and however many times each carries it. The end-to-end
+    # test cannot assert this: view_count is global and any concurrent request
+    # returning the same post moves it, so it only checks that a view is counted
+    # at all. This is the exact-arithmetic half, and it needs no chain traffic.
+    _probe(
+        "backend_hardening.image_impression_counted_once_per_response",
+        "from routes.public import _collect_image_impression_ids as ids\n"
+        "a = 'https://imagedelivery.net/h/11111111-1111-4111-8111-111111111111/public'\n"
+        "b = 'https://imagedelivery.net/h/22222222-2222-4222-8222-222222222222/public'\n"
+        "one = ids([{'media': [a]}])\n"
+        "repeated = ids([{'media': [a, a]}, {'media': [a]}])\n"
+        "two = ids([{'media': [a, b]}])\n"
+        "empty = ids([{'media': []}, {}])\n"
+        "ok = len(one) == 1 and repeated == one and len(two) == 2 and not empty\n"
+        "print('OK' if ok else ('BAD', len(one), len(repeated), len(two), len(empty)))\n",
+    )
+
     # ── 2026-08-14 frontend review ───────────────────────────────────────
     # L-2: a real sign/verify roundtrip over the attribution payload, and proof
     # that swapping the invite code afterwards fails verification.
