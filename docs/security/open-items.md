@@ -105,9 +105,9 @@ Two Lows worth naming because they are the cheapest of the remainder and both re
 
 ---
 
-## Fixed on `dev` — 2026-08-14 indexer review
+## Fixed in `v1.36.0` — 2026-08-14 indexer review
 
-Every finding except M-1 was fixed on the same day the review landed; M-1 was accepted as risk and moved to the accepted-decisions table. Detail in [the review](2026-08-14/indexer-review.md). **Not yet released** — these are on `dev`, unreleased at the time of writing.
+Every finding except M-1 was fixed on the same day the review landed; M-1 was accepted as risk and moved to the accepted-decisions table. Detail in [the review](2026-08-14/indexer-review.md). **All of it shipped in `v1.36.0`**, including the correction to M-3, whose first fix was undone by the next indexer restart.
 
 | ID | Item | Fix |
 | :--- | :--- | :--- |

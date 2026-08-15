@@ -7,7 +7,7 @@
 
 **Prior state:** every Critical and High from the 2026-08-04 → 2026-08-13 rounds is closed; see [`open-items.md`](../open-items.md). Items already recorded there as accepted decisions were excluded from scope by instruction and are not re-reported. Nothing below is a re-report of a known item.
 
-> **Retest guidance.** Nothing here is fixed. This document records findings only; no code was modified during the audit.
+> **Retest guidance.** Nothing was fixed *during the audit* — no code was modified while it was written, and the findings below describe the code as audited. Remediation happened afterwards: ten of the eleven shipped in `v1.36.0`, M-5 was accepted as risk. Each finding carries its own Status line, and [Remediation](#remediation) records what changed.
 
 ---
 

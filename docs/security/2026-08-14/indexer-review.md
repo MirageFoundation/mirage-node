@@ -13,7 +13,7 @@
 
 **2 High, 3 Medium, 4 Low, 1 Informational. Nothing Critical.**
 
-**Disposition, decided 2026-08-14 (same day):** nine of the ten were fixed on `dev` and are **unreleased**; **M-1 was accepted as risk** and will not be re-reported by future reviews. The Status column records each decision, and "Remediation" at the end of the document describes what shipped.
+**Disposition, decided 2026-08-14 (same day):** nine of the ten were fixed and **shipped in `v1.36.0`**; **M-1 was accepted as risk** and will not be re-reported by future reviews. L-4 shipped partially, and its residue is accepted as risk too. The Status column records each decision, and "Remediation" at the end of the document describes what shipped.
 
 > **M-3's first fix was incomplete and would have shipped that way.** A backfill in `_init_db()` — labelled one-time, actually run on every startup — put the removed standing back byte for byte on the next indexer restart. Caught during the release run, not by the M-3 tests, which only covered `delete_post` and the canonical SQL. Read "Correction found while cutting the release" before trusting any other Status in this table.
 
@@ -44,7 +44,7 @@ The rest of the indexer held up well under an audit that was specifically lookin
 
 ## H-1 (High) — Permanent wedge: governance event attributes are base64-decoded on a guess
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 **Component:** `indexer/message_processor.py`. **Privilege required:** none — this arms itself over time. **Effect:** indexing stops chain-wide, permanently, and the affected block becomes un-indexable.
 
@@ -130,7 +130,7 @@ Independently, `extract_proposal_id` should not hand an arbitrary string to a ba
 
 ## H-2 (High) — Permanent wedge: the indexer only understands admin level `100` exactly, but the chain accepts any level ≥ 100
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 **Component:** `indexer/params.py`, reached from two handlers. **Privilege required:** one governance `MsgSetLevel`. **Effect:** the same permanent chain-wide wedge as H-1.
 
@@ -247,7 +247,7 @@ This is not covered by the accepted 2026-08-07 I-1 boundary. That item accepts t
 
 ## M-2 (Medium) — An empty profile inventory soft-deletes every user and destroys the blocked-list history
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 **Component:** `indexer/main.py`. **Effect:** total, irreversible loss of the one dataset the indexer is the sole custodian of.
 
@@ -292,7 +292,7 @@ This is not covered by the accepted 2026-08-07 I-1 boundary. That item accepts t
 
 ## M-3 (Medium) — Deleting a post never retracts the topic standing it granted
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased). Scoped to the author's own votes — see Remediation for why.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`). Scoped to the author's own votes — see Remediation for why.
 
 > **The first fix was incomplete, and was only caught while cutting the release.** The repair migration removed the banked standing correctly, and then the *next indexer restart* put all of it back, byte for byte. `_init_db()` carried a third copy of the vote-stats definition — a backfill labelled "one-time" that in fact runs on every startup — without the deleted-self-vote exclusion. Its `ON CONFLICT (owner, topic) DO NOTHING` looked idempotent, but the repair *deletes* rows whose entire vote set was a self-upvote on a deleted post, so there was no longer a row to conflict with and the backfill re-inserted them at the pre-fix values. The fix survived exactly until the first restart, on every node. The backfill is now deleted rather than patched, because carrying a second definition is what caused this. See "Correction found while cutting the release" below.
 
@@ -360,7 +360,7 @@ Make deletion symmetric with creation. The cheapest correct version is to recomp
 
 ## L-1 (Low) — A swallowed exception inside the block transaction cannot do what its comment claims
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 ```857:865:indexer/database.py
                         try:
@@ -382,7 +382,7 @@ The comment describes behaviour the database will not provide. Either wrap the b
 
 ## L-2 (Low) — Governance projects only a subset of the message types the indexer can handle, and drops the rest silently
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 `_process_governance_events` resolves a passed proposal's messages through `TYPE_URL_TO_PROTO` (`main.py:437`), and `_filter_trackable_anys` keeps only the types in that map (`chain_client.py:379-386`). But the map is **not** the set of messages the indexer can project. `TYPE_URL_TO_PROTO` has 26 entries (`message_processor.py:112-138`) and `MsgAnnotate` is not among them, while `process_core_message` dispatches `MsgAnnotate` to a full handler (`message_processor.py:184-185`, `944-1056`). The two lists are maintained independently with nothing tying them together.
 
@@ -399,7 +399,7 @@ The failure is quiet in both shapes, and the more dangerous one is quieter:
 
 ## L-3 (Low) — The per-block `chain_id` is written into the checkpoint without ever being compared
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 `_process_block` reads `chain_id` out of the block header, requires only that it be non-empty (`main.py:297-299`), and hands it to `set_checkpoint` (`main.py:336`), which overwrites `meta.chain_id` on every block (`database.py:754-773`). Nothing compares it to `self.chain.get_chain_id()` or to the value already stored.
 
@@ -411,7 +411,7 @@ This sits close to the accepted "co-located node is trusted" boundary, and I am 
 
 ## L-4 (Low) — Profile reads go over gRPC inside the block transaction
 
-**Status: PARTIALLY fixed 2026-08-14** (on `dev`, unreleased). The amplification is gone; the gRPC call is still inside the transaction — see Remediation.
+**Status: PARTIALLY fixed 2026-08-14** (shipped in `v1.36.0`). The amplification is gone; the gRPC call is still inside the transaction, and that residue is **accepted as risk — do not re-report** (recorded in [`open-items.md`](../open-items.md)). See Remediation.
 
 `_process_block` deliberately hoists balance reads out of the transaction, and says why:
 
@@ -430,7 +430,7 @@ A block packed with follow/unfollow transactions therefore stalls the indexer an
 
 ## I-1 (Informational) — `unblock_topics_matching` treats a stored `%` as a wildcard where its sibling escapes it
 
-**Status: fixed 2026-08-14** (on `dev`, unreleased) — see Remediation.
+**Status: fixed 2026-08-14** (shipped in `v1.36.0`) — see Remediation.
 
 ```2216:2223:indexer/database.py
                 cur.execute(
@@ -570,7 +570,9 @@ Every test above passed, the repair migration ran and recorded, and the fix was 
 
 ## Remediation — 2026-08-14
 
-Everything except M-1 was fixed the same day. **All of it is on `dev` and unreleased.** Each fix carries a stub-level regression test in the `indexer_hardening` category (18 new assertions, no docker or chain required), and the changed SQL was validated against a real PostgreSQL 16 rather than reasoned about.
+Everything except M-1 was fixed the same day. **All of it shipped in `v1.36.0`.** Each fix carries a regression test in the `indexer_hardening` category, and the changed SQL was validated against a real PostgreSQL 16 rather than reasoned about.
+
+**M-3's fix was corrected after this section was first written** — the original version was undone by the next indexer restart. See "Correction found while cutting the release" above; the table below describes the fix as it shipped.
 
 | ID | What changed |
 | :-- | :-- |
