@@ -564,7 +564,7 @@ the corresponding check confirmed to fail. All 18 mutations were caught.
 | **H-3** | Fixed | Daily and flash quest completion now run inside `_locked_transaction("quest_assignment:<owner>")`, sharing a key with quest assignment so the two serialise against each other. A `_cursor` context manager threads one cursor through every nested helper so the read-decide-write is a single transaction. Verified against a real PostgreSQL: two concurrent completers produced two reward rows unlocked, one locked. |
 | **M-1** | Fixed | `_send_push_to_user` takes the actor and drops the notification when the recipient — or an agent they enabled — has blocked them, mirroring the inbox filter; the lookup fails closed. Reply and mention delivery re-check that the source post still exists and is not deleted, instead of pushing the snapshotted text. |
 | **M-2** | Fixed | Mentions are capped at `MAX_MENTIONS_PER_POST = 10` per post at enqueue, and unresolvable `@words` are dropped after a single batched lookup rather than each costing a row and a connection. A 20,000-character post drops from 3,015 outbox rows to at most 10. |
-| **M-3** | Fixed | `kind` is read from the query string only; reading it from `request.form` was what forced Werkzeug to parse and spool the whole body before the per-kind cap could be chosen. `request.max_content_length` is also set so a chunked upload declaring no `Content-Length` is cut off at the per-kind limit. The web client now sends `kind` in both places. |
+| **M-3** | Fixed | `kind` is read from the query string only; reading it from `request.form` was what forced Werkzeug to parse and spool the whole body before the per-kind cap could be chosen. `request.max_content_length` is also set so a chunked upload declaring no `Content-Length` is cut off at the per-kind limit. The web client now sends `kind` in both places. **This changed the endpoint's request contract — see the note below.** |
 | **M-4** | Fixed | `derive_address_from_pubkey` records a candidate; an `after_request` hook writes `user_last_seen` only when the response is under 400. Relay routes stay counted — they are authenticated by the chain ante and a rejected transaction returns 400 — while a forged pubkey now writes nothing. |
 | **M-5** | **Accepted as risk** | No backend ceiling on validator-funded relay fees. Not to be raised again. |
 | **L-1** | Fixed | The invite sequence takes the same per-referrer advisory lock, and both reward inserts carry `ON CONFLICT … DO NOTHING` on the existing unique index. |
@@ -593,6 +593,36 @@ upgrade rather than fix anything. It logs an error at startup instead. Closing i
 properly needs a token issued and enhanced security enabled in the Expo dashboard
 first; until then, anyone holding a copy of the push-token table can send pushes to
 users. Tracked in `open-items.md`.
+
+### M-3 changed a request contract, and the regression check did not notice
+
+M-3 moved `kind` from the form body to the query string. That is a change to how
+every caller must talk to `/api/upload_media`, and the `upload_media` suite in
+`tests/cases/test_backend_content.py` was still sending `kind` in the form body —
+so four of its five assertions failed on the next full run, and the fifth passed
+for the wrong reason (it asserts `media_invalid_kind`, which is what *every*
+form-only request now returns). The web client was updated with the fix and was
+never broken; only the tests were stale.
+
+**The M-3 regression check did not catch this because it reads source rather than
+behaviour.** `backend_hardening.upload_kind_read_before_body` inspects the handler
+for the `request.form` read and passed throughout. A source probe cannot tell that
+callers were left behind, which is the whole failure mode here.
+
+Fixed by putting `kind` in the query string in every test that sends it, and by
+adding `upload_media.form_kind_not_honoured` — a behavioural pin asserting that a
+form-only `kind` is *rejected*. Mutation-tested: restoring the `request.form`
+read makes that one case fail and the rest still pass, which is exactly the
+signal that was missing. Note that gunicorn recycles workers here, so a mutation
+needs about twenty seconds after `HUP` before every worker is serving the new
+code; probing sooner reads a stale worker and the mutation looks like it survived.
+
+Separately, `_post_multipart` in `tests/common.py` retried throttling responses but
+not transport faults, unlike `shared/client.py`. A momentary resolver failure
+therefore raised out of the test function and took every remaining assertion with
+it, surfacing as a single `upload_media.UNEXPECTED_ERROR` that looked like a broken
+endpoint. It now retries transport faults on the same bounded budget and still
+raises once that budget is spent.
 
 ### Correction found while testing
 

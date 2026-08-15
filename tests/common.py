@@ -286,7 +286,24 @@ def _post_multipart(url: str, data: dict, files: Optional[dict] = None):
     """
     max_retries = 7
     for attempt in range(1, max_retries + 1):
-        r = requests.post(url, data=data, files=files, timeout=30)
+        try:
+            r = requests.post(url, data=data, files=files, timeout=30)
+        except requests.RequestException as e:
+            # Transport faults are retried on the same budget as the throttling
+            # above, matching shared/client.py. Without this a momentary resolver
+            # or socket failure raised straight out of the caller and took every
+            # remaining assertion in the test function with it, reported as one
+            # UNEXPECTED_ERROR — which reads like a broken endpoint rather than a
+            # blip. `files` here holds bytes, not handles, so a retry re-sends the
+            # same body. Exhausting the budget still raises.
+            if attempt >= max_retries:
+                raise
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(
+                f"retry upload {url} error={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s"
+            )
+            time.sleep(delay)
+            continue
         if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
             retry_after = r.headers.get("Retry-After")
             try:

@@ -1472,38 +1472,56 @@ def test_upload_media(backend: str) -> None:
     # Minimal sniffable MP4 header (ftyp/mp42)
     fake_mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
 
+    # `kind` travels in the query string. The endpoint has to pick the per-kind
+    # size cap *before* Werkzeug parses the body, and reading a form field is
+    # what forces that parse — so a form-only `kind` is rejected by design
+    # (backend review M-3, v1.36.0). The form copy stays on these requests
+    # because the real client sends both; the query string is what is honoured.
     url = f"{backend}/api/upload_media"
 
+    def upload_url(kind: str) -> str:
+        return f"{url}?kind={kind}"
+
     # Invalid kind -> 400 media_invalid_kind
-    r = _post_multipart(url, {"kind": "bogus"}, {"file": ("x.png", png, "image/png")})
+    r = _post_multipart(upload_url("bogus"), {"kind": "bogus"}, {"file": ("x.png", png, "image/png")})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
         _pass("upload_media.invalid_kind_rejected")
     else:
         _fail("upload_media.invalid_kind_rejected", f"code={r.status_code} body={r.text[:200]}")
 
+    # `kind` in the form body only must NOT be honoured: accepting it would put
+    # the whole body on disk before the per-kind cap could be chosen, which is
+    # exactly the defect M-3 closed. Without this case the suite cannot tell a
+    # working endpoint from one that has quietly gone back to reading the form.
+    r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", png, "image/png")})
+    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
+        _pass("upload_media.form_kind_not_honoured")
+    else:
+        _fail("upload_media.form_kind_not_honoured", f"code={r.status_code} body={r.text[:200]}")
+
     # Missing file -> 400 media_file_required
-    r = _post_multipart(url, {"kind": "image"})
+    r = _post_multipart(upload_url("image"), {"kind": "image"})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_file_required":
         _pass("upload_media.missing_file_rejected")
     else:
         _fail("upload_media.missing_file_rejected", f"code={r.status_code} body={r.text[:200]}")
 
     # Bad magic bytes (text labelled as image) -> 415 media_invalid_type
-    r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", b"not an image", "image/png")})
+    r = _post_multipart(upload_url("image"), {"kind": "image"}, {"file": ("x.png", b"not an image", "image/png")})
     if r.status_code == 415 and (r.json() or {}).get("error_code") == "media_invalid_type":
         _pass("upload_media.bad_magic_rejected")
     else:
         _fail("upload_media.bad_magic_rejected", f"code={r.status_code} body={r.text[:200]}")
 
     # Video without duration/height -> 400 media_metadata_required
-    r = _post_multipart(url, {"kind": "video"}, {"file": ("x.mp4", fake_mp4, "video/mp4")})
+    r = _post_multipart(upload_url("video"), {"kind": "video"}, {"file": ("x.mp4", fake_mp4, "video/mp4")})
     if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_metadata_required":
         _pass("upload_media.video_metadata_required")
     else:
         _fail("upload_media.video_metadata_required", f"code={r.status_code} body={r.text[:200]}")
 
     # Valid image upload -> 200 {url, asset_id, kind}
-    r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", png, "image/png")})
+    r = _post_multipart(upload_url("image"), {"kind": "image"}, {"file": ("x.png", png, "image/png")})
     if r.status_code == 200:
         body = r.json() or {}
         if body.get("url") and body.get("asset_id") and body.get("kind") == "image":
