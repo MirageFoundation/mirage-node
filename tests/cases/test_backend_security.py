@@ -1388,11 +1388,16 @@ def test_upload_body_bound(backend):
         _skip("upload_bound.max_content_length_configured", "backend source not present")
 
     # Dynamic: exceed the image limit and require a clean 413, not a 500.
+    # `kind` goes in the query string: reading it from the form is what forced the
+    # whole body to be parsed before the per-kind cap could be chosen (M-3), so the
+    # endpoint now reads it from the query string only.
     limit_mb = 15
     oversize = b"\xff\xd8\xff" + b"\x00" * (limit_mb * 1024 * 1024 + 1024)
     try:
         r = _post_multipart(
-            f"{backend}/api/upload_media", {"kind": "image"}, {"file": ("big.jpg", oversize, "image/jpeg")}
+            f"{backend}/api/upload_media?kind=image",
+            {"kind": "image"},
+            {"file": ("big.jpg", oversize, "image/jpeg")},
         )
     except requests.RequestException as e:
         _fail("upload_bound.oversize_rejected", f"upload raised {type(e).__name__}: {e}")

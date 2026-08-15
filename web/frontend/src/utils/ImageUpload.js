@@ -50,7 +50,11 @@ export function uploadToNode(file, kind, fields, onProgress, xhrRef) {
         xhr.addEventListener('error', () => { clearRef(); reject(new Error('Network error during upload')); });
         xhr.addEventListener('abort', () => { clearRef(); reject(new Error('Upload aborted')); });
 
-        xhr.open('POST', Api.buildUrl('upload_media'));
+        // kind goes in the query string: the node needs it to pick the per-kind
+        // size cap *before* it parses the multipart body, and reading a form field
+        // is what forces that parse. It stays in the form body too so the request
+        // is still well-formed for a node that has not been updated yet.
+        xhr.open('POST', Api.buildUrl('upload_media', { kind }));
         const fd = new FormData();
         fd.append('kind', kind);
         fd.append('file', file);

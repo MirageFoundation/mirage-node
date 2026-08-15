@@ -333,7 +333,12 @@ def _export_privkey_bytes(key_name: str) -> bytes:
             hex_key = token
             break
     if not hex_key:
-        raise RuntimeError(f"{key_name} privkey export: no 64-hex key in output: {out[:200]}")
+        # Deliberately does not echo `out`. The only reason no token matched is
+        # that the key was printed in a shape this loop did not recognise — for
+        # example with a same-line prefix — so the output being described is
+        # exactly the output most likely to contain the private key, and startup
+        # runs at import under gunicorn, which would land it in the startup log.
+        raise RuntimeError(f"{key_name} privkey export: no 64-hex key in {len(out.splitlines())} line(s) of CLI output")
     pk = bytes.fromhex(hex_key)
     if len(pk) != 32:
         raise RuntimeError(f"{key_name} privkey must be 32 bytes, got {len(pk)}")

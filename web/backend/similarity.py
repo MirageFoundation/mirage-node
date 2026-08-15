@@ -20,6 +20,11 @@ CACHE_TTL = 86400  # 24 hours
 MIN_SHARED = 25
 MIN_SIMILARITY = 0.05
 MAX_SIMILAR_USERS = 30
+
+# Marks a cached "this viewer has no similar users". An empty string is never a
+# valid address, and the read path filters it out, so it occupies the cache row
+# without ever being returned as a recommendation.
+_NO_SIMILAR_USERS_SENTINEL = ""
 ACTIVE_DAYS = 30
 CONFIDENCE_K = 8  # n/(n+k) damper; 8 shared → 0.50, 30 → 0.79, 73 → 0.90
 
@@ -150,11 +155,36 @@ def get_or_compute_similarities(cur, viewer: str, backend_cur=None) -> list:
 
     if cached:
         logger.debug("similarity.cache_hit: %s", viewer_lower[:12])
-        return [(r[0], r[1], r[2]) for r in cached]
+        # The sentinel row is a cached "no similar users", not a similar user.
+        return [(r[0], r[1], r[2]) for r in cached if r[0] != _NO_SIMILAR_USERS_SENTINEL]
 
     start = time.time()
     similarities = compute_user_similarities(cur, viewer)
     elapsed_ms = (time.time() - start) * 1000
+
+    if not similarities:
+        # Negative caching. The write below sits inside `if similarities:`, so a
+        # viewer below MIN_SHARED never got a cache row and the full cross-user
+        # Pearson aggregate — 100-500ms by this module's own reckoning — re-ran on
+        # every request. That is reachable unauthenticated with an arbitrary
+        # address via /api/get_similar_users and the magic home feed.
+        expires_at = now_ts + CACHE_TTL
+        sentinel = (viewer_lower, _NO_SIMILAR_USERS_SENTINEL, 0.0, 0, now_ts, expires_at)
+        insert_sql = """
+            INSERT INTO user_similarity_cache(owner, similar_user, similarity, shared_dims, computed_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (owner, similar_user) DO UPDATE SET
+                computed_at = EXCLUDED.computed_at,
+                expires_at = EXCLUDED.expires_at
+        """
+        if backend_cur is not None:
+            backend_cur.execute(insert_sql, sentinel)
+        else:
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    bcur.execute(insert_sql, sentinel)
+        logger.debug("similarity.negative_cached: %s in %.1fms", viewer_lower[:12], elapsed_ms)
+        return similarities
 
     if similarities:
         expires_at = now_ts + CACHE_TTL

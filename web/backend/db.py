@@ -18,26 +18,75 @@ from shared.config import get_config
 logger = logging.getLogger(__name__)
 
 
+# Default statement timeout for backend-owned writes. Every query the backend
+# issues is serving a request that has already given up long before this, so the
+# ceiling exists to release the worker and the row locks rather than to allow a
+# genuinely slow query. Schema work opts out explicitly.
+BACKEND_STATEMENT_TIMEOUT_MS = 15000
+
+
+def _timeout_options(statement_timeout_ms: int, lock_timeout_ms: int = 0) -> str:
+    """Build the libpq ``options`` string that arms the server-side timeouts.
+
+    Setting them on the connection rather than per query is what makes them
+    unconditional: there is no code path that can forget, and a query that
+    outlives its budget is cancelled by PostgreSQL rather than by nobody.
+    """
+    parts = []
+    if statement_timeout_ms > 0:
+        parts.append(f"-c statement_timeout={int(statement_timeout_ms)}")
+    if lock_timeout_ms > 0:
+        parts.append(f"-c lock_timeout={int(lock_timeout_ms)}")
+    return " ".join(parts)
+
+
 def connect_db(timeout: float = 10.0, busy_timeout_ms: int = 15000) -> psycopg.Connection:
     """
     Open a READ-ONLY connection to the indexer PostgreSQL database.
-    timeout and busy_timeout_ms are ignored for PostgreSQL and kept for API compatibility.
+
+    ``timeout`` is the per-statement budget in seconds and ``busy_timeout_ms`` the
+    lock-wait budget. Both used to be accepted and documented as ignored, which is
+    worse than not accepting them: roughly 30 call sites pass an explicit value and
+    read as bounded while nothing bounded them. That is what let a single expensive
+    row-by-row match hold a gunicorn worker for its full 120-second lifetime. Pass
+    ``timeout=0`` to opt out deliberately.
     """
     cfg = get_config()
     url = cfg.get_indexer_ro_url()
-    return psycopg.connect(url, autocommit=True)
+    options = _timeout_options(int(timeout * 1000), busy_timeout_ms)
+    kwargs: Dict[str, Any] = {"autocommit": True}
+    if options:
+        kwargs["options"] = options
+    if timeout > 0:
+        # Bound the TCP connect as well; an unreachable database should surface as
+        # a fast 503 rather than as a worker parked in connect().
+        kwargs["connect_timeout"] = max(1, int(timeout))
+    return psycopg.connect(url, **kwargs)
 
 
-def connect_backend_db() -> psycopg.Connection:
-    """Open a read-write connection to the backend-owned PostgreSQL database."""
+def connect_backend_db(statement_timeout_ms: int = BACKEND_STATEMENT_TIMEOUT_MS) -> psycopg.Connection:
+    """Open a read-write connection to the backend-owned PostgreSQL database.
+
+    No ``lock_timeout`` here on purpose: the quest, invite and payout paths take
+    advisory locks and are expected to wait for them. Arming a lock timeout would
+    convert honest contention into an error at exactly the moments those locks were
+    added to make safe.
+    """
     cfg = get_config()
     url = cfg.get_backend_db_url()
-    return psycopg.connect(url, autocommit=True)
+    options = _timeout_options(statement_timeout_ms)
+    kwargs: Dict[str, Any] = {"autocommit": True}
+    if options:
+        kwargs["options"] = options
+    return psycopg.connect(url, **kwargs)
 
 
 def init_backend_schema() -> None:
     """Create all backend-owned tables (idempotent). Called at backend startup."""
-    conn = connect_backend_db()
+    # No statement timeout: building an index on an already-large table legitimately
+    # outruns the request-shaped budget, and a half-created schema is worse than a
+    # slow start.
+    conn = connect_backend_db(statement_timeout_ms=0)
     try:
         logger.debug("backend.schema.init.begin")
         with conn.cursor() as cur:

@@ -15,6 +15,10 @@
 
 **1 Critical, 3 High, 5 Medium, 2 Low.**
 
+**Disposition (v1.36.0):** ten of the eleven findings are fixed and covered by
+regression tests; **M-5 is accepted as a risk** and will not be raised again. All
+nine sub-threshold observations were also fixed. See [Remediation](#remediation).
+
 | ID | Area | Finding | Severity |
 | :-- | :-- | :-- | :-- |
 | **C-1** | Feeds / push | One on-chain blocked-topic pattern wedges the backend: exponential regex backtracking, ~24 s of CPU per row, and it also kills push delivery fleet-wide with no further attacker action | **Critical** |
@@ -38,6 +42,8 @@ Three findings share one root cause worth naming separately, because fixing them
 ---
 
 ## C-1 (Critical) — One blocked-topic pattern wedges the backend, and permanently kills push delivery for everyone
+
+**Status: fixed in v1.36.0.**
 
 **Privilege required:** an ordinary account. **Cost:** one transaction. **Effect:** gunicorn workers killed on demand, and — with no further attacker action — the platform's entire push notification system stops and silently discards every user's queued notifications.
 
@@ -159,6 +165,8 @@ A pattern at the maximum legal size matched against a non-matching maximum-lengt
 
 ## H-1 (High) — `page` is unbounded and multiplied into the SQL `LIMIT`
 
+**Status: fixed in v1.36.0.**
+
 `limit` is clamped everywhere; `page` is only floored:
 
 ```5489:5493:web/backend/routes/public.py
@@ -203,6 +211,8 @@ Two of the uncapped sites use `max(500, …)`, which reads like a cap and is a f
 
 ## H-2 (High) — The stats fan-out hands a live admin proof to any host an unauthenticated P2P peer names
 
+**Status: fixed in v1.36.0** — roster-bound; per-destination proof scoped out (protocol change).
+
 `validate_fleet_endpoint` answers "is this a reachable public Internet host", not "is this a member of our fleet". Nothing downstream requires fleet membership, and the destination list is built from strings an attacker supplies for free.
 
 The chain, verified link by link:
@@ -239,6 +249,8 @@ Two aggravating details on the same path. `validate_fleet_endpoint` accepts `htt
 ---
 
 ## H-3 (High) — Quest completion is an unlocked read-modify-write
+
+**Status: fixed in v1.36.0.**
 
 Assignment got an advisory lock (the M-2/L-5 fix) and claiming got one. Completion — the step that actually creates money — got neither.
 
@@ -282,6 +294,8 @@ Worth up to 1,000 MIRAGE base per duplicate, times the 5× multiplier cap, once 
 
 ## M-1 (Medium) — Push delivery ignores blocks and deletions that the inbox enforces
 
+**Status: fixed in v1.36.0.**
+
 The in-app inbox drops items whose actor the viewer blocked (`routes/public.py:7794-7795`, with agent-level blocks folded in at `:7437`). **`shared/push.py` contains no reference to any blocked list** — verified by search, zero matches. The reply path resolves the parent owner and sends unconditionally (`shared/push.py:572-618`); the mention path sends to every resolved username (`:717-736`), which requires no prior relationship at all.
 
 So a blocked user can put attacker-authored text on the victim's lock screen by replying to them or writing `@victim` in any post — repeatable at the throttle ceiling indefinitely — while the victim sees nothing in-app to report. The trending path *does* filter blocks (`push_listener.py:849-953`), which shows the intent; the event-driven paths were never given the same filter.
@@ -293,6 +307,8 @@ Deletion is not re-checked either. Content is snapshotted into the payload at en
 ---
 
 ## M-2 (Medium) — Uncapped mention fan-out silently destroys everyone's notifications
+
+**Status: fixed in v1.36.0.**
 
 `_extract_mentions` returns every distinct `@word` in a post with no cap and no check that the username exists (`shared/push.py:355-359`), and the listener enqueues one outbox row per mention:
 
@@ -316,6 +332,8 @@ Same code path, secondary effect: up to 200 posts are enqueued in one transactio
 ---
 
 ## M-3 (Medium) — `/api/upload_media` parses the whole body before the per-kind cap
+
+**Status: fixed in v1.36.0.**
 
 The comment states the probe runs before the body is materialized. The line above it already materialized it:
 
@@ -355,6 +373,8 @@ Applies only where uploads are enabled — the template default is `false`, and 
 
 ## M-4 (Medium) — `user_last_seen` is written before any signature check
 
+**Status: fixed in v1.36.0.**
+
 The helper's name implies a verified identity; it performs no verification and writes to the database as a side effect:
 
 ```149:154:web/backend/routes/core.py
@@ -382,6 +402,8 @@ Two consequences. The value is published: `active_7d` on the unauthenticated wel
 
 ## M-5 (Medium) — No backend ceiling on validator-funded relay fees
 
+**Status: ACCEPTED AS RISK. Do not raise again.**
+
 The validator signs the outer transaction and pays the fee. The fee is `gas_limit × min_gas_price`, where `gas_limit` is derived mechanically from a user-controlled payload with **no upper bound anywhere in the backend** — no `min()`, no absolute cap, and no comparison against any chain parameter, at any of the 25 relay construction sites (`gas_limit = max(gas_est, int(gas_used * 1.25))`, e.g. `routes/core.py:4065`).
 
 `relay_max_gas_fee` — the parameter that exists to bound exactly this — is required at startup (`web/backend/params.py:40`) and **never read**. Verified by search: the only two occurrences in the tree are the proto field definition in `shared/datatypes.py:509` and the required-params list itself. The backend fails hard if the parameter is absent and then ignores its value.
@@ -397,6 +419,8 @@ I am filing this Medium rather than High because the quantification depends on p
 ---
 
 ## L-1 (Low) — Invite reward inserts have no `ON CONFLICT`
+
+**Status: fixed in v1.36.0.**
 
 Steps 4 and 6 of `_process_invite_quest_completion` are the only two `pending_rewards` inserts in production code without an `ON CONFLICT` clause (contrast `quest_tracker.py:501`, and step 5 immediately between them at `routes/core.py:332`, which has one):
 
@@ -419,6 +443,8 @@ Two defects. The sequence runs on an autocommit cursor, and the step-2 read (`:2
 ---
 
 ## L-2 (Low) — `/api/search_username` does not escape LIKE metacharacters
+
+**Status: fixed in v1.36.0.**
 
 Every other search path sanitizes first — `like_query = query_lower.replace("%", "\\%").replace("_", "\\_")` (`routes/public.py:4989`), and `search_topics` strips to alphanumerics outright (`:4822`). `search_username` interpolates `q` raw into four LIKE patterns (`:4542-4548`).
 
@@ -508,7 +534,10 @@ Recorded because they are cheap to fix or explain why an adjacent claim was not 
 
 ---
 
-## Suggested remediation order
+## Suggested remediation order (superseded)
+
+Kept for the record. Everything below except M-5 shipped in v1.36.0; see
+[Remediation](#remediation) for what was actually done.
 
 1. **C-1** — cap the wildcard count at validation and at match time, and replace the regex with the chain's linear matcher. The push-listener half is the reason this is first.
 2. **H-1** — clamp `page` at the entry points and apply the existing `min(…, 500)` to the five uncapped pool computations. Smallest diff of the four top findings.
@@ -517,3 +546,60 @@ Recorded because they are cheap to fix or explain why an adjacent claim was not 
 5. **H-3 and L-1 together** — one advisory lock per owner around quest completion and the invite sequence, plus `ON CONFLICT` on the two invite inserts. L-1 must land before referral rewards are re-enabled, alongside the already-deferred pair-level idempotency work.
 6. **M-1, M-2** — block and deletion checks at push delivery; cap mentions at enqueue.
 7. **M-3, M-4, M-5, L-2** as capacity allows.
+
+---
+
+## Remediation
+
+Shipped in **v1.36.0**. Every fix below has a behavioural regression check in
+`tests/cases/test_backend_hardening.py` (category `backend_hardening`, walletless).
+The set was mutation-tested: each fix was reverted in turn inside the container and
+the corresponding check confirmed to fail. All 18 mutations were caught.
+
+| ID | Status | What was done |
+| :-- | :-- | :-- |
+| **C-1** | Fixed | `topic_matches_pattern` in the new `web/backend/topic_glob.py` is a direct port of the chain's linear `topicMatchesPattern`, verified against the Go original across 6,047 differential cases. Wildcards are capped at 4 at the validator (`routes/core.py`), and `_blocked_topics_sql` drops over-cap patterns from the `LIKE` pre-filter rather than bounding them, since `_topic_is_blocked` remains authoritative and linear. |
+| **H-1** | Fixed | `_clamp_page` floors at 1 and caps at `MAX_FEED_PAGE = 200` at every entry point; the five uncapped pool computations now apply `min(…, MAX_CANDIDATE_POOL)` and the inbox path `min(…, MAX_INBOX_ROWS)`. |
+| **H-2** | Fixed (one part scoped out) | Fan-out destinations come from the operator-configured `STATS_FLEET_ROSTER`, which requires `https://` and a fully-qualified hostname — bare IPs are rejected, since they cannot present a name-matching certificate. P2P moniker discovery and the `http://` endpoint synthesis are deleted. Peer responses are strictly validated and normalised by `validate_peer_stats`. **Per-destination proofs are not implemented**: the proof format is shared with the client and scoping it per host is a protocol change. The roster removes the attacker's ability to choose a destination, which is the exploitable half. |
+| **H-3** | Fixed | Daily and flash quest completion now run inside `_locked_transaction("quest_assignment:<owner>")`, sharing a key with quest assignment so the two serialise against each other. A `_cursor` context manager threads one cursor through every nested helper so the read-decide-write is a single transaction. Verified against a real PostgreSQL: two concurrent completers produced two reward rows unlocked, one locked. |
+| **M-1** | Fixed | `_send_push_to_user` takes the actor and drops the notification when the recipient — or an agent they enabled — has blocked them, mirroring the inbox filter; the lookup fails closed. Reply and mention delivery re-check that the source post still exists and is not deleted, instead of pushing the snapshotted text. |
+| **M-2** | Fixed | Mentions are capped at `MAX_MENTIONS_PER_POST = 10` per post at enqueue, and unresolvable `@words` are dropped after a single batched lookup rather than each costing a row and a connection. A 20,000-character post drops from 3,015 outbox rows to at most 10. |
+| **M-3** | Fixed | `kind` is read from the query string only; reading it from `request.form` was what forced Werkzeug to parse and spool the whole body before the per-kind cap could be chosen. `request.max_content_length` is also set so a chunked upload declaring no `Content-Length` is cut off at the per-kind limit. The web client now sends `kind` in both places. |
+| **M-4** | Fixed | `derive_address_from_pubkey` records a candidate; an `after_request` hook writes `user_last_seen` only when the response is under 400. Relay routes stay counted — they are authenticated by the chain ante and a rejected transaction returns 400 — while a forged pubkey now writes nothing. |
+| **M-5** | **Accepted as risk** | No backend ceiling on validator-funded relay fees. Not to be raised again. |
+| **L-1** | Fixed | The invite sequence takes the same per-referrer advisory lock, and both reward inserts carry `ON CONFLICT … DO NOTHING` on the existing unique index. |
+| **L-2** | Fixed | `_escape_like` escapes backslash first, then `%` and `_`; applied to `/api/search_username` and to the sibling path, which escaped the metacharacters but not the escape character and so returned an unauthenticated 500 for `?q=\`. Verified against PostgreSQL: `%` went from matching every row to matching only its literal. |
+
+### Cross-cutting
+
+`statement_timeout`, `lock_timeout` and `connect_timeout` are now set on both DSNs
+via `libpq` options, and `connect_db`'s previously-ignored `timeout` and
+`busy_timeout_ms` arguments are honoured. Schema initialisation runs with the
+statement timeout disabled so migrations cannot be killed mid-flight.
+
+### Sub-threshold observations
+
+All nine were fixed: negative caching for `similarity`, the dead
+`max_topic_size = 50` fallbacks replaced with a 503, `argon2_digest` raising instead
+of returning `None` (plus the one remaining `except Exception: pass` at the vote
+path), a 60-second param refresh TTL with backoff, the private key no longer echoed
+in the export error, `O_NOFOLLOW` on the push-listener lock, a 20-token per-owner
+cap, and a 30-second cache on the anonymous topic aggregation.
+
+**One was deliberately not made fatal.** `EXPO_ACCESS_TOKEN` is empty on every node
+in the fleet while `PUSH_NOTIFICATIONS_ENABLED=true`, so raising at import — the
+treatment every other required setting gets — would take the fleet offline on
+upgrade rather than fix anything. It logs an error at startup instead. Closing it
+properly needs a token issued and enhanced security enabled in the Expo dashboard
+first; until then, anyone holding a copy of the push-token table can send pushes to
+users. Tracked in `open-items.md`.
+
+### Correction found while testing
+
+The C-1 regression test initially used the pattern `a*a*…*b`, which the review's own
+table would have predicted was expensive. It is not: Python's engine rejects on a
+required-literal check and returns in 0.1 ms. The cost depends on the topic as much
+as the pattern — a full-length topic whose last character cannot match forces the
+engine to exhaust every split. The test now uses a 17-segment pattern against such a
+topic, measured at 22.3 s. This does not change the review's finding or its measured
+curve; it means an exploit needs both halves chosen correctly.

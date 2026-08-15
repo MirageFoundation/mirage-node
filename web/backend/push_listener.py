@@ -23,6 +23,7 @@ from shared.push import (
     deliver_push_event,
     send_push_for_trending,
     _extract_mentions,
+    _resolve_usernames_to_owners,
 )
 from push_events import (
     PUSH_OUTBOX_MAX_AGE_SECONDS,
@@ -39,6 +40,15 @@ from push_events import (
 
 PUSH_LISTENER_POLL_SECONDS = 5
 PUSH_LISTENER_BATCH_SIZE = 200
+# Mentions enqueued per post. _extract_mentions returns every distinct @word with
+# no cap and no existence check, so a 20,000-character post produced roughly 5,000
+# outbox rows at ~4 bytes a token. The single outbox thread drains 50 per tick and
+# cleanup manages 5,000 an hour, so a handful of posts outran both permanently —
+# and rows that age past PUSH_OUTBOX_MAX_AGE_SECONDS are marked terminal, so
+# everyone else's queued notifications were destroyed rather than delayed. The
+# existing MAX_MENTION_PUSHES applies at delivery, to one row, so it bounded
+# nothing here.
+MAX_MENTIONS_PER_POST = 10
 PUSH_OUTBOX_BATCH_SIZE = 50
 PUSH_LISTENER_LOCK_PATH = os.environ.get("PUSH_LISTENER_LOCK_PATH", "/tmp/mirage_push_listener.lock")
 PUSH_EVENT_SEEN_TTL_SECONDS = 7 * 24 * 60 * 60
@@ -60,7 +70,12 @@ _last_trending_poll_ts = 0.0
 def _acquire_listener_lock() -> bool:
     global _listener_lock_fp
     lock_path = PUSH_LISTENER_LOCK_PATH
-    fp = open(lock_path, "w")
+    # O_NOFOLLOW: the default path lives in world-writable /tmp, so a symlink
+    # planted there would have this process truncate whatever it pointed at.
+    # O_CREAT without O_EXCL keeps the lock re-acquirable across restarts, which
+    # is the whole point of an flock-based lock.
+    fd = os.open(lock_path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fp = os.fdopen(fd, "w")
     try:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
@@ -259,6 +274,27 @@ def _poll_posts() -> int:
     if not rows:
         return 0
 
+    # Resolve the batch's mentions in one indexer query before opening the backend
+    # transaction. Unresolvable @words are dropped here rather than enqueued: an
+    # invented username used to cost a row, a fresh indexer connection and a lookup
+    # each, which is what made the flood cheap to produce and expensive to drain.
+    mentions_by_post: dict[str, list[str]] = {}
+    for txhash, _owner, content, _target, _created_at, _username in rows:
+        names = _extract_mentions(str(content or ""))[:MAX_MENTIONS_PER_POST]
+        if names:
+            mentions_by_post[str(txhash or "").lower()] = names
+    known_usernames: set[str] = set()
+    if mentions_by_post:
+        candidates = sorted({n for names in mentions_by_post.values() for n in names})
+        with connect_db(timeout=3.0, busy_timeout_ms=5000) as mconn:
+            with mconn.cursor() as micur:
+                known_usernames = set(_resolve_usernames_to_owners(candidates, cur=micur))
+        logger().debug(
+            "push.listener.posts.mentions candidates=%d resolved=%d",
+            len(candidates),
+            len(known_usernames),
+        )
+
     processed = 0
     with connect_backend_db() as conn:
         with conn.transaction():
@@ -299,7 +335,9 @@ def _poll_posts() -> int:
                             created_ts,
                         )
 
-                    for mentioned_username in _extract_mentions(content_text):
+                    for mentioned_username in mentions_by_post.get(txhash_lc, []):
+                        if mentioned_username not in known_usernames:
+                            continue
                         enqueue_push_event(
                             cur,
                             mention_event_key(txhash_lc, mentioned_username),

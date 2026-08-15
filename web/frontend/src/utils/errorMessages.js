@@ -87,6 +87,7 @@ const ERROR_MAP = {
     topic_too_short: "Topic name is too short.",
     topic_too_long: "Topic name is too long.",
     topic_invalid_format: "Topic name contains invalid characters.",
+    topic_too_many_wildcards: "Too many * wildcards in that topic pattern.",
     topic_required: "A topic is required for new posts.",
     comment_content_required: "Comment text is required.",
     comment_not_found: "Comment not found.",

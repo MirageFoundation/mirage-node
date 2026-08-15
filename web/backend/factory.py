@@ -104,8 +104,8 @@ def create_app(init_runtime: bool = True) -> Flask:
         #
         # Last-seen is not written here. A query `address` is unverified, so
         # anyone could keep another user's account looking active, or make a
-        # dormant account look alive. Last-seen is written only where the
-        # address came from a verified public key (see derive_address_from_pubkey).
+        # dormant account look alive. It is written by the after_request hook
+        # below, and only for a request that succeeded.
         from stats import record_request_event
 
         record_request_event(request.path)
@@ -116,6 +116,14 @@ def create_app(init_runtime: bool = True) -> Flask:
             from stats import bind_verified_request_identity
 
             bind_verified_request_identity(request.path)
+        # Deferred until the outcome is known. This used to happen inside
+        # derive_address_from_pubkey, which despite its name verifies nothing —
+        # the derivation only checks for 33 bytes — so an unauthenticated caller
+        # could commit a row per forged pubkey and inflate the published
+        # active-user count without bound before the request failed.
+        from routes.core import flush_user_last_seen
+
+        flush_user_last_seen(response.status_code)
         return response
 
     # Middleware: inject new_inbox_items into every JSON response for logged-in users

@@ -1761,8 +1761,7 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM posts")
                 cur.execute(
-                    "INSERT INTO posts(txhash, owner, topic, comment_count, created_at) "
-                    "VALUES('d0','u','tech',0,1)"
+                    "INSERT INTO posts(txhash, owner, topic, comment_count, created_at) " "VALUES('d0','u','tech',0,1)"
                 )
                 for i in range(1, depth):
                     cur.execute(
@@ -1855,6 +1854,7 @@ def _indexer_hardening_db_checks(backend: str) -> None:
 
     db_name = _get_indexer_db_name()
     _indexer_hardening_txn_check()
+    _indexer_hardening_startup_backfill_check()
     _indexer_hardening_corrupt_profile_check(backend)
 
     # H-1/H-2: last_height is never written without the chain_id and block hash
@@ -1883,6 +1883,12 @@ FROM meta WHERE key IN ('chain_id', 'last_block_hash', 'last_height');\\" 2>&1" 
 
     # M-8: net_votes must equal the sum of the user's current canonical vote
     # signs in that topic. Re-votes and cleared votes are what used to break it.
+    #
+    # The canonical sum below must exclude an author's own vote on their own
+    # deleted post, matching _VOTE_STATS_FROM_CANONICAL in indexer/database.py.
+    # Without that clause this asserts the pre-v1.36.0 definition and fails on
+    # any database where somebody has ever deleted a post they upvoted.
+    #
     # Skip until the v1_33_0 rebuild migration has actually run on this DB.
     rc_mig, out_mig = _docker_exec(
         f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT value FROM meta WHERE key='migration_v1.33.0_rebuild_derived_stats';\\" 2>&1" """,
@@ -1907,6 +1913,7 @@ LEFT JOIN (
   FROM votes v
   JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
   WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
+    AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
   GROUP BY 1, 2
 ) d ON d.owner = s.owner AND d.topic = s.topic
 WHERE s.net_votes <> COALESCE(d.net, 0)
@@ -1928,6 +1935,96 @@ WHERE s.net_votes <> COALESCE(d.net, 0)
                 "indexer_hardening.net_votes_matches_canonical_votes",
                 f"{mismatched} (owner, topic) rows disagree with their canonical votes",
             )
+
+
+def _indexer_hardening_startup_backfill_check() -> None:
+    """Indexer startup must not resurrect standing the repair migration removed.
+
+    _init_db() used to carry its own copy of the vote-stats definition, without the
+    exclusion for an author's self-upvote on their own deleted post. The repair
+    migration deletes those rows outright, so ON CONFLICT DO NOTHING stopped
+    suppressing anything and the next restart re-inserted them with the pre-fix
+    values. The fix survived until the first restart, on every node.
+
+    Exercised against the real schema init in a scratch schema: build the exact
+    shape (a deleted post, its author's own upvote, no other votes), run _init_db,
+    and require that no stats row appears for it.
+    """
+    from indexer.database import DatabaseManager
+
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        code, out = _docker_exec("printenv INDEXER_DB_URL")
+        if code == 0 and out:
+            db_url = out.strip()
+    if not db_url:
+        _skip("indexer_hardening.startup_does_not_resurrect_standing", "INDEXER_DB_URL unavailable")
+        return
+
+    try:
+        import psycopg
+    except ImportError:
+        _skip("indexer_hardening.startup_does_not_resurrect_standing", "psycopg unavailable")
+        return
+
+    schema = f"hardening_probe_{_rand_str(8)}"
+    scratch_url = f"{db_url}{'&' if '?' in db_url else '?'}options=-csearch_path%3D{schema}"
+    owner = f"mirage1probe{_rand_str(20)}"
+    topic = f"probe{_rand_str(6)}"
+    txhash = _rand_str(64)
+
+    admin = None
+    try:
+        admin = psycopg.connect(db_url, autocommit=True)
+        with admin.cursor() as cur:
+            cur.execute(f"CREATE SCHEMA {schema}")
+
+        # First init builds the schema in the scratch namespace.
+        DatabaseManager(scratch_url)
+
+        with psycopg.connect(scratch_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO posts (txhash, owner, topic, root_topic, root_post_id, created_at, deleted) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, TRUE)",
+                    (txhash, owner, topic, topic, txhash, 1700000000),
+                )
+                cur.execute(
+                    "INSERT INTO votes (txhash, owner, target, user_vote, created_at) VALUES (%s, %s, %s, %s, %s)",
+                    (_rand_str(64), owner, txhash, 1, 1700000000),
+                )
+                # What the repair migration leaves behind: no stats row at all.
+                cur.execute("DELETE FROM user_topic_stats WHERE LOWER(owner) = LOWER(%s)", (owner,))
+
+        # Second init is the restart.
+        DatabaseManager(scratch_url)
+
+        with psycopg.connect(scratch_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT vote_count, net_votes, unique_root_posts FROM user_topic_stats "
+                    "WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
+                    (owner, topic),
+                )
+                row = cur.fetchone()
+
+        if row is None:
+            _pass("indexer_hardening.startup_does_not_resurrect_standing")
+        else:
+            _fail(
+                "indexer_hardening.startup_does_not_resurrect_standing",
+                f"schema init re-created standing for a deleted self-voted post: "
+                f"vote_count={row[0]} net_votes={row[1]} unique_root_posts={row[2]}",
+            )
+    except Exception as e:
+        _fail("indexer_hardening.startup_does_not_resurrect_standing", f"{type(e).__name__}: {e}")
+    finally:
+        if admin is not None:
+            try:
+                with admin.cursor() as cur:
+                    cur.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+            finally:
+                admin.close()
 
 
 def _indexer_hardening_txn_check() -> None:

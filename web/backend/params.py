@@ -16,7 +16,16 @@ from db import connect_db
 log = logging.getLogger(__name__)
 
 _PARAMS_CACHE: Optional[Dict[str, Any]] = None
+_PARAMS_LOADED_AT: float = 0.0
 _LOCK = threading.Lock()
+
+# How long a loaded param set is served before it is re-read. load_params() used
+# to run exactly once at startup and cache unconditionally, and force=True was
+# never called anywhere, so a governance change to block_hash_window, pow_base_bits
+# or the tier limits stayed invisible until the process restarted — including the
+# hash window this backend serves to clients, which is the coupling the comment in
+# chain.py says it is protecting.
+PARAMS_REFRESH_SECONDS = 60
 
 _REQUIRED_INT_PARAMS = [
     # Legacy key names intentionally retained for backend/public API stability.
@@ -112,7 +121,7 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
     Raises:
         RuntimeError: If params not available after max_retries
     """
-    global _PARAMS_CACHE
+    global _PARAMS_CACHE, _PARAMS_LOADED_AT
     with _LOCK:
         if _PARAMS_CACHE is not None and not force:
             return _PARAMS_CACHE
@@ -126,6 +135,7 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
                     raise RuntimeError("chain_params not yet available in indexer DB")
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
+                _PARAMS_LOADED_AT = time.monotonic()
                 # Count at info, values at debug: the full set is long and dumping it
                 # on every start bloats logs that get shared when debugging (L-8).
                 log.info(f"Loaded {len(cache)} chain params from indexer DB")
@@ -141,9 +151,26 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
 
 
 def expect_params() -> Dict[str, Any]:
-    """Get cached params. Raises if not loaded yet."""
+    """Get cached params, re-reading them once the cache is older than the TTL.
+
+    A refresh that fails keeps serving the values already loaded rather than
+    failing the request. That is not a fallback masking a bug: the previous
+    behaviour was to serve this same set forever, so a transient indexer blip
+    leaves the backend no worse off than it was, while a 503 on every relay route
+    would be a new and much larger failure. The attempt is logged either way.
+    """
+    global _PARAMS_LOADED_AT
     if _PARAMS_CACHE is None:
         raise RuntimeError("params cache uninitialized - indexer not available?")
+    if time.monotonic() - _PARAMS_LOADED_AT >= PARAMS_REFRESH_SECONDS:
+        try:
+            # One attempt, no retry sleep: this runs on the request path.
+            load_params(force=True, max_retries=1)
+        except Exception as e:  # noqa: BLE001
+            # Back off for a full interval. Without this a broken indexer would be
+            # re-queried by every request instead of once per TTL.
+            _PARAMS_LOADED_AT = time.monotonic()
+            log.warning(f"Chain param refresh failed, serving cached values: {e}")
     return _PARAMS_CACHE
 
 

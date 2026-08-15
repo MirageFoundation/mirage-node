@@ -176,7 +176,13 @@ def canon_base_vote(
     nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_vote(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, int(direction), nonce=int(nonce)
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        target,
+        int(direction),
+        nonce=int(nonce),
     )
 
 
@@ -395,7 +401,14 @@ def canon_base_send_tokens(
     nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_send_tokens(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), sender, target, int(amount), nonce=int(nonce)
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        sender,
+        target,
+        int(amount),
+        nonce=int(nonce),
     )
 
 
@@ -423,7 +436,13 @@ def canon_base_subscribe(
     nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_subscribe(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), int(level), target=str(target or ""), nonce=int(nonce)
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        int(level),
+        target=str(target or ""),
+        nonce=int(nonce),
     )
 
 
@@ -504,21 +523,25 @@ def argon2_digest(
     if _argon2_hash_raw is None:
         return None
     try:
-        try:
-            salt = bytes.fromhex(last_block_hash.strip())
-        except Exception:
-            salt = last_block_hash.encode("utf-8")
-        return _argon2_hash_raw(
-            base + b":" + uvarint(int(proof)),
-            salt,
-            time_cost=time_cost,
-            memory_cost=memory_cost,
-            parallelism=parallelism,
-            hash_len=32,
-            type=_Argon2Type.ID,
-        )
+        salt = bytes.fromhex(last_block_hash.strip())
     except Exception:
-        return None
+        salt = last_block_hash.encode("utf-8")
+    # Deliberately not wrapped. Returning None on any failure — an unusable salt,
+    # an Argon2 error — silently disabled the precheck for that request, because
+    # every call site skips the check when the digest is None. That is the exact
+    # condition _log_pow_precheck_error exists to alert on, and it emitted nothing,
+    # so the alert was blind to its most likely cause. Raising instead routes the
+    # failure into the call sites' existing except branch, which logs it and still
+    # lets the chain ante decide.
+    return _argon2_hash_raw(
+        base + b":" + uvarint(int(proof)),
+        salt,
+        time_cost=time_cost,
+        memory_cost=memory_cost,
+        parallelism=parallelism,
+        hash_len=32,
+        type=_Argon2Type.ID,
+    )
 
 
 def decode_b64(s: str) -> bytes:

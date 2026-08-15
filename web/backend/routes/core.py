@@ -78,6 +78,8 @@ from logging_utils import log_event, next_request_id, logger
 from error_utils import IndexerUnavailable, api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
+from quest_assignment import _locked_transaction
+from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
 
@@ -147,10 +149,23 @@ core_bp = Blueprint("core", __name__)
 
 
 def derive_address_from_pubkey(pub_dec: bytes) -> str:
+    """Derive a bech32 address and mark it as a candidate for the last-seen write.
+
+    The name implied a verified identity and this function verified nothing: the
+    underlying derivation checks only that it received 33 bytes, never that they
+    are a valid curve point, so any 33-byte string yielded a distinct valid-looking
+    address — and the row was committed before the request failed downstream. That
+    made `active_7d` on the unauthenticated welcome screen, and the whole admin
+    DAU/MAU basis, inflatable without bound by an unauthenticated caller.
+
+    Recording the candidate and letting flush_user_last_seen write it only on a
+    successful response keeps the 16 relay routes counted (they are authenticated
+    by the chain ante rather than by the backend, and a rejected transaction comes
+    back as a 400) while a forged pubkey now writes nothing.
+    """
     addr = _derive_address_from_pubkey(pub_dec)
-    if addr:
-        source = request.path if has_request_context() else ""
-        update_user_last_seen(addr, source=source)
+    if addr and has_request_context():
+        g.last_seen_candidate = addr
     return addr
 
 
@@ -158,6 +173,10 @@ def derive_address_from_pubkey(pub_dec: bytes) -> str:
 # state changes between simulation and execution, and storage write costs
 # (WriteFlat) that vary based on key/value sizes.
 GAS_BUFFER_MULTIPLIER = 1.25  # C-1: simulate skips some sig-verify cost vs DeliverTx
+
+# Devices kept per account. Comfortably above a real user's phone/tablet/reinstall
+# history, and far below Expo's 100-message limit for a single unchunked send.
+MAX_PUSH_TOKENS_PER_OWNER = 20
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
 
@@ -257,9 +276,9 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
     now_ts = int(time.time())
     day_utc = _get_utc_julian_day(now_ts)
 
+    # Step 1 is keyed on the new user, so it is not contended and needs no lock.
     with connect_backend_db() as conn:
         with conn.cursor() as cur:
-            # Step 1: Find the invite code used by this new user
             cur.execute(
                 """
                 SELECT owner, code FROM invite_codes
@@ -271,81 +290,91 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
             )
             invite_row = cur.fetchone()
 
-            if not invite_row:
-                log_event(rid, "invite_quest.no_invite_code", new_user=new_user_addr)
-                return
+    if not invite_row:
+        log_event(rid, "invite_quest.no_invite_code", new_user=new_user_addr)
+        return
 
-            referrer_addr, invite_code = invite_row
-            referrer_addr = referrer_addr.lower()
-            log_event(
-                rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code
-            )
+    referrer_addr, invite_code = invite_row
+    referrer_addr = referrer_addr.lower()
+    log_event(rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code)
 
-            # Step 2: Check if referrer has invite_recruit quest for today, not completed
-            cur.execute(
-                """
-                SELECT quest_id, completed_at FROM user_daily_quests
-                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
-                """,
-                (referrer_addr, day_utc),
-            )
-            quest_row = cur.fetchone()
+    # Steps 2-6 are a read-decide-write on the referrer's quest row, and the
+    # contention is between two *different* new users redeeming codes from the same
+    # referrer: both used to read the quest as incomplete and both paid out. The
+    # lock is keyed on the referrer for that reason, and shares quest_assignment's
+    # key so it also serializes against assignment and completion of the same row.
+    with _locked_transaction(f"quest_assignment:{referrer_addr}") as cur:
+        # Step 2: Check if referrer has invite_recruit quest for today, not completed
+        cur.execute(
+            """
+            SELECT quest_id, completed_at FROM user_daily_quests
+            WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
+            """,
+            (referrer_addr, day_utc),
+        )
+        quest_row = cur.fetchone()
 
-            if not quest_row:
-                log_event(rid, "invite_quest.referrer_no_quest", referrer=referrer_addr, day_utc=day_utc)
-                return
+        if not quest_row:
+            log_event(rid, "invite_quest.referrer_no_quest", referrer=referrer_addr, day_utc=day_utc)
+            return
 
-            _, completed_at = quest_row
-            if completed_at is not None:
-                log_event(rid, "invite_quest.referrer_quest_already_completed", referrer=referrer_addr)
-                return
+        _, completed_at = quest_row
+        if completed_at is not None:
+            log_event(rid, "invite_quest.referrer_quest_already_completed", referrer=referrer_addr)
+            return
 
-            log_event(rid, "invite_quest.completing", referrer=referrer_addr, new_user=new_user_addr)
+        log_event(rid, "invite_quest.completing", referrer=referrer_addr, new_user=new_user_addr)
 
-            # Step 3: Mark referrer's invite_recruit quest as completed
-            cur.execute(
-                """
-                UPDATE user_daily_quests
-                SET progress = 1, completed_at = %s
-                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
-                """,
-                (now_ts, referrer_addr, day_utc),
-            )
+        # Step 3: Mark referrer's invite_recruit quest as completed
+        cur.execute(
+            """
+            UPDATE user_daily_quests
+            SET progress = 1, completed_at = %s
+            WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
+            """,
+            (now_ts, referrer_addr, day_utc),
+        )
 
-            # Step 4: Insert pending reward for referrer (10k MIRAGE = 10,000,000,000 umirage)
-            # Referrer reward DOES get multiplier (apply_multiplier: True)
-            reward_amount_umirage = 10000 * 1_000_000  # 10k MIRAGE
-            cur.execute(
-                """
-                INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-                VALUES (%s, 'mirage', %s, 'quest:invite_recruit', %s)
-                """,
-                (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": True}), now_ts),
-            )
-            log_event(rid, "invite_quest.referrer_reward_created", referrer=referrer_addr, amount=reward_amount_umirage)
+        # Step 4: Insert pending reward for referrer (10k MIRAGE = 10,000,000,000 umirage)
+        # Referrer reward DOES get multiplier (apply_multiplier: True)
+        reward_amount_umirage = 10000 * 1_000_000  # 10k MIRAGE
+        # ON CONFLICT for the same reason as every other pending_rewards insert:
+        # without it a collision inside the same second raised mid-sequence, after
+        # step 3 had already marked the quest complete, so the referee's reward at
+        # step 6 was never written and step 2 short-circuits every retry.
+        cur.execute(
+            """
+            INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+            VALUES (%s, 'mirage', %s, 'quest:invite_recruit', %s)
+            ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
+            """,
+            (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": True}), now_ts),
+        )
+        log_event(rid, "invite_quest.referrer_reward_created", referrer=referrer_addr, amount=reward_amount_umirage)
 
-            # Step 5: Insert invite_referred quest for new user (already completed)
-            cur.execute(
-                """
-                INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
-                VALUES (%s, %s, 'invite_referred', 1, '{}', %s)
-                ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
-                """,
-                (new_user_addr, day_utc, now_ts),
-            )
+        # Step 5: Insert invite_referred quest for new user (already completed)
+        cur.execute(
+            """
+            INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
+            VALUES (%s, %s, 'invite_referred', 1, '{}', %s)
+            ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+            """,
+            (new_user_addr, day_utc, now_ts),
+        )
 
-            # Step 6: Insert pending reward for new user (10k MIRAGE)
-            # New user reward does NOT get multiplier (they're new, multiplier would be 1x anyway)
-            cur.execute(
-                """
-                INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-                VALUES (%s, 'mirage', %s, 'quest:invite_referred', %s)
-                """,
-                (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts),
-            )
-            log_event(rid, "invite_quest.referee_reward_created", new_user=new_user_addr, amount=reward_amount_umirage)
+        # Step 6: Insert pending reward for new user (10k MIRAGE)
+        # New user reward does NOT get multiplier (they're new, multiplier would be 1x anyway)
+        cur.execute(
+            """
+            INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+            VALUES (%s, 'mirage', %s, 'quest:invite_referred', %s)
+            ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
+            """,
+            (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts),
+        )
+        log_event(rid, "invite_quest.referee_reward_created", new_user=new_user_addr, amount=reward_amount_umirage)
 
-            log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
+        log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
 
 
 def _parse_envelope_nonce(data: dict):
@@ -734,6 +763,20 @@ def _verify_signature(pub_dec: bytes, sig_dec: bytes, signed_bytes: bytes) -> bo
         return True
     except Exception:
         return False
+
+
+def flush_user_last_seen(status_code: int) -> None:
+    """Write the request's last-seen row, but only if the request succeeded.
+
+    Registered as an after_request hook. A signature-verified address is preferred
+    over the merely-derived candidate, since the former is proof of key ownership
+    and the latter is only proof that 33 bytes were supplied.
+    """
+    if not has_request_context() or status_code >= 400:
+        return
+    addr = getattr(g, "verified_request_address", "") or getattr(g, "last_seen_candidate", "")
+    if addr:
+        update_user_last_seen(addr, source=request.path)
 
 
 def _auth_error(message: str, status: int = 401):
@@ -2344,6 +2387,13 @@ def core_block_topic():
             return jsonify({"error": "invalid topic format"}), 400
         if "**" in topic:
             return jsonify({"error": "invalid topic format"}), 400
+        # The chain bounds the alphanumerics but leaves the wildcards free, so a
+        # 35-character topic limit still admits 34 of them. That was the input to
+        # the backend's backtracking matcher; the matcher is linear now, but the
+        # SQL pre-filter's LIKE is not, so the count stays bounded at the door.
+        if count_wildcards(topic) > MAX_TOPIC_WILDCARDS:
+            log_event(rid, "block_topic.too_many_wildcards", wildcards=count_wildcards(topic))
+            return api_error_code("topic_too_many_wildcards")
 
         p = expect_params()
         min_topic = int(p.get("min_topic_size", 2))
@@ -3416,11 +3466,9 @@ def core_edit():
             if not topic:
                 return jsonify({"error": "topic required for root posts"}), 400
             try:
-                from params import expect_params as _expect_params
-
-                max_topic = int(_expect_params().get("max_topic_size", 50))
+                max_topic = int(expect_params()["max_topic_size"])
             except Exception:
-                max_topic = 50
+                return jsonify({"error": "backend not initialized"}), 503
             if len(topic) > max_topic:
                 return jsonify({"error": "topic too long"}), 400
             if not re.fullmatch(r"[a-z0-9]+", topic):
@@ -3893,14 +3941,16 @@ def core_post():
             if not topic:
                 return jsonify({"error": "topic required for root posts"}), 400
             try:
-                from params import expect_params as _expect_params
-
-                p = _expect_params()
-                max_topic = int(p.get("max_topic_size", 50))
-                min_topic = int(p.get("min_topic_size", 3))
+                p = expect_params()
+                max_topic = int(p["max_topic_size"])
+                min_topic = int(p["min_topic_size"])
             except Exception:
-                max_topic = 50
-                min_topic = 3
+                # Both keys are in _REQUIRED_INT_PARAMS, so the previous fallback
+                # was unreachable by construction — and wrong anyway: it used 50
+                # where the chain default is 35, so had it ever fired it would have
+                # accepted topics the chain rejects. Fail to 503 like the username
+                # bounds immediately above.
+                return jsonify({"error": "backend not initialized"}), 503
             if len(topic) < min_topic:
                 return jsonify({"error": "topic too short"}), 400
             if len(topic) > max_topic:
@@ -4242,9 +4292,8 @@ def core_vote():
                     effective_required = _effective_difficulty(int(difficulty))
                     if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception:
-                # If PoW precheck fails unexpectedly, let chain ante decide
-                pass
+            except Exception as _pow_exc:
+                _log_pow_precheck_error(rid, "vote", _pow_exc)
 
             # Verify signature for PoW users (chain also verifies via ante handler)
             try:
@@ -5088,6 +5137,27 @@ def core_register_push_token():
                     """,
                     (user_addr.lower(), token, platform, now_ts, now_ts),
                 )
+
+                # Registration validated token shape but never bounded how many an
+                # owner could accumulate, and delivery builds one unchunked Expo
+                # message per token against Expo's documented 100-message limit.
+                # Evicting the least recently used keeps a real user's devices
+                # working while bounding the fan-out.
+                cur.execute(
+                    """
+                    DELETE FROM push_tokens
+                    WHERE LOWER(owner) = %s
+                      AND token NOT IN (
+                        SELECT token FROM push_tokens
+                        WHERE LOWER(owner) = %s
+                        ORDER BY last_used_at DESC, token
+                        LIMIT %s
+                      )
+                    """,
+                    (user_addr.lower(), user_addr.lower(), MAX_PUSH_TOKENS_PER_OWNER),
+                )
+                if cur.rowcount:
+                    log_event(rid, "register_push_token.evicted", owner=user_addr.lower(), evicted=cur.rowcount)
 
                 # First push token for this account on this node: defer the
                 # lively-topic push by ~24h. Each node tracks trending state in

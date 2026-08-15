@@ -15,6 +15,8 @@
 
 **Disposition, decided 2026-08-14 (same day):** nine of the ten were fixed on `dev` and are **unreleased**; **M-1 was accepted as risk** and will not be re-reported by future reviews. The Status column records each decision, and "Remediation" at the end of the document describes what shipped.
 
+> **M-3's first fix was incomplete and would have shipped that way.** A backfill in `_init_db()` — labelled one-time, actually run on every startup — put the removed standing back byte for byte on the next indexer restart. Caught during the release run, not by the M-3 tests, which only covered `delete_post` and the canonical SQL. Read "Correction found while cutting the release" before trusting any other Status in this table.
+
 | ID | Finding | Severity | Status |
 | :-- | :-- | :-- | :-- |
 | **H-1** | Governance event attributes are base64-decoded on a guess; 11.6% of four-digit proposal IDs decode to garbage and permanently wedge the indexer | **High** | Fixed |
@@ -292,6 +294,8 @@ This is not covered by the accepted 2026-08-07 I-1 boundary. That item accepts t
 
 **Status: fixed 2026-08-14** (on `dev`, unreleased). Scoped to the author's own votes — see Remediation for why.
 
+> **The first fix was incomplete, and was only caught while cutting the release.** The repair migration removed the banked standing correctly, and then the *next indexer restart* put all of it back, byte for byte. `_init_db()` carried a third copy of the vote-stats definition — a backfill labelled "one-time" that in fact runs on every startup — without the deleted-self-vote exclusion. Its `ON CONFLICT (owner, topic) DO NOTHING` looked idempotent, but the repair *deletes* rows whose entire vote set was a self-upvote on a deleted post, so there was no longer a row to conflict with and the backfill re-inserted them at the pre-fix values. The fix survived exactly until the first restart, on every node. The backfill is now deleted rather than patched, because carrying a second definition is what caused this. See "Correction found while cutting the release" below.
+
 **Component:** `indexer/message_processor.py`, `indexer/database.py`. **Privilege required:** none — any user, on their own posts. **Effect:** cheap, invisible accumulation of downvote weight in a chosen topic.
 
 This is the only finding in this review that an ordinary user can trigger with ordinary transactions today.
@@ -511,6 +515,26 @@ As found, none of the wedge paths had any coverage — nothing in the suite refe
 **The source-level assertions were subsequently replaced with behavioural ones**, because a guard that is present but broken would have satisfied a string match. The SQL-level fixes now run against a real PostgreSQL in a throwaway schema that the real `DatabaseManager` populates via `search_path`, so nothing touches live rows: the `SAVEPOINT` is proven by forcing only the backfill `UPDATE` to fail with a CHECK constraint and asserting the surrounding transaction still works, the escaping and the depth cap are executed, and the M-3 retraction is driven through the real `delete_post`. The chain-id latch, the signal exit code and the profile-sync guards are driven against bare instances and a stub DB. The remaining string match is on the canonical SQL predicates themselves, where the text *is* the definition.
 
 **The assertions were mutation-tested.** Reverting the M-3 vote predicate and the walk depth cap in the source made exactly the expected three fail, with useful messages — the M-3 one reporting `(3, 3, 3, 0)`, which is the live-versus-rebuild divergence described above showing through: `post_count` correctly dropped to zero while the vote-derived counters kept the standing. A regression test that cannot fail is not evidence, so this was checked rather than assumed.
+
+---
+
+## Correction found while cutting the release — M-3 was only fixed until the first restart
+
+Every test above passed, the repair migration ran and recorded, and the fix was still wrong. It was caught by the whole-database consistency assertion failing during the release run, on 210 `(owner, topic)` rows.
+
+**The mechanism.** `_init_db()` contained a vote backfill commented "One-time backfill from existing votes (idempotent via `ON CONFLICT DO NOTHING`)". It was neither one-time nor idempotent. It ran on every indexer startup, and it carried its own copy of the vote-stats definition — predating `_VOTE_STATS_FROM_CANONICAL` and lacking its deleted-self-vote exclusion, and differing from it in three further ways (`LOWER(p.root_topic)` rather than the `COALESCE` fallback to `p.topic`, an unfiltered `COUNT(*)` for `vote_count`, and a bare `root_post_id` for `unique_root_posts`).
+
+`ON CONFLICT DO NOTHING` is what made it look safe, and is exactly why it was not. The repair does not zero these rows, it **deletes** them: an author whose only vote in a topic was the auto-upvote on a post they later deleted has no canonical row at all. With the row gone there was nothing left to conflict with, so the backfill re-inserted it from the old definition at the old values. The observable signature was a byte-identical resurrection — `vote_count=1, net_votes=1, unique_root_posts=1, post_count=0`, the last one zero because the neighbouring `post_count` backfill correctly counts only live posts.
+
+**Impact.** On every node, the standing removed by `v1_36_0_repair_deleted_post_standing` would have come back on the next indexer restart, silently and with no log line, since the backfill is raw DML inside schema init. M-3 would have been reported as fixed and released while remaining exploitable after any restart.
+
+**Why the tests missed it.** Every M-3 test asserted the behaviour of `delete_post` and of the canonical SQL, both of which were correct. Nothing asserted what *startup* does, and startup was the one path that still held the old definition.
+
+**The fix** deletes the backfill rather than adding the missing predicate to it. Patching would have left three definitions of a stats row where the migration's own docstring says there must be exactly one, and would have preserved the other three divergences for the next person to trip over. Nothing needs bootstrapping there: a fresh database has no votes at `_init_db` time, and a legacy one is rebuilt by `v1_33_0_rebuild_derived_stats`.
+
+**Now tested at the level that failed.** `indexer_hardening.startup_does_not_resurrect_standing` builds the exact shape in a scratch schema — a deleted post, its author's own upvote, no other votes, no stats row — runs the real `_init_db` twice, and requires that no row appears. Restoring the backfill makes it fail with the same `vote_count=1 net_votes=1` values observed in the live data. The whole-database assertion that caught this now holds across an indexer restart, which is the property that was actually broken.
+
+**The whole-database check was itself wrong**, and its own bug hid part of this: its canonical query omitted the deleted-self-vote exclusion, so it asserted the *pre-M-3* definition and would have failed on any database where anyone had ever deleted a post they upvoted. That accounted for 1,122 of the 1,332 rows it originally reported. It now matches `_VOTE_STATS_FROM_CANONICAL`.
 
 ---
 

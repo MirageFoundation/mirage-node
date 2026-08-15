@@ -93,6 +93,7 @@ from tests.cases.test_backend_indexer import (
     test_indexer_hardening,
     test_indexer_topic_edit,
 )
+from tests.cases.test_backend_hardening import test_backend_hardening
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_quests import test_quest_config, test_quest_assignment
 from tests.cases.test_backend_payouts import (
@@ -163,6 +164,7 @@ ALL_CATEGORIES = {
     "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer": test_indexer,
     "indexer_hardening": test_indexer_hardening,
+    "backend_hardening": test_backend_hardening,
     "indexer_topic_edit": test_indexer_topic_edit,
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
@@ -229,6 +231,7 @@ STATELESS_CATEGORIES = {
 # fixtures only. Running one of them must not create five wallets and broadcast
 # setup transactions that the selected checks never consume.
 WALLETLESS_CATEGORIES = {
+    "backend_hardening",
     "stats_pure",
     "error_registry",
     "indexer_fail_hard",

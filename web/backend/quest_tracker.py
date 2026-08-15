@@ -14,13 +14,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional
 
 import yaml
 
 import settings
-from quest_assignment import assign_daily_quests_if_needed, assign_flash_quest_if_eligible
+from quest_assignment import _locked_transaction, assign_daily_quests_if_needed, assign_flash_quest_if_eligible
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,23 @@ class QuestTracker:
         except Exception as e:
             logger.error(f"Failed to load quest definitions: {e}")
 
+    @contextmanager
+    def _cursor(self, cur=None):
+        """Yield ``cur`` if the caller already holds one, else open a connection.
+
+        Progress helpers each used to open their own connection, which is what made
+        quest completion a read-modify-write across four separate autocommit
+        connections: the completion guard evaluated a snapshot that was already
+        stale by the time the write landed. Passing a cursor down lets the whole
+        decision run inside one locked transaction.
+        """
+        if cur is not None:
+            yield cur
+            return
+        with self._connect() as conn:
+            with conn.cursor() as own_cur:
+                yield own_cur
+
     def _utc_julian_day(self, ts: int) -> int:
         """Convert Unix timestamp to UTC Julian day number."""
         # Julian day 0 = Jan 1, 4713 BC
@@ -131,27 +149,26 @@ class QuestTracker:
                 # 0 means not suspended, any future timestamp means suspended
                 return suspended_until > ts
 
-    def _get_daily_quest_progress(self, owner: str, quest_id: str, day_utc: int) -> QuestProgress:
+    def _get_daily_quest_progress(self, owner: str, quest_id: str, day_utc: int, cur=None) -> QuestProgress:
         """Get user's progress on a daily quest."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT progress, progress_meta, last_action_at, completed_at
-                    FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
-                    """,
-                    (owner, day_utc, quest_id),
-                )
-                row = cur.fetchone()
-                if not row:
-                    return QuestProgress()
-                return QuestProgress(
-                    progress=row[0],
-                    progress_meta=row[1] if isinstance(row[1], dict) else {},
-                    last_action_at=row[2],
-                    completed_at=row[3],
-                )
+        with self._cursor(cur) as c:
+            c.execute(
+                """
+                SELECT progress, progress_meta, last_action_at, completed_at
+                FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                """,
+                (owner, day_utc, quest_id),
+            )
+            row = c.fetchone()
+            if not row:
+                return QuestProgress()
+            return QuestProgress(
+                progress=row[0],
+                progress_meta=row[1] if isinstance(row[1], dict) else {},
+                last_action_at=row[2],
+                completed_at=row[3],
+            )
 
     def _update_daily_quest_progress(
         self,
@@ -162,22 +179,22 @@ class QuestTracker:
         progress_meta: dict,
         last_action_at: int,
         completed_at: Optional[int],
+        cur=None,
     ) -> None:
         """Update user's daily quest progress."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, last_action_at, completed_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (owner, day_utc, quest_id) DO UPDATE SET
-                        progress = EXCLUDED.progress,
-                        progress_meta = EXCLUDED.progress_meta,
-                        last_action_at = EXCLUDED.last_action_at,
-                        completed_at = EXCLUDED.completed_at
-                    """,
-                    (owner, day_utc, quest_id, progress, json.dumps(progress_meta), last_action_at, completed_at),
-                )
+        with self._cursor(cur) as c:
+            c.execute(
+                """
+                INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, last_action_at, completed_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (owner, day_utc, quest_id) DO UPDATE SET
+                    progress = EXCLUDED.progress,
+                    progress_meta = EXCLUDED.progress_meta,
+                    last_action_at = EXCLUDED.last_action_at,
+                    completed_at = EXCLUDED.completed_at
+                """,
+                (owner, day_utc, quest_id, progress, json.dumps(progress_meta), last_action_at, completed_at),
+            )
 
     def _get_user_assigned_quests(self, owner: str, day_utc: int) -> list[str]:
         """Get the quest IDs assigned to a user for a given day."""
@@ -257,27 +274,26 @@ class QuestTracker:
             {q.id: {"time_window_minutes": q.time_window_minutes} for q in self.flash_templates},
         )
 
-    def _get_flash_quest_progress(self, owner: str, starts_at: int) -> QuestProgress:
+    def _get_flash_quest_progress(self, owner: str, starts_at: int, cur=None) -> QuestProgress:
         """Get progress for a specific flash quest."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT progress, progress_meta, last_action_at, completed_at
-                    FROM user_flash_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
-                    """,
-                    (owner, starts_at),
+        with self._cursor(cur) as c:
+            c.execute(
+                """
+                SELECT progress, progress_meta, last_action_at, completed_at
+                FROM user_flash_quests
+                WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
+                """,
+                (owner, starts_at),
+            )
+            row = c.fetchone()
+            if row:
+                return QuestProgress(
+                    progress=row[0],
+                    progress_meta=row[1] if row[1] else {},
+                    last_action_at=row[2],
+                    completed_at=row[3],
                 )
-                row = cur.fetchone()
-                if row:
-                    return QuestProgress(
-                        progress=row[0],
-                        progress_meta=row[1] if row[1] else {},
-                        last_action_at=row[2],
-                        completed_at=row[3],
-                    )
-                return QuestProgress()
+            return QuestProgress()
 
     def _update_flash_quest_progress(
         self,
@@ -287,46 +303,55 @@ class QuestTracker:
         progress_meta: dict,
         last_action_at: int,
         completed_at: Optional[int],
+        cur=None,
     ) -> None:
         """Update flash quest progress."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE user_flash_quests
-                    SET progress = %s, progress_meta = %s, last_action_at = %s, completed_at = %s
-                    WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
-                    """,
-                    (progress, json.dumps(progress_meta), last_action_at, completed_at, owner, starts_at),
-                )
+        with self._cursor(cur) as c:
+            c.execute(
+                """
+                UPDATE user_flash_quests
+                SET progress = %s, progress_meta = %s, last_action_at = %s, completed_at = %s
+                WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
+                """,
+                (progress, json.dumps(progress_meta), last_action_at, completed_at, owner, starts_at),
+            )
 
-    def _flash_quest_has_target(self, owner: str, starts_at: int, target: str) -> bool:
+    def _flash_quest_has_target(self, owner: str, starts_at: int, target: str, cur=None) -> bool:
         """Check if target is already counted for this flash quest."""
-        progress = self._get_flash_quest_progress(owner, starts_at)
+        progress = self._get_flash_quest_progress(owner, starts_at, cur=cur)
         targets = progress.progress_meta.get("targets", [])
         return target.lower() in [t.lower() for t in targets]
 
-    def _flash_quest_has_root(self, owner: str, starts_at: int, root_post_id: str) -> bool:
+    def _flash_quest_has_root(self, owner: str, starts_at: int, root_post_id: str, cur=None) -> bool:
         """Check if root post is already counted for this flash quest."""
-        progress = self._get_flash_quest_progress(owner, starts_at)
+        progress = self._get_flash_quest_progress(owner, starts_at, cur=cur)
         roots = progress.progress_meta.get("roots", [])
         return root_post_id.lower() in [r.lower() for r in roots]
 
-    def _flash_quest_has_topic(self, owner: str, starts_at: int, topic: str) -> bool:
+    def _flash_quest_has_topic(self, owner: str, starts_at: int, topic: str, cur=None) -> bool:
         """Check if topic is already counted for this flash quest."""
-        progress = self._get_flash_quest_progress(owner, starts_at)
+        progress = self._get_flash_quest_progress(owner, starts_at, cur=cur)
         topics = progress.progress_meta.get("unique_topics", [])
         return topic.lower() in [t.lower() for t in topics]
 
     def _increment_flash_progress(
         self, owner: str, quest: QuestDefinition, flash_data: dict, ts: int, **kwargs
     ) -> None:
+        """Increment flash quest progress, serialized per owner.
+
+        Identical shape to the daily path, and identically unguarded before this:
+        read at the top, completion decided from that snapshot, reward written
+        later on a different connection.
         """
-        Increment flash quest progress if conditions are met.
-        Similar to _increment_daily_progress but for flash quests.
-        """
+        with _locked_transaction(f"quest_assignment:{owner.lower()}") as cur:
+            self._apply_flash_progress(cur, owner, quest, flash_data, ts, **kwargs)
+
+    def _apply_flash_progress(
+        self, cur, owner: str, quest: QuestDefinition, flash_data: dict, ts: int, **kwargs
+    ) -> None:
+        """Body of _increment_flash_progress; caller holds the per-owner lock."""
         starts_at = flash_data["starts_at"]
-        progress = self._get_flash_quest_progress(owner, starts_at)
+        progress = self._get_flash_quest_progress(owner, starts_at, cur=cur)
 
         logger.info(
             f"_increment_flash_progress: quest={quest.id}, progress={progress.progress}/{quest.target_count}, kwargs={kwargs}"
@@ -359,7 +384,7 @@ class QuestTracker:
         # Enforce unique root thread for comment quests
         if quest.unique_root_post:
             root_post_id = kwargs.get("root_post_id")
-            if root_post_id and self._flash_quest_has_root(owner, starts_at, root_post_id):
+            if root_post_id and self._flash_quest_has_root(owner, starts_at, root_post_id, cur=cur):
                 logger.info(f"Flash quest {quest.id} rejected: duplicate root_post_id {root_post_id}")
                 return
 
@@ -380,14 +405,14 @@ class QuestTracker:
         # Enforce unique targets if configured
         if quest.unique_target:
             target = kwargs.get("target")
-            if target and self._flash_quest_has_target(owner, starts_at, target):
+            if target and self._flash_quest_has_target(owner, starts_at, target, cur=cur):
                 logger.info(f"Flash quest {quest.id} rejected: duplicate target {target}")
                 return
 
         # Enforce unique topics if configured (for topic_explorer quest)
         if quest.unique_topic:
             topic = kwargs.get("topic")
-            if topic and self._flash_quest_has_topic(owner, starts_at, topic):
+            if topic and self._flash_quest_has_topic(owner, starts_at, topic, cur=cur):
                 logger.info(f"Flash quest {quest.id} rejected: duplicate topic {topic}")
                 return
 
@@ -469,7 +494,7 @@ class QuestTracker:
                         new_progress = quest.target_count - 1
 
         # Update progress
-        self._update_flash_quest_progress(owner, starts_at, new_progress, meta, ts, ts if completed else None)
+        self._update_flash_quest_progress(owner, starts_at, new_progress, meta, ts, ts if completed else None, cur=cur)
 
         logger.info(f"Flash quest progress: {owner} {quest.id} {new_progress}/{quest.target_count}")
 
@@ -485,25 +510,26 @@ class QuestTracker:
                 else:
                     reward_data = {"id": reward.get("id")}
 
-                self._add_pending_reward(owner, reward_type, reward_data, f"flash:{quest.id}", ts)
+                self._add_pending_reward(owner, reward_type, reward_data, f"flash:{quest.id}", ts, cur=cur)
 
             logger.info(f"Flash quest completed: {owner} finished {quest.id}")
 
-    def _add_pending_reward(self, owner: str, reward_type: str, reward_data: dict, reason: str, ts: int) -> None:
+    def _add_pending_reward(
+        self, owner: str, reward_type: str, reward_data: dict, reason: str, ts: int, cur=None
+    ) -> None:
         """Add a pending reward for a user."""
         try:
-            with self._connect() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
-                        RETURNING id
-                        """,
-                        (owner, reward_type, json.dumps(reward_data), reason, ts),
-                    )
-                    inserted = cur.fetchone()
+            with self._cursor(cur) as c:
+                c.execute(
+                    """
+                    INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
+                    RETURNING id
+                    """,
+                    (owner, reward_type, json.dumps(reward_data), reason, ts),
+                )
+                inserted = c.fetchone()
         except Exception as exc:
             raise RuntimeError(
                 f"pending reward insert failed owner={owner} reward_type={reward_type} reason={reason} ts={ts}"
@@ -516,27 +542,42 @@ class QuestTracker:
                 f"Skipped duplicate pending reward for {owner}: reward_type={reward_type} reason={reason} ts={ts}"
             )
 
-    def _quest_has_target(self, owner: str, quest_id: str, day_utc: int, target: str) -> bool:
+    def _quest_has_target(self, owner: str, quest_id: str, day_utc: int, target: str, cur=None) -> bool:
         """Check if target is already counted for this quest/day."""
-        progress = self._get_daily_quest_progress(owner, quest_id, day_utc)
+        progress = self._get_daily_quest_progress(owner, quest_id, day_utc, cur=cur)
         targets = progress.progress_meta.get("targets", [])
         return target.lower() in [t.lower() for t in targets]
 
-    def _quest_has_root(self, owner: str, quest_id: str, day_utc: int, root_post_id: str) -> bool:
+    def _quest_has_root(self, owner: str, quest_id: str, day_utc: int, root_post_id: str, cur=None) -> bool:
         """Check if root post is already counted for this quest/day."""
-        progress = self._get_daily_quest_progress(owner, quest_id, day_utc)
+        progress = self._get_daily_quest_progress(owner, quest_id, day_utc, cur=cur)
         roots = progress.progress_meta.get("roots", [])
         return root_post_id.lower() in [r.lower() for r in roots]
 
-    def _quest_has_topic(self, owner: str, quest_id: str, day_utc: int, topic: str) -> bool:
+    def _quest_has_topic(self, owner: str, quest_id: str, day_utc: int, topic: str, cur=None) -> bool:
         """Check if topic is already counted for this quest/day."""
-        progress = self._get_daily_quest_progress(owner, quest_id, day_utc)
+        progress = self._get_daily_quest_progress(owner, quest_id, day_utc, cur=cur)
         topics = progress.progress_meta.get("unique_topics", [])
         return topic.lower() in [t.lower() for t in topics]
 
     def _increment_daily_progress(self, owner: str, quest: QuestDefinition, day_utc: int, ts: int, **kwargs) -> None:
-        """Increment progress on a daily quest if requirements are met."""
-        progress = self._get_daily_quest_progress(owner, quest.id, day_utc)
+        """Increment progress on a daily quest, serialized per owner.
+
+        Assignment and claiming were each given an advisory lock; completion — the
+        step that actually creates money — had neither, and ran as a read-decide-
+        write across separate autocommit connections. The only thing standing
+        between two concurrent completions and two reward rows was a unique index
+        on a second-granularity timestamp, so actions that straddled a UTC second
+        boundary both paid out. The lock key matches quest_assignment's so
+        assignment and completion serialize against each other, not just amongst
+        themselves.
+        """
+        with _locked_transaction(f"quest_assignment:{owner.lower()}") as cur:
+            self._apply_daily_progress(cur, owner, quest, day_utc, ts, **kwargs)
+
+    def _apply_daily_progress(self, cur, owner: str, quest: QuestDefinition, day_utc: int, ts: int, **kwargs) -> None:
+        """Body of _increment_daily_progress; caller holds the per-owner lock."""
+        progress = self._get_daily_quest_progress(owner, quest.id, day_utc, cur=cur)
 
         # Already completed
         if progress.completed_at is not None:
@@ -561,7 +602,7 @@ class QuestTracker:
         # Enforce unique root thread for comment quests
         if quest.unique_root_post:
             root_post_id = kwargs.get("root_post_id")
-            if root_post_id and self._quest_has_root(owner, quest.id, day_utc, root_post_id):
+            if root_post_id and self._quest_has_root(owner, quest.id, day_utc, root_post_id, cur=cur):
                 return
 
         # Reject self-target interactions if configured
@@ -579,13 +620,13 @@ class QuestTracker:
         # Enforce unique targets if configured
         if quest.unique_target:
             target = kwargs.get("target")
-            if target and self._quest_has_target(owner, quest.id, day_utc, target):
+            if target and self._quest_has_target(owner, quest.id, day_utc, target, cur=cur):
                 return
 
         # Enforce unique topics if configured (for topic_explorer quest)
         if quest.unique_topic:
             topic = kwargs.get("topic")
-            if topic and self._quest_has_topic(owner, quest.id, day_utc, topic):
+            if topic and self._quest_has_topic(owner, quest.id, day_utc, topic, cur=cur):
                 return
 
         # Check time spacing
@@ -664,7 +705,9 @@ class QuestTracker:
                         new_progress = quest.target_count - 1
 
         # Update progress
-        self._update_daily_quest_progress(owner, quest.id, day_utc, new_progress, meta, ts, ts if completed else None)
+        self._update_daily_quest_progress(
+            owner, quest.id, day_utc, new_progress, meta, ts, ts if completed else None, cur=cur
+        )
 
         # Add rewards if completed
         if completed:
@@ -681,7 +724,7 @@ class QuestTracker:
                 else:
                     reward_data = {"id": reward.get("id")}
 
-                self._add_pending_reward(owner, reward_type, reward_data, f"quest:{quest.id}", ts)
+                self._add_pending_reward(owner, reward_type, reward_data, f"quest:{quest.id}", ts, cur=cur)
 
             logger.info(f"Quest completed: {owner} finished {quest.id}")
 

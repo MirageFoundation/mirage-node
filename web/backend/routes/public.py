@@ -35,6 +35,7 @@ from fleet_url import post_json as fleet_post_json, validate_fleet_endpoint
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
+from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
 from user_last_seen import update_user_last_seen
 from params import load_params, expect_params
 from settings import (
@@ -53,6 +54,7 @@ from settings import (
     ANDROID_BANNER_ENABLED,
     IOS_BANNER_ENABLED,
 )
+import threading
 import time
 import calendar
 from datetime import datetime as dt
@@ -85,6 +87,35 @@ _STREAM_PATH_RE = re.compile(r"[A-Za-z0-9._/-]{1,200}")
 # an unknown parameter degrades playback visibly in the log rather than forwarding
 # arbitrary client input to the upstream CDN.
 _STREAM_PROXY_ALLOWED_PARAMS = frozenset({"token", "exp", "sig", "verify", "clientBandwidthHint", "protocol"})
+
+# `limit` was clamped everywhere and `page` only floored, while several feeds
+# compute their SQL row cap as the product of the two. That made `page` the
+# unbounded half of a bound: one unauthenticated request with a large page
+# removed the LIMIT, and psycopg materializes the whole result at execute().
+MAX_FEED_PAGE = 200
+# Ceiling for every candidate-pool computation. Some sites wrote max(500, …),
+# which reads like a cap and is a floor; the magic home feed already used
+# min(…, 500) correctly, so this is that value applied uniformly.
+MAX_CANDIDATE_POOL = 500
+# The inbox is paged deeper than a feed by real users, so it gets its own larger
+# ceiling rather than the pool cap — its query is a ten-level self-join, which is
+# exactly why it must not be unbounded.
+MAX_INBOX_ROWS = 2000
+
+
+def _clamp_page(page: int) -> int:
+    """Floor and cap a client-supplied page number."""
+    return min(max(1, int(page)), MAX_FEED_PAGE)
+
+
+def _escape_like(value: str) -> str:
+    """Escape LIKE metacharacters in a user-supplied search term.
+
+    Backslash goes first: it is PostgreSQL's default LIKE escape character, so
+    escaping only % and _ leaves a trailing backslash dangling as an incomplete
+    escape sequence and raises, which is an unauthenticated 500 from any search box.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _get_balance(address) -> int:
@@ -697,14 +728,9 @@ def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tup
         return False
     if blocked_exact and topic in blocked_exact:
         return True
-    if blocked_patterns:
-        import re as _re
-
-        for pat in blocked_patterns:
-            # Convert glob * to regex .* (don't use fnmatch — it treats ? and [] as meta)
-            escaped = _re.escape(pat).replace(r"\*", ".*")
-            if _re.fullmatch(escaped, topic):
-                return True
+    for pat in blocked_patterns:
+        if topic_matches_pattern(topic, pat):
+            return True
     return False
 
 
@@ -869,6 +895,15 @@ def _blocked_topics_sql(
         params.extend(bt_list)
     if blocked_patterns:
         for pat in blocked_patterns:
+            # PostgreSQL's LIKE backtracks the same way the old regex matcher did,
+            # so a pattern with many wildcards is as expensive here as it was
+            # there. Patterns over the cap are left out of the pre-filter rather
+            # than bounded: every caller routes its rows through _row_to_post,
+            # whose _topic_is_blocked call is linear and authoritative, so the
+            # only cost of omitting one is that a few more rows are fetched.
+            if count_wildcards(pat) > MAX_TOPIC_WILDCARDS:
+                logger.debug("blocked_topics_sql skipping over-cap pattern wildcards=%d", count_wildcards(pat))
+                continue
             # Escape SQL LIKE metacharacters then convert glob * to %
             like_pat = pat.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
             clauses.append(f"LOWER(TRIM({topic_col})) NOT LIKE %s")
@@ -1360,9 +1395,7 @@ def _load_vote_and_comment_stats(
         # a total computed before their vote was indexed renders as a vote that
         # visibly did not count, while the post page — which sums live — shows it.
         # Other users' votes stay cached; nobody can tell those are seconds late.
-        vote_totals = _load_vote_totals_cached(
-            cur, post_ids, backend_cur=backend_cur, force_live=set(user_votes)
-        )
+        vote_totals = _load_vote_totals_cached(cur, post_ids, backend_cur=backend_cur, force_live=set(user_votes))
     stats_vt_ms = _ms_since(_t)
 
     # Comment counts
@@ -1530,7 +1563,7 @@ def _get_following_feed(
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
     factor = _seen_overfetch_factor(seen_posts, 4)
-    max_candidates = limit * page * factor
+    max_candidates = min(limit * page * factor, MAX_CANDIDATE_POOL)
     candidates, followed_topics, followed_users = _load_following_candidates(
         cur,
         viewer_lower,
@@ -1802,11 +1835,13 @@ def _get_home_feed_newest(
     )
 
     # Fetch in batches using cursor-based pagination (created_at < ?).
-    need = page * limit + 1
+    # `need` bounds both the loop below and the list it accumulates, so capping
+    # batch_size alone would still let a deep page build 20k post dicts in memory.
+    need = min(page * limit + 1, MAX_CANDIDATE_POOL)
     factor = _seen_overfetch_factor(seen_posts, 3)
     seen: set[str] = set()
     posts: list[dict] = []
-    batch_size = max(500, need * factor)
+    batch_size = min(max(500, need * factor), MAX_CANDIDATE_POOL)
     last_ts = None
 
     while len(posts) < need:
@@ -2865,7 +2900,7 @@ def _get_guest_feed(
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
     """Simple chronological feed for guest users."""
-    max_candidates = limit * page * 2
+    max_candidates = min(limit * page * 2, MAX_CANDIDATE_POOL)
     candidates = _load_candidate_posts(
         cur,
         max_candidates,
@@ -2930,7 +2965,7 @@ def _get_guest_feed_magic(
     """
     import time
 
-    max_candidates = limit * page * 4
+    max_candidates = min(limit * page * 4, MAX_CANDIDATE_POOL)
     candidates = _load_candidate_posts(
         cur,
         max_candidates,
@@ -3799,6 +3834,37 @@ _CIRCULATION_CACHE_TTL = 60  # 60 seconds
 
 # Cache for welcome stats (lightweight stats for landing page)
 _welcome_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+
+# Short-lived cache for unauthenticated full-table aggregations. get_welcome_stats
+# next door already had one; the topic listing did not, so every anonymous request
+# ran two GROUP BY aggregations over the whole posts table with a 10s statement
+# timeout and no rate limit. 30s matches the sibling and is well inside the window
+# where a newly created topic still appears promptly.
+AGG_CACHE_TTL_SECONDS = 30
+_agg_cache: Dict[str, tuple[int, Any]] = {}
+_agg_cache_lock = threading.Lock()
+
+
+def _agg_cache_get(key: str) -> Any:
+    with _agg_cache_lock:
+        entry = _agg_cache.get(key)
+        if entry and entry[0] > int(time.time()):
+            return entry[1]
+    return None
+
+
+def _agg_cache_put(key: str, value: Any) -> None:
+    now = int(time.time())
+    with _agg_cache_lock:
+        # Bounded by eviction of expired entries: the key includes client-supplied
+        # arguments, so without this the dict is an unbounded attacker-grown map.
+        if len(_agg_cache) > 256:
+            for k, v in list(_agg_cache.items()):
+                if v[0] <= now:
+                    del _agg_cache[k]
+        _agg_cache[key] = (now + AGG_CACHE_TTL_SECONDS, value)
+
+
 _WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
 
 # Cache for full overview stats (expensive query)
@@ -4510,6 +4576,15 @@ def username_search():
     if not q:
         return jsonify({"results": []})
 
+    # This was the one search path that interpolated the query raw into its LIKE
+    # patterns, while every sibling escaped first. Not injection — psycopg
+    # parameterizes correctly — but wildcard injection: `%` matched every profile
+    # and forced the CTE to evaluate LOWER() and a conditional SUBSTRING over the
+    # whole table, `_` enabled enumeration by structure, and a trailing backslash
+    # produced an unauthenticated 500.
+    q_like = _escape_like(q)
+    search_q_like = _escape_like(search_q)
+
     try:
         conn = connect_db(timeout=5.0, busy_timeout_ms=5000)
         cur = conn.cursor()
@@ -4540,10 +4615,10 @@ def username_search():
             LIMIT %s
             """,
             (
-                f"%{q}%",
-                f"%{search_q}%",
-                f"{search_q}%",
-                f"{q}%",
+                f"%{q_like}%",
+                f"%{search_q_like}%",
+                f"{search_q_like}%",
+                f"{q_like}%",
                 limit,
             ),
         )
@@ -4638,7 +4713,7 @@ def get_users():
     has_username = request.args.get("has_username", "false", type=str).lower() in ("true", "1", "yes")
 
     limit = min(max(1, limit), 500)
-    page = max(1, page)
+    page = _clamp_page(page)
     offset = (page - 1) * limit
 
     try:
@@ -4688,6 +4763,17 @@ def get_topics():
     min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
     allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+
+    # Cache the anonymous case only. The response is filtered by the viewer's
+    # blocked topics further down, so a key that ignored the viewer would serve one
+    # user's filtered view to another. Anonymous is the unrestricted path anyway.
+    viewer_addr = request.args.get("address", default="", type=str)
+    cache_key = f"topics:{limit}:{min_posts}:{','.join(sorted(allowed_tags))}"
+    if not viewer_addr:
+        cached = _agg_cache_get(cache_key)
+        if cached is not None:
+            return jsonify(cached)
+
     try:
         # Get min/max topic size from chain params
         p = expect_params()
@@ -4746,7 +4832,6 @@ def get_topics():
             small_topics_count = 0
 
         # Filter out blocked topics for the viewer
-        viewer_addr = request.args.get("address", default="", type=str)
         viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
         blocked_exact, blocked_prefixes = _split_blocked_topics(viewer_blocked_topics)
 
@@ -4800,7 +4885,10 @@ def get_topics():
         topics = list(topics_dict.values())
         conn.close()
 
-        return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
+        payload = {"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts}
+        if not viewer_addr:
+            _agg_cache_put(cache_key, payload)
+        return jsonify(payload)
     except Exception as e:
         return safe_error(e)
 
@@ -4986,7 +5074,7 @@ def search():
 
         # Sanitize query for LIKE matching (escape special chars)
         query_lower = query.lower()
-        like_query = query_lower.replace("%", "\\%").replace("_", "\\_")
+        like_query = _escape_like(query_lower)
 
         # ========== USER SEARCH (@username) ==========
         if search_type == "user":
@@ -5489,7 +5577,7 @@ def get_posts():
     limit = request.args.get("limit", 25, type=int)
     limit = min(max(1, limit), 100)
     page = request.args.get("page", 1, type=int)
-    page = max(1, page)
+    page = _clamp_page(page)
     offset = (page - 1) * limit
     topic = request.args.get("topic", default=None, type=str)
     address = request.args.get("address", default="", type=str)
@@ -5661,7 +5749,7 @@ def get_posts():
 
         # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
         # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
-        max_candidates = max(500, limit * page * _seen_overfetch_factor(persisted_seen, 3))
+        max_candidates = min(max(500, limit * page * _seen_overfetch_factor(persisted_seen, 3)), MAX_CANDIDATE_POOL)
         order_clause = "ORDER BY p.created_at DESC"
 
         t_select = time.monotonic()
@@ -5974,7 +6062,7 @@ def get_user_posts():
     page = request.args.get("page", 1, type=int)
     post_type = request.args.get("type", default="", type=str)
     limit = min(max(1, limit), 50)
-    page = max(1, page)
+    page = _clamp_page(page)
     offset = (page - 1) * limit
 
     allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
@@ -7421,10 +7509,10 @@ def get_inbox():
         return jsonify({"error": "address required"}), 400
 
     limit = min(max(1, limit), 100)
-    page = max(1, page)
+    page = _clamp_page(page)
     offset = (page - 1) * limit
     viewer_lower = address.lower()
-    need = offset + limit
+    need = min(offset + limit, MAX_INBOX_ROWS)
 
     try:
         t_db_open = time.time()
@@ -8163,14 +8251,16 @@ def admin_stats_aggregate():
         "end": end,
     }
     local_norm = local_label.rstrip("/")
-    for base_url in _stats.discover_servers():
+    for base_url in _stats.fleet_fanout_targets():
         if base_url.rstrip("/") == local_norm:
             continue
         entry: Dict[str, Any] = {"server": base_url}
-        # Revalidate at send time: discovery may have run against different DNS,
-        # and this request carries the admin's signed proof.
-        endpoint = validate_fleet_endpoint(base_url, allow_ip_literal=True)
-        if endpoint is None:
+        # Revalidate at send time: the roster is resolved fresh here, and this
+        # request carries the admin's signed proof. IP literals are no longer
+        # accepted — a credential destination has to be a named https host so the
+        # certificate can actually be checked against something.
+        endpoint = validate_fleet_endpoint(base_url)
+        if endpoint is None or endpoint.url.split(":", 1)[0] != "https":
             entry["status"] = "rejected"
             log_event(rid, "admin_stats_aggregate.rejected_destination", server=base_url)
             servers.append(entry)
@@ -8179,7 +8269,14 @@ def admin_stats_aggregate():
             resp = fleet_post_json(endpoint, "api/admin/stats/export", proof, timeout=6)
             if resp.status_code == 200:
                 entry["status"] = "ok"
-                entry["stats"] = resp.json()
+                # Validate before merging: the peer decides these numbers, and the
+                # aggregation used bare int() on them outside any try/except.
+                try:
+                    entry["stats"] = _stats.validate_peer_stats(resp.json())
+                except ValueError as ve:
+                    entry["status"] = "bad_response"
+                    entry["error"] = str(ve)
+                    log_event(rid, "admin_stats_aggregate.bad_peer_stats", server=base_url, error=str(ve))
             elif resp.status_code in (401, 403):
                 entry["status"] = "unauthorized"
             else:
@@ -8256,7 +8353,13 @@ def upload_media():
         )
         from media.base import max_image_bytes, max_video_bytes
 
-        kind = (request.form.get("kind") or request.args.get("kind") or "").strip().lower()
+        # Query string only. Reading `kind` from request.form invokes Werkzeug's
+        # multipart parser, which consumes the whole stream and spools the file
+        # part to disk — so the per-kind cap below used to be evaluated after the
+        # body it was meant to bound had already been transferred and written. The
+        # only limit that applied during that parse was the global one, which is
+        # sized for video, making a 15 MiB image cap really ~1516 MiB.
+        kind = (request.args.get("kind") or "").strip().lower()
         if kind not in ("image", "video"):
             return api_error_code("media_invalid_kind", 400)
 
@@ -8265,10 +8368,15 @@ def upload_media():
         # allow 1 MiB of slack on the Content-Length probe; the post-read check
         # still enforces the exact per-kind cap.
         max_bytes = max_image_bytes() if kind == "image" else max_video_bytes()
+        slack_bytes = max_bytes + (1024 * 1024)
         content_length = request.content_length
-        if content_length is not None and content_length > max_bytes + (1024 * 1024):
+        if content_length is not None and content_length > slack_bytes:
             log_event(rid, "upload_media.too_large", kind=kind, content_length=content_length, max=max_bytes)
             return api_error_code("media_too_large", 413)
+        # Belt and braces for a chunked upload that declares no Content-Length:
+        # Werkzeug enforces this during the parse itself, so the stream is cut off
+        # at the per-kind limit rather than at the video-sized global one.
+        request.max_content_length = slack_bytes
 
         f = request.files.get("file")
         if f is None:

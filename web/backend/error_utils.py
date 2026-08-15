@@ -101,6 +101,7 @@ ERRORS = {
     "topic_too_short": "topic too short",
     "topic_too_long": "topic too long",
     "topic_invalid_format": "invalid topic format",
+    "topic_too_many_wildcards": "too many wildcards in topic pattern",
     "topic_required": "topic required for root posts",
     "comment_content_required": "comment content required",
     "comment_not_found": "comment not found or invalid",

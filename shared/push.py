@@ -478,16 +478,57 @@ def _truncate(text: str, max_len: int = 150) -> str:
     return text[: max_len - 1] + "…"
 
 
+def _recipient_blocks_actor(recipient: str, actor: str) -> bool:
+    """True if ``recipient`` (or an agent they enabled) has blocked ``actor``.
+
+    Mirrors the inbox's own filter, including agent-level blocks. The in-app inbox
+    has always dropped items from blocked actors; push delivery had no reference to
+    any blocked list at all, so replying to someone who blocked you or writing
+    ``@them`` in any post put attacker-authored text on their lock screen while
+    they saw nothing in-app to report.
+    """
+    recipient_lc = (recipient or "").strip().lower()
+    actor_lc = (actor or "").strip().lower()
+    if not recipient_lc or not actor_lc or recipient_lc == actor_lc:
+        return False
+    try:
+        with _connect_indexer_ro() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM blocked_users
+                    WHERE LOWER(target) = %s
+                      AND (
+                        LOWER(owner) = %s
+                        OR LOWER(owner) IN (SELECT LOWER(target) FROM enabled_agents WHERE LOWER(owner) = %s)
+                      )
+                    LIMIT 1
+                    """,
+                    (actor_lc, recipient_lc, recipient_lc),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:  # noqa: BLE001
+        # Fail closed: an unreadable block list must not become a delivered push.
+        logger.warning("[Push] Block lookup failed for %s, suppressing: %s", recipient_lc[:16], exc)
+        return True
+
+
 def _send_push_to_user(
     owner: str,
     title: str,
     body: str,
     data: dict,
     *,
+    actor: str = "",
     tokens: list[tuple[str, str]] | None = None,
     skip_throttle: bool = False,
 ) -> str:
     """Send push to all devices for an owner, respecting the 5/30-min throttle."""
+    if actor and _recipient_blocks_actor(owner, actor):
+        logger.info("[Push] Recipient %s blocks actor %s, suppressed", owner[:16], actor[:16])
+        return PUSH_DISCARD
+
     if tokens is None:
         tokens = _get_tokens_for_owner(owner)
     if not tokens:
@@ -569,6 +610,15 @@ def _do_reply_push(
     poster_lc = poster_addr.lower()
     with _connect_indexer_ro() as conn:
         with conn.cursor() as cur:
+            # Content is snapshotted into the payload at enqueue and was never
+            # re-validated, so deleting the reply within seconds of posting left
+            # the inbox empty while the device still displayed it — and the
+            # delivered text is unrecoverable. _fetch_post_context filters
+            # deleted rows, so a missing reply here means deleted or not yet
+            # indexed; either way there is nothing to deliver.
+            if not _fetch_post_context(tx_hash, cur=cur):
+                logger.info("[Push] Reply %s is gone or deleted, discarding push", tx_hash[:16])
+                return PUSH_DISCARD
             parent_ctx = _fetch_post_context(target_txhash, cur=cur)
             if not parent_ctx:
                 logger.warning("[Push] Missing parent post context for %s", target_txhash[:16])
@@ -615,7 +665,7 @@ def _do_reply_push(
     body = _truncate(content)
     data = {"type": "reply", "rootPostId": root_post_id, "replyId": tx_hash, "inboxReply": inbox_reply}
 
-    outcome = _send_push_to_user(target_owner, title, body, data)
+    outcome = _send_push_to_user(target_owner, title, body, data, actor=poster_addr)
     _check_old_receipts()
     return outcome
 
@@ -682,6 +732,13 @@ def _do_mentions_push(
                 logger.warning("[Push] Missing profile for mention poster %s", poster_addr[:16])
                 return PUSH_RETRY
             post_ctx = _fetch_post_context(tx_hash, cur=cur)
+            # Previously this path explicitly tolerated the post being gone and
+            # pushed the snapshotted text anyway, so a mention could be posted and
+            # deleted within seconds and still land on the victim's lock screen
+            # with nothing in-app to report.
+            if not post_ctx:
+                logger.info("[Push] Mention source %s is gone or deleted, discarding push", tx_hash[:16])
+                return PUSH_DISCARD
     poster_username = poster_username or profile["username"]
     logger.debug("[Push] Mention context resolved root=%s", root_post_id[:16])
     p_display = ""
@@ -733,7 +790,7 @@ def _do_mentions_push(
         title = f"{display_name} mentioned you"
         body = _truncate(content)
         data = {"type": "mention", "rootPostId": root_post_id, "replyId": tx_hash, "inboxReply": inbox_reply}
-        outcomes.append(_send_push_to_user(owner, title, body, data))
+        outcomes.append(_send_push_to_user(owner, title, body, data, actor=poster_addr))
 
     _check_old_receipts()
     # New outbox rows target one username. The multi-owner aggregation remains
@@ -819,7 +876,7 @@ def _do_award_push(
     body = f"Your post received a {award_type} award"
     data = {"type": "award", "rootPostId": root_post_id, "replyId": target_txhash.lower(), "inboxReply": inbox_reply}
 
-    outcome = _send_push_to_user(post_owner, title, body, data)
+    outcome = _send_push_to_user(post_owner, title, body, data, actor=awarder_addr)
     _check_old_receipts()
     return outcome
 
@@ -885,7 +942,7 @@ def _do_follow_push(
     title = f"{display_name} followed you"
     body = "Tap to view their profile"
     data = {"type": "follow", "user": follower_addr.lower(), "replyId": reply_id, "inboxReply": inbox_reply}
-    outcome = _send_push_to_user(target_owner, title, body, data)
+    outcome = _send_push_to_user(target_owner, title, body, data, actor=follower_addr)
     _check_old_receipts()
     return outcome
 
@@ -1020,7 +1077,7 @@ def _do_subscription_gift_push(
         "replyId": reply_id,
         "inboxReply": inbox_reply,
     }
-    outcome = _send_push_to_user(recipient_addr, title, body, data)
+    outcome = _send_push_to_user(recipient_addr, title, body, data, actor=gifter_addr)
     _check_old_receipts()
     return outcome
 
@@ -1073,7 +1130,7 @@ def _do_donation_push(
         "replyId": reply_id,
         "inboxReply": inbox_reply,
     }
-    outcome = _send_push_to_user(recipient_addr, title, body, data)
+    outcome = _send_push_to_user(recipient_addr, title, body, data, actor=sender_addr)
     _check_old_receipts()
     return outcome
 

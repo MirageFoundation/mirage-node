@@ -17,22 +17,27 @@ Core model (see the Server Stats Redesign plan):
 - Every metric is a query over an arbitrary ``[start, end]`` window.
 """
 
-import ipaddress
 import logging
 import re
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
 from flask import g, has_request_context, request
 
-from chain import get_connected_peers
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
 from fleet_url import validate_fleet_endpoint
+from settings import STATS_FLEET_ROSTER
 
 logger = logging.getLogger(__name__)
+
+# Statement budget for the admin aggregations in this module. They are the only
+# callers that relied on connect_db(timeout=STATS_QUERY_TIMEOUT_SEC)'s default, and unlike a feed query they are
+# genuinely allowed to be slow: several scan the full posts or votes table for an
+# infrequent, admin-facing dashboard. Stated explicitly so arming the default
+# timeout does not quietly convert a slow dashboard into a broken one.
+STATS_QUERY_TIMEOUT_SEC = 60.0
 
 VISITOR_HEADER = "X-Mirage-Visitor"
 
@@ -458,7 +463,7 @@ def _growth_visitors(start: int, end: int) -> Tuple[int, int]:
 
 
 def _contributor_addresses(start: int, end: int) -> set[str]:
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -472,7 +477,7 @@ def _contributor_addresses(start: int, end: int) -> set[str]:
 
 
 def _new_users(start: int, end: int) -> int:
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -487,7 +492,7 @@ def _new_users(start: int, end: int) -> int:
 def _contributors(start: int, end: int) -> Tuple[int, int, int]:
     """(contributors, posts, comments) in window from the indexer. Posts with a
     target are comments; votes are active usage, not contribution."""
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -531,7 +536,7 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
     signup + N days. "Active later" combines the indexer (posts/comments) and
     the backend engagement log, joined by address.
     """
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -557,7 +562,7 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
     )
 
     profiles: Dict[str, int] = {}
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -576,7 +581,7 @@ def _retention(start: int, end: int, now_ts: int) -> Dict[str, Any]:
 
     addrs = list(profiles.keys())
     last_chain: Dict[str, int] = {}
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT LOWER(owner), MAX(created_at) FROM posts WHERE LOWER(owner) = ANY(%s) GROUP BY 1",
@@ -674,7 +679,7 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
     all_addrs = sorted({a for addrs in campaign_addrs.values() for a in addrs})
     contributor_set: set = set()
     if all_addrs:
-        with connect_db() as conn:
+        with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT DISTINCT LOWER(owner) FROM posts "
@@ -706,7 +711,7 @@ def _campaigns(start: int, end: int, limit: int = 50) -> List[Dict[str, Any]]:
 def _contributors_by_day(start: int, end: int) -> Dict[int, set[str]]:
     """Distinct on-chain posters/commenters per UTC day."""
     out: Dict[int, set[str]] = {}
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT (created_at/%s)*%s AS d, LOWER(owner) "
@@ -761,7 +766,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     new_users_by_day: Dict[int, int] = {}
     posts_by_day: Dict[int, Tuple[int, int, int]] = {}
     cohort: Dict[str, int] = {}
-    with connect_db() as conn:
+    with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT (created_at/%s)*%s AS d, COUNT(*) FROM profiles "
@@ -793,7 +798,7 @@ def _daily_series(start: int, end: int, now_ts: int) -> List[Dict[str, int]]:
     last_active: Dict[str, int] = {}
     if cohort:
         addrs = list(cohort.keys())
-        with connect_db() as conn:
+        with connect_db(timeout=STATS_QUERY_TIMEOUT_SEC) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT LOWER(owner), MAX(created_at) FROM posts WHERE LOWER(owner) = ANY(%s) GROUP BY 1",
@@ -1077,77 +1082,126 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
     }
 
 
-def _peer_endpoint(ip: str) -> Optional[str]:
-    """Resolve a P2P peer IP to a fleet web endpoint, or None to skip it.
+def fleet_fanout_targets() -> List[str]:
+    """Destinations the admin stats fan-out may forward the admin's proof to.
 
-    A node that has its own domain serves https and redirects plain http to it
-    (and is already represented by its validator domain moniker, possibly behind
-    a CDN whose DNS hides the origin IP). A domain-less node (e.g. a bare
-    validator) instead serves the API directly over http on its IP. So we probe
-    http://<ip>: a redirect to https means "domain node — skip" (avoids listing
-    the same node twice); a direct response means "this IP is its only endpoint".
+    This used to be ``discover_servers()``, which unioned validator monikers with
+    live P2P peer monikers and IPs. Every one of those is self-declared text from
+    an unauthenticated source: peering with a node and setting your moniker to a
+    domain you own put your host in this list, and the aggregate route then POSTed
+    the admin's live signature proof to it. The proof is deliberately replayable
+    across fleet nodes, so one harvested copy worked against siblings that had
+    never seen the nonce.
+
+    The roster is operator configuration instead. Nothing an outsider can write
+    reaches this list, and https is enforced by the parser rather than preferred,
+    since the discovery path also synthesised ``http://`` endpoints.
     """
-    # is_global rather than a shape-only regex (L-1/L-5): the shape check accepted
-    # private, loopback and link-local addresses, so a peer list containing
-    # 169.254.169.254 or 10.x turned this into an outbound probe of the host's own
-    # network from inside the container.
-    try:
-        parsed = ipaddress.ip_address(ip)
-    except ValueError:
-        return None
-    if not parsed.is_global:
-        return None
-    try:
-        resp = requests.get(f"http://{ip}/api/get_peers", timeout=3, allow_redirects=False)
-    except requests.RequestException:
-        # Can't probe it (down/filtered); surface it so it shows as unreachable
-        # rather than silently vanishing from the fleet.
-        return f"http://{ip}"
-    if 300 <= resp.status_code < 400 and resp.headers.get("Location", "").startswith("https"):
-        return None
-    return f"http://{ip}"
-
-
-def discover_servers() -> List[str]:
-    """Full fleet, derived entirely from live network state — never hardcoded.
-
-    Two on-chain sources are unioned: validators (which advertise a web endpoint
-    via a domain moniker when they have one) and the same connected_peers list the
-    /network page uses (every P2P peer this node sees, by network IP). Domain nodes
-    come from validators; domain-less nodes are reached at their peer IP (see
-    _peer_endpoint, which skips peers that are really a domain node). Server-to-
-    server fan-out only; a peer IP is never an identity/merge key.
-    """
-    servers: List[str] = []
+    targets: List[str] = []
     seen: set = set()
-
-    def add(url: Optional[str]) -> None:
-        if not url:
-            return
+    for url in STATS_FLEET_ROSTER:
         key = url.rstrip("/")
         if key not in seen:
             seen.add(key)
-            servers.append(key)
+            targets.append(key)
+    return targets
 
-    local = local_server_label()
-    if local.startswith("http"):
-        add(local)
 
-    with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
-            row = cur.fetchone()
-            validators = row[0] if row and isinstance(row[0], list) else []
+def _coerce_count(value: Any, field: str) -> int:
+    """Coerce a peer-supplied counter, rejecting anything that is not a number.
 
-    for v in validators:
-        add(_normalize_moniker_url(v.get("moniker", "") if isinstance(v, dict) else ""))
+    ``aggregate_server_stats`` used bare ``int()`` on these outside any try/except,
+    so a peer returning a non-numeric field raised straight out of the admin
+    endpoint and 500'd it for as long as that peer stayed in the list.
+    """
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number, got {type(value).__name__}")
+    ivalue = int(value)
+    if ivalue < 0:
+        raise ValueError(f"{field} must not be negative, got {ivalue}")
+    return ivalue
 
-    for p in get_connected_peers():
-        if not isinstance(p, dict):
-            continue
-        url = _normalize_moniker_url(p.get("moniker", ""))
-        if not url:
-            url = _peer_endpoint(str(p.get("ip", "") or "").strip())
-        add(url)
 
-    return servers
+# A peer can otherwise return an arbitrarily long series and make the aggregation
+# allocate on its behalf. A window is at most a few years of daily points.
+MAX_PEER_SERIES_POINTS = 4000
+
+
+def validate_peer_stats(payload: Any) -> Dict[str, Any]:
+    """Return a normalized copy of a peer's stats response, or raise ValueError.
+
+    Only known keys survive, every counter is checked to be a number, and the two
+    series are length-bounded. Validating before the merge is what keeps a hostile
+    or simply broken peer from deciding the shape of the admin's dashboard.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError(f"peer stats must be an object, got {type(payload).__name__}")
+
+    def _section(key: str) -> Dict[str, Any]:
+        # Checked before defaulting: `or {}` would swallow a falsy wrong type such
+        # as [] or 0 and treat a malformed section as an absent one.
+        raw = payload.get(key)
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            raise ValueError(f"{key} must be an object, got {type(raw).__name__}")
+        return raw
+
+    growth_raw, onchain_raw, retention_raw = _section("growth"), _section("onchain"), _section("retention")
+
+    growth = {f: _coerce_count(growth_raw.get(f), f"growth.{f}") for f in ("visitors", "lurkers")}
+    onchain = {
+        f: _coerce_count(onchain_raw.get(f), f"onchain.{f}") for f in ("new_users", "contributors", "posts", "comments")
+    }
+    retention: Dict[str, Any] = {
+        "cohort_size": _coerce_count(retention_raw.get("cohort_size"), "retention.cohort_size")
+    }
+    for k in ("d7", "d14", "d30"):
+        bucket = retention_raw.get(k)
+        if bucket is None:
+            bucket = {}
+        if not isinstance(bucket, dict):
+            raise ValueError(f"retention.{k} must be an object, got {type(bucket).__name__}")
+        retention[k] = {
+            "eligible": _coerce_count(bucket.get("eligible"), f"retention.{k}.eligible"),
+            "retained": _coerce_count(bucket.get("retained"), f"retention.{k}.retained"),
+        }
+
+    def _points(raw: Any, label: str, fields: tuple[str, ...]) -> List[Dict[str, int]]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise ValueError(f"{label} must be a list, got {type(raw).__name__}")
+        if len(raw) > MAX_PEER_SERIES_POINTS:
+            raise ValueError(f"{label} has {len(raw)} points, limit {MAX_PEER_SERIES_POINTS}")
+        out: List[Dict[str, int]] = []
+        for i, pt in enumerate(raw):
+            if not isinstance(pt, dict):
+                raise ValueError(f"{label}[{i}] must be an object, got {type(pt).__name__}")
+            point = {"t": _coerce_count(pt.get("t"), f"{label}[{i}].t")}
+            for f in fields:
+                point[f] = _coerce_count(pt.get(f), f"{label}[{i}].{f}")
+            out.append(point)
+        return out
+
+    series = _points(
+        payload.get("series"),
+        "series",
+        ("new_users", "contributors", "posts", "comments", "lurkers", "d7_eligible", "d7_retained"),
+    )
+    dau30_raw = payload.get("dau30")
+    if dau30_raw is None:
+        dau30_raw = {}
+    if not isinstance(dau30_raw, dict):
+        raise ValueError(f"dau30 must be an object, got {type(dau30_raw).__name__}")
+    dau_days = _points(dau30_raw.get("days"), "dau30.days", ("contributors", "lurkers"))
+
+    return {
+        "growth": growth,
+        "onchain": onchain,
+        "retention": retention,
+        "series": series,
+        "dau30": {"days": dau_days},
+    }

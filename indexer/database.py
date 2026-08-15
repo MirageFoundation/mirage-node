@@ -652,24 +652,18 @@ class DatabaseManager:
                     """
                 )
 
-                # One-time backfill from existing votes (idempotent via ON CONFLICT DO NOTHING)
-                cur.execute(
-                    """
-                    INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
-                    SELECT
-                        LOWER(v.owner),
-                        LOWER(p.root_topic),
-                        COUNT(*),
-                        SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END),
-                        COUNT(DISTINCT LOWER(p.root_post_id)),
-                        0
-                    FROM votes v
-                    JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-                    WHERE p.root_topic IS NOT NULL AND p.root_topic != ''
-                    GROUP BY LOWER(v.owner), LOWER(p.root_topic)
-                    ON CONFLICT (owner, topic) DO NOTHING
-                    """
-                )
+                # There used to be a vote backfill here, labelled one-time but run on
+                # every startup, carrying its own copy of the stats definition. Its
+                # ON CONFLICT DO NOTHING only looked idempotent while the row existed:
+                # v1_36_0_repair_deleted_post_standing deletes rows whose whole vote
+                # set was an author's self-upvote on a post they later deleted, and the
+                # backfill — which had no such exclusion — re-inserted them verbatim on
+                # the next restart, undoing the repair on every node.
+                #
+                # _VOTE_STATS_FROM_CANONICAL is the single definition of a vote-derived
+                # stats row. Nothing bootstraps that table here: a fresh database has no
+                # votes yet at this point, and a legacy one is rebuilt by
+                # v1_33_0_rebuild_derived_stats.
 
                 # Backfill post_count from existing posts
                 cur.execute(
