@@ -41,7 +41,7 @@ from tests.common import (
 from tests.blockchain_helpers import (
     _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
-    _get_chain_profile, _get_profile_full, _assert_capped_deque,
+    _get_chain_profile, _get_profile_full, _wait_profile_agents, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
     _broadcast_tx_sync, _wait_for_tx_result, _submit_tx, _sign_relay,
     _build_msg_post, _build_msg_vote, _build_msg_set_username,
@@ -594,8 +594,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     _check_deliver_accept("hardcap.set_agents_atomic", ccode, dcode, dlog)
 
     # Verify order is preserved (indexer should reflect chain state)
-    profile = _get_profile_full(backend, aw_addr)
-    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    got_agents = _wait_profile_agents(backend, aw_addr, [agent3, agent2])
     if got_agents == [agent3.lower(), agent2.lower()]:
         _pass("hardcap.set_agents_order_preserved")
     else:
@@ -679,8 +678,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     )
     _check_deliver_accept("hardcap.set_agents_clear", ccode, dcode, dlog)
 
-    profile = _get_profile_full(backend, aw_addr)
-    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    got_agents = _wait_profile_agents(backend, aw_addr, [])
     if got_agents:
         _fail("hardcap.set_agents_clear_empty", f"count={len(got_agents)}")
     else:

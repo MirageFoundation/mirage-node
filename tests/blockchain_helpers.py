@@ -99,6 +99,7 @@ from tests.common import (
     _run_miraged,
     _docker_exec,
     _INSIDE_CONTAINER,
+    INDEX_TIMEOUT_SEC,
 )
 
 COMET_RPC_URL = "http://127.0.0.1:26657"
@@ -343,6 +344,24 @@ def _get_profile_full(backend: str, address: str) -> dict:
     r = _request_with_retries("GET", f"{backend}/api/get_profile", params={"address": address}, timeout=10)
     r.raise_for_status()
     return r.json() or {}
+
+
+def _wait_profile_agents(backend: str, address: str, expected: list[str]) -> list[str]:
+    """Poll get_profile until enabled_agents matches expected, and return what was last seen.
+
+    get_profile is served from the indexer, which processes blocks asynchronously, so a
+    delivered SetAgents is not visible the instant the tx lands.
+    """
+    want = [a.lower() for a in expected]
+    got = []
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        profile = _get_profile_full(backend, address)
+        got = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+        if got == want:
+            return got
+        time.sleep(1)
+    return got
 
 
 def _get_chain_profile(address: str) -> dict:
