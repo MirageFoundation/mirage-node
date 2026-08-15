@@ -238,6 +238,32 @@ const formatTopicStatus = useCallback((topic) => {
 }, [getInfo, formatStatusForPosition]);
 ```
 
+### Upgrades — ALWAYS `scripts/test_upgrade.sh`, NEVER A MANUAL EQUIVALENT
+
+**Every single upgrade must be validated by `scripts/test_upgrade.sh`. No exceptions.**
+
+```bash
+scripts/test_upgrade.sh          # run the pipeline, launch the panes
+scripts/test_upgrade.sh --wait   # block until done; exit 0 iff all three passed
+```
+
+- **Never hand-run the equivalent steps.** Reset, upgrade proposal, halt, deploy,
+  PoW raise, `test_blockchain`, `test_backend`, `verify_upgrade` — running these
+  yourself is NOT a substitute, even if you run all of them in order. The script
+  exists so the sequence and its gates cannot be partially performed.
+- **The release is not ready until `blockchain`, `backend` and `verify` all report
+  `passed`.** Read `~/.mirage/upgrade_tests/all.json` and `verify.out`.
+- **On any failure: fix the cause and re-run the whole pipeline.** Re-running a
+  single pane and declaring the release verified is not acceptable.
+- The rehearsal deploys the way production deploys, which is why it catches what
+  unit tests cannot. In `v1.36.0` it caught a binary reporting
+  `v1.36.0-1-gd783da08` — every suite passed and the release would still have
+  shipped mislabelled.
+- Agents: launch it with `required_permissions: ["all"]`. It writes status files
+  to `~/.mirage/upgrade_tests`, outside the workspace, so the sandbox kills it at
+  the first step with `rm: Permission denied`. `--wait` only reads, so it works
+  sandboxed.
+
 ### Tests
 
 **BEFORE RUNNING `tests/test_backend.py` OR `tests/test_blockchain.py` — NON-NEGOTIABLE:**
