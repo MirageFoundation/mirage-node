@@ -1,4 +1,3 @@
-/* global BigInt */
 import { updateNotification } from "../utils/notifications.js";
 import Storage from './Storage';
 import seedVault from './SeedVault';
@@ -8,7 +7,7 @@ import { getSessionGeneration } from './sessionLifecycle';
 import { peekHandoffByPurpose } from './onboardingSession';
 import Api from './api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
-import { generateEnvelopeNonce } from './canonicalEncoding';
+import { generateEnvelopeNonce, canonicalAttribution } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
@@ -3981,11 +3980,24 @@ class TransactionHandler {
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                if (transaction.invite_code) {
-                    toRelay.invite_code = transaction.invite_code;
-                }
-                if (transaction.referrer_username) {
-                    toRelay.referrer_username = transaction.referrer_username;
+                if (transaction.invite_code || transaction.referrer_username) {
+                    // Sign exactly what is sent, already normalised the way the backend
+                    // normalises it, so the two canonical strings cannot drift.
+                    const inviteCode = String(transaction.invite_code || "").trim().toUpperCase();
+                    const referrerUsername = String(transaction.referrer_username || "").trim();
+                    if (inviteCode) toRelay.invite_code = inviteCode;
+                    if (referrerUsername) toRelay.referrer_username = referrerUsername;
+                    const attrCanon = canonicalAttribution({
+                        action: 'set_username',
+                        target: signerAddress,
+                        invite_code: inviteCode,
+                        referrer_username: referrerUsername,
+                        nonce: envelopeNonce,
+                    });
+                    const attrSig = await __CosmSecp256k1.createSignature(__CosmSha256(attrCanon), privBytes);
+                    toRelay.attribution_signature = btoa(
+                        Array.from(attrSig.toFixedLength()).map(b => String.fromCharCode(b)).join('')
+                    );
                 }
                 endpoint = 'core/set_username';
             } else if (msgName === 'MsgSetBiography') {
@@ -4920,194 +4932,190 @@ class TransactionHandler {
             }
 
             // Submit transaction
-            try {
-                const out = await Api.post(endpoint, toRelay);
-                // Reports return {success: true, id: ...} instead of {tx_hash: ...}
-                const txHash = (out && out.tx_hash) ? String(out.tx_hash).toLowerCase() :
-                    ((endpoint === 'core/report' && out && out.success && out.id) ? `report-${out.id}` : null);
-                if (txHash || (endpoint === 'core/report' && out && out.success)) {
-                    // If we reserved a fee for this submission, leave it pending until next status update reduces it
-                    // No change here; pending is adjusted via status fetch above
+            const out = await Api.post(endpoint, toRelay);
+            // Reports return {success: true, id: ...} instead of {tx_hash: ...}
+            const txHash = (out && out.tx_hash) ? String(out.tx_hash).toLowerCase() :
+                ((endpoint === 'core/report' && out && out.success && out.id) ? `report-${out.id}` : null);
+            if (txHash || (endpoint === 'core/report' && out && out.success)) {
+                // If we reserved a fee for this submission, leave it pending until next status update reduces it
+                // No change here; pending is adjusted via status fetch above
 
-                    // For votes, update local direction and vote count only after tx is successfully sent
-                    if (endpoint === 'core/vote' && transaction && transaction.action === 'create_vote') {
-                        try {
-                            const targetIdRaw = String(transaction.target || '').trim();
-                            if (targetIdRaw && this.getPost && this.updatePost) {
-                                // Use the same key casing that the app state uses for posts
-                                // Try exact key first; if missing, fall back to lowercase
-                                let post = this.getPost(targetIdRaw);
-                                let targetId = targetIdRaw;
-                                if (!post) {
-                                    const lower = targetIdRaw.toLowerCase();
-                                    if (lower && lower !== targetIdRaw) {
-                                        post = this.getPost(lower);
-                                        if (post) targetId = lower;
-                                    }
-                                }
-                                if (post) {
-                                    const prevDir = (typeof post.direction === 'number') ? post.direction : 0;
-                                    const newDir = Number(transaction.direction) || 0;
-                                    const prevPoints = (typeof post.points === 'number')
-                                        ? post.points
-                                        : (Number(post.points) || 0);
-                                    const nextPoints = prevPoints + (newDir - prevDir);
-                                    this.updatePost(targetId, { direction: newDir, points: nextPoints });
-                                }
-                            }
-                            // Persist own vote highlight so arrows reflect immediately on future loads
-                            try {
-                                Storage.setVote(String(transaction.target || '').trim(), Number(transaction.direction) || 0, 100);
-                            } catch (_) { }
-                        } catch (_) { }
-                    }
-
+                // For votes, update local direction and vote count only after tx is successfully sent
+                if (endpoint === 'core/vote' && transaction && transaction.action === 'create_vote') {
                     try {
-                        // NOTE: We no longer inject transient posts or comments into the UI here.
-                        // Posts and comments must only appear after they are confirmed on-chain
-                        // and fetched back from the backend. Root posts are shown via CreatePostView
-                        // redirect + fetch, and replies via ViewPostView reloading comments.
-
-                        // For comments, we still update the root post's last-visit comment count
-                        // and timestamp so frontpage "+X new" indicators behave correctly, but we
-                        // do NOT add a temporary comment object to the parent's children.
-                        try {
-                            const parentId = String(transaction.target || '').trim();
-                            if (parentId && transaction.action === 'create_comment' && this.getPost) {
-                                const parent = this.getPost(parentId);
-                                if (parent) {
-                                    // Update root post's last-visit comment count immediately so frontpage won't show "+1 new" for own comment
-                                    // Also update last-visit timestamp to "now + 10s" to suppress highlight
-                                    const performVisitUpdate = async () => {
-                                        try {
-                                            let rootId = parentId;
-                                            // If parent is a comment (no title), we need to find the real root.
-                                            // Since the new comment (txHash) might not be indexed yet, we resolve the root using the PARENT ID.
-                                            // The parent ID is already on chain and indexed.
-                                            if (!parent || !(parent.title && String(parent.title).trim() !== '')) {
-                                                try {
-                                                    // Ask backend for the root of the PARENT, which is stable
-                                                    const res = await Api.get('get_root_post_id', { comment_id: parentId });
-                                                    if (res && res.root_post_id) {
-                                                        rootId = String(res.root_post_id).toLowerCase();
-                                                    }
-                                                } catch (err) {
-                                                    // Last resort fallback: try the new comment hash (might fail if race condition)
-                                                    if (txHash) {
-                                                        try {
-                                                            const res2 = await Api.get('get_root_post_id', { comment_id: txHash }, { timeoutMs: 5000 });
-                                                            if (res2 && res2.root_post_id) {
-                                                                rootId = String(res2.root_post_id).toLowerCase();
-                                                            }
-                                                        } catch (_) { }
-                                                    }
-                                                }
-                                            }
-
-                                            if (!rootId) {
-                                                return;
-                                            }
-
-                                            // Increment visit count
-                                            const prev = Storage.getLastVisitCommentCount(rootId);
-
-                                            if (prev !== null && prev !== undefined) {
-                                                const newVal = Number(prev) + 1;
-                                                Storage.setLastVisitCommentCount(rootId, newVal);
-                                            } else {
-                                                // No previous count: use in-memory root if present.
-                                                try {
-                                                    const rootPost = this.getPost ? this.getPost(rootId) : null;
-                                                    if (rootPost && typeof rootPost.comments === 'number') {
-                                                        Storage.setLastVisitCommentCount(rootId, rootPost.comments + 1);
-                                                    }
-                                                } catch (e) { }
-                                            }
-
-                                            // Update timestamp to suppress highlight (now + 10s buffer)
-                                            const nowSec = Math.floor(Date.now() / 1000);
-                                            Storage.setLastVisitTimestamp(rootId, nowSec + 10);
-
-                                        } catch (err) { }
-                                    };
-                                    // Execute immediately without delay
-                                    performVisitUpdate();
+                        const targetIdRaw = String(transaction.target || '').trim();
+                        if (targetIdRaw && this.getPost && this.updatePost) {
+                            // Use the same key casing that the app state uses for posts
+                            // Try exact key first; if missing, fall back to lowercase
+                            let post = this.getPost(targetIdRaw);
+                            let targetId = targetIdRaw;
+                            if (!post) {
+                                const lower = targetIdRaw.toLowerCase();
+                                if (lower && lower !== targetIdRaw) {
+                                    post = this.getPost(lower);
+                                    if (post) targetId = lower;
                                 }
                             }
-                        } catch (_) { }
-
-                        // If this was an edit, update the edited post locally
-                        try {
-                            if (transaction.action === 'edit_post' && this.updatePost) {
-                                const nowTs = Math.floor(Date.now() / 1000);
-                                const overrideId = String(transaction.override || '').toLowerCase();
-                                const isRoot = (typeof transaction.title === 'string' && transaction.title.trim().length > 0) || !transaction.target;
-                                const patch = {
-                                    edited: true,
-                                    edited_ts: nowTs,
-                                    content: transaction.content || '',
-                                    flash: true,
-                                };
-                                if (isRoot) {
-                                    patch.title = transaction.title || '';
-                                    patch.topic = transaction.topic || '';
-                                }
-                                if (Array.isArray(transaction.media)) {
-                                    patch.media = transaction.media;
-                                }
-                                this.updatePost(overrideId, patch);
-                                // Clear flash after animation delay
-                                setTimeout(() => {
-                                    try {
-                                        if (this.updatePost) {
-                                            this.updatePost(overrideId, { flash: false });
-                                        }
-                                    } catch (_) { }
-                                }, 1250);
+                            if (post) {
+                                const prevDir = (typeof post.direction === 'number') ? post.direction : 0;
+                                const newDir = Number(transaction.direction) || 0;
+                                const prevPoints = (typeof post.points === 'number')
+                                    ? post.points
+                                    : (Number(post.points) || 0);
+                                const nextPoints = prevPoints + (newDir - prevDir);
+                                this.updatePost(targetId, { direction: newDir, points: nextPoints });
                             }
-                        } catch (_) { }
-
-                        // Ensure the new topic is available immediately in the topics list
+                        }
+                        // Persist own vote highlight so arrows reflect immediately on future loads
                         try {
-                            const t = (transaction && typeof transaction.topic === 'string') ? transaction.topic.trim() : '';
-                            if (t) {
-                                const stored = Storage.load('topics', { topics: [], lastSorted: null }) || {};
-                                const existing = Array.isArray(stored.topics) ? stored.topics : [];
-                                const set = new Set(existing.filter((x) => typeof x === 'string' && x));
-                                set.add('all');
-                                set.add(t);
-                                const nextTopics = ['all', ...Array.from(set).filter((x) => x !== 'all')];
-                                Storage.save('topics', { topics: nextTopics, lastSorted: new Date() });
-                            }
+                            Storage.setVote(String(transaction.target || '').trim(), Number(transaction.direction) || 0, 100);
                         } catch (_) { }
-                        // No-op: vote highlight is keyed by post_id and is handled by VoteSection + create_vote handler.
                     } catch (_) { }
                 }
-                // For reports, success is determined by the response.success field
-                const success = (endpoint === 'core/report') ? (out && out.success === true) : !!txHash;
-                if (success) {
-                    // Per-tx "Transaction submitted" toast is intentionally suppressed here.
-                    // processTransactions() shows a single summary notification (with the
-                    // average elapsed time across the queue) once the queue is fully drained.
 
-                    // For votes, poll for indexed details to show weight
-                    if (endpoint === 'core/vote' && txHash) {
-                        const target = (transaction && transaction.action === 'create_vote') ? transaction.target : null;
-                        this._startVoteDetailsPoll(txHash, target);
-                    }
+                try {
+                    // NOTE: We no longer inject transient posts or comments into the UI here.
+                    // Posts and comments must only appear after they are confirmed on-chain
+                    // and fetched back from the backend. Root posts are shown via CreatePostView
+                    // redirect + fetch, and replies via ViewPostView reloading comments.
 
-                    // Dispatch event for quest-relevant actions so quest progress can refresh
-                    const action = transaction?.action;
-                    if (action === 'create_vote' || action === 'create_post' || action === 'create_comment') {
-                        console.log('[TransactionHandler] Dispatching questActionCompleted for action:', action);
-                        window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { action, txHash } }));
-                    }
-                }
-                resolve({ success: success, tx_hash: txHash, result: out, error: out?.error, error_code: out?.error_code });
-                return;
-            } catch (e) {
-                throw e;
+                    // For comments, we still update the root post's last-visit comment count
+                    // and timestamp so frontpage "+X new" indicators behave correctly, but we
+                    // do NOT add a temporary comment object to the parent's children.
+                    try {
+                        const parentId = String(transaction.target || '').trim();
+                        if (parentId && transaction.action === 'create_comment' && this.getPost) {
+                            const parent = this.getPost(parentId);
+                            if (parent) {
+                                // Update root post's last-visit comment count immediately so frontpage won't show "+1 new" for own comment
+                                // Also update last-visit timestamp to "now + 10s" to suppress highlight
+                                const performVisitUpdate = async () => {
+                                    try {
+                                        let rootId = parentId;
+                                        // If parent is a comment (no title), we need to find the real root.
+                                        // Since the new comment (txHash) might not be indexed yet, we resolve the root using the PARENT ID.
+                                        // The parent ID is already on chain and indexed.
+                                        if (!parent || !(parent.title && String(parent.title).trim() !== '')) {
+                                            try {
+                                                // Ask backend for the root of the PARENT, which is stable
+                                                const res = await Api.get('get_root_post_id', { comment_id: parentId });
+                                                if (res && res.root_post_id) {
+                                                    rootId = String(res.root_post_id).toLowerCase();
+                                                }
+                                            } catch (err) {
+                                                // Last resort fallback: try the new comment hash (might fail if race condition)
+                                                if (txHash) {
+                                                    try {
+                                                        const res2 = await Api.get('get_root_post_id', { comment_id: txHash }, { timeoutMs: 5000 });
+                                                        if (res2 && res2.root_post_id) {
+                                                            rootId = String(res2.root_post_id).toLowerCase();
+                                                        }
+                                                    } catch (_) { }
+                                                }
+                                            }
+                                        }
+
+                                        if (!rootId) {
+                                            return;
+                                        }
+
+                                        // Increment visit count
+                                        const prev = Storage.getLastVisitCommentCount(rootId);
+
+                                        if (prev !== null && prev !== undefined) {
+                                            const newVal = Number(prev) + 1;
+                                            Storage.setLastVisitCommentCount(rootId, newVal);
+                                        } else {
+                                            // No previous count: use in-memory root if present.
+                                            try {
+                                                const rootPost = this.getPost ? this.getPost(rootId) : null;
+                                                if (rootPost && typeof rootPost.comments === 'number') {
+                                                    Storage.setLastVisitCommentCount(rootId, rootPost.comments + 1);
+                                                }
+                                            } catch (e) { }
+                                        }
+
+                                        // Update timestamp to suppress highlight (now + 10s buffer)
+                                        const nowSec = Math.floor(Date.now() / 1000);
+                                        Storage.setLastVisitTimestamp(rootId, nowSec + 10);
+
+                                    } catch (err) { }
+                                };
+                                // Execute immediately without delay
+                                performVisitUpdate();
+                            }
+                        }
+                    } catch (_) { }
+
+                    // If this was an edit, update the edited post locally
+                    try {
+                        if (transaction.action === 'edit_post' && this.updatePost) {
+                            const nowTs = Math.floor(Date.now() / 1000);
+                            const overrideId = String(transaction.override || '').toLowerCase();
+                            const isRoot = (typeof transaction.title === 'string' && transaction.title.trim().length > 0) || !transaction.target;
+                            const patch = {
+                                edited: true,
+                                edited_ts: nowTs,
+                                content: transaction.content || '',
+                                flash: true,
+                            };
+                            if (isRoot) {
+                                patch.title = transaction.title || '';
+                                patch.topic = transaction.topic || '';
+                            }
+                            if (Array.isArray(transaction.media)) {
+                                patch.media = transaction.media;
+                            }
+                            this.updatePost(overrideId, patch);
+                            // Clear flash after animation delay
+                            setTimeout(() => {
+                                try {
+                                    if (this.updatePost) {
+                                        this.updatePost(overrideId, { flash: false });
+                                    }
+                                } catch (_) { }
+                            }, 1250);
+                        }
+                    } catch (_) { }
+
+                    // Ensure the new topic is available immediately in the topics list
+                    try {
+                        const t = (transaction && typeof transaction.topic === 'string') ? transaction.topic.trim() : '';
+                        if (t) {
+                            const stored = Storage.load('topics', { topics: [], lastSorted: null }) || {};
+                            const existing = Array.isArray(stored.topics) ? stored.topics : [];
+                            const set = new Set(existing.filter((x) => typeof x === 'string' && x));
+                            set.add('all');
+                            set.add(t);
+                            const nextTopics = ['all', ...Array.from(set).filter((x) => x !== 'all')];
+                            Storage.save('topics', { topics: nextTopics, lastSorted: new Date() });
+                        }
+                    } catch (_) { }
+                    // No-op: vote highlight is keyed by post_id and is handled by VoteSection + create_vote handler.
+                } catch (_) { }
             }
+            // For reports, success is determined by the response.success field
+            const success = (endpoint === 'core/report') ? (out && out.success === true) : !!txHash;
+            if (success) {
+                // Per-tx "Transaction submitted" toast is intentionally suppressed here.
+                // processTransactions() shows a single summary notification (with the
+                // average elapsed time across the queue) once the queue is fully drained.
+
+                // For votes, poll for indexed details to show weight
+                if (endpoint === 'core/vote' && txHash) {
+                    const target = (transaction && transaction.action === 'create_vote') ? transaction.target : null;
+                    this._startVoteDetailsPoll(txHash, target);
+                }
+
+                // Dispatch event for quest-relevant actions so quest progress can refresh
+                const action = transaction?.action;
+                if (action === 'create_vote' || action === 'create_post' || action === 'create_comment') {
+                    console.log('[TransactionHandler] Dispatching questActionCompleted for action:', action);
+                    window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { action, txHash } }));
+                }
+            }
+            resolve({ success: success, tx_hash: txHash, result: out, error: out?.error, error_code: out?.error_code });
+            return;
         } catch (error) {
             console.error('Transaction error:', error);
             const errMsg = String(error && error.message ? error.message : error);

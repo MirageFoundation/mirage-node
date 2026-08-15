@@ -161,8 +161,17 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-			# Report-only first; enforce after UAT soak (see frontend security remediation).
-			Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
+			# All window.open calls pass noopener,noreferrer and nothing here talks to
+			# a popup, so severing the opener relationship costs nothing.
+			Cross-Origin-Opener-Policy "same-origin"
+			Cross-Origin-Resource-Policy "same-origin"
+			# Enforcing, not report-only. It shipped report-only with no report-uri,
+			# report-to or Reporting-Endpoints anywhere, so no violation was ever
+			# collected and the "enforce after UAT soak" exit criterion could not be
+			# reached — it was a no-op with a plan attached. img-src and media-src stay
+			# permissive by decision: tightening them to the mediaPolicy.js allowlist
+			# would break inline media from arbitrary hosts.
+			Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
 		}
 
 		@aasa path /.well-known/apple-app-site-association

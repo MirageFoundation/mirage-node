@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import styled from "styled-components";
 import ReactMarkdown from "react-markdown";
+import { markdownUrlTransform } from "../../../utils/markdownUrl";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import InlineMedia from "./InlineMedia";
@@ -345,10 +346,10 @@ export default function MarkdownRenderer({ text }) {
         <Container>
             <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkHashtags, remarkSoftBreaks]}
+                urlTransform={markdownUrlTransform}
                 components={{
                     img: ({ src }) => <InlineMedia url={src} />,
                     a: ({ href, children }) => (
-                        // eslint-disable-next-line jsx-a11y/anchor-has-content
                         <a href={href} target="_blank" rel="noopener noreferrer">
                             {children}
                         </a>

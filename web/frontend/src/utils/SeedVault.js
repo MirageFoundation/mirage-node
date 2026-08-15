@@ -227,7 +227,7 @@ class SeedVault {
                 this._pwdKeyBytes = keyBytes;
                 this._touchUnlock();
                 return true;
-            } catch (e) {
+            } catch (_e) {
                 throw new Error('Incorrect password');
             }
         }
@@ -247,7 +247,7 @@ class SeedVault {
                 this._prfKeyBytes = keyBytes;
                 this._touchUnlock();
                 return true;
-            } catch (e) {
+            } catch (_e) {
                 throw new Error('Passkey decryption failed');
             }
         }
@@ -394,6 +394,41 @@ class SeedVault {
         try { console.debug('[SeedVault] auto-lock', { mode, idleMs, mins }); } catch (_) { /* noop */ }
         this.lock();
         return true;
+    }
+
+    /**
+     * Whether storeSeed(seed, getMode(), null) can succeed. The protected modes
+     * re-encrypt with a cached key, and lock() nulls it, so after a lock there is
+     * no secret and the write would throw. Callers must pick a storable target
+     * mode instead of leaving the session with no seed at all.
+     */
+    canStoreWithoutSecret() {
+        const mode = this.getMode();
+        if (mode === 'password') return !!this._pwdKeyBytes;
+        if (mode === 'passkey') return !!this._prfKeyBytes;
+        return true;
+    }
+
+    /**
+     * Store a seed for a session that has just been established by login, using a
+     * mode that can actually be written.
+     *
+     * The "sign in with recovery phrase instead" link locks the vault before
+     * routing to /login, so a protected mode arrives here with no secret and no
+     * cached key. Writing it anyway threw, which left the app rendering as signed
+     * in with no seed: every signature failed and the unlock screen offered the
+     * same broken link on reload. Falling back to memory keeps the session usable
+     * and persists nothing, so it is not a downgrade to plaintext — but it does
+     * not survive a refresh, which is why the caller warns the user to set the
+     * vault up again.
+     *
+     * @returns {Promise<{ mode: string, requested: string }>}
+     */
+    async storeSeedForSession(seed) {
+        const requested = this.getMode() || 'insecure';
+        const mode = this.canStoreWithoutSecret() ? requested : 'memory';
+        await this.storeSeed(seed, mode, null);
+        return { mode, requested };
     }
 
     requireFreshUnlock(maxAgeMs = 60_000) {

@@ -87,10 +87,53 @@ def _test_topic_matcher() -> None:
         _fail("backend_hardening.wildcard_counter", f"cap={MAX_TOPIC_WILDCARDS}")
 
 
+def _test_attribution_canon() -> None:
+    """L-2 (frontend review): the attribution encoding is pinned across languages.
+
+    invite_code and referrer_username drive the referral reward ledger and used to
+    be appended to the POST body after the signature was computed. They now carry
+    their own signature, which only works if both sides build the same bytes — so
+    these vectors are duplicated verbatim in the frontend's
+    tests/unit/frontendHardening.test.js. A change on one side alone turns every
+    invited signup into a rejection, which is the loud failure this pins.
+    """
+    root = Path(__file__).resolve().parents[2]
+    for extra in (root, root / "web" / "backend"):
+        if str(extra) not in sys.path:
+            sys.path.insert(0, str(extra))
+    from pow import canon_attribution
+
+    vectors = [
+        (
+            ("set_username", "MIRAGE1abc", "ABCD-1234", "", 1786816859440123),
+            "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653161626300414243442d31323334000031373836383136383539343430313233",
+        ),
+        (
+            ("set_username", "mirage1xyz", "", "bob-1", 9007199254740991),
+            "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653178797a0000626f622d310039303037313939323534373430393931",
+        ),
+    ]
+    for args, expected in vectors:
+        got = canon_attribution(*args).hex()
+        if got != expected:
+            _fail("backend_hardening.attribution_canon", f"args={args} got={got}")
+            return
+
+    # The nonce binding is what stops a captured signature being replayed onto a
+    # different request carrying a different invite code.
+    a = canon_attribution("set_username", "mirage1abc", "ABCD-1234", "", 1)
+    b = canon_attribution("set_username", "mirage1abc", "ABCD-1234", "", 2)
+    if a == b:
+        _fail("backend_hardening.attribution_canon", "nonce not bound into the payload")
+        return
+    _pass("backend_hardening.attribution_canon")
+
+
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
     _test_topic_matcher()
+    _test_attribution_canon()
 
     if not _check_local_docker():
         _skip("backend_hardening.container_probes", "requires local docker")
@@ -310,6 +353,45 @@ def test_backend_hardening(backend: str):
         "import inspect, node\n"
         "src = inspect.getsource(node._export_privkey_bytes)\n"
         "print('OK' if 'out[:200]' not in src and 'out}' not in src else ('BAD', src[-200:]))\n",
+    )
+
+    # ── 2026-08-14 frontend review ───────────────────────────────────────
+    # L-2: a real sign/verify roundtrip over the attribution payload, and proof
+    # that swapping the invite code afterwards fails verification.
+    _probe(
+        "backend_hardening.attribution_signature_roundtrip",
+        "import hashlib\n"
+        "from cryptography.hazmat.primitives.asymmetric import ec\n"
+        "from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, Prehashed\n"
+        "from cryptography.hazmat.primitives import hashes, serialization\n"
+        "from pow import canon_attribution\n"
+        "from routes.core import _verify_signature\n"
+        "priv = ec.derive_private_key(0x4d69726167655465737441747472696273, ec.SECP256K1())\n"
+        "pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.CompressedPoint)\n"
+        "signed = canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', '', 42)\n"
+        "der = priv.sign(hashlib.sha256(signed).digest(), ec.ECDSA(Prehashed(hashes.SHA256())))\n"
+        "r, s = decode_dss_signature(der)\n"
+        "sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big')\n"
+        "good = _verify_signature(pub, sig, signed)\n"
+        "swapped_code = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'BBBB-2222', '', 42))\n"
+        "swapped_ref = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', 'mallory', 42))\n"
+        "replayed = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', '', 43))\n"
+        "ok = good and not swapped_code and not swapped_ref and not replayed\n"
+        "print('OK' if ok else ('BAD', good, swapped_code, swapped_ref, replayed))\n",
+    )
+    # The handler blanks referrer_username when a direct invite code is present.
+    # Verification has to run against the value the client actually signed, so it
+    # must read received_referrer and not the post-blanking raw_referrer -- an
+    # ordering slip there would reject every code+referrer signup.
+    _probe(
+        "backend_hardening.attribution_verifies_received_value",
+        "import inspect, re\n"
+        "from routes import core\n"
+        "src = inspect.getsource(core.core_set_username)\n"
+        "call = re.search(r'canon_attribution[(](.*?)[)]', src, re.S)\n"
+        "args = call.group(1) if call else ''\n"
+        "ok = bool(call) and 'received_referrer' in args and 'raw_referrer' not in args\n"
+        "print('OK' if ok else ('BAD', args[:200]))\n",
     )
 
     # Push enabled with an empty Expo token must be reported loudly. It is not

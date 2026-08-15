@@ -171,9 +171,11 @@ export function useInbox({
             if (!isMountedRef.current) return;
             setError(String(e && e.message ? e.message : 'Failed to load inbox'));
         } finally {
-            if (!isMountedRef.current) return;
-            setLoading(false);
-            setIsLoadingMore(false);
+            // A return here would swallow anything propagating out of the try.
+            if (isMountedRef.current) {
+                setLoading(false);
+                setIsLoadingMore(false);
+            }
         }
     }, [viewerAddress, applyInboxPage]);
     useEffect(() => {

@@ -15,7 +15,8 @@ import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } 
 
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
-import { installCrossTabSessionWatcher } from './utils/sessionLifecycle';
+import { installCrossTabSessionWatcher, onSessionReset, resetClientSession } from './utils/sessionLifecycle';
+import { updateNotification } from './utils/notifications';
 
 
 // Lazy import wrapper that handles chunk load failures after deployments.
@@ -76,7 +77,6 @@ const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const FAQView = lazyWithRetry(() => import('./views/FAQView'));
 const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
-/* global __MIRAGE_APP_VERSION__ */
 const APP_VERSION = typeof __MIRAGE_APP_VERSION__ === 'string' ? __MIRAGE_APP_VERSION__ : '';
 
 // Routes that should not be saved/restored
@@ -390,11 +390,30 @@ class App extends Component {
             } catch (_) { /* noop */ }
         }, 30_000);
 
-        // Cross-tab session reset
+        // Cross-tab session reset. Locking the vault alone leaves this tab's queue,
+        // pending maps and PoW worker running, and leaves its session generation
+        // unbumped, so a queued intent that predates the sign-out still matches if
+        // the user signs back into the same account here.
         this._removeCrossTabWatcher = installCrossTabSessionWatcher(() => {
-            try { seedVault.lock(); } catch (_) { /* noop */ }
+            resetClientSession({ reason: 'cross_tab_sign_out', clearVault: true, lockVault: true })
+                .catch((e) => { console.error('[App] cross-tab session reset failed:', e?.message || e); });
             this.setState({ publicKey: '', username: '', seedPhrase: '' });
         });
+
+        // Rendered posts carry the viewer's own user_vote, so they are account-bound
+        // and must not outlive the session that fetched them.
+        this._removeSessionResetSub = onSessionReset(({ reason }) => {
+            try { console.debug('[App] clearing post state on session reset', { reason }); } catch (_) { /* noop */ }
+            this.setState({ posts: [], deletedPosts: new Set(), topic: 'all' });
+        });
+
+        // A failed vault write leaves a session that renders as signed in but cannot
+        // sign anything, so it has to be visible rather than a console line.
+        this._onSeedVaultStoreFailed = (e) => {
+            const msg = String(e?.detail?.message || 'Failed to store recovery phrase');
+            updateNotification(`Could not save your recovery phrase: ${msg}`, 15, true);
+        };
+        window.addEventListener('seedVaultStoreFailed', this._onSeedVaultStoreFailed);
 
         // Listen for theme id changes from SettingsView
         this._onThemeIdChange = (e) => {
@@ -491,8 +510,12 @@ class App extends Component {
         try {
             if (typeof this._removeCrossTabWatcher === 'function') this._removeCrossTabWatcher();
         } catch (_) { }
+        try {
+            if (typeof this._removeSessionResetSub === 'function') this._removeSessionResetSub();
+        } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
         try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
+        try { window.removeEventListener('seedVaultStoreFailed', this._onSeedVaultStoreFailed); } catch (_) { }
         try { window.removeEventListener('themeIdChanged', this._onThemeIdChange); } catch (_) { }
         try { window.removeEventListener('themeModeChanged', this._onThemeModeChange); } catch (_) { }
         try {
@@ -797,11 +820,21 @@ class App extends Component {
 
         Storage.save('publicKey', publicKey);
         Storage.save('username', username);
+        // Any owner stashed for the unlock screen is obsolete once credentials are set.
+        Storage.remove('vault_owner');
         // Store seed through SeedVault. Never silently downgrade to insecure on error —
         // preserve the previous vault and surface the failure.
         if (seedPhrase) {
-            const mode = seedVault.getMode() || 'insecure';
-            seedVault.storeSeed(seedPhrase, mode, null).catch((e) => {
+            seedVault.storeSeedForSession(seedPhrase).then(({ mode, requested }) => {
+                if (mode !== requested) {
+                    console.warn('[SeedVault] vault was locked; stored seed in memory mode', { requested });
+                    updateNotification(
+                        'Signed in for this session only — set up vault protection again in Settings.',
+                        10,
+                        true,
+                    );
+                }
+            }).catch((e) => {
                 console.error('[SeedVault] Failed to store seed (vault unchanged):', e?.message || e);
                 try {
                     window.dispatchEvent(new CustomEvent('seedVaultStoreFailed', {
@@ -886,7 +919,7 @@ class App extends Component {
             let hasChanges = false;
 
             for (const postId in updatedPosts) {
-                if (!updatedPosts.hasOwnProperty(postId)) continue;
+                if (!Object.prototype.hasOwnProperty.call(updatedPosts, postId)) continue;
                 const key = String(postId).toLowerCase();
                 const dir = savedVotes[key];
                 if (dir !== undefined && dir !== null && updatedPosts[postId].direction !== dir) {
@@ -914,7 +947,7 @@ class App extends Component {
 
             // Iterate over each new post
             for (let postId in newPosts) {
-                if (!newPosts.hasOwnProperty(postId)) continue;
+                if (!Object.prototype.hasOwnProperty.call(newPosts, postId)) continue;
                 const key = String(postId).toLowerCase();
 
                 // Skip posts that were locally deleted

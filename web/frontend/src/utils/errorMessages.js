@@ -15,6 +15,7 @@ const ERROR_MAP = {
     invite_code_invalid_format: "Invite code format is invalid.",
     invite_codes_not_required: "Invite codes are not required on this node.",
     invite_codes_main_site_only: "Invite codes only work on mirage.talk.",
+    attribution_signature_invalid: "Could not verify your invite code. Please reload and try again.",
 
     // Username
     username_required: "A username is required.",

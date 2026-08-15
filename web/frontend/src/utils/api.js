@@ -43,12 +43,23 @@ let apiSessionGeneration = 0;
 function resetApiSession(gen, reason = 'session_reset') {
     apiSessionGeneration = typeof gen === 'number' ? gen : (apiSessionGeneration + 1);
     try {
-        console.debug('[Api] resetApiSession', { generation: apiSessionGeneration, reason, inflight: sessionControllers.size });
+        console.debug('[Api] resetApiSession', {
+            generation: apiSessionGeneration,
+            reason,
+            inflight: sessionControllers.size,
+            cached: responseCache.size,
+        });
     } catch (_) { /* noop */ }
     for (const c of [...sessionControllers]) {
         try { c.abort(); } catch (_) { /* noop */ }
     }
     sessionControllers.clear();
+    // Aborting in-flight work is not enough: a completed response cached under the
+    // previous account is served straight from responseCache on the next read, and
+    // the cache-hit branch never compares generations.
+    responseCache.clear();
+    inflight.clear();
+    prefetchKey = null;
 }
 
 function trackController(controller) {

@@ -622,6 +622,33 @@ def canon_base_award(
     return bytes(out)
 
 
+def canon_attribution(
+    action: str,
+    target: str,
+    invite_code: str,
+    referrer_username: str,
+    nonce: int,
+) -> bytes:
+    """Canonical bytes for backend-only fields that ride along with a relayed message.
+
+    The chain envelope has a fixed shape, so attribution fields (invite_code,
+    referrer_username) cannot go into it and were previously appended to the POST
+    body after signing. They now carry their own signature over these bytes, bound
+    to the envelope nonce so a captured signature cannot be lifted onto another
+    request. Must match canonicalAttribution() in
+    web/frontend/src/utils/canonicalEncoding.js byte for byte.
+    """
+    parts = [
+        "mirage.attribution.v1",
+        str(action or ""),
+        str(target or "").lower(),
+        str(invite_code or ""),
+        str(referrer_username or ""),
+        str(int(nonce or 0)),
+    ]
+    return "\x00".join(parts).encode("utf-8")
+
+
 def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
     """
     Insert pow (tag 5) between difficulty (tag 4) and timestamp (tag 6)

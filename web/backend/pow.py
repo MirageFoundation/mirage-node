@@ -26,6 +26,7 @@ except Exception:
     _Argon2Type = None
 
 from shared import canon as canon_shared
+from shared.canon import canon_attribution  # noqa: F401  (re-exported for routes)
 
 
 def uvarint(n: int) -> bytes:

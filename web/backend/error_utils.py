@@ -38,6 +38,7 @@ ERRORS = {
     "invite_code_invalid_format": "invalid code format",
     "invite_codes_not_required": "invite codes not required on this node",
     "invite_codes_main_site_only": "invite codes only work on mirage.talk",
+    "attribution_signature_invalid": "invite code and referrer must be signed",
     # Username
     "username_required": "username required",
     "username_too_short": "username too short",

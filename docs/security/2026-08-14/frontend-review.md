@@ -11,16 +11,24 @@
 
 ## Summary
 
-**1 High, 2 Medium, 2 Low, 1 Informational. Nothing Critical.** No fix has been applied; this document is review only.
+**1 High, 2 Medium, 2 Low, 1 Informational. Nothing Critical.**
+
+> **Status: closed.** Every finding was dispositioned and shipped in **v1.36.0** —
+> see [Remediation](#remediation). One narrow part of M-1 (`img-src`/`media-src`
+> host breadth) and the two `react-router` advisories were accepted as risk and are
+> not to be raised again. The body below is the review as written, before any fix.
+>
+> The `img-src`/`media-src` line above is the accepted part; the enforcing-mode
+> flip that M-1 is mostly about did ship.
 
 | ID | Finding | Severity | Status |
 | :-- | :-- | :-- | :-- |
-| **H-1** | "Sign in with recovery phrase instead" cannot restore a password or passkey vault, and fails silently | High | Open |
-| **M-1** | CSP has been Report-Only since the day it shipped, and no collector exists, so the soak that would end it can never conclude | Medium | Open |
-| **M-2** | `onSessionReset` has no subscribers; sign-out leaves per-tab feed, API and `sessionStorage` caches populated | Medium | Open |
-| **L-1** | Cross-tab sign-out locks the sibling tab's vault but does not drain its queue | Low | Open |
-| **L-2** | Signed request bodies are narrower than the fields the backend acts on | Low | Open |
-| **I-1** | The lint gate covers 7 of 322 source files | Informational | Open |
+| **H-1** | "Sign in with recovery phrase instead" cannot restore a password or passkey vault, and fails silently | High | Fixed in v1.36.0 |
+| **M-1** | CSP has been Report-Only since the day it shipped, and no collector exists, so the soak that would end it can never conclude | Medium | Fixed in v1.36.0 (media host breadth accepted) |
+| **M-2** | `onSessionReset` has no subscribers; sign-out leaves per-tab feed, API and `sessionStorage` caches populated | Medium | Fixed in v1.36.0 |
+| **L-1** | Cross-tab sign-out locks the sibling tab's vault but does not drain its queue | Low | Fixed in v1.36.0 |
+| **L-2** | Signed request bodies are narrower than the fields the backend acts on | Low | Fixed in v1.36.0 |
+| **I-1** | The lint gate covers 7 of 322 source files | Informational | Fixed in v1.36.0 |
 
 IDs are local to this document. In [`open-items.md`](../open-items.md) the High is filed as **H-3 (08-14)** to avoid colliding with the two indexer Highs of the same date, and the rest are suffixed `(fe)`.
 
@@ -359,3 +367,50 @@ Not run: the Playwright e2e suite, which needs a browser download. It pins the a
 - The backend and the frontend are operated by the same party, which is what bounds L-2. If a third-party relay is ever introduced, L-2 should be re-rated immediately.
 - CDN-added response headers may exist but are not a repository-controlled guarantee; the origin Caddy configuration is the baseline and must fail secure on its own.
 - Chain and backend authorization are out of scope except where needed to decide whether a frontend issue is contained.
+
+---
+
+## Remediation
+
+Shipped in **v1.36.0**. Every finding raised in this document has a disposition
+below; none is left open.
+
+Regression coverage lives in `web/frontend/tests/unit/frontendHardening.test.js`
+(18 tests) and, for the two-sided L-2 fix, in `tests/cases/test_backend_hardening.py`
+and the `account` category of `tests/test_backend.py`. The set was mutation-tested:
+`npm run check:mutation` reverts each frontend fix in turn and requires the test that
+covers it to fail, and the backend guard was reverted twice inside the local
+container — once to drop the check entirely, once to verify against the
+post-blanking referrer instead of the signed one. Every mutation was caught. The
+probe runs in CI, so a future revert cannot pass silently.
+
+| ID | Status | What was done |
+| :-- | :-- | :-- |
+| **H-1** | Fixed | `seedVault.storeSeedForSession()` picks a mode it can actually write: `canStoreWithoutSecret()` reports whether the current protected mode still holds a cached key, and when it does not — which is exactly the state `handleFallbackLogin` creates — the seed goes to `memory` instead of throwing. The session is usable immediately and nothing is persisted, so this is not a downgrade to plaintext; because it does not survive a refresh, `setCredentials` raises a notification telling the user to set the vault up again in Settings. A `seedVaultStoreFailed` listener in `App.js` surfaces any remaining store failure instead of swallowing it. |
+| **M-1** | Fixed | The header is now `Content-Security-Policy`, not `Content-Security-Policy-Report-Only`. The soak had no end condition because it had no collector; enforcing on UAT first and then prod replaces the collector with the only signal that was ever going to arrive. `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Resource-Policy: same-origin` were added at the same time. |
+| **M-1 (`img-src`/`media-src`)** | **Accepted as risk** | `img-src` and `media-src` still allow any HTTPS host. This is only reachable after a supply-chain compromise of the bundle itself — `script-src 'self'` would not stop such a script, and no post content can reach it — and tightening to the `mediaPolicy` allowlist would break inline media from arbitrary hosts, which is accepted behaviour. Not to be raised again. |
+| **M-2** | Fixed | `onSessionReset` now has subscribers: the per-tab feed cache (`useMain`), the API response cache and inflight map (`api.js`), the seen-posts buffer (`useSeenPosts`), `ProfileCache` pending requests, `UsernameCache`, and `App.state.posts`. Sign-out calls `resetClientSession({ hardReset: true })`, so `sessionStorage` is cleared alongside `localStorage` rather than surviving into the next account. |
+| **M-7 (from 2026-08-07, folded in here)** | Fixed | Revealing or copying the phrase in a protected vault now requires a step-up: `requestSeedReveal()` calls `seedVault.requireFreshUnlock(120s)` and, when the unlock is stale, prompts for the password or re-runs the passkey ceremony before the phrase is shown. Wired in all four themes. |
+| **L-1** | Fixed | The cross-tab watcher calls `resetClientSession({ reason: 'cross_tab_sign_out', clearVault: true, lockVault: true })` instead of `seedVault.lock()` alone, so the sibling tab's queue, pending maps and PoW worker are drained and its session generation is bumped. The encrypted blob is kept, so the tab can still offer the unlock screen. |
+| **L-2** | Fixed | `invite_code` and `referrer_username` — the two fields with money attached — now carry an `attribution_signature` over `canon_attribution`, bound to the same envelope nonce so a captured signature cannot be lifted onto another request. The canonical encoding lives in `shared/canon.py` and `canonicalEncoding.js` and is pinned byte-for-byte on both sides by shared golden vectors. The backend verifies against the value it *received*, before the handler's own referrer-blanking, and rejects with `attribution_signature_invalid`. Other fields of this kind were left unsigned; these two were selected because they are the ones that pay out. |
+| **I-1** | Fixed | `npm run lint` covers `src tests scripts` — the whole tree — with errors fatal and warnings permitted, to be ratcheted down over time; the original narrow zero-warning gate survives as `lint:strict` and both run in CI. The pre-existing errors this surfaced (`no-redeclare`, `no-prototype-builtins`, `no-unsafe-finally`, `no-useless-catch`, and phantom `jsx-a11y` disables for a plugin that is not installed) were fixed rather than suppressed. |
+| **I-1 (related CI gaps)** | Fixed | `check:headers` asserts the six security headers and the enforcing CSP directly against the Caddyfile, and `deploy/templates/caddy/**` was added to the workflow's path filter so a header change triggers it. `check:repro` now runs in CI. `check:audit` gates at moderate against an explicit allowlist, which is stricter than the previous blanket `--audit-level=high` while still expressing the two accepted advisories as named exceptions rather than as a raised threshold. |
+| **Dependency (`react-router` 6.30.4)** | **Accepted as risk** | Both moderate advisories are unreachable here — no SSR hydration path, and router targets are not built from unconstrained user input — and the fix is a breaking major bump. Recorded by GHSA ID in `scripts/check_audit.mjs`, so a *new* advisory still fails the build. Not to be raised again. |
+| **Sub-threshold** | Fixed | `markdownUrlTransform` drops protocol-relative (`//host`) and backslash-authority URLs before `defaultUrlTransform` sees them, in all four themes; `SearchDropdown` thumbnails go through `classifyMediaUrl` like every other media surface. |
+
+### Bookkeeping corrections
+
+Both errors identified in the Summary were corrected in
+[`open-items.md`](../open-items.md) and annotated in the
+[2026-08-09 retest](../2026-08-09/frontend-retest.md): M-1 was recorded as
+"Closed (report-only)" when report-only is a milestone rather than a closure, and
+the 2026-08-07 M-7 was never closed — a different item was filed under its ID.
+
+### Correction found while testing
+
+The review's H-1 trace was correct, but the natural fix was not the obvious one.
+Making `storeSeed` tolerate a null secret would have written the seed in plaintext
+for a user who had explicitly chosen a protected mode. Falling back to `memory`
+keeps the failure visible (the session does not survive a refresh, and the user is
+told why) without silently downgrading custody, which is why the fallback warns
+rather than persisting.

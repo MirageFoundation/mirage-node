@@ -1,4 +1,5 @@
 import Api from './api';
+import { onSessionReset } from './sessionLifecycle';
 
 // Shared username cache (address -> username), persisted for 24h.
 const CACHE_KEY = 'usernames_cache_v1';
@@ -7,6 +8,15 @@ const TTL_MS = 86400000; // 24 hours
 let cacheLoaded = false;
 let cacheMap = {}; // keys: lowercase address, value: username string
 let cacheTimestamp = 0;
+
+// Sign-out wipes the localStorage copy, so the in-memory map has to be dropped
+// too or loadCache() keeps serving it without ever re-reading.
+onSessionReset(({ reason }) => {
+    cacheLoaded = false;
+    cacheMap = {};
+    cacheTimestamp = 0;
+    try { console.debug('[UsernameCache] cleared on session reset', { reason }); } catch (_) { /* noop */ }
+});
 
 function loadCache() {
     if (cacheLoaded) return;

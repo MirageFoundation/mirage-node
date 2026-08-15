@@ -17,7 +17,10 @@ export function useSignOut({
       try {
         console.debug('[SignOut] session-reset-start');
       } catch (_) { /* noop */ }
-      await resetClientSession({ reason: 'sign_out', preserveAnalytics: true, clearVault: true });
+      // hardReset so sessionStorage goes too — feed_order_*, feed_scroll_*,
+      // mirage_came_from_feed and the pending seen-post batch all live there and
+      // would otherwise be inherited by the next account in this tab.
+      await resetClientSession({ reason: 'sign_out', clearVault: true, hardReset: true });
       if (cancelled) return;
       setCredentials("", "", "");
       navigate("/");

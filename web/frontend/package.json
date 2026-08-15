@@ -30,14 +30,18 @@
         "dev": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite'",
         "build": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export VITE_APP_VERSION=\"${VITE_APP_VERSION:-${GIT_BRANCH} (${GIT_HASH})}\"; vite build'",
         "preview": "vite preview",
-        "lint": "eslint src/utils/onboardingSession.js src/utils/sessionLifecycle.js src/utils/mediaPolicy.js src/utils/CryptoUtils.js src/logic/useLogin.js src/logic/useWelcome.js src/logic/useSignOut.js tests scripts --max-warnings=0",
+        "lint": "eslint src tests scripts",
+        "lint:strict": "eslint src/utils/onboardingSession.js src/utils/sessionLifecycle.js src/utils/mediaPolicy.js src/utils/markdownUrl.js src/utils/CryptoUtils.js src/utils/SeedVault.js src/logic/useLogin.js src/logic/useWelcome.js src/logic/useSignOut.js tests scripts --max-warnings=0",
         "test": "vitest run",
         "test:watch": "vitest",
         "test:e2e": "playwright test --project=chromium-mocked",
         "check:pow-assets": "node scripts/sync_pow_assets.mjs --check",
         "sync:pow-assets": "node scripts/sync_pow_assets.mjs",
         "check:bundle-policy": "node scripts/check_bundle_policy.mjs",
-        "check:repro": "node scripts/check_build_reproducibility.mjs --run"
+        "check:repro": "node scripts/check_build_reproducibility.mjs --run",
+        "check:audit": "node scripts/check_audit.mjs",
+        "check:headers": "node scripts/check_caddy_headers.mjs",
+        "check:mutation": "node scripts/mutation_probe.mjs"
     },
     "browserslist": {
         "production": [

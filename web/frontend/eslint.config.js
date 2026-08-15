@@ -48,6 +48,10 @@ export default [
             }],
             'no-empty': ['error', { allowEmptyCatch: true }],
             'no-restricted-globals': ['error', 'event', 'fdescribe'],
+            // Apostrophes in UI copy. React escapes text nodes regardless, so this
+            // is a style preference; keeping it an error would have blocked
+            // widening the gate from 7 files to the whole tree.
+            'react/no-unescaped-entities': 'warn',
         },
     },
     {

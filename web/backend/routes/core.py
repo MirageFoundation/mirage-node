@@ -86,6 +86,7 @@ from user_last_seen import update_user_last_seen
 from shared.inbox import record_inbox_event, follow_event_key, donation_event_key, subscription_gift_event_key
 from pow import (
     argon2_digest,
+    canon_attribution,
     canon_base_post,
     canon_base_edit,
     canon_base_annotate,
@@ -1010,7 +1011,10 @@ def core_set_username():
 
         invite_code = str(data.get("invite_code", "")).strip().upper()
         has_direct_code = bool(invite_code and len(invite_code) == 9 and invite_code[4] == "-")
-        raw_referrer = "" if has_direct_code else str(data.get("referrer_username", "")).strip()
+        # Keep the value as received: the attribution signature covers what the client
+        # sent, not what this handler later decides to ignore.
+        received_referrer = str(data.get("referrer_username", "")).strip()
+        raw_referrer = "" if has_direct_code else received_referrer
         referrer_is_address = raw_referrer.lower().startswith("mirage1")
         referrer_max_length = 64 if referrer_is_address else max_u
         if raw_referrer and len(raw_referrer) > referrer_max_length:
@@ -1075,6 +1079,29 @@ def core_set_username():
                 return jsonify({"error": "invalid signature"}), 400
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
+
+        # invite_code and referrer_username drive the referral reward path but cannot
+        # go into the chain envelope, whose shape the ante fixes. They carry their own
+        # signature so the signed payload is as wide as the body acted on.
+        if invite_code or received_referrer:
+            attribution_sig = str(data.get("attribution_signature", "")).strip()
+            if not attribution_sig:
+                log_event(rid, "set_username.attribution_signature_missing", user=user_addr)
+                return api_error_code("attribution_signature_invalid")
+            try:
+                attr_sig_dec = base64.b64decode(attribution_sig)
+            except Exception:
+                return api_error_code("attribution_signature_invalid")
+            attr_signed = canon_attribution(
+                "set_username",
+                user_addr,
+                invite_code,
+                received_referrer,
+                nonce,
+            )
+            if not _verify_signature(pub_dec, attr_sig_dec, attr_signed):
+                log_event(rid, "set_username.attribution_signature_invalid", user=user_addr)
+                return api_error_code("attribution_signature_invalid")
 
         referrer_username = raw_referrer
         referrer_address = ""

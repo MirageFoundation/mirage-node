@@ -1,5 +1,3 @@
-/* global __MIRAGE_FAQ_MARKDOWN__ */
-
 const FAQ_MARKDOWN = __MIRAGE_FAQ_MARKDOWN__;
 
 if (typeof FAQ_MARKDOWN !== 'string' || FAQ_MARKDOWN.trim() === '') {

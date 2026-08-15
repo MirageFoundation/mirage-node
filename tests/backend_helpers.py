@@ -47,6 +47,7 @@ from tests.common import (
     _canon_base_award_raw,
     _canon_base_annotate_raw,
     canon_signed_with_pow,
+    canon_attribution,
     sign_canonical,
     compute_pow,
     get_status,
@@ -715,6 +716,8 @@ def _do_set_username_raw(
     skip_pow: bool = False,
     invite_code: str | None = None,
     referrer_username: str | None = None,
+    omit_attribution_signature: bool = False,
+    tamper_referrer_after_signing: str | None = None,
 ) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
@@ -743,10 +746,20 @@ def _do_set_username_raw(
     }
     if not skip_pow:
         payload["pow"] = int(proof)
-    if invite_code:
-        payload["invite_code"] = str(invite_code).strip().upper()
-    if referrer_username:
-        payload["referrer_username"] = str(referrer_username).strip()
+    code_clean = str(invite_code).strip().upper() if invite_code else ""
+    referrer_clean = str(referrer_username).strip() if referrer_username else ""
+    if code_clean:
+        payload["invite_code"] = code_clean
+    if referrer_clean:
+        payload["referrer_username"] = referrer_clean
+    if (code_clean or referrer_clean) and not omit_attribution_signature:
+        # These drive the referral reward path but cannot enter the chain envelope,
+        # so they carry a second signature bound to the same envelope nonce.
+        payload["attribution_signature"] = _b64(
+            sign_canonical(wallet, canon_attribution("set_username", addr, code_clean, referrer_clean, nonce))
+        )
+    if tamper_referrer_after_signing is not None:
+        payload["referrer_username"] = tamper_referrer_after_signing
     code, resp = _post(f"{backend}/api/core/set_username", payload)
     return resp
 

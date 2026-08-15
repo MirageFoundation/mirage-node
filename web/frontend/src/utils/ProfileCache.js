@@ -1,4 +1,5 @@
 import Api from './api';
+import { onSessionReset } from './sessionLifecycle';
 
 const CACHE_KEY = 'profile_followed_cache';
 const NO_CACHE_UNTIL_KEY = 'profile_no_cache_until';
@@ -6,6 +7,13 @@ const CACHE_TTL_MS = 86400000; // 24 hours
 const NO_CACHE_WINDOW_MS = 30000; // 30 seconds after follow/unfollow
 
 const pendingRequests = new Map();
+
+// Keyed by viewer address, so a request still pending at sign-out would resolve
+// into the next account's session.
+onSessionReset(({ reason }) => {
+    pendingRequests.clear();
+    try { console.debug('[ProfileCache] pending cleared on session reset', { reason }); } catch (_) { /* noop */ }
+});
 
 function isInNoCacheWindow() {
     try {

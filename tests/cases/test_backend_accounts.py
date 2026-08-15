@@ -291,6 +291,39 @@ def test_account(backend: str):
     else:
         _fail("account.profile_referral appears in referral stats", f"address={referred_addr}")
 
+    # Attribution fields ride outside the chain envelope, so they carry their own
+    # signature. A network position that can rewrite the body must not be able to
+    # redirect the referral reward, nor strip the signature to dodge the check.
+    unsigned_wallet = _generate_wallet()
+    unsigned_resp = _do_set_username_raw(
+        backend,
+        unsigned_wallet,
+        f"unsigned-{_rand_str(6)}",
+        referrer_username=referrer_name,
+        omit_attribution_signature=True,
+    )
+    if unsigned_resp.get("tx_hash"):
+        _fail("account.profile_referral rejects unsigned attribution", f"resp={unsigned_resp}")
+    elif unsigned_resp.get("error_code") == "attribution_signature_invalid":
+        _pass("account.profile_referral rejects unsigned attribution")
+    else:
+        _fail("account.profile_referral rejects unsigned attribution", f"resp={unsigned_resp}")
+
+    tampered_wallet = _generate_wallet()
+    tampered_resp = _do_set_username_raw(
+        backend,
+        tampered_wallet,
+        f"tampered-{_rand_str(6)}",
+        referrer_username=referrer_name,
+        tamper_referrer_after_signing=f"attacker-{_rand_str(6)}",
+    )
+    if tampered_resp.get("tx_hash"):
+        _fail("account.profile_referral rejects swapped referrer", f"resp={tampered_resp}")
+    elif tampered_resp.get("error_code") == "attribution_signature_invalid":
+        _pass("account.profile_referral rejects swapped referrer")
+    else:
+        _fail("account.profile_referral rejects swapped referrer", f"resp={tampered_resp}")
+
     duplicate_wallet = _generate_wallet()
     duplicate_resp = _do_set_username_raw(
         backend,

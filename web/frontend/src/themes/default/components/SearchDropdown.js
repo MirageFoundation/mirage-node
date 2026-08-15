@@ -9,6 +9,7 @@ import {
     HiOutlineMagnifyingGlass,
 } from "react-icons/hi2";
 import { getAuthorColor } from "../../../utils/tierColors";
+import { classifyMediaUrl } from "../../../utils/mediaPolicy";
 import UserAvatar from "./UserAvatar.js";
 import PostPlaceholderAvatar from "./PostPlaceholderAvatar.js";
 
@@ -312,18 +313,27 @@ function shortAddress(address) {
  * the explicit `thumbnail` field first, then falls back to the first
  * image-like entry in a `media` array if present.
  */
+function safeThumbnail(raw) {
+    const url = String(raw || "").trim();
+    if (!url) return "";
+    // The feed routes every post-supplied media URL through the scheme, credential
+    // and control-character checks; this dropdown rendered them raw.
+    const verdict = classifyMediaUrl(url);
+    return verdict.ok ? url : "";
+}
+
 function getPostThumbnail(post) {
     if (!post) return "";
     if (typeof post.thumbnail === "string" && post.thumbnail.trim()) {
-        return post.thumbnail.trim();
+        return safeThumbnail(post.thumbnail);
     }
     if (Array.isArray(post.media) && post.media.length > 0) {
         for (const m of post.media) {
             if (!m) continue;
-            if (typeof m === "string" && m.trim()) return m.trim();
+            if (typeof m === "string" && m.trim()) return safeThumbnail(m);
             if (typeof m === "object") {
                 const url = m.url || m.thumbnail || m.src || "";
-                if (typeof url === "string" && url.trim()) return url.trim();
+                if (typeof url === "string" && url.trim()) return safeThumbnail(url);
             }
         }
     }

@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from "react";
 import Storage from "../utils/Storage";
 import { signPlainPayload } from "../utils/signPlain";
 import { getVisitorId } from "../utils/visitorId";
+import { onSessionReset } from "../utils/sessionLifecycle";
 
 const DWELL_MS = 3000;
 const GLANCE_MS = 150;
@@ -70,6 +71,18 @@ function _flushPendingBufferSave() {
     }
     _savePendingBufferNow();
 }
+
+// The buffer is signed and flushed under whichever account is current when it
+// drains, so anything queued by the previous account has to go at sign-out.
+onSessionReset(({ reason }) => {
+    _seenBuffer = [];
+    if (_bufferSaveTimer) {
+        clearTimeout(_bufferSaveTimer);
+        _bufferSaveTimer = null;
+    }
+    try { sessionStorage.removeItem(_SB_KEY); } catch (_) { /* noop */ }
+    _LOG("PENDING cleared on session reset:", reason);
+});
 
 function _getAddress() {
     try {

@@ -766,6 +766,13 @@ export default function SettingsView({ state }) {
         deleteConfirmReady,
         seedRevealed,
         setSeedRevealed,
+        seedRevealPrompt,
+        seedRevealPassword,
+        setSeedRevealPassword,
+        seedRevealBusy,
+        requestSeedReveal,
+        confirmSeedReveal,
+        cancelSeedReveal,
         seedCopied,
         setSeedCopied,
         vaultAutoLockMinutes,
@@ -1081,18 +1088,29 @@ export default function SettingsView({ state }) {
                                 <SettingLabel>Recovery phrase</SettingLabel>
                                 <SettingControl>
                                     {!seedRevealed ? <>
-                                        <RevealButton onClick={() => {
-                                            const s = seedVault.getSeed();
-                                            if (!s) {
-                                                setSecError('No seed phrase available. Please sign in first.');
-                                                return;
-                                            }
-                                            setSeedRevealed(true);
-                                            setSeedCopied(false);
-                                        }}>
-                                            Reveal Recovery Phrase
+                                        <RevealButton disabled={seedRevealBusy} onClick={requestSeedReveal}>
+                                            {seedRevealBusy ? 'Verifying...' : 'Reveal Recovery Phrase'}
                                         </RevealButton>
                                         <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
+                                        {seedRevealPrompt === 'password' && <div>
+                                            <ExplanationText>Enter your vault password to reveal the phrase.</ExplanationText>
+                                            <InlinePasswordRow>
+                                                <PasswordInput type="password" placeholder="Vault password" value={seedRevealPassword} onChange={e => {
+                                                    setSeedRevealPassword(e.target.value);
+                                                    setSecError('');
+                                                }} disabled={seedRevealBusy} autoFocus onKeyDown={e => {
+                                                    if (e.key === 'Enter') {
+                                                        e.preventDefault();
+                                                        confirmSeedReveal();
+                                                    }
+                                                }} />
+                                                <SmallButton disabled={seedRevealBusy || !seedRevealPassword.trim()} onClick={confirmSeedReveal}>
+                                                    {seedRevealBusy ? 'Checking...' : 'Reveal'}
+                                                </SmallButton>
+                                                <GhostButton disabled={seedRevealBusy} onClick={cancelSeedReveal}>Cancel</GhostButton>
+                                            </InlinePasswordRow>
+                                        </div>}
+                                        {secError && <SecurityError>{secError}</SecurityError>}
                                     </> : <SeedPhraseCard>
                                         <SeedWarningBanner>
                                             <span style={{ fontSize: '0.85rem', lineHeight: 1 }}>⚠</span>

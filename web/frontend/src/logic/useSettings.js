@@ -9,6 +9,11 @@ import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "./usePendingDeletes.js";
 import { formatError } from "../utils/errorMessages";
 import { normalizeThemeId, DEFAULT_THEME_ID } from "../registry/theme";
+
+// How recently the vault must have been unlocked for a reveal to skip the
+// step-up. Long enough to cover "unlock, then go back up my phrase", short
+// enough that a walked-away session does not stay revealable.
+const SEED_REVEAL_FRESH_MS = 120_000;
 export const CheckboxInput = styled.input.attrs({
     type: 'checkbox'
 })`
@@ -294,6 +299,64 @@ export function useSettings({
         const timer = setTimeout(() => setSeedRevealed(false), 60_000);
         return () => clearTimeout(timer);
     }, [seedRevealed]);
+
+    // ── Security: step-up before revealing the recovery phrase ─────────────
+    // Limiting how long the phrase is exposed is the entire point of a protected
+    // vault, so revealing it from an already-unlocked session has to cost the
+    // secret again. Plaintext and memory modes have nothing to challenge with:
+    // the phrase is readable from localStorage (or is only in RAM) regardless.
+    const [seedRevealPrompt, setSeedRevealPrompt] = useState(null); // null | 'password'
+    const [seedRevealPassword, setSeedRevealPassword] = useState('');
+    const [seedRevealBusy, setSeedRevealBusy] = useState(false);
+    const cancelSeedReveal = useCallback(() => {
+        setSeedRevealPrompt(null);
+        setSeedRevealPassword('');
+    }, []);
+    const requestSeedReveal = useCallback(async () => {
+        setSecError('');
+        if (!seedVault.getSeed()) {
+            setSecError('No seed phrase available. Please sign in first.');
+            return;
+        }
+        const mode = seedVault.getMode();
+        const protectedMode = mode === 'password' || mode === 'passkey';
+        if (!protectedMode || seedVault.requireFreshUnlock(SEED_REVEAL_FRESH_MS)) {
+            setSeedRevealed(true);
+            setSeedCopied(false);
+            return;
+        }
+        if (mode === 'password') {
+            setSeedRevealPassword('');
+            setSeedRevealPrompt('password');
+            return;
+        }
+        // Passkey re-authentication is its own prompt — no field to render.
+        setSeedRevealBusy(true);
+        try {
+            await seedVault.unlock(null);
+            setSeedRevealed(true);
+            setSeedCopied(false);
+        } catch (e) {
+            setSecError(String(e?.message || 'Passkey verification failed'));
+        } finally {
+            setSeedRevealBusy(false);
+        }
+    }, []);
+    const confirmSeedReveal = useCallback(async () => {
+        setSecError('');
+        setSeedRevealBusy(true);
+        try {
+            await seedVault.unlock(seedRevealPassword);
+            setSeedRevealPrompt(null);
+            setSeedRevealPassword('');
+            setSeedRevealed(true);
+            setSeedCopied(false);
+        } catch (e) {
+            setSecError(String(e?.message || 'Incorrect password'));
+        } finally {
+            setSeedRevealBusy(false);
+        }
+    }, [seedRevealPassword]);
     useEffect(() => () => {
         if (secSuccessTimeoutRef.current) {
             clearTimeout(secSuccessTimeoutRef.current);
@@ -603,6 +666,13 @@ export function useSettings({
         setSeedRevealed,
         seedCopied,
         setSeedCopied,
+        seedRevealPrompt,
+        seedRevealPassword,
+        setSeedRevealPassword,
+        seedRevealBusy,
+        requestSeedReveal,
+        confirmSeedReveal,
+        cancelSeedReveal,
         vaultAutoLockMinutes,
         setVaultAutoLockMinutes,
         commitModeSwitch,

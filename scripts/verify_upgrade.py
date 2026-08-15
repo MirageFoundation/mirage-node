@@ -606,6 +606,72 @@ def check_stats_roster_configured() -> None:
     note("backend.env not present: stats roster not verifiable from here")
 
 
+def check_security_headers_enforcing() -> None:
+    """Frontend M-1: the CSP must be enforcing, with COOP and CORP alongside it.
+
+    Read from the served Caddyfile rather than the repo template, because the
+    defect this closes was a policy that shipped in report-only mode and stayed
+    there. A host running the old template would look fixed in git and be
+    unprotected in the browser.
+    """
+    for path in (Path("/etc/caddy/Caddyfile"), repo_root() / "deploy/templates/caddy/Caddyfile"):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if "Content-Security-Policy-Report-Only" in text:
+            fail(f"{path} still serves the CSP in report-only mode: it blocks nothing")
+            return
+        if "Content-Security-Policy" not in text:
+            fail(f"{path} serves no Content-Security-Policy at all")
+            return
+        missing = [
+            h
+            for h in ("Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy", "X-Frame-Options")
+            if h not in text
+        ]
+        if missing:
+            fail(f"{path} is missing {', '.join(missing)}")
+        else:
+            ok(f"CSP is enforcing, with COOP and CORP present ({path})")
+        return
+    note("no Caddyfile readable from here: response headers not verifiable")
+
+
+def check_attribution_encoding_pinned() -> None:
+    """Frontend L-2: the invite-code signature only works if both sides agree.
+
+    A drift between shared/canon.py and canonicalEncoding.js does not fail
+    loudly on its own — it turns every invited signup into a rejection, which
+    looks like an invite-code bug rather than an encoding bug. The vector below
+    is the same one both test suites pin.
+    """
+    p = deployed_source("shared/canon.py")
+    if p is None:
+        p = repo_root() / "shared/canon.py"
+    sys.path.insert(0, str(p.parent.parent))
+    try:
+        from shared.canon import canon_attribution
+    except Exception as e:
+        fail(f"shared.canon.canon_attribution is not importable ({e}): invited signups cannot be verified")
+        return
+
+    expected = (
+        "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d6500"
+        "6d69726167653161626300414243442d31323334000031373836383136383539343430313233"
+    )
+    got = canon_attribution("set_username", "MIRAGE1abc", "ABCD-1234", "", 1786816859440123).hex()
+    if got != expected:
+        fail("attribution encoding drifted from the pinned vector: every invited signup would be rejected")
+        return
+    if canon_attribution("set_username", "mirage1abc", "X", "", 1) == canon_attribution(
+        "set_username", "mirage1abc", "X", "", 2
+    ):
+        fail("attribution encoding does not bind the nonce: a signature can be replayed onto another request")
+        return
+    ok("attribution encoding matches the pinned cross-language vector and binds the nonce")
+
+
 def check_expo_token_open_item() -> None:
     """The one finding this release documents rather than fixes.
 
@@ -646,10 +712,13 @@ def main() -> int:
     check_startup_backfill_removed()
     check_topic_matcher_is_linear()
     check_stats_roster_configured()
+    check_security_headers_enforcing()
+    check_attribution_encoding_pinned()
     check_expo_token_open_item()
     note(
         "the full behaviour of every fix in this release, including the database-level ones, is proven by "
-        "tests/test_backend.py --category indexer_hardening,backend_hardening (offline; no chain traffic)"
+        "tests/test_backend.py --category indexer_hardening,backend_hardening (offline; no chain traffic), "
+        "and the frontend fixes by web/frontend: npm run test && npm run check:mutation"
     )
     print(f"\nResult: {passed} passed, {failed} failed")
     return 1 if failed else 0

@@ -2,6 +2,21 @@
 
 Companion to [`2026-08-07/frontend-review.md`](../2026-08-07/frontend-review.md).
 
+> **Two rows in the closure map below were wrong.** Corrected on 2026-08-14 by the
+> [full frontend review](../2026-08-14/frontend-review.md); both are now closed for
+> real in `v1.36.0`. The map is left as originally written, with the corrections
+> marked inline, because rewriting it would hide the failure mode: a closure map is
+> only useful if it can be audited against the findings it claims to close.
+>
+> 1. **M-1 was not closed.** Report-only is a milestone, not a closure, and the
+>    rollout had no collector and so no way to conclude. Enforcing mode shipped in
+>    `v1.36.0`.
+> 2. **The review's M-7 was never closed; a different item was recorded under its
+>    ID.** The 2026-08-07 M-7 is "the decrypted phrase is duplicated in App state
+>    and reveal requires no step-up". The row below describes sign-out, which is
+>    what M-5 already covered — two rows for session reset, and the real M-7
+>    missing. Step-up shipped in `v1.36.0`.
+
 ## Finding closure map
 
 | ID | Finding | Status | Evidence |
@@ -10,13 +25,13 @@ Companion to [`2026-08-07/frontend-review.md`](../2026-08-07/frontend-review.md)
 | H-2 | Recovery phrase in router history | Closed | `onboardingSession.js` handoff; `useLogin`/`useCreateAccount`/`useWelcome` no longer put seeds in `location.state` |
 | H-3 | Destructive signup / insecure vault fallback | Closed | Deferred vault commit; `setCredentials` no longer falls back to insecure on error |
 | H-4 | Queue not owner-bound / incomplete drain | Closed | `TransactionHandler` stamps owner+session; `_drainQueue` / `cancelAll` / `resetSession` |
-| M-1 | Missing CSP / anti-framing | Closed (report-only) | Caddy CSP-Report-Only + `X-Frame-Options DENY` + `Referrer-Policy: strict-origin-when-cross-origin` (not `no-referrer` — YouTube embeds return Error 153 without a Referer) |
+| M-1 | Missing CSP / anti-framing | ~~Closed (report-only)~~ **Not closed here — closed in `v1.36.0`** | Caddy CSP-Report-Only + `X-Frame-Options DENY` + `Referrer-Policy: strict-origin-when-cross-origin` (not `no-referrer` — YouTube embeds return Error 153 without a Referer) |
 | M-2 | Weak password / no auto-lock | Closed | 12-char password policy; `vault_auto_lock_minutes` + `SeedVault.checkAutoLock` |
 | M-3 | CRA audit debt / unpinned Docker install | Closed | Vite migration; Dockerfile unpinned Babel install removed |
 | M-4 | Remote Argon2 | Closed | Vendored `/pow/argon2-bundled.min.js` + `MANIFEST.txt` |
 | M-5 | Incomplete session reset | Closed | `sessionLifecycle.resetClientSession` + API abort generation |
 | M-6 | Direct tx paths bypass queue | Closed | Former direct `performTransaction` callers queued |
-| M-7 | Sign-out incomplete | Closed | Sign-out drains queue via session reset |
+| M-7 | ~~Sign-out incomplete~~ **Wrong finding — the real M-7 is "phrase duplicated in App state, reveal needs no step-up"** | ~~Closed~~ **Not closed here — closed in `v1.36.0`** | Sign-out drains queue via session reset (which is M-5's evidence, not M-7's) |
 | L-1 | Media privacy / proxies | Accepted risk | Photon/wsrv thumbnail proxies retained deliberately — they keep the viewer's IP off the origin host and apply upstream abuse filtering (incl. CSAM) that a direct fetch would not. `mediaPolicy` still rejects unsafe URLs; `autoplay_media` default off |
 | L-2 | Login autocomplete / help | Closed | Default `LoginView` autocomplete hardening + privacy helper text |
 | L-3 | Vote buttons lack queue status | Closed | `formatVoteStatus` wired into all theme `VoteSection`s |

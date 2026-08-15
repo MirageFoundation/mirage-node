@@ -9,6 +9,7 @@ import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
 import { signPlainPayload } from "../utils/signPlain";
+import { onSessionReset } from "../utils/sessionLifecycle";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 const MODERATION_REMINDER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -63,6 +64,19 @@ export const readMemFeedState = topic => {
         return null;
     }
 };
+// The feed cache is keyed by topic, not by account, and it holds the viewer's own
+// user_vote on every cached post. Without this it survives sign-out and the next
+// account in the same tab is served the previous one's feed until a refetch.
+export const clearFeedMemCache = () => {
+    try {
+        if (typeof window === 'undefined') return;
+        window.__MIRAGE_FEED_MEM_CACHE__ = {};
+    } catch (_) { /* noop */ }
+};
+onSessionReset(({ reason }) => {
+    clearFeedMemCache();
+    try { console.debug('[Feed] mem-cache cleared on session reset', { reason }); } catch (_) { /* noop */ }
+});
 export const writeMemFeedState = (topic, patch) => {
     try {
         const cache = getFeedMemCache();

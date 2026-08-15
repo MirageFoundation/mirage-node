@@ -8,12 +8,14 @@ on:
       - 'web/frontend/**'
       - 'docs/FAQ.md'
       - 'deploy/Dockerfile'
+      - 'deploy/templates/caddy/**'
       - '.github/workflows/frontend.yml'
   pull_request:
     paths:
       - 'web/frontend/**'
       - 'docs/FAQ.md'
       - 'deploy/Dockerfile'
+      - 'deploy/templates/caddy/**'
       - '.github/workflows/frontend.yml'
 
 jobs:
@@ -37,11 +39,21 @@ jobs:
       - name: Check PoW assets
         run: npm run check:pow-assets
 
-      - name: Lint
+      # Whole tree, errors only. The strict gate keeps a warning-free floor on the
+      # security-critical modules; widen that list as files are cleaned up.
+      - name: Lint (all sources)
         run: npm run lint
+
+      - name: Lint (strict, zero warnings)
+        run: npm run lint:strict
 
       - name: Unit tests
         run: npm run test
+
+      # Reverting any of the 2026-08-14 security fixes must break a test, not
+      # slip through a suite that only exercises the happy path.
+      - name: Security regression mutation probe
+        run: npm run check:mutation
 
       - name: Production build
         env:
@@ -52,8 +64,14 @@ jobs:
       - name: Bundle policy
         run: npm run check:bundle-policy
 
-      - name: Audit (high+)
-        run: npm audit --audit-level=high
+      - name: Build reproducibility
+        run: npm run check:repro
+
+      - name: Response headers
+        run: npm run check:headers
+
+      - name: Audit (moderate+, allowlisted)
+        run: npm run check:audit
 
       - name: Install Playwright
         run: npx playwright install --with-deps chromium
