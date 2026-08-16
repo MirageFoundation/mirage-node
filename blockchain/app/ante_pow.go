@@ -238,21 +238,25 @@ func envelopeMsgCounts(msgs []sdk.Msg) map[string]uint64 {
 }
 
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	// Proof of work is not part of gas estimation, and running it here was a free
-	// unauthenticated CPU amplifier (review M-2).
+	// Simulate runs this decorator for its state reads and skips only the Argon2id
+	// verification itself, at verifyPoW below.
 	//
-	// Simulate is registered on the gRPC *query* router, so it is reachable via
-	// abci_query on the public RPC port whether or not 1317/9090 are published.
-	// In simulate mode the SDK installs an infinite gas meter, skips signature
-	// verification and deducts no fee, so the request is free. Worse, the nonce
-	// is never persisted because the state is discarded — so an attacker computes
-	// one set of valid envelopes once and re-simulates it indefinitely, defeating
-	// the abort-on-first-failure property that makes the CheckTx path expensive
-	// for them and cheap for the node. ~100 messages is ~165ms of CPU and ~400MB
-	// of allocation churn per free HTTP request.
-	if simulate {
-		return next(ctx, tx, simulate)
-	}
+	// Skipping the whole decorator instead made every gas estimate short by the
+	// cost of the reads it performs, so clients sized their gas limit from a
+	// simulation that had done less work than execution would and the tx died
+	// with "out of gas in location: ReadFlat" in the block. The hashing is the
+	// part worth skipping and the part that costs nothing in gas: it is pure CPU.
+	//
+	// It is worth skipping because Simulate is registered on the gRPC *query*
+	// router, so it is reachable via abci_query on the public RPC port whether or
+	// not 1317/9090 are published. In simulate mode the SDK installs an infinite
+	// gas meter, skips signature verification and deducts no fee, so the request
+	// is free. Worse, the nonce is never persisted because the state is discarded
+	// — so an attacker computes one set of valid envelopes once and re-simulates
+	// it indefinitely, defeating the abort-on-first-failure property that makes
+	// the CheckTx path expensive for them and cheap for the node. ~100 messages is
+	// ~165ms of CPU and ~400MB of allocation churn per free HTTP request
+	// (review M-2).
 
 	// chainLastID is the hash of the immediately-previous committed block, which
 	// the equality branch of the PoW validator accepts directly. Under ABCI 2.0
@@ -315,6 +319,18 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	gracePeriod := params.PowDifficultyAllowance
 	baseBits := params.MinDifficulty
 	powFactor := params.PowDifficultyStep
+
+	// The one thing simulate does not do. Every read that decides whether PoW is
+	// required has already happened by the time this is called, so a simulated
+	// transaction is charged exactly what executing it will charge.
+	verifyPoW := func(canonical []byte, lastBlockHash []byte, difficulty uint64, pow uint64) error {
+		if simulate {
+			return nil
+		}
+		return validatePoWBytesArgon2(canonical, lastBlockHash, difficulty, pow, chainLastID, lookupHash,
+			skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(),
+			baseBits, powFactor)
+	}
 
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 
@@ -401,7 +417,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
 			}
@@ -427,7 +443,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForVote(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgVote", "err", err.Error())
 				return ctx, err
 			}
@@ -453,7 +469,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForEdit(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
@@ -492,7 +508,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSetUsername(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
@@ -518,7 +534,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSetBiography(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
@@ -544,7 +560,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForDelete(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
@@ -570,7 +586,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForDeleteUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, err
 			}
@@ -596,7 +612,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSendTokens(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, err
 			}
@@ -630,7 +646,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForEnableAgent(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
@@ -656,7 +672,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForDisableAgent(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, err
 			}
@@ -682,7 +698,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSetAgents(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, err
 			}
@@ -708,7 +724,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForFollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -734,7 +750,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnfollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -760,7 +776,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForFollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -786,7 +802,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnfollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -812,7 +828,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForBlockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -838,7 +854,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnblockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -864,7 +880,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForBlockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -890,7 +906,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnblockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -916,7 +932,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForBlockTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -942,7 +958,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnblockTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, lookupHash, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockTopic", "err", err.Error())
 				return ctx, err
 			}
