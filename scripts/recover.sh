@@ -446,15 +446,34 @@ snapshot_diverged_state() {
   [ -f "$data_dir/priv_validator_state.json" ] \
     && cp "$data_dir/priv_validator_state.json" "$cap/" 2>/dev/null || true
 
+  # The breadcrumb a CONSENSUS_FATAL halt leaves behind. The prune-hole guard in
+  # the vendored iavl fork fires from the background pruning goroutine and exits
+  # the process, so without this the halt is indistinguishable from an ordinary
+  # crash and its reason is lost the moment the DB moves. Preserve it inside the
+  # capture, next to the state it explains.
+  local breadcrumb halt_reason="none"
+  breadcrumb="${MIRAGE_CONSENSUS_FATAL_FILE:-$NODE_HOME/.consensus_fatal}"
+  if [ -f "$breadcrumb" ]; then
+    halt_reason="$(sed -n 's/^reason=//p' "$breadcrumb" | head -n1)"
+    : "${halt_reason:=unparseable}"
+    cp "$breadcrumb" "$cap/CONSENSUS_FATAL.txt" 2>/dev/null || true
+    log "FORENSIC: node halted on a consensus-fatal condition: $halt_reason"
+  fi
+
   {
     echo "captured_utc=$ts"
     echo "reason=${RECOVERY_REASON:-divergence}"
+    echo "consensus_fatal=$halt_reason"
     echo "recovery_mode=${RECOVERY_MODE_RUNNING:-unknown}"
     echo "local_height=${LOCAL_DIVERGED_HEIGHT:-unknown}"
     echo "local_app_hash=${LOCAL_DIVERGED_APP_HASH:-unknown}"
     echo "node_version=$(miraged version 2>/dev/null | tail -n1 || echo unknown)"
     echo "dirs_captured=$moved"
   } > "$cap/MANIFEST.txt" 2>/dev/null || true
+
+  # Clear it only after it is safely inside the capture, so the next recovery
+  # does not attribute a fresh incident to this one.
+  [ -f "$breadcrumb" ] && rm -f "$breadcrumb" 2>/dev/null || true
 
   FORENSIC_CAPTURE_DIR="$cap"
   log "FORENSIC: preserved diverged state ($moved dirs) -> $cap"

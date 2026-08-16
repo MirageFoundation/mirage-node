@@ -9,9 +9,18 @@
 
 ---
 
+> **Disposition (2026-08-16, `v1.36.0`).** Every finding below has been dispositioned.
+> **25 fixed, 1 accepted as risk, 2 closed as not-a-defect.** See
+> [Dispositions](#dispositions) at the end of this document for the per-finding record,
+> and [`../open-items.md`](../open-items.md) for the accepted risk.
+>
+> The release also settled four of the eight items under
+> [Not determined from source](#not-determined-from-source) — the two that only needed a
+> test, plus a read-only check of the live fleet and a new runtime invariant.
+
 ## Summary
 
-**1 Critical, 2 High, 5 Medium, 9 Low, 10 Informational. All open.**
+**1 Critical, 2 High, 5 Medium, 9 Low, 10 Informational. All dispositioned in `v1.36.0`.**
 
 | ID | Finding | Severity | Privilege required |
 | :-- | :-- | :-- | :-- |
@@ -394,3 +403,68 @@ Items 1–3 change chain behaviour and belong in one coordinated upgrade rather 
 - Cosmos SDK transaction and block cache semantics roll back writes when a handler or lifecycle method returns an error.
 - The CometBFT RPC port is publicly reachable, per `scripts/fleet_audit.sh` and the accepted address-disclosure decision of 2026-08-13. C-1 and M-2 both depend on reachability, not on secrecy.
 - Genesis `raw_state` trust and the indexer moderation boundary remain accepted architecture boundaries and were excluded from scope.
+
+---
+
+## Dispositions
+
+Recorded 2026-08-16. Everything below shipped in `v1.36.0`, which the fixes made
+consensus-breaking; the tag was moved and the release re-rehearsed.
+
+### Fixed
+
+| ID | Fix | Regression test |
+| :-- | :-- | :-- |
+| **C-1** | Transitive message flattening (`nestedMsgs` / `transitiveMsgs`, depth-capped at 4) so the router, the staking decorator and the governance-authority decorator all classify nested messages; nested relay messages rejected outright. `x/authz` unwired from `app_config.go` and its KV store deleted by a `v1.36.0` store loader. | `app/ante_nested_msgs_test.go`, over every relay prototype; mutation-tested |
+| **H-1** | `iavl/iterator.go` records the traversal error instead of discarding it; `cachekv/internal/mergeiterator.go` consults parent and cache before its exhaustion sentinel. | `x/core/keeper/failfast_store_test.go` mid-loop fault injection |
+| **H-2** | `iavl/store.go` `Set` panics on a tree write error, matching `Get`/`Has`/`Delete`; the finalization guard converts it to a clean halt. | same file |
+| **M-1** | New `Params.ValidateGovernanceUpdate()` — reachable `min_difficulty` ceiling (32), non-zero `relay_min_gas_price` / `relay_max_gas_fee` / `subscription_reserve_bps`, `block_hash_window` floor. Kept out of `Validate()` so from-genesis replay still works. Genesis reserve fixed via an `InitGenesis` sentinel plus the genesis file. | `x/core/types/params_test.go` |
+| **M-2** | `PowDecorator` returns early when `simulate` is true; `query-gas-limit = 50000000` in the node template. | — |
+| **M-4** | The `MsgSetAutoRenewal` branch of `PowDecorator` requires a paid level, mirroring the handler. | — |
+| **M-5** | The O(accounts) full scan runs every `SupplyFullScanInterval` (100) blocks behind the O(1) per-block delta check. Measured on prod: 874 accounts, median 107 ms, max 678 ms per scan — about 115 ms of *every* 3000 ms block before this change, growing with a set any user can extend permanently. | — |
+| **L-1** | New `haltFinalizeFatal`: the 27 no-error-channel halt sites halt during finalization and panic (recovered by baseapp into an error response) everywhere else. Six sit on the ante path, which runs in check, recheck and simulate, so a transient fault while answering a public query used to `os.Exit(1)` a validator. | `TestHaltFinalizeFatalIsConfinedToFinalization` |
+| **L-2** | Negative `Height`/`Version` rejected in both `rootmulti.Restore` and `iavl.Importer.Add`. Was a remote crash of any state-syncing node. | `patches/iavl` suite |
+| **L-3** | Parameter bounds checks restored to `verify_upgrade.py`, retightened to the `v1.36.0` governance bounds. | — |
+| **L-4** | `loadFullProfile` propagates all six list errors instead of `if err == nil`. | — |
+| **L-5** | `checkReserveOrDowngrade` requires the reserve to cover the message count that pubkey submitted in the transaction; the single-message downgrade path is deliberately unchanged. | — |
+| **L-6** | `LoggingDecorator` moved after `SigVerificationDecorator`. | `TestRelayAnteDecoratorOrder` |
+| **L-7** | The `iter.Close()` failure in `prepForZeroHeightGenesis` panics rather than returning a silently partial export. | — |
+| **L-8** | `reflect.Uint32` and `reflect.Bool` cases added to the canon harness — without them the `MsgSubscribe.Level` assertion searched for `0x00`, which every canon buffer contains, and passed vacuously. Plus a new AST-driven check that every field of every relay message appears in its metasig closure, which is the actual authentication boundary the old harness never touched. | `app/ante_metasig_canon_completeness_test.go`; both mutation-tested |
+| **L-9** | `immutable_tree.go` `Iterate` and `nodedb.go` `traversePrefix` return `itr.Error()`; `iavl/store.go` `/subspace` refuses to answer with a truncated result. | — |
+| **I-1** | `AddRelayCredit` returns an overflow error instead of saturating at 2^64−1. | — |
+| **I-2** | `GetBalance` halts on an undecodable address instead of reporting zero. | — |
+| **I-3** | `RecordRecentBlockHash` rejects a zero window instead of substituting a duplicated default of 60. | — |
+| **I-4** | `IterateRelayCredits` errors on a malformed credit value, matching `GetRelayCredit`. | — |
+| **I-5** | All eight hardcoded tier fallbacks replaced with a hard fail, matching `Edit`. | — |
+| **I-6** | `max_biography_length = 0` now means disabled at the use site, and `ValidateGovernanceUpdate` rejects `can_have_biography` without a length. | — |
+| **I-9** | `govulncheck`, `test-iavl` and `test-store` widened to `./...` (minus `streaming`, whose test needs a compiled plugin). | — |
+| **I-10** | `check_patches.sh` gained `dotglob`, dropped the `*.go` filter, and the iavl `LICENSE` was restored — an Apache-2.0 redistribution gap on a public repo. | — |
+| — | `batch.go` re-takes the mutex before returning a flush error. A disk-full condition during commit used to surface as `sync: unlock of unlocked mutex`, hiding the real cause. | `patches/iavl/batch_flush_error_test.go`; mutation-tested |
+| — | `consensusFatalHalt` writes a breadcrumb that `recover.sh` reads at its forensic-snapshot chokepoint, and exits through a test seam. The prune-hole guard fires from a background goroutine, so an unattended halt was indistinguishable from a crash and the operator's first move was the wipe `AGENTS.md` forbids. | `patches/iavl/consensus_fatal_test.go` |
+
+### Accepted as risk
+
+| ID | Decision |
+| :-- | :-- |
+| **M-3** | `MsgSendTokens` ignoring the blocked-module-account list is accepted: sending to a module account is self-inflicted fund loss, not an attack on anyone else. Recorded in [`../open-items.md`](../open-items.md) and not to be re-raised. |
+
+### Closed as not-a-defect
+
+| ID | Decision |
+| :-- | :-- |
+| **I-7** | Retired proto tags protected by comments rather than `reserved`. Fail-closed today; no change. |
+| **I-8** | Three legacy messages registered without handlers. They fail at the router; no change. |
+
+### Not-determined items settled
+
+| # | Result |
+| :-- | :-- |
+| **1** | Live fleet parameters checked read-only against M-1 on both prod and UAT: `min_difficulty=10`, `relay_min_gas_price=1000`, `relay_max_gas_fee=500000000`, `subscription_reserve_bps=9500`, `block_hash_window=60`. All inside the new governance bounds, and no tier shows the I-6 shape. M-1 was a reachability finding, not a live misconfiguration. |
+| **3** | Now asserted rather than argued: `AssertModuleSolvencyInvariant` checks core module balance ≥ Σ recorded reserves on the same periodic cadence as the supply scan. Covered by `x/core/keeper/module_solvency_test.go`, including that the sum uses arbitrary precision rather than a `uint64` that would wrap. |
+| **5** | Settled by test, not by sentinel. `x/core/keeper/envelope_nonce_roundtrip_test.go` writes a nonce, commits, reopens the same database and asserts it is still present, including through a transaction's cache context. Empty values do survive, so replay protection is sound as written. |
+| **7** | Measured on prod: 874 accounts, median 107 ms, p95 176 ms, max 678 ms per scan — roughly 0.13 ms per account. At the old every-block cadence that was ~3.8% of every 3000 ms block, and it scales linearly with a set any user can grow permanently. The 1-in-100 cadence brings it to ~1.15 ms amortised. |
+
+Items 2, 4, 6 and 8 remain open. Item 8 no longer applies to the fixes: every
+change above was built and tested, the two vendored fork suites and
+`scripts/check_patches.sh` were run, and the release was re-rehearsed through
+`scripts/test_upgrade.sh`.

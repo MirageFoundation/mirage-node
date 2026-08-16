@@ -13,14 +13,21 @@ var ErrDelegationDisabled = errors.Register("app", 1001, "delegation is not supp
 type DisableDelegatorStakingDecorator struct{}
 
 func (d DisableDelegatorStakingDecorator) AnteHandle(ctx types.Context, tx types.Tx, simulate bool, next types.AnteHandler) (types.Context, error) {
-	if err := rejectDelegatorStakingMsgs(tx); err != nil {
+	msgs, err := transitiveMsgs(tx)
+	if err != nil {
+		return ctx, err
+	}
+	if err := rejectDelegatorStakingMsgs(msgs); err != nil {
 		return ctx, err
 	}
 	return next(ctx, tx, simulate)
 }
 
-func rejectDelegatorStakingMsgs(tx types.Tx) error {
-	for _, msg := range tx.GetMsgs() {
+// rejectDelegatorStakingMsgs takes the transitive message set rather than the
+// transaction: a delegation nested inside a wrapper moves consensus voting
+// power just as effectively as a top-level one.
+func rejectDelegatorStakingMsgs(msgs []types.Msg) error {
+	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case *stakingtypes.MsgBeginRedelegate:
 			return ErrDelegationDisabled

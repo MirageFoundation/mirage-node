@@ -1156,7 +1156,12 @@ func (ndb *nodeDB) traversePrefix(prefix []byte, fn func(k, v []byte) error) err
 		}
 	}
 
-	return nil
+	// MIRAGE PATCH: return the traversal error, matching the sibling
+	// traverseRange above which already does. Both prefix walks in
+	// deleteLegacyVersions run through here, so a truncated walk left legacy
+	// orphans undeleted while reporting success — unbounded disk growth that the
+	// MIRAGE_PRUNE_DEGRADED counter would never see.
+	return itr.Error()
 }
 
 // Get the iterator for a given prefix.

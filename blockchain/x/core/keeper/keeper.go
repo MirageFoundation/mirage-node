@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"mirage/consensusfatal"
 	"mirage/x/core/types"
 
 	corestore "cosmossdk.io/core/store"
@@ -1062,10 +1061,21 @@ func (k Keeper) DeductFeeFromOwner(ctx sdk.Context, owner string, amount uint64)
 }
 
 // GetBalance returns the spendable balance for denom on an address.
+//
+// An address that does not decode is a fault, not a balance of zero. This used
+// to return zero, on paths that gate value movement — renewal affordability and
+// both Subscribe checks — so a profile stored under a malformed address key
+// looked like a user who simply cannot afford anything (review I-2). The decode
+// is deterministic, so every node agreed and it could not diverge, but it is the
+// same "decode failure defaults to zero" shape this release removed elsewhere,
+// and the only way to reach it is a raw_state genesis import, which is exactly
+// when the operator most needs to know.
 func (k Keeper) GetBalance(ctx sdk.Context, owner string, denom string) sdkmath.Int {
 	addr, err := sdk.AccAddressFromBech32(owner)
 	if err != nil {
-		return sdkmath.NewInt(0)
+		haltFinalizeFatal(ctx, fmt.Errorf(
+			"CONSENSUS_FATAL:BALANCE_ADDRESS_DECODE height=%d owner=%q denom=%s: %w",
+			ctx.BlockHeight(), owner, denom, err))
 	}
 	return k.bankBalance(ctx, addr, denom).Amount
 }
@@ -1160,7 +1170,7 @@ func (k Keeper) GetRelayCredit(ctx sdk.Context, valoper string) sdkmath.Int {
 		// mint distribution (M-3). Absent key still means zero credit.
 		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "valoper", valoper, "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET height=%d valoper=%s: %w", ctx.BlockHeight(), valoper, err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_STORE_GET height=%d valoper=%s: %w", ctx.BlockHeight(), valoper, err))
 	}
 	if len(bz) == 0 {
 		return sdkmath.ZeroInt()
@@ -1170,7 +1180,7 @@ func (k Keeper) GetRelayCredit(ctx sdk.Context, valoper string) sdkmath.Int {
 		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:RELAY_CREDIT_DECODE",
 			"height", ctx.BlockHeight(), "module", "core", "valoper", valoper, "bytes_len", len(bz))
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_DECODE height=%d valoper=%s bytes=%d: expected 8-byte big-endian uint64", ctx.BlockHeight(), valoper, len(bz)))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:RELAY_CREDIT_DECODE height=%d valoper=%s bytes=%d: expected 8-byte big-endian uint64", ctx.BlockHeight(), valoper, len(bz)))
 	}
 	return sdkmath.NewIntFromUint64(binary.BigEndian.Uint64(bz))
 }
@@ -1182,13 +1192,17 @@ func (k Keeper) AddRelayCredit(ctx sdk.Context, valoper string, delta sdkmath.In
 	store := k.storeService.OpenKVStore(ctx)
 	cur := k.GetRelayCredit(ctx, valoper)
 	next := cur.Add(delta)
-	// store as big-endian uint64 up to 2^64-1 (saturate on overflow)
-	var v uint64
-	if next.IsUint64() {
-		v = next.Uint64()
-	} else {
-		v = ^uint64(0)
+	// Overflow is a fault, not a value to clamp to. Saturating at 2^64-1 was
+	// unreachable — the only caller passes 1 and credits are wiped every mint
+	// interval — but it silently discards the excess, and it becomes a real loss
+	// of funds the moment the delta is a fee amount rather than a message count
+	// (review I-1). safe_math.go makes the same promise for every other counter.
+	if !next.IsUint64() {
+		return fmt.Errorf(
+			"relay credit overflow for valoper %s: %s + %s exceeds uint64",
+			valoper, cur.String(), delta.String())
 	}
+	v := next.Uint64()
 	bz := make([]byte, 8)
 	binary.BigEndian.PutUint64(bz, v)
 	return store.Set(k.relayCreditKey(valoper), bz)
@@ -1204,12 +1218,19 @@ func (k Keeper) IterateRelayCredits(ctx sdk.Context, fn func(valoper string, amt
 	for ; it.Valid(); it.Next() {
 		key := string(it.Key())
 		valoper := strings.TrimPrefix(key, types.RelayCreditsPrefix)
-		amt := sdkmath.ZeroInt()
-		if v := it.Value(); len(v) > 0 {
-			if len(v) == 8 {
-				amt = sdkmath.NewIntFromUint64(binary.BigEndian.Uint64(v))
-			}
+		// A credit value that is not exactly 8 bytes is corruption, and reporting
+		// it as zero contradicts GetRelayCredit, which halts on the same bytes
+		// (review I-4). This function has no non-test caller today; wiring it to a
+		// query or a mint path with the old behaviour would have silently
+		// under-credited a validator, which is the M-3 this release already fixed.
+		v := it.Value()
+		if len(v) != 8 {
+			_ = it.Close()
+			return fmt.Errorf(
+				"relay credit for valoper %s is %d bytes, want 8-byte big-endian uint64",
+				valoper, len(v))
 		}
+		amt := sdkmath.NewIntFromUint64(binary.BigEndian.Uint64(v))
 		if stop := fn(valoper, amt); stop {
 			break
 		}
@@ -1288,25 +1309,25 @@ func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:PARAMS_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_EMPTY",
 			"height", ctx.BlockHeight(), "module", "core")
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_EMPTY height=%d: params not initialized (InitGenesis must SetParams)", ctx.BlockHeight()))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:PARAMS_EMPTY height=%d: params not initialized (InitGenesis must SetParams)", ctx.BlockHeight()))
 	}
 	if err := k.cdc.Unmarshal(bz, &p); err != nil {
 		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_UNMARSHAL",
 			"height", ctx.BlockHeight(), "module", "core", "err", err, "bytes_len", len(bz))
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_UNMARSHAL height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:PARAMS_UNMARSHAL height=%d bytes=%d: %w", ctx.BlockHeight(), len(bz), err))
 	}
 	if err := p.Validate(); err != nil {
 		// CONSENSUS_FATAL class: deterministic
 		ctx.Logger().Error("CONSENSUS_FATAL:PARAMS_VALIDATE",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PARAMS_VALIDATE height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:PARAMS_VALIDATE height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return p
 }
@@ -1380,10 +1401,15 @@ func (k Keeper) RecordRecentBlockHash(ctx sdk.Context, hashLower string, window 
 	}
 	next := make([]string, 0, len(current)+1)
 	next = append(next, hashLower)
-	limit := int(window)
-	if limit <= 0 {
-		limit = 60
+	// A zero window is a fault, not a cue to invent one. This used to substitute a
+	// hardcoded 60, duplicating DefaultParams in a second place that can drift
+	// (review I-3). Unreachable through governance, since Validate() bounds
+	// block_hash_window to [1,1000], so the only way here is a caller that forgot
+	// to read the param — which this now says out loud.
+	if window == 0 {
+		return fmt.Errorf("block hash window is zero at height %d; the caller must pass params.BlockHashWindow", ctx.BlockHeight())
 	}
+	limit := int(window)
 	for i := 0; i < len(current) && len(next) < limit; i++ {
 		if current[i] == hashLower {
 			continue
@@ -1416,10 +1442,16 @@ func (k Keeper) mintDenom() string { return types.MintDenom }
 //
 // See docs/troubleshooting/divergence-recovery.md.
 //
-// Cost note (M-2): this is O(accounts) through the canonical-only IAVL path.
-// The O(1) delta check cannot detect a supply write paired with a missing
-// balance write, so EndBlock retains this scan every block and logs its
-// duration every 1000 blocks.
+// Cost note: this is O(accounts) through the canonical-only IAVL path, and the
+// O(1) delta check cannot replace it — the delta cannot detect a supply write
+// paired with a missing balance write, which is the exact 2026-06-12 shape.
+//
+// It no longer runs every block. The scanned set is user-growable and
+// irreversible (dust transfers to fresh addresses are never swept), so an
+// every-block walk let any user impose permanent unmetered work on every
+// validator (review M-5). EndBlock now calls this every
+// types.SupplyFullScanInterval blocks, which is deterministic across the fleet
+// and costs a bounded detection delay of the same.
 func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
 	denom := k.mintDenom()
 	sum := sdkmath.ZeroInt()
@@ -1436,6 +1468,51 @@ func (k Keeper) AssertSupplyInvariant(ctx sdk.Context) error {
 			denom, supply.String(), sum.String(), supply.Sub(sum).String(),
 		)
 		return haltFinalizeInvariantError(ctx, "supply_equals_balances", err)
+	}
+	return nil
+}
+
+// AssertModuleSolvencyInvariant checks that the core module account can actually
+// pay every reserve balance it has promised: module balance >= Σ ReserveFunds
+// across all profiles.
+//
+// The 2026-08-14 review could show by inspection that every reserve mutation
+// preserves this, and therefore that CORE_MODULE_SHORT_BURN is unreachable — but
+// it could not show that no other module withdraws from the core account
+// out-of-band, and M-3 established that the account is not even blocked from
+// receiving. That left the property believed-safe rather than asserted-safe.
+// This asserts it.
+//
+// A shortfall means recorded liabilities exceed their backing, so the next
+// reserve spend would either burn coins that are not there or silently
+// under-deliver. Both are consensus-relevant, so this halts during finalization
+// on the same terms as the supply invariant.
+//
+// O(profiles), so EndBlock runs it on the same periodic cadence as the supply
+// full scan rather than every block (review M-5).
+func (k Keeper) AssertModuleSolvencyInvariant(ctx sdk.Context) error {
+	profiles, err := k.GetAllProfiles(ctx)
+	if err != nil {
+		return fmt.Errorf("module solvency invariant: loading profiles: %w", err)
+	}
+
+	liabilities := sdkmath.ZeroInt()
+	for _, bz := range profiles {
+		var core types.ProfileCore
+		if err := json.Unmarshal(bz, &core); err != nil {
+			return fmt.Errorf("module solvency invariant: decoding a profile: %w", err)
+		}
+		liabilities = liabilities.Add(sdkmath.NewIntFromUint64(core.ReserveFunds))
+	}
+
+	backing := k.bankBalance(ctx, k.moduleAddress(), k.mintDenom()).Amount
+	if backing.LT(liabilities) {
+		err := fmt.Errorf(
+			"module solvency invariant violated for %s: core module balance %s < recorded reserves %s (short by %s across %d profiles)",
+			k.mintDenom(), backing.String(), liabilities.String(),
+			liabilities.Sub(backing).String(), len(profiles),
+		)
+		return haltFinalizeInvariantError(ctx, "module_balance_covers_reserves", err)
 	}
 	return nil
 }
@@ -1620,8 +1697,10 @@ func (k Keeper) BurnFromModuleAmount(ctx sdk.Context, amount uint64) error {
 		ctx.Logger().Error("CONSENSUS_FATAL:CORE_MODULE_SHORT_BURN",
 			"height", ctx.BlockHeight(), "balance", bal.String(),
 			"required", amt.String(), "denom", k.mintDenom())
-		consensusfatal.HaltErr(err)
-		return err
+		// This one has an error channel, so it halts during finalization and
+		// returns everywhere else rather than taking the process down on a path
+		// that commits nothing.
+		return haltFinalizeInvariantError(ctx, "core_module_short_burn", err)
 	}
 	return k.burnCoinsTracked(ctx, amt)
 }
@@ -2037,12 +2116,12 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "op", "record", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d op=record: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d op=record: %w", ctx.BlockHeight(), err))
 	}
 	if len(existing) > 0 {
 		if len(existing) != 8 {
 			// CONSENSUS_FATAL class: deterministic
-			consensusfatal.HaltErr(fmt.Errorf(
+			haltFinalizeFatal(ctx, fmt.Errorf(
 				"CONSENSUS_FATAL:POW_COUNT_DECODE height=%d op=record bytes=%d: expected 8-byte big-endian uint64",
 				ctx.BlockHeight(), len(existing),
 			))
@@ -2051,7 +2130,7 @@ func (k Keeper) RecordPoWMessage(ctx sdk.Context) error {
 	}
 	count, err = types.CheckedAddUint64(count, 1)
 	if err != nil {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:POW_COUNT_OVERFLOW height=%d op=record: %w",
 			ctx.BlockHeight(), err,
 		))
@@ -2078,7 +2157,7 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 	if err != nil {
 		ctx.Logger().Error("CONSENSUS_FATAL:POW_WINDOW_PARAM",
 			"height", currentHeight, "window", params.PowMessageWindow, "op", "window_sum", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=window_sum: %w",
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:POW_WINDOW_PARAM height=%d window=%d op=window_sum: %w",
 			currentHeight, params.PowMessageWindow, err))
 	}
 
@@ -2090,19 +2169,19 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 			// CONSENSUS_FATAL class: node-local
 			ctx.Logger().Error("CONSENSUS_FATAL:POW_COUNT_STORE_GET",
 				"height", ctx.BlockHeight(), "read_height", height, "module", "core", "op", "window_sum", "err", err)
-			consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d read_height=%d op=window_sum: %w", ctx.BlockHeight(), height, err))
+			haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:POW_COUNT_STORE_GET height=%d read_height=%d op=window_sum: %w", ctx.BlockHeight(), height, err))
 		}
 		if len(bz) > 0 {
 			if len(bz) != 8 {
 				// CONSENSUS_FATAL class: deterministic
-				consensusfatal.HaltErr(fmt.Errorf(
+				haltFinalizeFatal(ctx, fmt.Errorf(
 					"CONSENSUS_FATAL:POW_COUNT_DECODE height=%d read_height=%d op=window_sum bytes=%d: expected 8-byte big-endian uint64",
 					ctx.BlockHeight(), height, len(bz),
 				))
 			}
 			total, err = types.CheckedAddUint64(total, binary.BigEndian.Uint64(bz))
 			if err != nil {
-				consensusfatal.HaltErr(fmt.Errorf(
+				haltFinalizeFatal(ctx, fmt.Errorf(
 					"CONSENSUS_FATAL:POW_COUNT_OVERFLOW height=%d read_height=%d op=window_sum: %w",
 					ctx.BlockHeight(), height, err,
 				))
@@ -2230,20 +2309,20 @@ func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return BaseDifficultySteps
 	}
 	if len(bz) != 8 {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:DIFFICULTY_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
 			ctx.BlockHeight(), len(bz),
 		))
 	}
 	v := binary.BigEndian.Uint64(bz)
 	if v > MaxSafeDifficultySteps {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:DIFFICULTY_RANGE height=%d difficulty=%d max=%d",
 			ctx.BlockHeight(), v, MaxSafeDifficultySteps,
 		))
@@ -2259,7 +2338,7 @@ func (k Keeper) HasCurrentDifficulty(ctx sdk.Context) bool {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "op", "has", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d op=has: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:DIFFICULTY_STORE_GET height=%d op=has: %w", ctx.BlockHeight(), err))
 	}
 	return len(bz) > 0
 }
@@ -2305,20 +2384,20 @@ func (k Keeper) GetPreviousDifficulty(ctx sdk.Context) uint64 {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:PREV_DIFFICULTY_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return k.GetCurrentDifficulty(ctx)
 	}
 	if len(bz) != 8 {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:PREV_DIFFICULTY_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
 			ctx.BlockHeight(), len(bz),
 		))
 	}
 	v := binary.BigEndian.Uint64(bz)
 	if v > MaxSafeDifficultySteps {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:PREV_DIFFICULTY_RANGE height=%d difficulty=%d max=%d",
 			ctx.BlockHeight(), v, MaxSafeDifficultySteps,
 		))
@@ -2334,13 +2413,13 @@ func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:LAST_DIFF_CHANGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return 0
 	}
 	if len(bz) != 8 {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:LAST_DIFF_CHANGE_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
 			ctx.BlockHeight(), len(bz),
 		))
@@ -2348,7 +2427,7 @@ func (k Keeper) GetLastDifficultyChangeHeight(ctx sdk.Context) int64 {
 	v := binary.BigEndian.Uint64(bz)
 	height, err := types.CheckedUint64ToInt64(v)
 	if err != nil {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:LAST_DIFF_CHANGE_RANGE height=%d stored=%d: %w",
 			ctx.BlockHeight(), v, err,
 		))
@@ -2364,20 +2443,20 @@ func (k Keeper) GetConsecutiveLowUsage(ctx sdk.Context) uint64 {
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_STORE_GET height=%d: %w", ctx.BlockHeight(), err))
 	}
 	if len(bz) == 0 {
 		return 0
 	}
 	if len(bz) != 8 {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_DECODE height=%d bytes=%d: expected 8-byte big-endian uint64",
 			ctx.BlockHeight(), len(bz),
 		))
 	}
 	v := binary.BigEndian.Uint64(bz)
 	if v > types.MaxPowCalmSequenceThreshold {
-		consensusfatal.HaltErr(fmt.Errorf(
+		haltFinalizeFatal(ctx, fmt.Errorf(
 			"CONSENSUS_FATAL:CONSECUTIVE_LOW_USAGE_RANGE height=%d count=%d max=%d",
 			ctx.BlockHeight(), v, types.MaxPowCalmSequenceThreshold,
 		))
@@ -2671,7 +2750,7 @@ func (k Keeper) HasEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint6
 		// CONSENSUS_FATAL class: node-local
 		ctx.Logger().Error("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS",
 			"height", ctx.BlockHeight(), "module", "core", "err", err)
-		consensusfatal.HaltErr(fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS height=%d: %w", ctx.BlockHeight(), err))
+		haltFinalizeFatal(ctx, fmt.Errorf("CONSENSUS_FATAL:ENVELOPE_NONCE_STORE_HAS height=%d: %w", ctx.BlockHeight(), err))
 	}
 	return found
 }

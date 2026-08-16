@@ -586,13 +586,16 @@ path), a 60-second param refresh TTL with backoff, the private key no longer ech
 in the export error, `O_NOFOLLOW` on the push-listener lock, a 20-token per-owner
 cap, and a 30-second cache on the anonymous topic aggregation.
 
-**One was deliberately not made fatal.** `EXPO_ACCESS_TOKEN` is empty on every node
-in the fleet while `PUSH_NOTIFICATIONS_ENABLED=true`, so raising at import — the
-treatment every other required setting gets — would take the fleet offline on
-upgrade rather than fix anything. It logs an error at startup instead. Closing it
-properly needs a token issued and enhanced security enabled in the Expo dashboard
-first; until then, anyone holding a copy of the push-token table can send pushes to
-users. Tracked in `open-items.md`.
+**One was deliberately not made fatal, and is now ACCEPTED AS RISK 2026-08-16 — do
+not re-report.** `EXPO_ACCESS_TOKEN` is empty on every node in the fleet while
+`PUSH_NOTIFICATIONS_ENABLED=true`, so raising at import — the treatment every other
+required setting gets — would take the fleet offline on upgrade rather than fix
+anything. It logs an error at startup instead, and that loud startup error is the
+accepted end state. Accepted with the impact understood: pushes go out
+unauthenticated, so anyone holding a copy of the push-token table can send pushes to
+users. Closing it needs a token issued *and* enhanced security enabled in the Expo
+dashboard, which is an operator action outside this repository. Recorded in
+[`open-items.md`](../open-items.md).
 
 ### M-3 changed a request contract, and the regression check did not notice
 

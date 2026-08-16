@@ -115,7 +115,7 @@ func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, 
 //   - canPoW == true: caller must run validatePoWBytesArgon2.
 //   - canPoW == false, err == nil: caller must skip PoW (paid path; gas deducted
 //     by the message handler, which also downgrades on exhausted reserve).
-func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgName string) (canPoW bool, err error) {
+func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgName string, msgCount uint64) (canPoW bool, err error) {
 	allowed, _, lerr := d.canUsePoW(ctx, pubkey)
 	if lerr != nil {
 		ctx.Logger().Error("PoW: profile decode failure (rejecting tx, peers will reject identically)",
@@ -123,7 +123,7 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 		return false, lerr
 	}
 	if !allowed {
-		if rerr := d.checkReserveOrDowngrade(ctx, pubkey, params); rerr != nil {
+		if rerr := d.checkReserveOrDowngrade(ctx, pubkey, params, msgCount); rerr != nil {
 			ctx.Logger().Error("PoW: reserve/profile check failed", "msg", msgName, "err", rerr.Error())
 			return false, rerr
 		}
@@ -139,7 +139,7 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 // downgrade lives in deductRelayGasFee on the handler path — so this function
 // returns nil for the insufficient-reserve case so the tx reaches the handler.
 // Returns an error only for CONSENSUS_FATAL profile failures or malformed pubkey.
-func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, params coretypes.Params) error {
+func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgCount uint64) error {
 	if len(pubkey) != 33 {
 		return fmt.Errorf("invalid envelope_pubkey length: got %d, want 33", len(pubkey))
 	}
@@ -177,6 +177,33 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 		minReserve = 1
 	}
 
+	// A paid user may submit at most as many messages in one transaction as their
+	// reserve can actually pay for.
+	//
+	// Routing is decided once per message from the level as it stood before any
+	// handler ran, and a paid user's PoW is waived at that point. So when message
+	// 1 exhausted the reserve, deductRelayGasFee wrote Level = 0 into the shared
+	// cache-wrapped store, messages 2..N read level 0 and were charged nothing —
+	// while the ante had already waived their proof of work. N was bounded only by
+	// transaction size and block gas (review L-5).
+	//
+	// The single-message case is deliberately left alone: it must still reach the
+	// handler so the durable downgrade in deductRelayGasFee can happen. Rejecting
+	// it here is what wedged paid users in the earlier M-5, because baseapp
+	// discards ante mutations when the ante returns an error. Splitting into
+	// separate transactions therefore still works and still downgrades correctly.
+	if msgCount > 1 {
+		affordable := core.ReserveFunds / minReserve
+		if msgCount > affordable {
+			ctx.Logger().Error("checkReserveOrDowngrade: transaction carries more messages than the reserve can pay for",
+				"owner", addr, "level", core.Level, "reserve", core.ReserveFunds,
+				"min_per_msg", minReserve, "messages", msgCount, "affordable", affordable)
+			return fmt.Errorf(
+				"insufficient reserve: %d messages in one transaction but the reserve covers %d; submit them separately",
+				msgCount, affordable)
+		}
+	}
+
 	if core.ReserveFunds >= minReserve {
 		return nil // Sufficient reserve
 	}
@@ -190,7 +217,43 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 	return nil
 }
 
+// envelopeMsgCounts counts, per envelope pubkey, how many messages in this
+// transaction that pubkey submitted. checkReserveOrDowngrade needs it because
+// the reserve is spent per message but routing is decided per message against
+// the level before any handler ran (review L-5).
+func envelopeMsgCounts(msgs []sdk.Msg) map[string]uint64 {
+	counts := make(map[string]uint64, len(msgs))
+	for _, m := range msgs {
+		carrier, ok := m.(interface{ GetEnvelopePubkey() []byte })
+		if !ok {
+			continue
+		}
+		pk := carrier.GetEnvelopePubkey()
+		if len(pk) == 0 {
+			continue
+		}
+		counts[string(pk)]++
+	}
+	return counts
+}
+
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
+	// Proof of work is not part of gas estimation, and running it here was a free
+	// unauthenticated CPU amplifier (review M-2).
+	//
+	// Simulate is registered on the gRPC *query* router, so it is reachable via
+	// abci_query on the public RPC port whether or not 1317/9090 are published.
+	// In simulate mode the SDK installs an infinite gas meter, skips signature
+	// verification and deducts no fee, so the request is free. Worse, the nonce
+	// is never persisted because the state is discarded — so an attacker computes
+	// one set of valid envelopes once and re-simulates it indefinitely, defeating
+	// the abort-on-first-failure property that makes the CheckTx path expensive
+	// for them and cheap for the node. ~100 messages is ~165ms of CPU and ~400MB
+	// of allocation churn per free HTTP request.
+	if simulate {
+		return next(ctx, tx, simulate)
+	}
+
 	// chainLastID is the hash of the immediately-previous committed block, which
 	// the equality branch of the PoW validator accepts directly. Under ABCI 2.0
 	// it is empty on every path because FinalizeBlock carries no LastBlockId, so
@@ -271,6 +334,12 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 		}
 	}
 
+	// How many messages each envelope pubkey submitted in this transaction. The
+	// reserve is spent per message, but routing is decided per message against the
+	// level as it stood before any handler ran, so a paid user could otherwise get
+	// every message after the first for free (review L-5).
+	msgCounts := envelopeMsgCounts(tx.GetMsgs())
+
 	for _, msg := range tx.GetMsgs() {
 		switch m := msg.(type) {
 		case *coretypes.MsgSubscribe:
@@ -290,9 +359,31 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				ctx.Logger().Error("PoW: MsgSetAutoRenewal cannot use PoW, must pay with reserve")
 				return ctx, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
 			}
+			// The exemption above rests on "must pay with reserve", which is only
+			// true for a paid user. At level 0 nothing charges: checkReserveOrDowngrade
+			// returns nil unconditionally, and the handler cannot charge either —
+			// a free user may only set the flag to the value it already has, which
+			// forces the no-op branch, and deductRelayGasFee returns immediately
+			// below level 1. That made this the one relay message costing zero PoW,
+			// zero tokens and zero reserve while the node paid a full relay ante,
+			// and because RecordPoWMessage sits inside the PoW branches the abuse
+			// never raised difficulty (review M-4).
+			//
+			// Rejecting here mirrors the handler's own free-tier rule, so nothing
+			// legitimate is lost: the only value a level-0 user could set was the
+			// one already stored.
+			level, addr, lerr := d.getUserLevel(ctx, m.EnvelopePubkey)
+			if lerr != nil {
+				ctx.Logger().Error("PoW: profile read failed", "msg", "MsgSetAutoRenewal", "err", lerr.Error())
+				return ctx, lerr
+			}
+			if level < coretypes.LevelSubscriber {
+				ctx.Logger().Error("PoW: MsgSetAutoRenewal requires a paid level", "addr", addr, "level", level)
+				return ctx, fmt.Errorf("MsgSetAutoRenewal requires a subscription: auto-renewal cannot be set at level %d", level)
+			}
 			// Paid path only: reject on profile CONSENSUS_FATAL / malformed pubkey.
 			// Insufficient reserve is allowed through so deductRelayGasFee can downgrade.
-			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params, msgCounts[string(m.EnvelopePubkey)]); err != nil {
 				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgSetAutoRenewal", "err", err.Error())
 				return ctx, err
 			}
@@ -302,7 +393,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgPost")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgPost", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -328,7 +419,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgVote")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgVote", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -354,7 +445,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEdit")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEdit", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -384,7 +475,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				ctx.Logger().Error("PoW: MsgAnnotate cannot use PoW")
 				return ctx, fmt.Errorf("MsgAnnotate cannot use PoW")
 			}
-			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params, msgCounts[string(m.EnvelopePubkey)]); err != nil {
 				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, err
 			}
@@ -393,7 +484,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetUsername")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetUsername", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -419,7 +510,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetBiography")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetBiography", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -445,7 +536,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDelete")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDelete", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -471,7 +562,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDeleteUser")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDeleteUser", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -497,7 +588,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSendTokens")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSendTokens", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -531,7 +622,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEnableAgent")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEnableAgent", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -557,7 +648,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDisableAgent")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDisableAgent", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -583,7 +674,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetAgents")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetAgents", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -609,7 +700,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowUser")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowUser", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -635,7 +726,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowUser")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowUser", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -661,7 +752,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowTopic")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowTopic", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -687,7 +778,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowTopic")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowTopic", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -713,7 +804,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockPost")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockPost", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -739,7 +830,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockPost")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockPost", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -765,7 +856,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockUser")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockUser", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -791,7 +882,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockUser")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockUser", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -817,7 +908,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockTopic")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockTopic", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}
@@ -843,7 +934,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockTopic")
+			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockTopic", msgCounts[string(m.EnvelopePubkey)])
 			if err != nil {
 				return ctx, err
 			}

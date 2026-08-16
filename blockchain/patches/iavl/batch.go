@@ -58,10 +58,17 @@ func (b *BatchWithFlusher) Set(key, value []byte) error {
 	}
 	if batchSizeAfter > b.flushThreshold {
 		b.mtx.Unlock()
-		if err := b.Write(); err != nil {
+		err := b.Write()
+		// Re-lock before returning: the deferred Unlock runs on the error path
+		// too, and upstream's bare `return err` left it unlocking an already
+		// unlocked mutex. The resulting "sync: unlock of unlocked mutex" panic
+		// replaced the actual cause — a disk-full or read-only volume during
+		// commit — with an unrelated runtime error, on precisely the path where
+		// the operator most needs to see the real one.
+		b.mtx.Lock()
+		if err != nil {
 			return err
 		}
-		b.mtx.Lock()
 	}
 	return b.batch.Set(key, value)
 }
@@ -80,10 +87,12 @@ func (b *BatchWithFlusher) Delete(key []byte) error {
 	}
 	if batchSizeAfter > b.flushThreshold {
 		b.mtx.Unlock()
-		if err := b.Write(); err != nil {
+		err := b.Write()
+		// Re-lock before returning; see the matching comment in Set.
+		b.mtx.Lock()
+		if err != nil {
 			return err
 		}
-		b.mtx.Lock()
 	}
 	return b.batch.Delete(key)
 }

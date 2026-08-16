@@ -98,6 +98,7 @@ cannot be observed read-only are proven by tests instead:
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -107,9 +108,13 @@ import urllib.request
 from pathlib import Path
 
 # The shipped software version, checked against version.txt and the binary. The
-# chain upgrade handler carries the same name this release: nothing here is
-# consensus-breaking, but mixed binaries compute different topic standing from
-# the same blocks and a node left behind keeps both wedge fuses lit.
+# chain upgrade handler carries the same name this release.
+#
+# This release IS consensus-breaking, unlike the first v1.36.0 cut: the
+# 2026-08-14 review's C-1 fix changes which transactions the ante accepts, x/authz
+# is unwired and its store deleted, and the PoW, reserve and supply-invariant
+# paths all changed. A node left on the old binary will fork, not merely compute
+# different topic standing.
 RELEASE_VERSION = "v1.36.0"
 UPGRADE_NAME = "v1.36.0"
 COMET_RPC_URL = "http://127.0.0.1:26657"
@@ -125,6 +130,72 @@ INDEXER_PROGRESS_WINDOW_SEC = 10
 
 # Key written by indexer/migrations/v1_36_0_repair_deleted_post_standing.py.
 STANDING_MIGRATION_KEY = "v1.36.0_repair_deleted_post_standing"
+
+# Read-only mirror of Params.Validate() and Params.ValidateGovernanceUpdate() in
+# blockchain/x/core/types/params.go. Keep the values and the cross-field rules in
+# sync with that file.
+#
+# This block and the two checks that consume it existed until the v1.35.0 rewrite
+# dropped them, which is how the whole M-1 class — parameter values that pass
+# Validate() and then break the chain — went unnoticed for a release (review L-3).
+# It is restored here with the v1.36.0 governance bounds, which are tighter than
+# Validate()'s: Validate() must keep accepting the values already committed to
+# the chain so a from-genesis replay still works, while governance must not be
+# able to set them again.
+#
+# min_difficulty's ceiling is MaxGovernableMinDifficulty (32), not Validate()'s
+# 256: at 256 the PoW target is zero and no free-tier user can ever produce a
+# valid envelope.
+INTEGER_PARAM_BOUNDS = {
+    "min_difficulty": (1, 32),
+    "pow_message_window": (1, 10_000),
+    "pow_message_limit": (1, 18_446_744_073_709_551_615),
+    "pow_calm_period_definition": (0, 18_446_744_073_709_551_615),
+    "pow_calm_sequence_threshold": (1, 100_000),
+    "mint_interval": (1, 1_000_000),
+    "mint_quantity": (1, 1_000_000_000_000_000),
+    "mint_dynamic_credit_cap": (0, 18_446_744_073_709_551_615),
+    "block_hash_window": (20, 1_000),
+    "pow_difficulty_allowance": (0, 18_446_744_073_709_551_615),
+    "min_username_size": (1, 64),
+    "max_username_size": (1, 128),
+    "min_topic_size": (1, 100),
+    "max_topic_size": (1, 100),
+    # Zero on either of these makes every relay message free for paid tiers,
+    # inverting the economics. Governance may not set it; Validate() still
+    # accepts it because the field defaulted to zero before v1.11.0.
+    "relay_min_gas_price": (1, 1_000_000_000),
+    "relay_max_gas_fee": (1, 100_000_000_000),
+    "max_envelope_age": (1, 86_400),
+    "subscription_period": (0, 525_600),
+    # Zero escrows no reserve from a subscription payment, so a paying user
+    # cannot send a single relayed message.
+    "subscription_reserve_bps": (1, 10_000),
+}
+FLOAT_PARAM_BOUNDS = {
+    "mint_dynamic_split": (0.0, 1.0),
+    "pow_difficulty_step": (0.01, 1.0),
+}
+MAX_PROFILE_LIST_ENTRIES = 4_294_967_295
+MAX_VOTE_WEIGHT = 100.0
+MAX_AWARD_CONFIG_COST = 1_000_000_000_000
+PROFILE_LIST_LIMIT_FIELDS = (
+    "max_enabled_agents",
+    "max_followed_users",
+    "max_followed_topics",
+    "max_blocked_users",
+    "max_blocked_posts",
+    "max_blocked_topics",
+)
+
+# Every field in Params. Presence is checked separately from value validation so
+# a generated-query/schema mismatch cannot hide behind a numeric default.
+#
+# This covers all 24 fields of the Params message except subscription_reserve_percent,
+# which is deliberately excluded: it is superseded by subscription_reserve_bps,
+# nothing reads it, and Validate() leaves it unconstrained so a from-genesis
+# replay of the v1.5.0/v1.8.0/v1.11.0 handlers still passes.
+REQUIRED_PARAMS = tuple(INTEGER_PARAM_BOUNDS) + tuple(FLOAT_PARAM_BOUNDS) + ("tiers", "award_configs")
 
 passed = 0
 failed = 0
@@ -697,12 +768,179 @@ def check_expo_token_open_item() -> None:
         )
 
 
+def query_params() -> dict:
+    return (http_json(f"{REST_URL}/mirage/core/v1/params").get("params")) or {}
+
+
+def check_required_params_present() -> None:
+    try:
+        params = query_params()
+    except Exception as e:
+        fail(f"params query failed: {e}")
+        return
+    missing = [name for name in REQUIRED_PARAMS if params.get(name) is None]
+    if missing:
+        fail(f"params query is missing required field(s): {missing}")
+        return
+    ok(f"all {len(REQUIRED_PARAMS)} runtime-required params present")
+
+
+def check_param_bounds() -> None:
+    """Assert the chain's live parameters are inside the governance bounds.
+
+    Restored from the pre-v1.35.0 script (review L-3) and retightened for the
+    v1.36.0 governance rules.
+    """
+    try:
+        params = query_params()
+    except Exception as e:
+        fail(f"params bounds check: params query failed: {e}")
+        return
+
+    violations: list[str] = []
+    checked = 0
+    int_values: dict[str, int] = {}
+    for name, (low, high) in INTEGER_PARAM_BOUNDS.items():
+        checked += 1
+        raw = params.get(name)
+        if raw is None:
+            violations.append(f"{name} missing")
+            continue
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            violations.append(f"{name}={raw!r} not an integer")
+            continue
+        int_values[name] = value
+        if value < low or value > high:
+            violations.append(f"{name}={value} outside [{low}, {high}]")
+
+    for name, (low, high) in FLOAT_PARAM_BOUNDS.items():
+        checked += 1
+        raw = params.get(name)
+        try:
+            value = float(raw)
+            if not math.isfinite(value):
+                violations.append(f"{name}={value} is not finite")
+            elif value < low or value > high:
+                violations.append(f"{name}={value} outside [{low}, {high}]")
+        except (TypeError, ValueError):
+            violations.append(f"{name}={raw!r} not a number")
+
+    pow_limit = int_values.get("pow_message_limit")
+    calm_definition = int_values.get("pow_calm_period_definition")
+    if pow_limit is not None and calm_definition is not None and calm_definition >= pow_limit:
+        violations.append(
+            f"pow_calm_period_definition={calm_definition} must be < pow_message_limit={pow_limit}"
+        )
+
+    pow_window = int_values.get("pow_message_window")
+    allowance = int_values.get("pow_difficulty_allowance")
+    if pow_window is not None and allowance is not None and allowance > 2 * pow_window:
+        violations.append(
+            f"pow_difficulty_allowance={allowance} must be <= 2*pow_message_window={2 * pow_window}"
+        )
+
+    min_username = int_values.get("min_username_size")
+    max_username = int_values.get("max_username_size")
+    if min_username is not None and max_username is not None and min_username > max_username:
+        violations.append(f"min_username_size={min_username} exceeds max_username_size={max_username}")
+
+    min_topic = int_values.get("min_topic_size")
+    max_topic = int_values.get("max_topic_size")
+    if min_topic is not None and max_topic is not None and min_topic > max_topic:
+        violations.append(f"min_topic_size={min_topic} exceeds max_topic_size={max_topic}")
+
+    tiers = params.get("tiers")
+    if not isinstance(tiers, list) or len(tiers) != 3:
+        violations.append(f"tiers must contain exactly 3 entries, got {tiers!r}")
+    else:
+        for index, tier in enumerate(tiers):
+            if not isinstance(tier, dict):
+                violations.append(f"tiers[{index}] is not an object")
+                continue
+            for name in PROFILE_LIST_LIMIT_FIELDS:
+                checked += 1
+                raw = tier.get(name)
+                try:
+                    value = int(raw)
+                except (TypeError, ValueError):
+                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
+                    continue
+                if value < 0 or value > MAX_PROFILE_LIST_ENTRIES:
+                    violations.append(
+                        f"tiers[{index}].{name}={value} outside [0, {MAX_PROFILE_LIST_ENTRIES}]"
+                    )
+            for name in ("period_fee", "max_title_length", "max_content_length"):
+                checked += 1
+                raw = tier.get(name)
+                try:
+                    value = int(raw)
+                except (TypeError, ValueError):
+                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
+                    continue
+                if value < 0:
+                    violations.append(f"tiers[{index}].{name}={value} must be non-negative")
+                if name in ("max_title_length", "max_content_length") and value == 0:
+                    violations.append(f"tiers[{index}].{name} must be > 0")
+                if index == 0 and name == "period_fee" and value != 0:
+                    violations.append(f"tiers[0].period_fee={value} must be 0")
+
+            checked += 1
+            raw_vote_weight = tier.get("vote_weight")
+            try:
+                vote_weight = float(raw_vote_weight)
+                if not math.isfinite(vote_weight):
+                    violations.append(f"tiers[{index}].vote_weight={vote_weight} is not finite")
+                elif vote_weight < 0.0 or vote_weight > MAX_VOTE_WEIGHT:
+                    violations.append(
+                        f"tiers[{index}].vote_weight={vote_weight} outside [0.0, {MAX_VOTE_WEIGHT}]"
+                    )
+            except (TypeError, ValueError):
+                violations.append(f"tiers[{index}].vote_weight={raw_vote_weight!r} not a number")
+
+    award_configs = params.get("award_configs")
+    if not isinstance(award_configs, list) or not award_configs:
+        violations.append(f"award_configs must be a non-empty list, got {award_configs!r}")
+    else:
+        award_names: set[str] = set()
+        for index, award in enumerate(award_configs):
+            if not isinstance(award, dict):
+                violations.append(f"award_configs[{index}] is not an object")
+                continue
+            checked += 2
+            name = award.get("name")
+            if not isinstance(name, str) or name == "":
+                violations.append(f"award_configs[{index}].name must be non-empty")
+            elif name in award_names:
+                violations.append(f"award_configs[{index}].name={name!r} is duplicated")
+            else:
+                award_names.add(name)
+            raw_cost = award.get("cost")
+            try:
+                cost = int(raw_cost)
+            except (TypeError, ValueError):
+                violations.append(f"award_configs[{index}].cost={raw_cost!r} not an integer")
+                continue
+            if cost < 0 or cost > MAX_AWARD_CONFIG_COST:
+                violations.append(
+                    f"award_configs[{index}].cost={cost} outside [0, {MAX_AWARD_CONFIG_COST}]"
+                )
+
+    if violations:
+        fail("stored params violate the v1.36.0 governance bounds: " + "; ".join(violations))
+        return
+    ok(f"stored params satisfy the v1.36.0 governance bounds ({checked} values checked)")
+
+
 def main() -> int:
     print(f"verify_upgrade.py for {RELEASE_VERSION}")
     check_version_txt()
     check_binary_version()
     check_upgrade_applied()
     check_chain_live_past_upgrade()
+    check_required_params_present()
+    check_param_bounds()
     check_indexer_advancing()
     check_event_attrs_not_decoded()
     check_admin_levels_by_range()

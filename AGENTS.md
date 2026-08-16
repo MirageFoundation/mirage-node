@@ -68,6 +68,29 @@ separate, explicit per-task approval.
   - NEVER set `authority` to the user's address
   - User's address is derived from `envelope_pubkey`
 
+- **Failure policy — the node must not die, and must not fork either**:
+  - This **narrows the general fail-hard rule above for `blockchain/` only**. Everywhere
+    else (backend, indexer, deploy scripts, tests) the general rule is unchanged.
+  - **Outside block finalization — return errors, never exit.** Public queries, CheckTx,
+    ReCheckTx and Simulate commit nothing, so no divergence is possible and killing the
+    process buys no safety at all. Any reader with an `error` return propagates it. A
+    reader without one gates on `ExecMode() == ExecModeFinalize` and only then halts.
+    The backend simulates every user action, so these paths are reachable from public RPC
+    and must never be able to take a validator down.
+  - **During finalization — never continue past a fault that would change the AppHash.**
+    A node that keeps going after a store fault commits state its peers did not and has
+    silently forked, which is worse than stopping: the chain survives one halted validator,
+    but a forked one is off consensus while reporting healthy. This is the `v1.34.0`
+    fail-closed contract and it stands.
+  - **Halt cleanly; do not crash.** A bare `panic` with a stack trace is not an acceptable
+    operator experience. Consensus-fatal conditions go through `consensusfatal` with a
+    named reason, an actionable message, and a preserved forensic snapshot (see the node
+    recovery rule below). Raw panics on consensus paths should be converted as they are
+    touched.
+  - **Never swallow.** Silently substituting a zero, an empty list or a default for a
+    failed read is the worst of the three options: it neither reports nor stops, and it is
+    how a node forks without anyone noticing. Return the error and let the caller decide.
+
 ### Node Recovery — ALWAYS Snapshot Diverged State Before Wiping
 
 **HARD RULE (NON-NEGOTIABLE): Never destroy a diverged chain DB without first preserving it.**

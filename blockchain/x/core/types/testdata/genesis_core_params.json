@@ -78,6 +78,7 @@
   }
  ],
  "subscription_reserve_percent": 0.95,
+ "subscription_reserve_bps": "9500",
  "relay_min_gas_price": "1000",
  "relay_max_gas_fee": "500000000",
  "max_envelope_age": "60",

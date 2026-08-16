@@ -2347,10 +2347,11 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// Register the store loader for v1.28.0's store deletions. This must run
-	// before app.Load() (called later in App.New) so the deleted stores are
-	// dropped while loading the multistore at the upgrade height.
+	// Register the store loaders for the upgrades that physically delete stores.
+	// These must run before app.Load() (called later in App.New) so the deleted
+	// stores are dropped while loading the multistore at the upgrade height.
 	app.registerV1_28_0StoreLoader()
+	app.registerV1_36_0StoreLoader()
 }
 
 // registerV1_28_0StoreLoader wires StoreUpgrades for the v1.28.0 upgrade, which
@@ -2373,6 +2374,35 @@ func (app *App) registerV1_28_0StoreLoader() {
 	if upgradeInfo.Name == "v1.28.0" && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
 		storeUpgrades := storetypes.StoreUpgrades{
 			Deleted: []string{"group", "circuit"},
+		}
+		app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storeUpgrades))
+	}
+}
+
+// registerV1_36_0StoreLoader deletes the x/authz KV store at the v1.36.0 upgrade
+// height. The module was removed because its MsgExec wrapper dispatched inner
+// messages straight into the message router, skipping the relay ante chain
+// entirely — envelope signature, nonce replay and proof of work — which allowed
+// any funded account to drain any account holding a username.
+//
+// Nothing in the product ever used authz: no chain code, no backend, no
+// frontend. The store therefore holds no grants worth migrating, and it is
+// deleted rather than left orphaned.
+//
+// The transitive classification guard in mirageAnteRouter is the actual fix and
+// is deliberately independent of this deletion — it is what stops the *next*
+// wrapper, whether that arrives as a re-enabled module or a new SDK message.
+//
+// Same TWO-PHASE (NOT ATOMIC) caveat as registerV1_28_0StoreLoader above.
+func (app *App) registerV1_36_0StoreLoader() {
+	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
+	if err != nil {
+		panic(err)
+	}
+
+	if upgradeInfo.Name == "v1.36.0" && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
+		storeUpgrades := storetypes.StoreUpgrades{
+			Deleted: []string{"authz"},
 		}
 		app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storeUpgrades))
 	}

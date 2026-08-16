@@ -36,6 +36,18 @@ func populateFields(t *testing.T, obj interface{}) {
 		case reflect.Int32:
 			// Enums often small, hope 10+i is valid or just int32
 			field.SetInt(int64(10 + i))
+		case reflect.Uint32:
+			// Without this case MsgSubscribe.Level stayed 0, and verifyCanon then
+			// searched the canon for the single byte 0x00 — which every canon
+			// buffer contains as the writer's own prefix terminator. The assertion
+			// passed whether or not level was in the canon at all, and level is
+			// what selects the paid tier (review L-8). The value must be large
+			// enough that its uvarint encoding cannot collide with a tag byte.
+			field.SetUint(uint64(2000000 + i))
+		case reflect.Bool:
+			// Same class: without this case MsgSetAutoRenewal.AutoRenew was
+			// uncoverable, since false encodes to the same 0x00.
+			field.SetBool(true)
 		case reflect.Slice:
 			if field.Type().Elem().Kind() == reflect.Uint8 { // []byte
 				field.SetBytes([]byte(fmt.Sprintf("%s_bytes", fieldName)))
@@ -114,6 +126,17 @@ func verifyCanon(t *testing.T, obj interface{}, canon []byte, ignoredFields ...s
 			n := binary.PutUvarint(tmp[:], u)
 			search = tmp[:n]
 			valStr = fmt.Sprintf("%d", u)
+		case reflect.Bool:
+			// Bools are written as uvarint 1/0. populateFields sets them true, so
+			// the search byte is 0x01 rather than the 0x00 every buffer contains.
+			var u uint64
+			if field.Bool() {
+				u = 1
+			}
+			var tmp [10]byte
+			n := binary.PutUvarint(tmp[:], u)
+			search = tmp[:n]
+			valStr = fmt.Sprintf("%t", field.Bool())
 		}
 
 		if len(search) > 0 {

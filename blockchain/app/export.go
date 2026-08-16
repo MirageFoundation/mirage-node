@@ -229,9 +229,15 @@ func (app *App) prepForZeroHeightGenesis(ctx sdk.Context, jailAllowedAddrs []str
 		}
 	}
 
+	// Panic rather than return, matching every other error in this function.
+	// Returning here skipped ApplyAndReturnValidatorSetUpdates and the slashing
+	// signing-info reset, and the caller cannot observe that — it marshals the
+	// partial state and exits zero, so `miraged export --for-zero-height` produced
+	// a silently broken artifact that looked like a success (L-7).
 	if err := iter.Close(); err != nil {
 		app.Logger().Error("error while closing the key-value store reverse prefix iterator: ", err)
-		return
+		panic(fmt.Errorf("zero-height export: closing the validator iterator failed, "+
+			"validator power updates and the slashing reset were not applied: %w", err))
 	}
 
 	_, err = app.StakingKeeper.ApplyAndReturnValidatorSetUpdates(ctx)

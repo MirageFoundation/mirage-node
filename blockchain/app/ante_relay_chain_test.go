@@ -49,11 +49,15 @@ func TestRelayAnteDecoratorOrder(t *testing.T) {
 		"app.GovAuthorityDecorator",
 		"ante.TxTimeoutHeightDecorator",
 		"ante.ConsumeTxSizeGasDecorator",
-		"app.LoggingDecorator",
 		"app.EnsureAccountsDecorator",
 		"ante.SetPubKeyDecorator",
 		"ante.SigGasConsumeDecorator",
 		"ante.SigVerificationDecorator",
+		// After SigVerification since v1.36.0: it logs one line per message and
+		// hashes the whole transaction, so ahead of the signature check an
+		// anonymous 1MB transaction of thousands of minimal relay messages made
+		// every node write thousands of log lines for free (L-6).
+		"app.LoggingDecorator",
 		"ante.DeductFeeDecorator",
 		"app.RelaySigDecorator",
 		"*app.PowDecorator",

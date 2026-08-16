@@ -539,6 +539,26 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
 		p = types.DefaultParams()
 	}
+	// subscription_reserve_bps is substituted on its own rather than joining the
+	// all-or-nothing test above, which would discard every deliberately-set value
+	// in the genesis file alongside it.
+	//
+	// Zero is legal to Validate() (the bound is an upper one) but it short-circuits
+	// the reserve split, so all three call sites burn the entire period fee and
+	// escrow nothing: the user reaches level 1 with an empty reserve and is demoted
+	// on their next relay message. Full fee in, instant demotion, no service.
+	//
+	// This is not hypothetical. The shipped genesis params carried no
+	// subscription_reserve_bps key at all, so proto3 decoded it as 0 and every
+	// chain started from that file — a reset_local_testnet.py run, a new
+	// deployment, a from-genesis replay — ran inverted until the v1.34.0 handler
+	// executed. Fixed here rather than in Validate() for the replay reason
+	// documented on MinBlockHashWindow.
+	if p.SubscriptionReserveBps == 0 {
+		p.SubscriptionReserveBps = types.DefaultParams().SubscriptionReserveBps
+		sdkCtx.Logger().Info("InitGenesis: substituted default subscription_reserve_bps",
+			"value", p.SubscriptionReserveBps)
+	}
 	if err := am.k.SetParams(sdkCtx, p); err != nil {
 		panic(fmt.Errorf("InitGenesis: SetParams failed: %w", err))
 	}
@@ -833,13 +853,37 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 			"height", sdkCtx.BlockHeight(), "err", err)
 		return err
 	}
-	scanStart := time.Now()
-	if err := am.k.AssertSupplyInvariant(sdkCtx); err != nil {
-		sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
-			"height", sdkCtx.BlockHeight(), "err", err)
-		return err
-	}
-	if sdkCtx.BlockHeight()%1000 == 0 {
+	// The full scan is O(accounts) and, unlike the delta check, its cost is
+	// charged to no transaction — while the set it walks is user-growable and
+	// irreversible: MsgSendTokens moves as little as 1 umirage to any valid
+	// bech32 address with no existence requirement, x/bank deletes only zero
+	// balances, and nothing sweeps dust for addresses that have no profile. Each
+	// such transfer is paid for once and adds one permanent entry that every
+	// future block had to walk, forever, with no ceiling (review M-5).
+	//
+	// So it now runs periodically rather than every block. The height test is a
+	// pure function of the block height, so every validator scans at exactly the
+	// same heights and nothing about this is non-deterministic. The cost is a
+	// bounded detection delay of at most SupplyFullScanInterval blocks for the
+	// one fault class the delta check cannot see (a supply write paired with a
+	// missing balance write); the node still halts, and recovery is a state-sync
+	// either way.
+	if sdkCtx.BlockHeight()%types.SupplyFullScanInterval == 0 {
+		scanStart := time.Now()
+		if err := am.k.AssertSupplyInvariant(sdkCtx); err != nil {
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:SUPPLY_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
+		}
+		// Same cadence, same reason: O(profiles) and charged to no transaction.
+		// This asserts what the review could previously only argue from
+		// inspection — that the core module account can pay every reserve it has
+		// recorded, with no other module draining it out-of-band.
+		if err := am.k.AssertModuleSolvencyInvariant(sdkCtx); err != nil {
+			sdkCtx.Logger().Error("CONSENSUS_FATAL:MODULE_SOLVENCY_INVARIANT EndBlock; halting chain (auto-recovery will state-sync)",
+				"height", sdkCtx.BlockHeight(), "err", err)
+			return err
+		}
 		sdkCtx.Logger().Info("supply full scan complete",
 			"height", sdkCtx.BlockHeight(),
 			"elapsed_ms", time.Since(scanStart).Milliseconds())
@@ -1433,6 +1477,11 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if err := updated.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
+	// Constraints a proposal must satisfy but a historical blob need not, so they
+	// cannot be folded into Validate() without breaking a from-genesis replay.
+	if err := updated.ValidateGovernanceUpdate(); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
 	if err := am.k.SetParams(sdkCtx, updated); err != nil {
 		return nil, err
 	}
@@ -1923,11 +1972,16 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 	if err != nil {
 		return fmt.Errorf("updateProfileCore: load enabled_agents for %s: %w", owner, err)
 	}
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(int(core.Level))
-	maxAgents := uint64(5)
-	if tierConfig != nil {
-		maxAgents = tierConfig.MaxEnabledAgents
+	if tierConfig == nil {
+		return fmt.Errorf("tier config not found for level %d", core.Level)
 	}
+	maxAgents := tierConfig.MaxEnabledAgents
 
 	// Build a temporary Profile for validation
 	tempProf := core.ToProfile()
@@ -1963,25 +2017,50 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	// Convert to full profile
 	prof := core.ToProfile()
 
-	// Load lists via per-entry iterators
-	if agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner); err == nil {
-		prof.EnabledAgents = agents
+	// Load lists via per-entry iterators.
+	//
+	// Every error propagates. These used to be `if xs, err := ...; err == nil`,
+	// which discarded the error and returned the profile with that list empty and
+	// err == nil — so a transient read fault was indistinguishable from a user who
+	// blocks nobody, and a client read "0 blocked users" as truth (review L-4).
+	// Query-only, so it could not diverge consensus, but it is the exact fail-open
+	// shape the v1.34.0 contract set out to remove, and the paginated path already
+	// propagates.
+	agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading enabled agents for %s: %w", owner, err)
 	}
-	if users, err := am.k.ListFollowedUsers(sdkCtx, owner); err == nil {
-		prof.FollowedUsers = users
+	prof.EnabledAgents = agents
+
+	users, err := am.k.ListFollowedUsers(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading followed users for %s: %w", owner, err)
 	}
-	if topics, err := am.k.ListFollowedTopics(sdkCtx, owner); err == nil {
-		prof.FollowedTopics = topics
+	prof.FollowedUsers = users
+
+	topics, err := am.k.ListFollowedTopics(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading followed topics for %s: %w", owner, err)
 	}
-	if blocked, err := am.k.ListBlockedUsers(sdkCtx, owner); err == nil {
-		prof.BlockedUsers = blocked
+	prof.FollowedTopics = topics
+
+	blocked, err := am.k.ListBlockedUsers(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading blocked users for %s: %w", owner, err)
 	}
-	if posts, err := am.k.ListBlockedPosts(sdkCtx, owner); err == nil {
-		prof.BlockedPosts = posts
+	prof.BlockedUsers = blocked
+
+	posts, err := am.k.ListBlockedPosts(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading blocked posts for %s: %w", owner, err)
 	}
-	if blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner); err == nil {
-		prof.BlockedTopics = blockedTopics
+	prof.BlockedPosts = posts
+
+	blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner)
+	if err != nil {
+		return types.Profile{}, false, fmt.Errorf("loading blocked topics for %s: %w", owner, err)
 	}
+	prof.BlockedTopics = blockedTopics
 
 	return prof, true, nil
 }
@@ -2158,8 +2237,17 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 		if tierConfig == nil || !tierConfig.CanHaveBiography {
 			return nil, fmt.Errorf("biography not available for tier level %d", userLevel)
 		}
+		// Zero is "disabled", per the field's own proto comment — not "unlimited".
+		// The old `maxLen > 0 &&` guard meant the opposite, so a tier with
+		// can_have_biography enabled but no length set had no tier limit at all
+		// (review I-6). ValidateGovernanceUpdate now rejects that combination, so
+		// this branch is unreachable via governance; it stays because the state it
+		// guards against is a raw_state import away.
 		maxLen := tierConfig.MaxBiographyLength
-		if maxLen > 0 && uint64(utf8.RuneCountInString(biography)) > maxLen {
+		if maxLen == 0 {
+			return nil, fmt.Errorf("biography not available for tier level %d: max_biography_length is 0", userLevel)
+		}
+		if uint64(utf8.RuneCountInString(biography)) > maxLen {
 			return nil, fmt.Errorf("biography exceeds limit: %d > %d characters", utf8.RuneCountInString(biography), maxLen)
 		}
 	}
@@ -2243,11 +2331,16 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 		}
 		userLevel = int(core.Level)
 	}
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxAgents := 5
-	if tierConfig != nil {
-		maxAgents = int(tierConfig.MaxEnabledAgents)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxAgents := int(tierConfig.MaxEnabledAgents)
 
 	has, err := am.k.HasEnabledAgent(sdkCtx, owner, agent)
 	if err != nil {
@@ -2378,11 +2471,16 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 		}
 		userLevel = int(core.Level)
 	}
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxAgents := 5
-	if tierConfig != nil {
-		maxAgents = int(tierConfig.MaxEnabledAgents)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxAgents := int(tierConfig.MaxEnabledAgents)
 
 	agents := req.GetAgents()
 	if len(agents) > maxAgents {
@@ -2471,11 +2569,16 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 		return nil, err
 	}
 
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxPosts := uint64(25)
-	if tierConfig != nil {
-		maxPosts = tierConfig.MaxBlockedPosts
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxPosts := tierConfig.MaxBlockedPosts
 	if maxPosts == 0 {
 		return nil, fmt.Errorf("blocked post limit is zero for level %d", userLevel)
 	}
@@ -2583,11 +2686,16 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, fmt.Errorf("BlockUser: unfollow %s for %s: %w", target, owner, err)
 	}
 
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxUsers := uint64(10)
-	if tierConfig != nil {
-		maxUsers = tierConfig.MaxBlockedUsers
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxUsers := tierConfig.MaxBlockedUsers
 	if maxUsers == 0 {
 		return nil, fmt.Errorf("blocked user limit is zero for level %d", userLevel)
 	}
@@ -2699,11 +2807,16 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		}
 	}
 
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxTopics := uint64(10)
-	if tierConfig != nil {
-		maxTopics = tierConfig.MaxBlockedTopics
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxTopics := tierConfig.MaxBlockedTopics
 	if maxTopics == 0 {
 		return nil, fmt.Errorf("blocked topic limit is zero for level %d", userLevel)
 	}
@@ -2823,11 +2936,16 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		return nil, err
 	}
 
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxUsers := uint64(25)
-	if tierConfig != nil {
-		maxUsers = tierConfig.MaxFollowedUsers
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxUsers := tierConfig.MaxFollowedUsers
 
 	// O(1) duplicate check
 	has, err := am.k.HasFollowedUser(sdkCtx, owner, user)
@@ -2989,11 +3107,16 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		}
 	}
 
+	// A nil tier config is a governance fault, not a cue to invent a limit.
+	// Each of these eight sites used to substitute a different hardcoded number,
+	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
+	// same condition (review I-5). Reachable only through a governance
+	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(userLevel)
-	maxTopics := uint64(50)
-	if tierConfig != nil {
-		maxTopics = tierConfig.MaxFollowedTopics
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
+	maxTopics := tierConfig.MaxFollowedTopics
 
 	has, err := am.k.HasFollowedTopic(sdkCtx, owner, topic)
 	if err != nil {

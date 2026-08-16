@@ -1106,6 +1106,23 @@ loop:
 				return snapshottypes.SnapshotItem{}, errorsmod.Wrapf(types.ErrLogic, "node height %v cannot exceed %v",
 					item.IAVL.Height, math.MaxInt8)
 			}
+			// MIRAGE PATCH: reject negative height and version. Both are
+			// wire-supplied int64s from the snapshot peer, and chunk hashes are
+			// verified only against that same peer's metadata, so everything
+			// reaching importer.Add is attacker-controlled. The importer rejects
+			// only versions *above* its own, then indexes nonces[version] on a
+			// slice allocated as make([]uint32, version+1) — a negative version is
+			// an out-of-range panic inside the restore goroutine, which has no
+			// recover, so the process dies instead of rejecting the snapshot and
+			// trying the next peer.
+			if item.IAVL.Height < 0 {
+				return snapshottypes.SnapshotItem{}, errorsmod.Wrapf(types.ErrLogic, "node height %v cannot be negative",
+					item.IAVL.Height)
+			}
+			if item.IAVL.Version < 0 {
+				return snapshottypes.SnapshotItem{}, errorsmod.Wrapf(types.ErrLogic, "node version %v cannot be negative",
+					item.IAVL.Version)
+			}
 			node := &iavltree.ExportNode{
 				Key:     item.IAVL.Key,
 				Value:   item.IAVL.Value,

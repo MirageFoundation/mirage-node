@@ -20,6 +20,14 @@ import (
 //     signature check at all (C-1).
 //   - RelaySigDecorator runs BEFORE PowDecorator, so an unauthenticated
 //     envelope is rejected without paying for Argon2id (M-1).
+//   - LoggingDecorator runs AFTER SigVerification, so an unauthenticated
+//     transaction cannot make the node write logs. It used to sit at index 5,
+//     four places ahead of SigVerification, while looping over every message with
+//     a logger.Info call plus a SHA-256 over the whole transaction — so a 1MB
+//     transaction of thousands of minimal relay messages with a garbage signature
+//     produced thousands of log lines on every node that CheckTx'd it, from an
+//     anonymous sender (L-6). That contradicted the ordering contract stated
+//     right here.
 //   - ensure precedes setPubKey so the outer signer account exists.
 //   - IncrementSequenceDecorator is deliberately absent: relay txs are
 //     unordered, so there is no sequence to increment.
@@ -52,11 +60,11 @@ func relayAnteDecorators(
 		GovAuthorityDecorator{},
 		authante.NewTxTimeoutHeightDecorator(),
 		authante.NewConsumeGasForTxSizeDecorator(ak),
-		LoggingDecorator{},
 		NewEnsureAccountsDecorator(ak),
 		authante.NewSetPubKeyDecorator(ak),
 		authante.NewSigGasConsumeDecorator(ak, authante.DefaultSigVerificationGasConsumer),
 		authante.NewSigVerificationDecorator(ak, signModeHandler),
+		LoggingDecorator{},
 		authante.NewDeductFeeDecorator(ak, bk, nil, nil),
 		RelaySigDecorator{Keeper: ck},
 		&PowDecorator{Keeper: ck},

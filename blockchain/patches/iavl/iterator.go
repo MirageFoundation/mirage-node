@@ -228,7 +228,14 @@ func (iter *Iterator) Next() {
 	}
 
 	node, err := iter.t.next()
-	// TODO: double-check if this error is correctly handled.
+	// MIRAGE PATCH: record the traversal error instead of discarding it.
+	// traversal.next() propagates nodeDB.GetNode, so a node-local read fault
+	// arrives here. Upstream invalidates without assigning iter.err, which makes
+	// a truncated iteration indistinguishable from one that finished cleanly —
+	// and a truncated iteration that commits is AppHash divergence.
+	if err != nil {
+		iter.err = err
+	}
 	if node == nil || err != nil {
 		iter.t = nil
 		iter.valid = false

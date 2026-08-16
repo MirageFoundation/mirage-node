@@ -12,7 +12,14 @@ minimum-gas-prices = "1000umirage"
 
 # The maximum gas a query coming over rest/grpc may consume.
 # If this is set to zero, the query can consume an unbounded amount of gas.
-query-gas-limit = "0"
+#
+# Non-zero since v1.36.0. Queries reach the node unauthenticated through
+# abci_query on the public CometBFT RPC port, which every validator must keep
+# open to peer, so a zero limit made one crafted query an unbounded-CPU DoS
+# against a consensus-critical process. 50,000,000 is well above any legitimate
+# query — the block gas limit itself is smaller — so it bounds abuse without
+# rejecting real traffic.
+query-gas-limit = "50000000"
 
 # default: the last 362880 states are kept, pruning at 10 block intervals
 # nothing: all historic states will be saved, nothing will be deleted (i.e. archiving node)

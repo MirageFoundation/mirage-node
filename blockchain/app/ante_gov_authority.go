@@ -18,8 +18,15 @@ import (
 type GovAuthorityDecorator struct{}
 
 func (d GovAuthorityDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
+	// Transitive: a transaction whose only top-level message is a wrapper has no
+	// GetAuthority() of its own, so inspecting the top level alone would let the
+	// spoof attempt this decorator exists to reject pass on both paths.
+	msgs, err := transitiveMsgs(tx)
+	if err != nil {
+		return ctx, err
+	}
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	for _, m := range tx.GetMsgs() {
+	for _, m := range msgs {
 		if am, ok := m.(interface{ GetAuthority() string }); ok {
 			if strings.TrimSpace(am.GetAuthority()) == govAuthority {
 				return ctx, fmt.Errorf("unauthorized: governance authority cannot be used in direct transactions")

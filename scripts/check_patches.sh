@@ -19,6 +19,28 @@ do
   fi
 done
 
+# Upstream paths the vendored modules deliberately do not carry: documentation,
+# CI configuration, editor settings and test fixtures, none of which are linked
+# by Mirage.
+#
+# LICENSE is deliberately NOT in this list. Both forks are redistributed in a
+# public repository under Apache-2.0, so a missing licence file is a compliance
+# gap rather than a tidiness one, and this check is what catches it.
+INTENTIONALLY_OMITTED=(
+  'docs/*'
+  '.github/*'
+  '.vscode/*'
+  'testdata/*'
+  '*.md'
+  '*.yml'
+  '*.yaml'
+  '.gitignore'
+  '.golangci.yml'
+  'Makefile'
+  'POEM'
+  'mockgen.sh'
+)
+
 module_dir() {
   "$GO" mod download -json "$1" | python3 -c \
     'import json, sys; data = json.load(sys.stdin); print(data["Dir"])'
@@ -32,7 +54,9 @@ check_fork() {
   local -a allowed=("$@")
   local file rel upstream_file permitted
 
-  shopt -s globstar nullglob
+  # dotglob: without it a dot-prefixed file added anywhere inside either fork is
+  # invisible to the whole scan below.
+  shopt -s globstar nullglob dotglob
   for file in "$fork"/**; do
     [[ -f "$file" ]] || continue
     rel="${file#"$fork"/}"
@@ -56,17 +80,25 @@ check_fork() {
       exit 1
     fi
   done
-  for file in "$upstream"/**/*.go; do
+  # Every upstream file, not just *.go. Restricting this loop to Go source is how
+  # the absent iavl LICENSE went unnoticed — an Apache-2.0 redistribution gap in
+  # a public repository, which no amount of Go-only checking would ever surface.
+  for file in "$upstream"/**; do
     [[ -f "$file" ]] || continue
     rel="${file#"$upstream"/}"
     [[ "$rel" == *_test.go ]] && continue
     [[ "$rel" == cmd/* || "$rel" == benchmarks/* ]] && continue
+    for skipped_rel in "${INTENTIONALLY_OMITTED[@]}"; do
+      if [[ "$rel" == $skipped_rel ]]; then
+        continue 2
+      fi
+    done
     if [[ ! -f "$fork/$rel" ]]; then
-      echo "FATAL: $name is missing upstream production file: $rel" >&2
+      echo "FATAL: $name is missing upstream file: $rel" >&2
       exit 1
     fi
   done
-  shopt -u globstar nullglob
+  shopt -u globstar nullglob dotglob
   echo "$name provenance diff OK"
 }
 
@@ -80,8 +112,12 @@ check_fork \
   immutable_tree.go \
   mutable_tree.go \
   nodedb.go \
+  iterator.go \
+  import.go \
+  batch.go \
   consensus_fatal.go \
   consensus_fatal_test.go \
+  batch_flush_error_test.go \
   fastnode_import_test.go \
   nodedb_prune_fail_fast_test.go
 
@@ -92,6 +128,8 @@ check_fork \
   go.mod \
   go.sum \
   rootmulti/store.go \
-  rootmulti/commit_info_prune_test.go
+  rootmulti/commit_info_prune_test.go \
+  cachekv/internal/mergeiterator.go \
+  iavl/store.go
 
 echo "Consensus patch provenance verified"

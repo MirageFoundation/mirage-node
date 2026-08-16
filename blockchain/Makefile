@@ -71,7 +71,7 @@ test-fast-app:
 # app-hash divergence shape.
 test-iavl:
 	@echo "--> Running patched IAVL tests (patches/iavl)"
-	@cd patches/iavl && go test -mod=readonly -timeout 5m .
+	@cd patches/iavl && go test -mod=readonly -timeout 10m ./...
 
 # patches/cosmos-sdk-store-v2 is a forked store/v2 (the rootmulti module the
 # v0.54 baseapp actually links) carrying the commit-info pruning fix (upstream
@@ -79,9 +79,12 @@ test-iavl:
 # unbounded). Like patches/iavl it is a separate go module (replace directive)
 # and is NOT picked up by ./..., so it gets its own gate in test-fast to pin
 # the commit-info prune regression.
+# Every package except streaming/, whose upstream suite launches a go-plugin
+# binary over stdio and fails on any machine that has not built one. Nothing in
+# Mirage links it.
 test-store:
-	@echo "--> Running patched store/v2 tests (patches/cosmos-sdk-store-v2/rootmulti)"
-	@cd patches/cosmos-sdk-store-v2 && go test -mod=readonly -timeout 5m ./rootmulti/
+	@echo "--> Running patched store/v2 tests (patches/cosmos-sdk-store-v2)"
+	@cd patches/cosmos-sdk-store-v2 && go test -mod=readonly -timeout 10m $$(go list ./... | grep -v '/streaming')
 
 test-patch-provenance:
 	@echo "--> Checking consensus patch provenance"
@@ -156,14 +159,19 @@ govet:
 	@echo Running go vet...
 	@go vet ./...
 
+# The forks are scanned with ./... like the main module. Scoping them to a single
+# package left iavl/db, iavl/cache, iavl/fastnode and store/v2's snapshots/,
+# cachekv/, iavl/ and pruning/ unscanned — re-creating, inside the vulnerability
+# gate itself, the blind spot the `replace` directives create. snapshots/ is the
+# one of those with a remote attack surface.
 govulncheck:
 	@status=0; \
 	echo "Running govulncheck for main module..."; \
 	$(GOVULNCHECK) ./... || status=1; \
 	echo "Running govulncheck for patched IAVL..."; \
-	(cd patches/iavl && $(GOVULNCHECK) .) || status=1; \
+	(cd patches/iavl && $(GOVULNCHECK) ./...) || status=1; \
 	echo "Running govulncheck for patched store/v2..."; \
-	(cd patches/cosmos-sdk-store-v2 && $(GOVULNCHECK) ./rootmulti/) || status=1; \
+	(cd patches/cosmos-sdk-store-v2 && $(GOVULNCHECK) ./...) || status=1; \
 	exit $$status
 
 .PHONY: govet govulncheck

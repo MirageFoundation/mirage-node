@@ -181,12 +181,24 @@ func (st *Store) CacheWrap() types.CacheWrap {
 }
 
 // Set implements types.KVStore, creates a new key/value pair in the underlying IAVL tree.
+//
+// MIRAGE PATCH: panic on a tree write error, for symmetry with Get, Has and
+// Delete below. Upstream logs and returns as though the write succeeded, but
+// types.KVStore has no error return at this boundary, so the fail-fast wrapper
+// has already reported success to the keeper and nothing downstream can observe
+// the loss. MutableTree.Set reads nodes from nodeDB to descend and rebalance, so
+// a node-local disk fault means the pair is simply never applied — one validator
+// then commits a block without that key while healthy peers commit with it. The
+// panic is converted into a clean halt by the finalization guard.
 func (st *Store) Set(key, value []byte) {
 	types.AssertValidKey(key)
 	types.AssertValidValue(value)
 	_, err := st.tree.Set(key, value)
-	if err != nil && st.logger != nil {
-		st.logger.Error("iavl set error", "error", err.Error())
+	if err != nil {
+		if st.logger != nil {
+			st.logger.Error("iavl set error", "error", err.Error())
+		}
+		panic(err)
 	}
 }
 
@@ -355,8 +367,21 @@ func (st *Store) Query(req *types.RequestQuery) (res *types.ResponseQuery, err e
 		for ; iterator.Valid(); iterator.Next() {
 			pairs.Pairs = append(pairs.Pairs, kv.Pair{Key: iterator.Key(), Value: iterator.Value()})
 		}
+		// MIRAGE PATCH: a truncated traversal must not be marshalled as a
+		// successful response. Upstream only checks Close(), which returns the
+		// iavl iterator's always-nil error, so a read fault mid-walk answered a
+		// remote client with a silently short result set. This is a query path —
+		// nothing is committed and no divergence is possible — so it returns the
+		// error rather than halting the node.
+		if err := iterator.Error(); err != nil {
+			if cerr := iterator.Close(); cerr != nil {
+				return &types.ResponseQuery{}, errorsmod.Wrapf(types.ErrLogic,
+					"subspace iteration failed: %v (close: %v)", err, cerr)
+			}
+			return &types.ResponseQuery{}, errorsmod.Wrapf(types.ErrLogic, "subspace iteration failed: %v", err)
+		}
 		if err := iterator.Close(); err != nil {
-			panic(fmt.Errorf("failed to close iterator: %w", err))
+			return &types.ResponseQuery{}, errorsmod.Wrapf(types.ErrLogic, "failed to close iterator: %v", err)
 		}
 
 		bz, err := pairs.Marshal()

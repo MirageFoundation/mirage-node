@@ -11,7 +11,7 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
-	authz "github.com/cosmos/cosmos-sdk/x/authz"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	"github.com/stretchr/testify/require"
 
@@ -55,22 +55,22 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 	app1 := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID(chainID))
 	require.NoError(t, app1.Load(true))
 
-	// The app has now initialized stores for all modules including authz.
+	// The app has now initialized stores for every wired module.
 	// Each store has been created in the multistore.
 
 	// 2. Verify that using StoreUpgrades.Added for an existing store causes issues
 	// This simulates what the buggy v1.10.4-restore-sdk upgrade did
-	t.Log("Creating app2 with StoreUpgrades.Added for existing authz store")
+	t.Log("Creating app2 with StoreUpgrades.Added for existing bank store")
 	app2 := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID(chainID))
 
 	upgradeHeight := int64(10)
 	app2.SetStoreLoader(
 		upgradetypes.UpgradeStoreLoader(upgradeHeight, &storetypes.StoreUpgrades{
-			Added: []string{authz.ModuleName},
+			Added: []string{banktypes.ModuleName},
 		}),
 	)
 
-	// The UpgradeStoreLoader will try to set InitialVersion on the authz store,
+	// The UpgradeStoreLoader will try to set InitialVersion on the bank store,
 	// which will conflict with existing data (if any was written)
 	// Note: On a fresh DB with no commits, this might not panic because there's
 	// no actual version history yet. The real issue manifests when there's

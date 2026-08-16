@@ -226,6 +226,99 @@ func TestGenesisParamsStillValidate(t *testing.T) {
 		"a real genesis must validate on this binary or every from-genesis node panics in InitGenesis")
 }
 
+// TestGenesisCarriesSubscriptionReserveBps is the M-1(c) regression test.
+//
+// The fixture used to have no subscription_reserve_bps key at all, so proto3
+// decoded it as 0 — and zero is legal to Validate(), which is precisely why
+// TestGenesisParamsStillValidate above passed while the chain was broken. Zero
+// short-circuits the reserve split, so all three call sites burn the whole
+// period fee and escrow nothing: the subscriber reaches level 1 with an empty
+// reserve and is demoted to free on their very next relay message.
+//
+// Every chain started from this file ran inverted until the v1.34.0 handler
+// executed, which includes every reset_local_testnet.py run.
+func TestGenesisCarriesSubscriptionReserveBps(t *testing.T) {
+	raw, err := os.ReadFile("testdata/genesis_core_params.json")
+	require.NoError(t, err)
+
+	var p Params
+	require.NoError(t, (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(raw), &p))
+
+	require.NotZero(t, p.SubscriptionReserveBps,
+		"genesis must set subscription_reserve_bps: zero escrows nothing and demotes every subscriber")
+	require.Equal(t, DefaultParams().SubscriptionReserveBps, p.SubscriptionReserveBps,
+		"genesis must agree with the default, and with the percent the v1.34.0 handler converts from")
+}
+
+// TestValidateGovernanceUpdateRejectsChainBreakingValues is the M-1(a)/(b)
+// regression test. Each value here passes Validate() — that is the whole point
+// of the finding — and breaks the chain in a way none of the upper bounds catch.
+func TestValidateGovernanceUpdateRejectsChainBreakingValues(t *testing.T) {
+	t.Run("min_difficulty 256 makes PoW unsatisfiable", func(t *testing.T) {
+		p := DefaultParams()
+		p.MinDifficulty = 256
+		require.NoError(t, p.Validate(), "the finding is that this passes Validate()")
+		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "min_difficulty")
+	})
+
+	t.Run("min_difficulty at the governable ceiling is allowed", func(t *testing.T) {
+		p := DefaultParams()
+		p.MinDifficulty = MaxGovernableMinDifficulty
+		require.NoError(t, p.ValidateGovernanceUpdate())
+	})
+
+	t.Run("zero relay_min_gas_price makes paid tiers free", func(t *testing.T) {
+		p := DefaultParams()
+		p.RelayMinGasPrice = 0
+		require.NoError(t, p.Validate())
+		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "relay_min_gas_price")
+	})
+
+	t.Run("zero relay_max_gas_fee makes paid tiers free", func(t *testing.T) {
+		p := DefaultParams()
+		p.RelayMaxGasFee = 0
+		require.NoError(t, p.Validate())
+		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "relay_max_gas_fee")
+	})
+
+	t.Run("zero subscription_reserve_bps inverts subscriptions", func(t *testing.T) {
+		p := DefaultParams()
+		p.SubscriptionReserveBps = 0
+		require.NoError(t, p.Validate())
+		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "subscription_reserve_bps")
+	})
+
+	t.Run("block_hash_window below the floor", func(t *testing.T) {
+		p := DefaultParams()
+		p.BlockHashWindow = MinBlockHashWindow - 1
+		require.NoError(t, p.Validate(), "kept legal so a from-genesis replay still works")
+		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "block_hash_window")
+	})
+
+	t.Run("the defaults are governable", func(t *testing.T) {
+		require.NoError(t, DefaultParams().ValidateGovernanceUpdate())
+	})
+}
+
+// TestValidateGovernanceUpdateStaysOutOfTheReadPath pins the reason these checks
+// are not in Validate(): GetParams validates on every read, so a constraint
+// there is applied retroactively to every blob the chain has ever stored, and a
+// from-genesis replay halts at the first height that predates it. The live
+// genesis carries block_hash_window 10 and a zero reserve, and both must keep
+// validating.
+func TestValidateGovernanceUpdateStaysOutOfTheReadPath(t *testing.T) {
+	p := DefaultParams()
+	p.BlockHashWindow = 10
+	p.SubscriptionReserveBps = 0
+	p.RelayMinGasPrice = 0
+	p.RelayMaxGasFee = 0
+
+	require.NoError(t, p.Validate(),
+		"historical values must still validate on the read path or replay halts")
+	require.Error(t, p.ValidateGovernanceUpdate(),
+		"but governance must not be able to set them")
+}
+
 // TestBlockHashWindowAcceptsTheGenesisValue guards a from-genesis start. The
 // live genesis stores block_hash_window 10 and InitGenesis panics when SetParams
 // fails, so raising the Validate() lower bound to MinBlockHashWindow would stop

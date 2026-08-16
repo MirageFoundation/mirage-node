@@ -54,9 +54,33 @@ const (
 	// block_hash_window 10, and InitGenesis only substitutes defaults when the
 	// value is zero, so a floor in Validate() would panic InitGenesis on this
 	// binary and break every node that starts from genesis. It is enforced where
-	// it can be: the v1.34.0 handler widens a stored value below the floor, and
+	// it can be: ValidateGovernanceUpdate below rejects a proposal that would set
+	// it lower, the v1.34.0 handler widens a stored value below the floor, and
 	// verify_upgrade.py bounds the live chain.
 	MinBlockHashWindow = 20
+
+	// MaxGovernableMinDifficulty caps min_difficulty at a value proof of work can
+	// actually satisfy. The target is derived by right-shifting the maximum hash
+	// by this many bits, so at 256 the target is exactly zero and no Argon2id
+	// output can ever clear it: every free-tier message is rejected in the ante
+	// while paid tiers, being PoW-exempt, notice nothing. Anything above roughly
+	// 40 is already unsatisfiable in practice; 32 is generous against a default
+	// of 10. Governance-path only, for the same replay reason as the floor above.
+	MaxGovernableMinDifficulty = 32
+
+	// SupplyFullScanInterval is how often EndBlock runs the O(accounts)
+	// supply-vs-balances scan. The O(1) delta check still runs every block; only
+	// the full walk is periodic, because its cost is charged to no transaction
+	// while the set it walks is user-growable and irreversible (review M-5).
+	//
+	// Not a governance parameter on purpose: it decides at which heights a node
+	// halts, so a proposal setting it to 0 or to a huge value would either divide
+	// by zero or disable the divergence guard outright.
+	//
+	// At the documented 3s block time this is a full scan every five minutes and
+	// a bounded detection delay of the same, against a twenty-fold reduction in
+	// per-block lifecycle work.
+	SupplyFullScanInterval = 100
 )
 
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
@@ -384,6 +408,69 @@ func (p Params) Validate() error {
 		awardNames[ac.Name] = true
 		if ac.Cost > MaxAwardConfigCost {
 			return fmt.Errorf("award_configs[%d]: cost %d exceeds max allowed %d", i, ac.Cost, MaxAwardConfigCost)
+		}
+	}
+	return nil
+}
+
+// ValidateGovernanceUpdate applies the constraints that a governance proposal
+// must satisfy but a historical params blob need not.
+//
+// These live here rather than in Validate() for one reason: Validate() runs on
+// every GetParams read, so a constraint added there is retroactively applied to
+// every params blob the chain has ever stored. A from-genesis replay would then
+// halt at the first height whose stored value predates the constraint — turning
+// a governance guard into a liveness bug. The same reasoning is already recorded
+// for MinBlockHashWindow and for the deprecated fields.
+//
+// Every value rejected here passes Validate() and breaks the chain in a way the
+// upper bounds do not catch (review M-1).
+func (p Params) ValidateGovernanceUpdate() error {
+	// min_difficulty = 256 makes the PoW target exactly zero, so proof of work
+	// becomes mathematically unsatisfiable and every free-tier user is censored
+	// while paid tiers, being PoW-exempt, see nothing wrong.
+	if p.MinDifficulty > MaxGovernableMinDifficulty {
+		return fmt.Errorf("min_difficulty %d exceeds the governable maximum of %d: "+
+			"the PoW target is max_hash >> min_difficulty, so anything this large is unsatisfiable "+
+			"and censors every free-tier user", p.MinDifficulty, MaxGovernableMinDifficulty)
+	}
+	// Either relay fee input at zero makes calculateRelayFee return zero. Paid
+	// tiers are PoW-exempt by design, so this fee is their only per-message cost:
+	// at zero every paid tier gets unlimited free chain writes, and because their
+	// reserves never drain they never hit the usage-based downgrade either.
+	if p.RelayMinGasPrice == 0 {
+		return fmt.Errorf("relay_min_gas_price must be > 0: zero removes the only per-message " +
+			"cost paid tiers bear, since they are exempt from proof of work")
+	}
+	if p.RelayMaxGasFee == 0 {
+		return fmt.Errorf("relay_max_gas_fee must be > 0: zero removes the only per-message " +
+			"cost paid tiers bear, since they are exempt from proof of work")
+	}
+	// Zero burns the whole period fee and escrows nothing, so a subscriber pays
+	// in full and is demoted to free on their first action.
+	if p.SubscriptionReserveBps == 0 {
+		return fmt.Errorf("subscription_reserve_bps must be > 0: zero escrows nothing, so a " +
+			"subscriber pays the full period fee and is demoted on their first message")
+	}
+	// A window shorter than this is a stricter freshness rule than
+	// max_envelope_age, rejecting work the age check still accepts.
+	if p.BlockHashWindow < MinBlockHashWindow {
+		return fmt.Errorf("block_hash_window %d is below the floor of %d, which would make the "+
+			"recent-hash window a stricter freshness rule than max_envelope_age",
+			p.BlockHashWindow, MinBlockHashWindow)
+	}
+	// max_biography_length is documented as "0 = disabled", but the handler read
+	// zero as "no limit", so a proposal turning biographies on for a tier without
+	// also setting a length left that tier with no tier-level cap at all — bounded
+	// only by the generic text validator (review I-6). Requiring the two fields to
+	// agree removes the ambiguity at the source rather than picking one reading.
+	for i, tier := range p.Tiers {
+		if tier == nil {
+			continue // Validate() already rejects this
+		}
+		if tier.CanHaveBiography && tier.MaxBiographyLength == 0 {
+			return fmt.Errorf("tiers[%d]: can_have_biography is set but max_biography_length is 0, "+
+				"which the field documents as disabled; set a length or disable biographies", i)
 		}
 	}
 	return nil

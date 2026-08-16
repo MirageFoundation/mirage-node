@@ -131,6 +131,19 @@ func (i *Importer) Add(exportNode *ExportNode) error {
 		return fmt.Errorf("node version %v can't be greater than import version %v",
 			exportNode.Version, i.version)
 	}
+	// MIRAGE PATCH: reject a negative version. Upstream bounds it only from
+	// above, then indexes i.nonces[exportNode.Version] on a slice allocated as
+	// make([]uint32, version+1), so a negative value from a malicious state-sync
+	// peer is an out-of-range panic inside the restore goroutine — which has no
+	// recover, so it kills the node rather than rejecting the snapshot and moving
+	// on to the next peer. Also guarded at the rootmulti call site; both, because
+	// this is the function that does the indexing.
+	if exportNode.Version < 0 {
+		return fmt.Errorf("node version %v cannot be negative", exportNode.Version)
+	}
+	if exportNode.Height < 0 {
+		return fmt.Errorf("node height %v cannot be negative", exportNode.Height)
+	}
 
 	node := &Node{
 		key:           exportNode.Key,

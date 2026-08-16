@@ -42,7 +42,6 @@ import (
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authsims "github.com/cosmos/cosmos-sdk/x/auth/simulation"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	authzkeeper "github.com/cosmos/cosmos-sdk/x/authz/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
@@ -96,7 +95,6 @@ type App struct {
 	DistrKeeper           distrkeeper.Keeper
 	GovKeeper             *govkeeper.Keeper
 	UpgradeKeeper         *upgradekeeper.Keeper
-	AuthzKeeper           authzkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
 	ParamsKeeper          paramskeeper.Keeper
 	CoreKeeper            corekeeper.Keeper
@@ -173,15 +171,36 @@ func mirageAnteRouter(
 	stdAnte sdk.AnteHandler,
 	relayAnte sdk.AnteHandler,
 ) (sdk.Context, error) {
-	if err := rejectDelegatorStakingMsgs(tx); err != nil {
+	// Classification must see the messages that will actually execute, not just
+	// the ones at the top level. A wrapper that dispatches its contents itself
+	// (authz.MsgExec) would otherwise carry a relay message onto the standard
+	// ante path, where the envelope signature, the nonce and the PoW are never
+	// checked at all.
+	nested, err := nestedMsgs(tx.GetMsgs(), 0)
+	if err != nil {
+		return ctx, err
+	}
+	for _, m := range nested {
+		if isRelayMessage(m) {
+			ctx.Logger().Error("ante: rejected relay message nested inside a wrapper", "msg_type", sdk.MsgTypeURL(m))
+			return ctx, fmt.Errorf("relay messages cannot be nested inside another message")
+		}
+	}
+
+	allMsgs, err := transitiveMsgs(tx)
+	if err != nil {
+		return ctx, err
+	}
+
+	if err := rejectDelegatorStakingMsgs(allMsgs); err != nil {
 		return ctx, err
 	}
 
 	isRelayTx := false
 	hasNonRelay := false
-	msgTypes := make([]string, 0, len(tx.GetMsgs()))
+	msgTypes := make([]string, 0, len(allMsgs))
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	for _, m := range tx.GetMsgs() {
+	for _, m := range allMsgs {
 		msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
 		switch m.(type) {
 		case *coretypes.MsgBridgeBurn,
@@ -285,7 +304,6 @@ func New(
 		&app.DistrKeeper,
 		&app.GovKeeper,
 		&app.UpgradeKeeper,
-		&app.AuthzKeeper,
 		&app.ConsensusParamsKeeper,
 		&app.ParamsKeeper,
 		&app.CoreKeeper,

@@ -221,6 +221,13 @@ func (t *ImmutableTree) Iterate(fn func(key []byte, value []byte) bool) (bool, e
 			return true, nil
 		}
 	}
+	// MIRAGE PATCH: report a traversal fault instead of returning it as a
+	// completed walk. Upstream returns (false, nil) unconditionally, so a caller
+	// could not distinguish "visited every key" from "stopped early on a disk
+	// error".
+	if err := itr.Error(); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 

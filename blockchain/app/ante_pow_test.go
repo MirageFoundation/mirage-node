@@ -481,8 +481,8 @@ func TestDisableDelegatorStakingDecorator(t *testing.T) {
 
 	// The shared rejection helper is used by the app's global ante router and
 	// must enforce the same policy even outside this decorator.
-	require.NoError(t, rejectDelegatorStakingMsgs(mockTx{msgs: []sdk.Msg{selfCancelUnbond}}))
-	require.ErrorIs(t, rejectDelegatorStakingMsgs(mockTx{msgs: []sdk.Msg{thirdPartyCancelUnbond}}), ErrDelegationDisabled)
+	require.NoError(t, rejectDelegatorStakingMsgs([]sdk.Msg{selfCancelUnbond}))
+	require.ErrorIs(t, rejectDelegatorStakingMsgs([]sdk.Msg{thirdPartyCancelUnbond}), ErrDelegationDisabled)
 }
 
 // TestMirageAnteRouterRejectsThirdPartyStakingBeforeRouting verifies that the

@@ -125,6 +125,35 @@ func haltFinalizeInvariantError(ctx sdk.Context, invariant string, err error) er
 	return err
 }
 
+// haltFinalizeFatal is for the keeper readers that have no error channel —
+// GetParams, GetRelayCredit, the PoW counters, the four difficulty getters and
+// HasEnvelopeNonce all return a bare value, so a fault has nowhere to go.
+//
+// During finalization it halts: continuing would commit state derived from a
+// value this node could not read while its peers could, which is divergence.
+//
+// Everywhere else it panics instead of exiting. Six of these sit on the ante
+// path, which runs in check, recheck and simulate modes, and the backend
+// simulates every user action — so a transient store fault while answering a
+// public query used to call os.Exit(1) on a validator, on a path where nothing
+// is committed and no divergence is possible. baseapp recovers the panic into an
+// error response for that one caller and the node stays up, which is the whole
+// point. Never substitute a default here: that is the silent divergence the
+// fail-closed contract exists to prevent.
+func haltFinalizeFatal(ctx sdk.Context, err error) {
+	if err == nil {
+		return
+	}
+	if ctx.ExecMode() == sdk.ExecModeFinalize {
+		ctx.Logger().Error("CONSENSUS_FATAL", "height", ctx.BlockHeight(), "err", err)
+		// CONSENSUS_FATAL class: node-local|deterministic
+		consensusfatal.HaltErr(err)
+	}
+	ctx.Logger().Error("core keeper read failed outside finalization; rejecting this request only",
+		"height", ctx.BlockHeight(), "exec_mode", ctx.ExecMode(), "err", err)
+	panic(err)
+}
+
 func haltFinalizeBankPanic(ctx sdk.Context, operation string) {
 	recovered := recover()
 	if recovered == nil {

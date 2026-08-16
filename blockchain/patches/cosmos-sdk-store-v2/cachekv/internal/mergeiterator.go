@@ -148,12 +148,44 @@ func (iter *cacheMergeIterator[V]) Close() error {
 
 // Error returns an error if the cacheMergeIterator is invalid defined by the
 // Valid method.
+//
+// MIRAGE PATCH: consult the underlying iterators first. Upstream's version is a
+// pure Valid() proxy, so it manufactures an "invalid cacheMergeIterator"
+// sentinel for a genuine storage fault exactly as it does for normal
+// exhaustion — and because every keeper store access is branched through
+// cachekv, this layer alone made a mid-iteration fault unobservable. Reporting
+// the real error lets the fail-fast wrapper halt instead of committing a
+// truncated iteration as a complete one.
 func (iter *cacheMergeIterator[V]) Error() error {
+	if err := iter.parent.Error(); !isExhaustionSentinel(err) {
+		return err
+	}
+	if err := iter.cache.Error(); !isExhaustionSentinel(err) {
+		return err
+	}
 	if !iter.Valid() {
 		return errors.New("invalid cacheMergeIterator")
 	}
 
 	return nil
+}
+
+// isExhaustionSentinel reports whether err is one of the "iteration finished"
+// markers the cache layers manufacture rather than a genuine fault. memIterator
+// and cacheMergeIterator both report exhaustion through Error, so surfacing
+// those unfiltered would turn the end of every healthy loop into a fault. Only a
+// real lower-layer error is worth propagating. Keep in lockstep with
+// iteratorExhausted in x/core/keeper/failfast_store.go.
+func isExhaustionSentinel(err error) bool {
+	if err == nil {
+		return true
+	}
+	switch err.Error() {
+	case "invalid memIterator", "invalid cacheMergeIterator":
+		return true
+	default:
+		return false
+	}
 }
 
 // assertValid checks if not valid, panics.
