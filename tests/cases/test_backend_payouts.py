@@ -173,15 +173,28 @@ def test_payout_transport(backend: str):
     copy_src = open(
         os.path.join(REPO_ROOT, "web", "frontend", "src", "utils", "errorMessages.js"), encoding="utf-8"
     ).read()
+    # A reserved claim is reported as the success it is, so the guarantee that
+    # the same rewards are never reserved twice has to hold in the distributor,
+    # not in the UI: the client is free to submit, and the server refuses.
+    dist_src = open(os.path.join(REPO_ROOT, "web", "backend", "reward_distributor.py"), encoding="utf-8").read()
+    if "unresolved = self.reconcile_owner_payouts(owner_lc)" in dist_src and '"error": "payout_pending"' in dist_src:
+        _pass("payout_transport.server_refuses_second_reservation")
+    else:
+        _fail(
+            "payout_transport.server_refuses_second_reservation",
+            "claim_rewards no longer blocks a second reservation while a payout is open",
+        )
     if (
-        "payout_pending" in hook_src
-        and "setPayoutPending(true)" in hook_src
+        "setPayoutPending(response.payout_pending === true)" in hook_src
         and "setPayoutPending(res.payout_pending === true)" in hook_src
         and "payout_pending:" in copy_src
     ):
-        _pass("payout_transport.client_locks_on_pending")
+        _pass("payout_transport.client_tracks_settling_transfer")
     else:
-        _fail("payout_transport.client_locks_on_pending", "the claim UI can still re-submit while a payout is open")
+        _fail(
+            "payout_transport.client_tracks_settling_transfer",
+            "the claim UI does not track a settling transfer from the claim response and the summary",
+        )
 
     if not _check_local_docker():
         _fail("payout_transport.signer_matches_pool", "local docker required")
@@ -227,12 +240,16 @@ def test_payout_transport(backend: str):
         "d._apply_broadcast_result = lambda payout_id, tx_hash, code, raw_log: 'broadcast'\n"
         "rd.broadcast_tx = lambda tx_bytes: ('A' * 64, 0, 0, '')\n"
         "res = d.claim_rewards(derive_address_from_pubkey(bytes([2]) + secrets.token_bytes(32)), int(time.time()))\n"
-        "emit({'success': res['success'], 'error': res['error']})\n"
+        "emit({'success': res['success'], 'error': res['error'], 'pending': res.get('payout_pending')})\n"
     )
-    if checktx == {"success": False, "error": "payout_pending"}:
-        _pass("payout_transport.checktx_success_stays_pending")
+    # The claim succeeds because the rewards are granted and the rows are
+    # claimed, but CheckTx is not payment: the transfer must still be flagged as
+    # settling so nothing downstream reports the tokens as delivered. The payout
+    # row staying at 'broadcast' is covered by test_payout_reconciliation.
+    if checktx == {"success": True, "error": None, "pending": True}:
+        _pass("payout_transport.checktx_reports_settling_transfer")
     else:
-        _fail("payout_transport.checktx_success_stays_pending", f"CheckTx was treated as payment: {checktx}")
+        _fail("payout_transport.checktx_reports_settling_transfer", f"CheckTx was not reported as settling: {checktx}")
 
 
 def test_payout_reconciliation(backend: str):

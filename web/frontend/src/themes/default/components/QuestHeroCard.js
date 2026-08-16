@@ -1398,15 +1398,20 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
     }
 
     /* CTA label */
+    // A settling transfer only concerns the button when there is something new
+    // to claim, which is the one case that has to wait for it. Otherwise the
+    // claim already succeeded and the button has nothing to say about it.
+    const payoutBlocksClaim = payoutPending && hasClaimableRewards;
+
     let ctaLabel;
     if (claiming) ctaLabel = 'Claiming…';
-    else if (payoutPending) ctaLabel = 'Confirming Payout…';
+    else if (payoutBlocksClaim) ctaLabel = 'Confirming Payout…';
     else if (!claimingAvailable) ctaLabel = 'Payouts Coming Soon';
     else if (hasClaimableRewards) ctaLabel = 'Claim Rewards';
     else if (allComplete) ctaLabel = 'All Quests Complete';
     else ctaLabel = 'Complete Quests to Earn';
 
-    const ctaDisabled = !hasClaimableRewards || claiming || !claimingAvailable || payoutPending;
+    const ctaDisabled = !hasClaimableRewards || claiming || !claimingAvailable || payoutBlocksClaim;
 
     return (
         <>
@@ -1588,7 +1593,7 @@ export default function QuestHeroCard({ feedViewMode = 'compact', collapsed = fa
                                 type="button"
                                 onClick={handleClaim}
                                 disabled={ctaDisabled}
-                                title={payoutPending ? 'A previous payout is still being confirmed on chain' : !claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
+                                title={payoutBlocksClaim ? 'A previous payout is still being confirmed on chain' : !claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
                                 {ctaLabel}
                             </CtaButton>

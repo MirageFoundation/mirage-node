@@ -178,9 +178,6 @@ export function useRewards() {
     // ---- claim ----
     const claimRewards = useCallback(async () => {
         const hasClaimable = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
-        if (payoutPending) {
-            return { success: false, error: 'payout_pending', message: formatError('payout_pending') };
-        }
         if (!userAddress || claiming || !hasClaimable) {
             return { success: false, error: 'nothing_to_claim' };
         }
@@ -197,16 +194,20 @@ export function useRewards() {
             const response = await Api.post('/rewards/claim', { owner: userAddress, ...sig });
 
             if (response.success) {
+                // The transfer may still be settling. The rewards are granted
+                // either way, so celebrate now rather than making the user wait
+                // on a block, and note the transfer without blocking anything.
+                setPayoutPending(response.payout_pending === true);
                 await fetchAll(true);
                 return {
                     success: true,
                     rewards: response.rewards,
                     txHash: response.tx_hash,
+                    payoutPending: response.payout_pending === true,
                 };
             } else if (response.error_code === 'payout_pending') {
-                // The node has committed to this payment and may already have
-                // broadcast it. Lock claiming until it settles rather than
-                // inviting the user to ask for the same rewards again.
+                // A previous payout is still open, so this claim reserved
+                // nothing. Rare, and the only case the user has to wait out.
                 setPayoutPending(true);
                 clearOptimisticClaimBalance('payout_pending');
                 await fetchAll(true);
@@ -236,7 +237,7 @@ export function useRewards() {
         } finally {
             setClaiming(false);
         }
-    }, [userAddress, claiming, payoutPending, totalAfterMultiplier, pendingInviteCodes, fetchAll, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
+    }, [userAddress, claiming, totalAfterMultiplier, pendingInviteCodes, fetchAll, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
 
     // ---- polling & event listeners ----
     useEffect(() => {

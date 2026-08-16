@@ -696,6 +696,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
     }
 
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+    // A settling transfer only concerns the button when there is something new
+    // to claim, which is the one case that has to wait for it.
+    const payoutBlocksClaim = payoutPending && hasClaimableRewards;
     const flashTarget = flashQuest?.target || 0;
     const flashProgress = flashQuest ? Math.min(flashQuest.progress || 0, flashTarget) : 0;
 
@@ -824,11 +827,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse }) {
                         </LoyaltyBonusText>
                         <ClaimButton
                             onClick={handleClaim}
-                            disabled={!hasClaimableRewards || claiming || !claimingAvailable || payoutPending}
-                            $hasRewards={hasClaimableRewards && claimingAvailable && !payoutPending}
-                            title={payoutPending ? 'a previous payout is still being confirmed on chain' : !claimingAvailable ? 'reward distribution is not yet configured' : undefined}
-                            >
-                            {claiming ? 'claiming...' : payoutPending ? 'confirming payout...' : !claimingAvailable ? 'coming soon' : hasClaimableRewards ? 'claim rewards' : 'complete quests'}
+                            disabled={!hasClaimableRewards || claiming || !claimingAvailable || payoutBlocksClaim}
+                            $hasRewards={hasClaimableRewards && claimingAvailable && !payoutBlocksClaim}
+                            title={payoutBlocksClaim ? 'a previous payout is still being confirmed on chain' : !claimingAvailable ? 'reward distribution is not yet configured' : undefined}
+                        >
+                            {claiming ? 'claiming...' : payoutBlocksClaim ? 'confirming payout...' : !claimingAvailable ? 'coming soon' : hasClaimableRewards ? 'claim rewards' : 'complete quests'}
                         </ClaimButton>
                     </ClaimSection>
 

@@ -581,6 +581,10 @@ def claim_rewards():
             "success": True,
             "rewards": result.get("rewards", []),
             "tx_hash": result.get("tx_hash"),
+            # The rewards are granted and the rows are claimed; only the token
+            # transfer is still settling. Clients show the claim as the success
+            # it is and may note the transfer separately.
+            "payout_pending": result.get("payout_pending", False),
         }
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:

@@ -439,14 +439,30 @@ class RewardDistributor:
         try:
             _hash, code, _height, raw_log = broadcast_tx(tx_bytes)
         except RuntimeError as e:
+            # The payout row is persisted, so reconciliation owns it from here and
+            # will rebroadcast. Nothing about the claim itself is in doubt.
             logger.error("payout.broadcast.transport_failed id=%d hash=%s err=%s", payout_id, tx_hash, e)
-            return {"success": False, "rewards": [], "tx_hash": tx_hash, "error": "payout_pending"}
+            return self._reserved_result(result, tx_hash)
 
         state = self._apply_broadcast_result(payout_id, tx_hash, int(code), raw_log)
-        # BROADCAST_MODE_SYNC only reports CheckTx. Tokens have not moved until
-        # reconciliation finds a successful DeliverTx in a committed block.
-        error_code = "payout_failed" if state == "failed" else "payout_pending"
-        return {"success": False, "rewards": [], "tx_hash": tx_hash, "error": error_code}
+        if state == "failed":
+            return {"success": False, "rewards": [], "tx_hash": tx_hash, "error": "payout_failed"}
+
+        # BROADCAST_MODE_SYNC only reports CheckTx, so the tokens have not moved
+        # until reconciliation finds a successful DeliverTx. The claim itself is
+        # already durable though: the reward rows are marked claimed and the
+        # cosmetics and invite codes were granted under the advisory lock in
+        # phase 1. Reporting that as a failure told users their claim did not go
+        # through when it had, so it is a success carrying a settling transfer.
+        # A payout that never lands releases the rows and the rewards come back.
+        return self._reserved_result(result, tx_hash)
+
+    @staticmethod
+    def _reserved_result(result: dict, tx_hash: str) -> dict:
+        """The claim succeeded; its token transfer is still settling on chain."""
+        result["tx_hash"] = tx_hash
+        result["payout_pending"] = True
+        return result
 
     def _reserve_claim(self, owner_lc: str, ts: int) -> Tuple[dict, Optional[Tuple[int, bytes, str]]]:
         """Phase 1: claim the rows and persist the signed payout, atomically.

@@ -889,6 +889,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     }
 
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+    // A settling transfer only concerns the button when there is something new
+    // to claim, which is the one case that has to wait for it.
+    const payoutBlocksClaim = payoutPending && hasClaimableRewards;
     const flashTarget = flashQuest?.target || 0;
     const flashProgress = flashQuest ? Math.min(flashQuest.progress || 0, flashTarget) : 0;
     const flashProgressTarget = flashTarget > 0 ? flashTarget : 1;
@@ -1055,11 +1058,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                             <ClaimButton
                                 onClick={handleClaim}
-                                disabled={!hasClaimableRewards || claiming || !claimingAvailable || payoutPending}
-                                $hasRewards={hasClaimableRewards && claimingAvailable && !payoutPending}
-                                title={payoutPending ? 'A previous payout is still being confirmed on chain' : !claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
+                                disabled={!hasClaimableRewards || claiming || !claimingAvailable || payoutBlocksClaim}
+                                $hasRewards={hasClaimableRewards && claimingAvailable && !payoutBlocksClaim}
+                                title={payoutBlocksClaim ? 'A previous payout is still being confirmed on chain' : !claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
-                                {claiming ? 'Claiming...' : payoutPending ? 'Confirming Payout...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 'Claim Rewards' : 'Complete Quests'}
+                                {claiming ? 'Claiming...' : payoutBlocksClaim ? 'Confirming Payout...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 'Claim Rewards' : 'Complete Quests'}
                             </ClaimButton>
                         </div>
                     </ClaimSection>
