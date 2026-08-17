@@ -200,15 +200,35 @@ resolve_upgrade_mode() {
 
 # A plan inherited from the restored backup halts the chain mid-run. In upgrade
 # mode our own proposal supplies the plan, so this only guards the other path.
+#
+# "no plan" and "could not ask" must not collapse into the same answer. Treating
+# an unreachable API as an all-clear would disarm the one check standing between
+# an inherited plan and a chain that halts mid-suite, so an indeterminate result
+# is fatal here rather than reassuring.
 assert_no_pending_plan() {
-  local plan_line
-  if plan_line="$(current_plan_height 2>/dev/null)"; then
-    die "the restored backup carries a pending upgrade plan (${plan_line}), and this release
+  local plan_line rc=0
+  plan_line="$(current_plan_height)" || rc=$?
+  case "$rc" in
+    0)
+      die "the restored backup carries a pending upgrade plan (${plan_line}), and this release
   registers no handler for it. The chain would halt at that height mid-test. Restore a
   backup taken after that upgrade applied, or register the handler."
-  fi
-  log "no pending upgrade plan on the restored chain"
+      ;;
+    "$PLAN_EMPTY_RC")
+      log "no pending upgrade plan on the restored chain"
+      ;;
+    *)
+      die "could not determine whether the restored chain has a pending upgrade plan (rc=${rc}).
+  See the current_plan error above. Refusing to continue: if a plan is pending, the chain
+  halts mid-suite and every pane fails for a reason that has nothing to do with the release."
+      ;;
+  esac
 }
+
+# Exit 0 with "<height> <name>" when a plan is pending, PLAN_EMPTY_RC when the
+# chain answered and has none, 1 when the query itself failed. Callers must be
+# able to tell the last two apart.
+PLAN_EMPTY_RC=3
 
 current_plan_height() {
   ctn_python '
@@ -226,7 +246,7 @@ height = int(plan.get("height") or 0)
 name = plan.get("name") or ""
 if height <= 0:
     print("current_plan is empty", file=sys.stderr)
-    sys.exit(1)
+    sys.exit('"$PLAN_EMPTY_RC"')
 print(f"{height} {name}")
 '
 }
@@ -452,9 +472,13 @@ wait_for_jobs() {
 }
 
 wait_for_halt() {
-  local plan_line plan_h plan_n head
+  local plan_line plan_h plan_n head rc=0
   log "waiting for upgrade halt (budget ${HALT_BUDGET_SEC}s)"
-  plan_line="$(current_plan_height)"
+  plan_line="$(current_plan_height)" || rc=$?
+  if (( rc != 0 )); then
+    die "no upgrade plan on chain after submitting the proposal (rc=${rc}).
+  The proposal did not pass, or it passed with a height already behind the head."
+  fi
   plan_h="${plan_line%% *}"
   plan_n="${plan_line#* }"
   log "on-chain plan name=${plan_n} height=${plan_h}"

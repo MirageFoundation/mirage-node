@@ -73,8 +73,10 @@ from tests.cases.test_blockchain_features import (
     test_security,
     test_send_tokens_raw_log_present,
 )
+from tests.cases.test_blockchain_net_tags import test_net_tags_chain
 
 ALL_CATEGORIES = {
+    "net_tags_chain": test_net_tags_chain,
     "relay_sig": test_relay_sig,
     "pow": test_pow,
     "authority": test_authority,
@@ -124,6 +126,7 @@ STATELESS_CATEGORIES = {
     "annotate_chain",
     "envelope_fields",
     "params_schema",
+    "net_tags_chain",
 }
 
 # params_mask is deliberately absent from STATELESS_CATEGORIES: it changes a

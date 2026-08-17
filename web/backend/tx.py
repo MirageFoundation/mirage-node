@@ -421,9 +421,13 @@ def _append_unordered_timeout(body_bytes: bytes, timeout_ns: int) -> bytes:
 def _append_memo(body_bytes: bytes, memo: str) -> bytes:
     """Append TxBody field 2 (memo) as raw wire bytes.
 
-    Same technique as _append_unordered_timeout. Routes build the TxBody with
-    memo="" and proto3 omits empty strings, so field 2 is absent from
-    body_bytes and this can never duplicate it.
+    Same technique as _append_unordered_timeout. Every relay route builds its
+    TxBody with memo="" and proto3 omits empty strings, so field 2 is absent
+    from body_bytes and appending cannot duplicate it. The one builder that
+    accepts a memo, bank_send_body_bytes, is only reached by the reward
+    distributor, which runs outside a request and therefore appends nothing —
+    but a caller that passed both would emit field 2 twice, so keep that
+    parameter unused.
     """
     if not memo:
         return body_bytes
@@ -435,11 +439,13 @@ def _append_memo(body_bytes: bytes, memo: str) -> bytes:
 def _prepare_signed_body(body_bytes: bytes, timeout_ns: int) -> bytes:
     """Body as it will be signed: messages, then memo, then unordered/timeout.
 
-    The single place the relay's network tag enters a transaction. Both the gas
-    estimator's size probe and the real signing path go through here, so the
-    estimate, the simulated tx and the broadcast tx are byte-identical and the
-    memo cannot be charged for but missing (or present but uncharged). Field
-    order stays canonical at 1, 2, 4, 5.
+    The single place the relay's network tag enters a transaction. The gas
+    estimator's size probe and the real signing path both go through here and
+    both take the memo from the same per-request cache, so the memo cannot be
+    charged for but missing, or present but uncharged. The bodies are not byte
+    equal — each build draws a fresh timeout — but the memo contributes the same
+    bytes to every one of them, which is the part the size accounting depends
+    on. Field order stays canonical at 1, 2, 4, 5.
     """
     return _append_unordered_timeout(_append_memo(body_bytes, request_memo()), timeout_ns)
 

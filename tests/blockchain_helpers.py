@@ -419,6 +419,7 @@ def _build_tx_bytes(
     sign_outer: bool = True,
     outer_sig: Optional[bytes] = None,
     unordered: bool = False,
+    memo: str = "",
 ) -> bytes:
     """Build TxRaw. By default signs unordered outer tx with validator key (C-1).
 
@@ -427,6 +428,12 @@ def _build_tx_bytes(
     overrides the 1-byte placeholder (use a 64-byte forgery to force the chain
     all the way into signature verification), and unordered=True adds the
     unordered/timeout_timestamp body fields the real signed path uses.
+
+    memo mirrors what the relaying backend attaches for network tags. It is set
+    on the TxBody here rather than appended as raw wire bytes: the backend has
+    to append because cosmpy's TxBody predates the unordered fields, but a test
+    building the body from scratch has no such constraint, and going through the
+    proto is what proves the field survives signing and the ante chain.
     """
     any_msgs: list[AnyPB] = []
     for msg, type_url in msgs:
@@ -434,7 +441,7 @@ def _build_tx_bytes(
         any_msg.type_url = type_url
         any_msg.value = msg.SerializeToString()
         any_msgs.append(any_msg)
-    body = TxBody(messages=any_msgs, memo="")
+    body = TxBody(messages=any_msgs, memo=memo)
     body_bytes = body.SerializeToString()
 
     if fee_amount is None:
@@ -768,8 +775,9 @@ def _submit_tx(
     fee_denom: str = "umirage",
     fee_amount: Optional[int] = None,
     wait_deliver: bool = False,
+    memo: str = "",
 ) -> tuple[str, int, str, Optional[int], Optional[str]]:
-    tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
+    tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount, memo=memo)
     tx_hash, check_code, check_log = _broadcast_tx_sync(tx_bytes)
     if not wait_deliver or check_code != 0:
         return tx_hash, check_code, check_log, None, None

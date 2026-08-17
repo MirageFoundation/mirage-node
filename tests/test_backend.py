@@ -96,7 +96,7 @@ from tests.cases.test_backend_indexer import (
     test_rumble_embeds,
 )
 from tests.cases.test_backend_hardening import test_backend_hardening
-from tests.cases.test_backend_net_tags import test_net_tags
+from tests.cases.test_backend_net_tags import test_net_tags, test_net_tags_live
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_quests import test_quest_config, test_quest_assignment
 from tests.cases.test_backend_payouts import (
@@ -171,6 +171,7 @@ ALL_CATEGORIES = {
     "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
     "net_tags": test_net_tags,
+    "net_tags_live": test_net_tags_live,
     "indexer_topic_edit": test_indexer_topic_edit,
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
@@ -308,6 +309,9 @@ RELEASE_GATE_CATEGORIES = {
     # The memo is written by any fee-paying relayer, so a parser that raises is
     # an indexer-kill primitive reachable from the chain. Must not be skipped.
     "net_tags",
+    # Every offline net_tags check can pass while no tag ever reaches the chain.
+    # A skip here means the release shipped the feature unverified end to end.
+    "net_tags_live",
 }
 
 

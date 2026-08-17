@@ -20,22 +20,43 @@ The properties worth defending, and what breaks if each is lost:
   * One memo per request. The transaction is built up to four times per request
     and all of them must be byte-identical, or the simulated size differs from
     the broadcast size.
+
+`test_net_tags_live` is the separate online half. It spends wallets and chain
+time, so it is its own category, but without it every check above can pass while
+not a single tag ever reaches the chain.
 """
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from tests.common import (
     _pass,
     _fail,
+    _skip,
     _debug,
+    _rand_str,
     docker_python,
     docker_import_probe,
+    _docker_exec,
+    WALLETS,
+)
+from tests.backend_helpers import (
+    _do_post,
+    _do_vote,
+    _wait_indexed,
 )
 
 _REPO = Path(__file__).resolve().parents[2]
+
+if str(_REPO) not in sys.path:
+    sys.path.insert(0, str(_REPO))
+
+from shared.nettag import STATUS_VALID, encode_memo, parse_memo  # noqa: E402
 
 
 def _probe(name: str, code: str, *, timeout: int = 60) -> None:
@@ -399,6 +420,152 @@ def _test_indexer_projection() -> None:
         "print('OK' if ok else ('BAD', sorted(want_cols - cols), sorted(want_idx - idx)))\n"
     )
     _probe("net_tags.indexer_schema", code)
+
+
+def _net_tag_row(txhash: str) -> dict | None:
+    """Read one net_tags row through psql in the container."""
+    rc, out = _docker_exec(
+        "su - postgres -c \"psql -d "
+        + _indexer_db_name()
+        + " -tAF'|' -c \\\"SELECT namespace, epoch, family, tag, "
+        + "COALESCE(net_class,''), COALESCE(relayer,''), height FROM net_tags "
+        + f"WHERE LOWER(txhash) = LOWER('{txhash}');\\\" 2>&1\" ",
+        timeout=20,
+    )
+    if rc != 0:
+        raise RuntimeError(f"net_tags query failed rc={rc} out={out}")
+    line = out.strip()
+    if not line:
+        return None
+    parts = line.split("|")
+    if len(parts) < 7:
+        raise RuntimeError(f"unexpected net_tags row: {line!r}")
+    return {
+        "namespace": parts[0],
+        "epoch": parts[1],
+        "family": int(parts[2]),
+        "tag": parts[3],
+        "net_class": parts[4],
+        "relayer": parts[5],
+        "height": int(parts[6]),
+    }
+
+
+def _wait_net_tag(txhash: str, timeout: float = 30.0) -> dict | None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        row = _net_tag_row(txhash)
+        if row is not None:
+            return row
+        time.sleep(1.0)
+    return None
+
+
+def _indexer_db_name() -> str:
+    url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not url:
+        rc, out = _docker_exec("printenv INDEXER_DB_URL")
+        url = out.strip() if rc == 0 else ""
+    if not url:
+        return "mirage_indexer"
+    return urlparse(url).path.lstrip("/")
+
+
+def test_net_tags_live(backend: str) -> None:
+    """End-to-end: real relayed transactions carry tags, and the tags cluster.
+
+    Everything in the offline category can pass while no tag is ever written to
+    the chain. This is the check that fails if the memo never leaves the
+    backend, never survives the ante chain, or never reaches the indexer.
+
+    The clustering assertion is the point of the whole feature: two actions from
+    one client in one week must carry the same tag, or there is no signal to
+    detect a farm with.
+    """
+    _debug("net_tags_live: start")
+
+    wallet = WALLETS.get("sub1")
+    other = WALLETS.get("sub2")
+    if wallet is None or other is None:
+        _skip("net_tags_live.setup", "sub1/sub2 wallets not available")
+        return
+
+    first_hash = str(
+        _do_post(
+            backend,
+            wallet,
+            topic=f"nettag{_rand_str(4)}",
+            title="Network tag end to end",
+            content="first tagged action",
+        )
+        or ""
+    ).strip()
+    if not first_hash:
+        _fail("net_tags_live.post_submitted", "backend returned no txhash for the post")
+        return
+    if not _wait_indexed(backend, str(wallet.address()), first_hash):
+        _fail("net_tags_live.post_submitted", f"post {first_hash[:12]} was never indexed")
+        return
+    _pass("net_tags_live.post_submitted", txhash=first_hash[:12])
+
+    try:
+        row = _wait_net_tag(first_hash)
+    except RuntimeError as e:
+        _fail("net_tags_live.tag_projected", str(e))
+        return
+    if row is None:
+        _fail(
+            "net_tags_live.tag_projected",
+            f"no net_tags row for {first_hash[:12]}: the relay is not tagging, or the indexer is not projecting",
+        )
+        return
+    _pass("net_tags_live.tag_projected", **{k: row[k] for k in ("epoch", "family", "net_class")})
+
+    # The stored row must be a well-formed tag, not junk that happened to land.
+    rebuilt = encode_memo(
+        row["namespace"], row["epoch"], row["family"], row["tag"], row["net_class"] or None
+    )
+    parsed = parse_memo(rebuilt)
+    if parsed.status != STATUS_VALID:
+        _fail("net_tags_live.row_is_wellformed", f"{parsed.status}: {parsed.reason} (row={row})")
+    else:
+        _pass("net_tags_live.row_is_wellformed")
+
+    # Attribution: the relaying node must be recorded, or a reader cannot tell
+    # whose claim the tag is and the whole thing is unscoped.
+    if not row["relayer"].startswith("mirage1"):
+        _fail("net_tags_live.relayer_recorded", f"relayer={row['relayer']!r}")
+    else:
+        _pass("net_tags_live.relayer_recorded", relayer=row["relayer"])
+
+    # The clustering property, and the exact shape a farm has: a second account,
+    # a different action type, one network. If these two rows do not share a tag
+    # there is nothing for an agent to cluster on and the feature is inert.
+    vote = _do_vote(backend, other, first_hash, 1)
+    second_hash = str((vote or {}).get("tx_hash") or (vote or {}).get("txhash") or "").strip()
+    if not second_hash:
+        _fail("net_tags_live.same_tag_across_accounts", f"no txhash from the vote: {vote}")
+        return
+    try:
+        second = _wait_net_tag(second_hash)
+    except RuntimeError as e:
+        _fail("net_tags_live.same_tag_across_accounts", str(e))
+        return
+    if second is None:
+        _fail("net_tags_live.same_tag_across_accounts", f"no net_tags row for the vote {second_hash[:12]}")
+        return
+    if second["tag"] != row["tag"]:
+        _fail(
+            "net_tags_live.same_tag_across_accounts",
+            f"two accounts on one network got different tags ({row['tag']} vs {second['tag']}); "
+            "clustering cannot work",
+        )
+    elif second["epoch"] != row["epoch"]:
+        _fail("net_tags_live.same_tag_across_accounts", f"epoch changed mid-test: {row['epoch']} -> {second['epoch']}")
+    else:
+        _pass("net_tags_live.same_tag_across_accounts", tag=row["tag"])
+
+    _debug("net_tags_live: done")
 
 
 def test_net_tags(backend: str) -> None:
