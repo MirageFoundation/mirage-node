@@ -34,7 +34,10 @@ async function encryptAESGCM(plaintext, rawKeyBytes) {
 
 async function decryptAESGCM(ivB64, ciphertextB64, rawKeyBytes) {
     const iv = new Uint8Array(fromBase64(ivB64));
-    const ciphertext = fromBase64(ciphertextB64);
+    // A view, not the bare buffer: WebCrypto identifies a plain ArrayBuffer by
+    // realm and rejects one built in another, which is every ArrayBuffer under
+    // jsdom. Views are checked structurally and cross realms intact.
+    const ciphertext = new Uint8Array(fromBase64(ciphertextB64));
     const key = await crypto.subtle.importKey('raw', rawKeyBytes, 'AES-GCM', false, ['decrypt']);
     const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
     return new TextDecoder().decode(decrypted);
@@ -227,8 +230,12 @@ class SeedVault {
                 this._pwdKeyBytes = keyBytes;
                 this._touchUnlock();
                 return true;
-            } catch (_e) {
-                throw new Error('Incorrect password');
+            } catch (e) {
+                // A failed tag check is the wrong password. Anything else is a
+                // defect, and reporting it as a wrong password sends the user to
+                // re-type a password that was right all along.
+                if (e && e.name === 'OperationError') throw new Error('Incorrect password');
+                throw e;
             }
         }
 
