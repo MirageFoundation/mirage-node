@@ -179,6 +179,14 @@ echo "✓ Caddyfile verified"
 echo "==> Generating Caddy trusted-proxy config (EDGE_PROVIDER=${EDGE_PROVIDER:-cloudflare})..."
 python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" || echo "WARN: refresh_edge_ips.py failed; using existing trusted-proxies.caddy if present"
 
+# Local IP-to-network-class dataset for network tags. Lives on the persistent
+# volume, never in the image, so a refresh survives redeploys instead of being
+# reverted to whatever was baked at build time. Non-fatal: a failed fetch keeps
+# the previous dataset, and with no dataset at all the relay simply omits the
+# class from the tag rather than blocking the posting path.
+echo "==> Refreshing IP-to-network-class dataset..."
+python3 "$ROOT_DIR/deploy/refresh_asn_db.py" || echo "WARN: refresh_asn_db.py failed; network class may be stale or absent"
+
 # Kill any existing tmux session
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   tmux kill-session -t "$SESSION" 2>/dev/null
@@ -700,6 +708,11 @@ while true; do
         # just rewrites an unchanged snippet). Hot-reloads Caddy only on a change.
         python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" \
             2>&1 | tee -a "$LOGS_DIR/deploy/refresh-edge-ips-$(date -u +%Y-%m-%d).log" || true
+        # Refresh the IP-to-network-class dataset. ASN allocations drift, so a
+        # dataset left alone slowly misclassifies; asn_db logs its age and
+        # escalates past 30 days if these passes stop succeeding.
+        python3 "$ROOT_DIR/deploy/refresh_asn_db.py" \
+            2>&1 | tee -a "$LOGS_DIR/deploy/refresh-asn-db-$(date -u +%Y-%m-%d).log" || true
         # Image GC: delete unused Cloudflare Images (off by default)
         if [ "${IMAGE_GC_ENABLED:-false}" = "true" ]; then
             python3 "$ROOT_DIR/scripts/image_gc.py" --days 7 --limit 100 \

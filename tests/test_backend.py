@@ -96,6 +96,7 @@ from tests.cases.test_backend_indexer import (
     test_rumble_embeds,
 )
 from tests.cases.test_backend_hardening import test_backend_hardening
+from tests.cases.test_backend_net_tags import test_net_tags
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_quests import test_quest_config, test_quest_assignment
 from tests.cases.test_backend_payouts import (
@@ -169,6 +170,7 @@ ALL_CATEGORIES = {
     "redgifs_thumbnails": test_redgifs_thumbnails,
     "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
+    "net_tags": test_net_tags,
     "indexer_topic_edit": test_indexer_topic_edit,
     "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
@@ -231,6 +233,7 @@ STATELESS_CATEGORIES = {
     # The other push outbox categories drive the shared outbox with their own
     # tick clock, so they run sequentially and never lease each other's rows.
     "push_outbox_schema",
+    "net_tags",
 }
 
 # These categories use source probes, generated addresses, or direct database
@@ -266,6 +269,7 @@ WALLETLESS_CATEGORIES = {
     "push_outbox_delivery",
     "push_outbox_retry",
     "push_outbox_cleanup",
+    "net_tags",
 }
 
 # Categories that guard a security or economic invariant. They must execute; a
@@ -301,6 +305,9 @@ RELEASE_GATE_CATEGORIES = {
     "push_outbox_delivery",
     "push_outbox_retry",
     "push_outbox_cleanup",
+    # The memo is written by any fee-paying relayer, so a parser that raises is
+    # an indexer-kill primitive reachable from the chain. Must not be skipped.
+    "net_tags",
 }
 
 

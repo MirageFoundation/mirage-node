@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
-# Local upgrade rehearsal: reset from latest backup, pass the software-upgrade
-# proposal, deploy the current tree, raise the PoW limit, then launch
-# test_blockchain / test_backend / verify_upgrade in the container tmux session.
+# Local release rehearsal: reset from the latest mirage.vote backup, deploy the
+# current tree, raise the PoW limit, then launch test_blockchain / test_backend
+# / verify_upgrade in the container tmux session. When the release registers a
+# chain upgrade handler it also passes the software-upgrade proposal and waits
+# for the halt and the plan to apply.
+#
+# CHAIN-UPGRADE MODE IS DETECTED, NOT DECLARED. The script reads the plan name
+# out of proposal_upgrade.json and looks for a matching SetUpgradeHandler in
+# blockchain/app/upgrades.go, then requires --no-chain-upgrade to agree with
+# what it found. Both ways of getting it wrong are things this script exists to
+# catch, and both are silent:
+#
+#   * Skipping the proposal for a release that DOES change chain code leaves the
+#     upgrade path completely unrehearsed while every pane still reports passed.
+#   * Passing the proposal for a release that registers NO handler halts the
+#     chain at the plan height with nothing able to resume it, which looks like
+#     a hung node rather than an operator error.
 #
 # Status files (host path, volume-mounted) so an LLM can poll without attaching:
 #   ~/.mirage/upgrade_tests/pipeline.stage                         current pipeline step
@@ -11,8 +25,9 @@
 #   ~/.mirage/upgrade_tests/all.json                               written when all three finish
 #
 # Usage:
-#   scripts/test_upgrade.sh          # run the pipeline and launch the panes
-#   scripts/test_upgrade.sh --wait   # block until the panes finish, exit 0 iff all passed
+#   scripts/test_upgrade.sh                     # run the pipeline and launch the panes
+#   scripts/test_upgrade.sh --no-chain-upgrade  # same, for a release with no handler
+#   scripts/test_upgrade.sh --wait              # block until the panes finish, exit 0 iff all passed
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +37,11 @@ STATUS_HOST="${HOME}/.mirage/upgrade_tests"
 STATUS_CTN="/root/.mirage/upgrade_tests"
 PROPOSAL_UPGRADE="${ROOT}/scripts/proposals/proposal_upgrade.json"
 PROPOSAL_POW="${ROOT}/scripts/proposals/proposal_set_pow_message_limit_9999999.json"
+UPGRADES_GO="${ROOT}/blockchain/app/upgrades.go"
 JOBS=(blockchain backend verify)
+
+# Set from --no-chain-upgrade; cross-checked against upgrades.go before use.
+NO_CHAIN_UPGRADE=0
 
 # Time budgets. Loops must terminate; these are the ceilings, not the expected wait.
 HALT_BUDGET_SEC="${HALT_BUDGET_SEC:-600}"
@@ -36,12 +55,20 @@ die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Local upgrade rehearsal: reset from latest backup, pass the software-upgrade
-proposal, deploy the current tree, raise the PoW limit, then launch
-test_blockchain / test_backend / verify_upgrade in the container tmux session.
+Local release rehearsal: reset from the latest mirage.vote backup, deploy the
+current tree, raise the PoW limit, then launch test_blockchain / test_backend /
+verify_upgrade in the container tmux session. A release that registers a chain
+upgrade handler additionally passes the software-upgrade proposal and waits for
+the halt and the plan to apply.
 
-  scripts/test_upgrade.sh          run the pipeline and launch the panes
-  scripts/test_upgrade.sh --wait   block until the panes finish; exit 0 iff all passed
+  scripts/test_upgrade.sh                     run the pipeline and launch the panes
+  scripts/test_upgrade.sh --no-chain-upgrade  same, for a release that ships no handler
+  scripts/test_upgrade.sh --wait              block until the panes finish; exit 0 iff all passed
+
+--no-chain-upgrade is cross-checked against blockchain/app/upgrades.go. The run
+aborts if the flag and the source disagree in either direction, because both
+mistakes are silent: skipping the proposal leaves a real upgrade unrehearsed,
+and passing it without a handler halts the local chain permanently.
 
 Poll:
   cat ~/.mirage/upgrade_tests/pipeline.stage
@@ -137,6 +164,50 @@ from pathlib import Path
 data = json.loads(Path("${PROPOSAL_UPGRADE}").read_text())
 print(data["messages"][0]["plan"]["name"])
 PY
+}
+
+# True when upgrades.go registers a SetUpgradeHandler for the plan name. Matched
+# on the quoted name so a mention in a comment cannot satisfy it.
+handler_is_registered() {
+  local name="$1"
+  [[ -f "$UPGRADES_GO" ]] || die "missing ${UPGRADES_GO}"
+  # The name must be the first argument on the line following the call, so a
+  # version string mentioned in a comment or a log message cannot satisfy this.
+  grep -A1 -E '^[[:space:]]*app\.UpgradeKeeper\.SetUpgradeHandler\($' "$UPGRADES_GO" \
+    | grep -qE "^[[:space:]]*\"${name}\",[[:space:]]*$"
+}
+
+# Refuse to run when the flag and the source disagree. Fail-closed both ways.
+resolve_upgrade_mode() {
+  local name="$1"
+  if handler_is_registered "$name"; then
+    if (( NO_CHAIN_UPGRADE )); then
+      die "--no-chain-upgrade was passed, but ${UPGRADES_GO} registers a handler for \"${name}\".
+  Skipping the proposal would leave this release's upgrade path completely unrehearsed
+  while all three panes still reported passed. Drop the flag, or remove the handler."
+    fi
+    log "chain upgrade mode: handler \"${name}\" is registered"
+    return 0
+  fi
+  if (( ! NO_CHAIN_UPGRADE )); then
+    die "no SetUpgradeHandler for \"${name}\" in ${UPGRADES_GO}.
+  Submitting the proposal would halt the local chain at the plan height with nothing
+  able to resume it. Either register the handler, or re-run with --no-chain-upgrade
+  if this release genuinely ships no chain change."
+  fi
+  log "no-chain-upgrade mode: no handler for \"${name}\", and none expected"
+}
+
+# A plan inherited from the restored backup halts the chain mid-run. In upgrade
+# mode our own proposal supplies the plan, so this only guards the other path.
+assert_no_pending_plan() {
+  local plan_line
+  if plan_line="$(current_plan_height 2>/dev/null)"; then
+    die "the restored backup carries a pending upgrade plan (${plan_line}), and this release
+  registers no handler for it. The chain would halt at that height mid-test. Restore a
+  backup taken after that upgrade applied, or register the handler."
+  fi
+  log "no pending upgrade plan on the restored chain"
 }
 
 current_plan_height() {
@@ -444,6 +515,38 @@ wait_pow_limit() {
   die "timed out waiting for pow_message_limit=9999999"
 }
 
+# Raise the limit only when it is not already raised. MsgUpdateParams rejects an
+# update whose mask selects a field it would not change ("update_mask does not
+# change any selected field"), so re-proposing against an already-raised chain
+# fails the proposal and, under set -e, would kill the pipeline for no reason.
+ensure_pow_limit() {
+  local limit
+  if limit=$(pow_message_limit) && [[ "$limit" -eq 9999999 ]]; then
+    log "pow_message_limit already 9999999; skipping the proposal"
+    return 0
+  fi
+  log "raise PoW message limit for the test suites (currently ${limit:-unknown})"
+  python3 "${ROOT}/scripts/submit_proposal.py" local "$PROPOSAL_POW" --no-confirm
+  wait_pow_limit
+}
+
+# Liveness for a release with no plan to apply: the chain must gain height on
+# the binary that was just deployed.
+wait_chain_advancing() {
+  local first second
+  first=$(rpc_height) || die "RPC unreachable after deploy"
+  log "chain at height ${first}; confirming it advances"
+  local start=$SECONDS
+  while (( SECONDS - start < APPLIED_BUDGET_SEC )); do
+    sleep 3
+    if second=$(rpc_height) && (( second > first + 2 )); then
+      log "chain advancing: ${first} -> ${second}"
+      return 0
+    fi
+  done
+  die "chain did not advance past ${first} within ${APPLIED_BUDGET_SEC}s after deploy"
+}
+
 launch_panes() {
   write_run_job
   wait_until 60 "tmux session ${SESSION}" tmux_has_session
@@ -497,31 +600,40 @@ run_pipeline() {
   local name
   name="$(upgrade_name)"
   log "upgrade name from proposal: ${name}"
+  resolve_upgrade_mode "$name"
 
   clear_status
   set_stage reset
 
-  log "reset local testnet from latest backup"
+  log "reset local testnet from latest mirage.vote backup"
   python3 "${ROOT}/scripts/reset_local_testnet.py" --latest
   wait_until "$RPC_BUDGET_SEC" "RPC after reset" rpc_is_up
 
-  set_stage upgrade_proposal
-  log "submit software-upgrade proposal"
-  python3 "${ROOT}/scripts/submit_proposal.py" local "$PROPOSAL_UPGRADE" --no-confirm
-  set_stage halt
-  wait_for_halt
+  if (( NO_CHAIN_UPGRADE )); then
+    assert_no_pending_plan
+  else
+    set_stage upgrade_proposal
+    log "submit software-upgrade proposal"
+    python3 "${ROOT}/scripts/submit_proposal.py" local "$PROPOSAL_UPGRADE" --no-confirm
+    set_stage halt
+    wait_for_halt
+  fi
 
   set_stage deploy
   log "deploy current tree into local container"
   "${ROOT}/deploy/deploy.sh" --local --update
   wait_until "$RPC_BUDGET_SEC" "RPC after deploy" rpc_is_up
   wait_until 120 "backend after deploy" backend_is_up
-  wait_applied_and_live "$name"
+  if (( NO_CHAIN_UPGRADE )); then
+    # No plan to apply, so liveness is measured directly: the chain must still
+    # be producing blocks on the newly deployed binary.
+    wait_chain_advancing
+  else
+    wait_applied_and_live "$name"
+  fi
 
   set_stage pow
-  log "raise PoW message limit for the test suites"
-  python3 "${ROOT}/scripts/submit_proposal.py" local "$PROPOSAL_POW" --no-confirm
-  wait_pow_limit
+  ensure_pow_limit
 
   launch_panes
   set_stage launched
@@ -531,6 +643,7 @@ run_pipeline() {
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
   --wait) wait_for_jobs ;;
+  --no-chain-upgrade) NO_CHAIN_UPGRADE=1; run_pipeline ;;
   "") run_pipeline ;;
   *) die "unknown argument: $1 (try --help)" ;;
 esac

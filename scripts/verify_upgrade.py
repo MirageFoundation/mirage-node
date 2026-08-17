@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.36.0.
+Post-deploy verification for v1.36.1.
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes:
@@ -8,77 +8,66 @@ what THIS release changes:
   python scripts/verify_upgrade.py
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 
-What v1.36.0 changes (deploy-visible)
---------------------------------------
-Indexer and backend hardening from the 2026-08-14 security review. No chain code
-changed, so every check here is about deployed software rather than about state.
+v1.36.1 IS NOT A CHAIN UPGRADE
+------------------------------
+There is no upgrade handler, no software-upgrade proposal and no halt height,
+because there is no binary change: `git diff v1.36.0..v1.36.1 -- blockchain/` is
+empty. Everything in this release is backend, indexer and deploy tooling.
 
-Indexer:
+That is why this script does not query applied_plan, unlike every version of it
+since v1.28.0. Asking the chain to confirm a plan that was deliberately never
+proposed would fail on a correctly deployed node, and adding a no-op handler
+just to give this script something to assert would have cost a real chain halt
+for a feature that touches no chain code.
 
-  * Governance event attributes were base64-decoded on a guess. Roughly one
-    four-digit proposal ID in nine decodes to something unparseable, which aborts
-    the block and re-fails at the same height forever. The fuse is the global
-    proposal counter reaching 1400; it was at 108 when this was written.
-  * Vote weight was looked up from a fixed set of levels {0, 1, 10, 100} while
-    the chain treats any level >= 100 as admin. One governance MsgSetLevel to 101
-    plus one ordinary message from that account wedged the indexer identically.
-  * A deleted post kept granting its author the topic standing that gates
-    downvote weight, so post/self-vote/delete could be banked indefinitely.
-    The first fix was undone by the next restart: a backfill in _init_db(),
-    labelled one-time but run every startup, held a second copy of the stats
-    definition and re-inserted exactly the rows the repair had deleted.
-  * Startup profile reconciliation would soft-delete every profile if the chain
-    reported an empty inventory.
+What v1.36.1 changes (deploy-visible)
+-------------------------------------
+The relaying backend now publishes an epoch-scoped network tag in TxBody.memo:
 
-Backend:
+    tag = HMAC-SHA256(SECRET, domain || iso_year || iso_week || family || ip)[:16]
 
-  * Blocked-topic patterns were matched with a regex built by turning each "*"
-    into ".*". That backtracks exponentially: one blocked topic, costing one
-    ordinary request to set, made every feed render burn tens of seconds of CPU
-    per row until the workers were gone. The chain's own matcher is a linear
-    walk, so this was ours alone; it is now a port of the chain's.
-  * Admin stats fan-out discovered its peers from P2P monikers, which any node
-    on the network can choose, and forwarded the admin's signature proof to
-    whatever host came back — over http, unvalidated. It now fans out only to a
-    roster the operator configures, https only.
-  * Feed pagination multiplied a client-supplied page by the page size with no
-    ceiling, so one request could ask for the whole table at once.
-  * Quest completion was a read-modify-write across autocommit connections, so
-    concurrent requests could bank the same reward more than once.
+so any third-party agent can cluster accounts acting from one network — the
+signature of a vote farm — without an IP being disclosed to anyone. memo is an
+existing TxBody field that the relay paths left empty and that the relayer's
+outer signature already covered, so no validator needed to learn anything new.
+
+The key's scope is a trust domain. Whoever holds it can evaluate the HMAC across
+the whole IPv4 space offline, so it is shared exactly as far as the parties
+already trusted with raw client IPs. The officially operated frontends share one
+value (scripts/set_net_tag_key.py) so a tag matches whichever door a user comes
+through; an independent operator keeps the per-node value the deploy migration
+generates and never receives ours.
+
+Alongside the tag the relay publishes a coarse network class — hosting, vpn,
+cellular, isp or unknown — resolved from a local IPtoASN snapshot. It is what
+lets a reader tell forty votes from two hosting networks (damning) from forty
+across two cellular ones (probably carrier NAT).
 
 Checks:
 
-  1. Frontend version.txt reports v1.36.0.
-  2. Chain binary version reports v1.36.0.
-  3. Upgrade handler name v1.36.0 is applied (applied_plan query).
-  4. Chain is live and has produced blocks past the upgrade height.
-  5. The indexer is advancing. Both wedges this release removes present as a
-     stuck indexer, and that is invisible in the chain's own health.
-  6. The deployed indexer does not base64-decode event attributes, and reads
-     them through the single shared helper.
-  7. The deployed indexer resolves admin levels by range, not by a fixed set.
-  8. The deployed indexer retracts topic standing when a post is deleted.
-  9. The standing-repair migration has been recorded as applied.
- 10. Every stored topic-standing row equals what the canonical vote definition
-     computes, which is the exploit's fingerprint and the migration's job to
-     have removed.
- 11. The deployed indexer no longer re-inserts that standing at startup. The
-     first version of the M-3 fix was undone by the next restart, so this is
-     checked on the host rather than trusted from the migration marker.
- 12. The deployed backend matches topic globs in linear time. Timed against the
-     worst chain-legal pattern rather than read, because the old code returned
-     the right answer, just far too late.
- 13. STATS_FLEET_ROSTER exists in backend.env (the deploy migration ran) and
-     holds only https entries. An empty value is allowed: it disables admin
-     stats fan-out, and it is the one field an operator fills in by hand.
+  1. Frontend version.txt reports v1.36.1.
+  2. Chain binary version reports v1.36.1. The Go source is unchanged, so this
+     is purely a "did the deploy rebuild and relabel the binary" check — and it
+     is the one v1.36.0's rehearsal caught shipping wrong.
+  3. No upgrade plan is pending. A scheduled halt on a release that ships no new
+     handler would stop the chain at that height with nothing able to resume it.
+  4. Chain is live and producing blocks.
+  5. The indexer is advancing.
+  6. NET_TAG_HMAC_KEY is present and well-formed in backend.env (the v1.36.1
+     deploy migration ran), and is not a value published in this repository.
+  7. The deployed backend attaches the memo at the single signing chokepoint,
+     so the gas estimate, the simulation and the broadcast cannot disagree.
+  8. The net_tags table exists with the indexes an agent's queries need.
+  9. The ASN dataset is installed, and its age is reported. Staleness is a NOTE
+     up to 30 days and a FAIL past it: the refresh is a daily job, and a month
+     of silent failure means the class field is quietly wrong.
+ 10. Tags are actually landing on chain — recent transactions carry parseable
+     memos. This is the end-to-end check; everything above it can pass while no
+     tag is ever written.
+ 11. Memos on chain are within the chain's memo budget.
 
-It also prints a NOTE when push is enabled with an empty EXPO_ACCESS_TOKEN. That
-is the single finding this release documents instead of fixing — failing startup
-on it would have taken every node offline on upgrade — and it never affects the
-exit code.
-
-Checks 6 through 13 read deployment artifacts (the deployed source, the
-indexer database) that are not reachable from every vantage point. When the
+Checks 5 through 11 read deployment artifacts (the deployed source, the indexer
+database, backend.env) that are not reachable from every vantage point. When the
 artifact is absent they report NOTE and do not affect the exit code, because a
 missing artifact means "not verifiable from here", not "verified". Run both
 invocations above for the full set — a run that only prints NOTE for a check has
@@ -87,18 +76,15 @@ not performed it.
 This script is read-only: it never broadcasts and never writes. Properties that
 cannot be observed read-only are proven by tests instead:
 
-  * every fix in this release —
-    tests/test_backend.py --category indexer_hardening,backend_hardening
+  * the tag construction, the memo grammar, the hostile-memo parser, the ASN
+    lookup and the import-time key requirement —
+    tests/test_backend.py --category net_tags
 
-  Both categories are offline (no chain, no transactions) and include the
-  database-backed behavioural checks, which build their own throwaway schema.
-  Every check in them was mutation-tested: each fix was reverted in turn and the
-  corresponding check confirmed to fail.
+  That category is offline and walletless (no chain, no transactions).
 """
 from __future__ import annotations
 
 import json
-import math
 import os
 import re
 import subprocess
@@ -108,95 +94,31 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# The shipped software version, checked against version.txt and the binary. The
-# chain upgrade handler carries the same name this release.
-#
-# This release IS consensus-breaking, unlike the first v1.36.0 cut: the
-# 2026-08-14 review's C-1 fix changes which transactions the ante accepts, x/authz
-# is unwired and its store deleted, and the PoW, reserve and supply-invariant
-# paths all changed. A node left on the old binary will fork, not merely compute
-# different topic standing.
-RELEASE_VERSION = "v1.36.0"
-UPGRADE_NAME = "v1.36.0"
+RELEASE_VERSION = "v1.36.1"
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
-
-# Blocks the chain must have produced after the upgrade height before the
-# upgrade counts as "live", not just "applied".
-MIN_BLOCKS_AFTER_UPGRADE = 5
 
 # The indexer must gain height across this window. timeout_commit is 3s, so this
 # spans several blocks even on a slow host.
 INDEXER_PROGRESS_WINDOW_SEC = 10
 
-# Key written by indexer/migrations/v1_36_0_repair_deleted_post_standing.py.
-STANDING_MIGRATION_KEY = "v1.36.0_repair_deleted_post_standing"
+# Blocks the chain must have produced across a short sample to count as live.
+# There is no upgrade height to measure from this release, so liveness is
+# measured directly rather than relative to a plan.
+LIVENESS_WINDOW_SEC = 8
 
-# Read-only mirror of Params.Validate() and Params.ValidateGovernanceUpdate() in
-# blockchain/x/core/types/params.go. Keep the values and the cross-field rules in
-# sync with that file.
-#
-# This block and the two checks that consume it existed until the v1.35.0 rewrite
-# dropped them, which is how the whole M-1 class — parameter values that pass
-# Validate() and then break the chain — went unnoticed for a release (review L-3).
-# It is restored here with the v1.36.0 governance bounds, which are tighter than
-# Validate()'s: Validate() must keep accepting the values already committed to
-# the chain so a from-genesis replay still works, while governance must not be
-# able to set them again.
-#
-# min_difficulty's ceiling is MaxGovernableMinDifficulty (32), not Validate()'s
-# 256: at 256 the PoW target is zero and no free-tier user can ever produce a
-# valid envelope.
-INTEGER_PARAM_BOUNDS = {
-    "min_difficulty": (1, 32),
-    "pow_message_window": (1, 10_000),
-    "pow_message_limit": (1, 18_446_744_073_709_551_615),
-    "pow_calm_period_definition": (0, 18_446_744_073_709_551_615),
-    "pow_calm_sequence_threshold": (1, 100_000),
-    "mint_interval": (1, 1_000_000),
-    "mint_quantity": (1, 1_000_000_000_000_000),
-    "mint_dynamic_credit_cap": (0, 18_446_744_073_709_551_615),
-    "block_hash_window": (20, 1_000),
-    "pow_difficulty_allowance": (0, 18_446_744_073_709_551_615),
-    "min_username_size": (1, 64),
-    "max_username_size": (1, 128),
-    "min_topic_size": (1, 100),
-    "max_topic_size": (1, 100),
-    # Zero on either of these makes every relay message free for paid tiers,
-    # inverting the economics. Governance may not set it; Validate() still
-    # accepts it because the field defaulted to zero before v1.11.0.
-    "relay_min_gas_price": (1, 1_000_000_000),
-    "relay_max_gas_fee": (1, 100_000_000_000),
-    "max_envelope_age": (1, 86_400),
-    "subscription_period": (0, 525_600),
-    # Zero escrows no reserve from a subscription payment, so a paying user
-    # cannot send a single relayed message.
-    "subscription_reserve_bps": (1, 10_000),
-}
-FLOAT_PARAM_BOUNDS = {
-    "mint_dynamic_split": (0.0, 1.0),
-    "pow_difficulty_step": (0.01, 1.0),
-}
-MAX_PROFILE_LIST_ENTRIES = 4_294_967_295
-MAX_VOTE_WEIGHT = 100.0
-MAX_AWARD_CONFIG_COST = 1_000_000_000_000
-PROFILE_LIST_LIMIT_FIELDS = (
-    "max_enabled_agents",
-    "max_followed_users",
-    "max_followed_topics",
-    "max_blocked_users",
-    "max_blocked_posts",
-    "max_blocked_topics",
-)
+MIN_NET_TAG_KEY_BYTES = 32
 
-# Every field in Params. Presence is checked separately from value validation so
-# a generated-query/schema mismatch cannot hide behind a numeric default.
-#
-# This covers all 24 fields of the Params message except subscription_reserve_percent,
-# which is deliberately excluded: it is superseded by subscription_reserve_bps,
-# nothing reads it, and Validate() leaves it unconstrained so a from-genesis
-# replay of the v1.5.0/v1.8.0/v1.11.0 handlers still passes.
-REQUIRED_PARAMS = tuple(INTEGER_PARAM_BOUNDS) + tuple(FLOAT_PARAM_BOUNDS) + ("tiers", "award_configs")
+# Any key that appears in this repository is public by definition. A node that
+# kept a documentation or test value would publish tags anyone can recompute,
+# which silently removes the only thing protecting the addresses.
+PUBLISHED_KEYS = {"ab" * 32, "aa" * 32, "bb" * 32, "cd" * 32, "00" * 32}
+
+ASN_STALE_NOTE_DAYS = 7
+ASN_STALE_FAIL_DAYS = 30
+
+# How far back to look for evidence that tags are landing.
+NET_TAG_SAMPLE_LIMIT = 200
 
 passed = 0
 failed = 0
@@ -225,8 +147,6 @@ def http_json(url: str, timeout: float = 10.0) -> dict:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
     except urllib.error.HTTPError as e:
-        # urllib's message is just the status line; the gRPC-gateway puts the
-        # actual reason in the body, which is the only useful part here.
         raise RuntimeError(f"HTTP {e.code} from {url}: {e.read().decode()[:300]}") from None
 
 
@@ -235,7 +155,7 @@ def repo_root() -> Path:
 
 
 def deployed_source(relative: str) -> Path | None:
-    """The deployed copy of an indexer file, preferring the container path.
+    """The deployed copy of a file, preferring the container path.
 
     Checks read the deployed tree rather than the repo: a host that did not
     receive the new code is exactly what this script exists to make visible.
@@ -245,6 +165,51 @@ def deployed_source(relative: str) -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+def env_file_text(path: Path) -> str | None:
+    try:
+        if not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def env_value(key: str) -> tuple[str | None, Path | None]:
+    """Read a key from the deployed backend.env, falling back to the template."""
+    for env_path in (Path("/root/.mirage/env/backend.env"), repo_root() / "deploy/templates/env/backend.env"):
+        text = env_file_text(env_path)
+        if text is None:
+            continue
+        for line in text.splitlines():
+            if line.startswith(f"{key}="):
+                return line.split("=", 1)[1].strip(), env_path
+        return None, env_path
+    return None, None
+
+
+def indexer_db_url() -> str:
+    """INDEXER_DB_URL from the environment, or from the deployed env files."""
+    from_env = os.environ.get("INDEXER_DB_URL", "").strip()
+    if from_env:
+        return from_env
+    env_dir = Path("/root/.mirage/env")
+    try:
+        if not env_dir.is_dir():
+            return ""
+        env_files = sorted(env_dir.glob("*.env"))
+    except OSError:
+        return ""
+    for env_file in env_files:
+        try:
+            text = env_file.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.strip().startswith("INDEXER_DB_URL="):
+                return line.split("=", 1)[1].strip().strip("'\"")
+    return ""
 
 
 def check_version_txt() -> None:
@@ -265,6 +230,13 @@ def check_version_txt() -> None:
 
 
 def check_binary_version() -> None:
+    """The Go source is identical to v1.36.0, so this checks the label only.
+
+    That is not a trivial check. deploy.sh skips the rebuild when it sees no
+    source change, and in v1.36.0 exactly that produced a binary reporting
+    v1.36.0-1-gd783da08 while every suite passed. A release whose source is
+    unchanged is the case most likely to hit it.
+    """
     bin_candidates = [
         "/usr/local/bin/miraged",
         "/root/go/bin/miraged",
@@ -281,8 +253,7 @@ def check_binary_version() -> None:
             return
         # Parse the version: line rather than searching the whole output. The
         # long form lists every dependency, and a substring match reports the
-        # release as shipped when some module happens to carry that version —
-        # github.com/rs/zerolog@v1.35.0 passed this check on a v1.34.0 binary.
+        # release as shipped when some module happens to carry that version.
         reported = ""
         for line in out.splitlines():
             if line.startswith("version:"):
@@ -298,101 +269,46 @@ def check_binary_version() -> None:
     fail("miraged binary not found")
 
 
-def applied_upgrade_height() -> int:
-    """Height at which the UPGRADE_NAME plan was applied. Raises if not applied."""
-    data = http_json(f"{REST_URL}/cosmos/upgrade/v1beta1/applied_plan/{UPGRADE_NAME}")
-    height = int(data.get("height") or data.get("Height") or 0)
-    if height <= 0:
-        raise RuntimeError(f"upgrade {UPGRADE_NAME} not applied: {data}")
-    return height
+def check_no_pending_upgrade_plan() -> None:
+    """This release registers no handler, so no plan may be scheduled.
 
-
-def check_upgrade_applied() -> None:
+    A plan left pending would halt the chain at its height with no handler of
+    that name in the binary, and nothing on the node could resume it.
+    """
     try:
-        height = applied_upgrade_height()
+        data = http_json(f"{REST_URL}/cosmos/upgrade/v1beta1/current_plan")
     except Exception as e:
-        fail(f"applied_plan check failed: {e}")
+        note(f"current_plan not reachable ({e}): pending upgrade not verifiable from here")
         return
-    ok(f"upgrade {UPGRADE_NAME} applied at height={height}")
+    plan = data.get("plan")
+    if not plan:
+        ok("no upgrade plan scheduled (v1.36.1 ships no handler, so none should be)")
+        return
+    fail(
+        f"an upgrade plan is scheduled that this binary cannot execute: "
+        f"name={plan.get('name')!r} height={plan.get('height')}; the chain will halt there"
+    )
 
 
 def comet_head() -> int:
     return int(http_json(f"{COMET_RPC_URL}/status")["result"]["sync_info"]["latest_block_height"])
 
 
-def check_chain_live_past_upgrade() -> None:
+def check_chain_live() -> None:
     try:
-        head = comet_head()
+        first = comet_head()
+        time.sleep(LIVENESS_WINDOW_SEC)
+        second = comet_head()
     except Exception as e:
         fail(f"comet status failed: {e}")
         return
-    if head <= 0:
-        fail(f"chain height={head}")
-        return
-
-    try:
-        upgrade_height = applied_upgrade_height()
-    except Exception as e:
-        fail(f"chain liveness check: {e}")
-        return
-
-    produced = head - upgrade_height
-    if produced >= MIN_BLOCKS_AFTER_UPGRADE:
-        ok(f"chain live at height={head}, {produced} block(s) after the upgrade height {upgrade_height}")
+    if second > first:
+        ok(f"chain live: height {first} -> {second} in {LIVENESS_WINDOW_SEC}s")
     else:
-        fail(
-            f"chain at height={head} has produced only {produced} block(s) since the upgrade height "
-            f"{upgrade_height}; want at least {MIN_BLOCKS_AFTER_UPGRADE}"
-        )
-
-
-def indexer_db_url() -> str:
-    """INDEXER_DB_URL from the environment, or from the deployed env files.
-
-    `docker exec mirage python3 .../verify_upgrade.py` — the invocation in this
-    file's docstring — does not source the env files, so reading them directly is
-    what makes the check run instead of reporting NOTE for a solvable reason.
-    """
-    from_env = os.environ.get("INDEXER_DB_URL", "").strip()
-    if from_env:
-        return from_env
-    env_dir = Path("/root/.mirage/env")
-    try:
-        if not env_dir.is_dir():
-            return ""
-        env_files = sorted(env_dir.glob("*.env"))
-    except OSError:
-        # Running as a non-root host user rather than inside the container. Not
-        # readable is "not verifiable from here", and the callers all degrade to
-        # NOTE on an empty URL; raising would abort every later check too.
-        return ""
-    for env_file in env_files:
-        try:
-            text = env_file.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            if line.strip().startswith("INDEXER_DB_URL="):
-                return line.split("=", 1)[1].strip().strip("'\"")
-    return ""
-
-
-def env_file_text(path: Path) -> str | None:
-    """Contents of a deployed env file, or None when it cannot be read here."""
-    try:
-        if not path.is_file():
-            return None
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+        fail(f"chain stalled at height {second} for {LIVENESS_WINDOW_SEC}s")
 
 
 def check_indexer_advancing() -> None:
-    """Both wedges this release removes present as a stuck indexer, and the
-    chain's own health says nothing about it: blocks keep being produced while
-    the indexer retries one block forever. Sampling twice is what distinguishes
-    "behind and catching up" from "stuck", so lag alone is reported, not asserted.
-    """
     db_url = indexer_db_url()
     if not db_url:
         note("no INDEXER_DB_URL in the environment or /root/.mirage/env: indexer progress not verifiable from here")
@@ -404,8 +320,6 @@ def check_indexer_advancing() -> None:
         return
 
     def _last_height() -> int:
-        """Read in its own connection: holding a snapshot across the sleep would
-        both risk reading stale data and pin the database's vacuum horizon."""
         with psycopg.connect(db_url, connect_timeout=10) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT value FROM meta WHERE key = 'last_height'")
@@ -432,548 +346,232 @@ def check_indexer_advancing() -> None:
         )
 
 
-def check_event_attrs_not_decoded() -> None:
-    """The base64 guess must be gone from the deployed indexer.
-
-    All four readers of the same event object share one helper now; a host that
-    kept its own copy of the old logic is still holding a lit fuse.
-    """
-    p = deployed_source("indexer/message_processor.py")
-    if p is None:
-        note("indexer source not present: event attribute decoding not verifiable from here")
+def check_net_tag_key_provisioned() -> None:
+    """The deploy migration must have installed a real, private key."""
+    value, env_path = env_value("NET_TAG_HMAC_KEY")
+    if env_path is None:
+        note("backend.env not present: NET_TAG_HMAC_KEY not verifiable from here")
         return
-    src = p.read_text(encoding="utf-8")
-    if "b64decode" in src:
-        fail(f"{p} still base64-decodes event attributes; the proposal-ID wedge is live on this host")
+    if value is None:
+        fail(f"{env_path} has no NET_TAG_HMAC_KEY: the v1.36.1 deploy migration has not run on this host")
         return
-    if "def attr_text" not in src:
-        fail(f"{p} has no attr_text helper: this host is not running the v1.36.0 indexer")
-        return
-
-    main = deployed_source("indexer/main.py")
-    if main is None:
-        note("indexer/main.py not present: attribute readers not verifiable from here")
-        return
-    if "attr_text" not in main.read_text(encoding="utf-8"):
-        fail(f"{main} does not use attr_text; a reader was left on the old decoding path")
-        return
-    ok("event attributes are read as text, through one shared helper")
-
-
-def check_admin_levels_by_range() -> None:
-    """Vote weight must resolve any level >= 100, not a fixed set."""
-    p = deployed_source("indexer/params.py")
-    if p is None:
-        note("indexer/params.py not present: admin level handling not verifiable from here")
-        return
-    src = p.read_text(encoding="utf-8")
-    if "def level_to_tier_index" not in src:
-        fail(f"{p} has no level_to_tier_index: any admin level other than 100 still wedges this host")
-        return
-
-    # Import rather than trust the text: the mapping is the whole fix, and a
-    # present-but-wrong function would satisfy a source match.
-    sys.path.insert(0, str(p.parent.parent))
-    try:
-        from indexer.params import level_to_tier_index
-    except Exception as e:
-        note(f"indexer.params not importable here ({e}); level mapping checked by source only")
-        ok("level_to_tier_index is present")
-        return
-
-    agent_tier = level_to_tier_index(100)
-    bad = [lvl for lvl in (100, 101, 150, 1000) if level_to_tier_index(lvl) != agent_tier]
-    if bad:
-        fail(f"level(s) {bad} do not resolve to the admin tier {agent_tier}")
-    else:
-        ok(f"admin levels 100..1000 all resolve to tier {agent_tier}")
-
-
-def check_delete_retracts_standing() -> None:
-    """Deleting a post must withdraw the standing it granted its author."""
-    p = deployed_source("indexer/database.py")
-    if p is None:
-        note("indexer/database.py not present: standing retraction not verifiable from here")
-        return
-    src = p.read_text(encoding="utf-8")
-    missing = [
-        marker
-        for marker in ("_recompute_topic_stats", "COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner)")
-        if marker not in src
-    ]
-    if missing:
-        fail(f"{p} is missing {missing}; deleted posts still buy topic standing on this host")
-    else:
-        ok("deleted posts no longer grant their author topic standing")
-
-
-def check_standing_migration_applied() -> None:
-    """The repair migration must have run: the fix stops new banking, the
-    migration is what removes what was banked before it."""
-    db_url = indexer_db_url()
-    if not db_url:
-        note("no INDEXER_DB_URL: standing repair migration not verifiable from here")
+    if not value:
+        fail(f"NET_TAG_HMAC_KEY is empty in {env_path}: the backend will refuse to start")
         return
     try:
-        import psycopg
-    except ImportError:
-        note("psycopg unavailable: standing repair migration not verifiable from here")
+        raw = bytes.fromhex(value)
+    except ValueError:
+        fail(f"NET_TAG_HMAC_KEY in {env_path} is not hex: the backend will refuse to start")
         return
-    try:
-        with psycopg.connect(db_url, connect_timeout=10) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT value FROM meta WHERE key = %s", (f"migration_{STANDING_MIGRATION_KEY}",))
-                row = cur.fetchone()
-    except Exception as e:
-        fail(f"standing repair migration check failed: {e}")
+    if len(raw) < MIN_NET_TAG_KEY_BYTES:
+        fail(f"NET_TAG_HMAC_KEY is {len(raw)} bytes in {env_path}; need at least {MIN_NET_TAG_KEY_BYTES}")
         return
-    if row:
-        ok(f"standing repair migration recorded ({STANDING_MIGRATION_KEY})")
-    else:
+    if value.lower() in PUBLISHED_KEYS:
         fail(
-            f"migration {STANDING_MIGRATION_KEY} is not recorded; standing banked before this release "
-            f"is still credited on this host"
+            f"NET_TAG_HMAC_KEY in {env_path} is a value published in this repository: "
+            f"anyone can recompute every tag this node emits, which deanonymizes its users"
         )
+        return
+    ok(f"NET_TAG_HMAC_KEY provisioned ({len(raw)} bytes, {env_path})")
 
 
-def check_no_standing_from_deleted_posts() -> None:
-    """The exploit's fingerprint, read from data rather than from code.
+def check_memo_injected_at_chokepoint() -> None:
+    """One chokepoint, or the estimate and the broadcast can disagree.
 
-    Every stored row must equal what the canonical definition computes, which is
-    the same comparison the offline suite makes. An earlier version of this check
-    looked for authors holding standing in a topic where all their own posts were
-    deleted, and that is not the fingerprint: standing is also earned by voting on
-    other people's posts, so it flagged honest voters who happened to have deleted
-    a post of their own. Comparing against canonical cannot false-positive, because
-    canonical is the definition.
+    Each relay route builds the body up to four times — the gas estimator's size
+    probe, the tx handed to simulate, the broadcast, and a rebuild on an
+    unordered-nonce collision. If any of them skips the memo, the simulated
+    transaction is a different size from the signed one.
     """
+    p = deployed_source("web/backend/tx.py")
+    if p is None:
+        fail("web/backend/tx.py is absent: this host cannot be emitting network tags")
+        return
+    src = p.read_text(encoding="utf-8")
+    if "_prepare_signed_body" not in src:
+        fail(f"{p} has no _prepare_signed_body: this host is not running the v1.36.1 backend")
+        return
+    # Every signing path must go through the helper; a bare call to the
+    # unordered/timeout appender is a path that skips the memo.
+    bare = len(re.findall(r"(?<!def )_append_unordered_timeout\(body_bytes", src))
+    if bare:
+        fail(f"{p} has {bare} signing path(s) bypassing _prepare_signed_body; those transactions go out untagged")
+        return
+    ok("the memo is attached at the single signing chokepoint")
+
+
+def check_net_tags_table() -> None:
     db_url = indexer_db_url()
     if not db_url:
-        note("no INDEXER_DB_URL: residual standing not verifiable from here")
+        note("no INDEXER_DB_URL: net_tags schema not verifiable from here")
         return
     try:
         import psycopg
     except ImportError:
-        note("psycopg unavailable: residual standing not verifiable from here")
+        note("psycopg unavailable: net_tags schema not verifiable from here")
+        return
+    want_cols = {"txhash", "namespace", "epoch", "family", "tag", "net_class", "relayer", "height", "created_at"}
+    want_idx = {
+        "idx_net_tags_tag",
+        "idx_net_tags_created_at",
+        "idx_net_tags_relayer_lower",
+        "idx_net_tags_epoch",
+    }
+    try:
+        with psycopg.connect(db_url, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'net_tags'")
+                cols = {r[0] for r in cur.fetchall()}
+                cur.execute("SELECT indexname FROM pg_indexes WHERE tablename = 'net_tags'")
+                idx = {r[0] for r in cur.fetchall()}
+    except Exception as e:
+        fail(f"net_tags schema check failed: {e}")
+        return
+    if not cols:
+        fail("net_tags table does not exist: this host is not running the v1.36.1 indexer")
+        return
+    missing_cols = sorted(want_cols - cols)
+    missing_idx = sorted(want_idx - idx)
+    if missing_cols or missing_idx:
+        fail(f"net_tags is incomplete: missing columns {missing_cols}, missing indexes {missing_idx}")
+        return
+    ok(f"net_tags present with {len(cols)} columns and all {len(want_idx)} required indexes")
+
+
+def check_asn_dataset() -> None:
+    """The dataset must be installed, and its age is the thing worth reporting."""
+    directory = Path(os.environ.get("ASN_DB_DIR", "").strip() or (Path.home() / ".mirage" / "asn"))
+    meta_path = directory / "meta.json"
+    if not meta_path.is_file():
+        note(
+            f"no ASN dataset at {directory}: tags are still emitted, but without a network class. "
+            f"Run deploy/refresh_asn_db.py"
+        )
+        return
+    try:
+        meta = json.loads(meta_path.read_text())
+    except Exception as e:
+        fail(f"{meta_path} is unreadable: {e}")
+        return
+    built_at = meta.get("built_at")
+    if not isinstance(built_at, (int, float)):
+        fail(f"{meta_path} has no usable built_at")
+        return
+    age_days = (time.time() - built_at) / 86400.0
+    v4 = meta.get("v4_records", 0)
+    v6 = meta.get("v6_records", 0)
+    if age_days >= ASN_STALE_FAIL_DAYS:
+        fail(
+            f"ASN dataset is {age_days:.1f} days old (v4={v4} v6={v6}); the daily refresh has been failing "
+            f"for over {ASN_STALE_FAIL_DAYS} days and the network class is no longer trustworthy"
+        )
+    elif age_days >= ASN_STALE_NOTE_DAYS:
+        note(f"ASN dataset is {age_days:.1f} days old (v4={v4} v6={v6}); check the refresh job")
+        ok(f"ASN dataset installed (v4={v4} v6={v6})")
+    else:
+        ok(f"ASN dataset installed and fresh: {age_days:.1f} days old, v4={v4} v6={v6}")
+
+
+def check_tags_landing_on_chain() -> None:
+    """The end-to-end check: are tags actually being written and projected?
+
+    Everything above this can pass on a node that emits no tag at all, so this
+    is the one that proves the feature is live. Zero rows is a NOTE rather than
+    a failure only when the node has indexed no relayed transactions yet.
+    """
+    db_url = indexer_db_url()
+    if not db_url:
+        note("no INDEXER_DB_URL: on-chain tags not verifiable from here")
+        return
+    try:
+        import psycopg
+    except ImportError:
+        note("psycopg unavailable: on-chain tags not verifiable from here")
         return
     try:
         with psycopg.connect(db_url, connect_timeout=10) as conn:
             with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM net_tags")
+                tag_rows = int((cur.fetchone() or [0])[0] or 0)
+                cur.execute("SELECT COUNT(*) FROM tx_index")
+                tx_rows = int((cur.fetchone() or [0])[0] or 0)
                 cur.execute(
                     """
-                    SELECT s.owner, s.topic, s.net_votes, COALESCE(d.net, 0)
-                      FROM user_topic_stats s
-                      LEFT JOIN (
-                          SELECT LOWER(v.owner) AS owner,
-                                 LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
-                                 SUM(CASE
-                                     WHEN v.user_vote > 0 THEN 1
-                                     WHEN v.user_vote < 0 THEN -1
-                                     ELSE 0
-                                 END)::int AS net
-                            FROM votes v
-                            JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-                           WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
-                             AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
-                           GROUP BY 1, 2
-                      ) d ON d.owner = s.owner AND d.topic = s.topic
-                     WHERE s.net_votes <> COALESCE(d.net, 0)
+                    SELECT epoch, family, net_class, COUNT(*)
+                      FROM net_tags
+                     GROUP BY epoch, family, net_class
+                     ORDER BY COUNT(*) DESC
                      LIMIT 5
                     """
                 )
-                rows = cur.fetchall()
+                breakdown = cur.fetchall()
+                cur.execute(
+                    "SELECT COUNT(*) FROM net_tags WHERE namespace = '' OR tag = '' OR epoch = ''"
+                )
+                malformed = int((cur.fetchone() or [0])[0] or 0)
     except Exception as e:
-        fail(f"residual standing check failed: {e}")
-        return
-    if rows:
-        fail(
-            f"{len(rows)} owner/topic pair(s) disagree with the canonical vote definition "
-            f"(owner, topic, stored, canonical): {rows[0]}"
-        )
-    else:
-        ok("stored topic standing matches the canonical vote definition")
-
-
-def check_startup_backfill_removed() -> None:
-    """The M-3 repair must survive a restart.
-
-    _init_db() carried a vote backfill, commented one-time but run on every
-    startup, holding a second copy of the stats definition without the
-    deleted-self-vote exclusion. Because the repair deletes those rows rather
-    than zeroing them, its ON CONFLICT DO NOTHING suppressed nothing and it
-    re-inserted them at pre-fix values. Checked here as well as in the tests
-    because a host still running the old file undoes its own migration.
-    """
-    p = deployed_source("indexer/database.py")
-    if p is None:
-        note("indexer/database.py not present: startup backfill not verifiable from here")
-        return
-    src = p.read_text(encoding="utf-8")
-    if "ON CONFLICT (owner, topic) DO NOTHING" in src:
-        fail(f"{p} still runs the legacy vote backfill at startup; the standing repair is undone on every restart")
-    else:
-        ok("startup no longer re-inserts standing the repair removed")
-
-
-def check_topic_matcher_is_linear() -> None:
-    """C-1: the deployed backend must match topic globs without a regex.
-
-    Timed rather than read, because the defect was a performance cliff and not a
-    wrong answer: the old code returned the correct result, just tens of seconds
-    late. The pattern below is chain-legal and costs 22s under the regex.
-    """
-    p = deployed_source("web/backend/topic_glob.py")
-    if p is None:
-        fail("web/backend/topic_glob.py is absent: this host still matches topic globs with a regex")
+        fail(f"on-chain tag check failed: {e}")
         return
 
-    sys.path.insert(0, str(p.parent))
-    try:
-        from topic_glob import topic_matches_pattern
-    except Exception as e:
-        note(f"topic_glob not importable here ({e}); matcher checked by presence only")
-        ok("topic_glob.py is deployed")
+    if malformed:
+        fail(f"{malformed} net_tags row(s) have an empty namespace, tag or epoch; the projection is storing junk")
         return
-
-    topic, pattern = "a" * 34 + "z", "a" + "*a" * 16
-    started = time.monotonic()
-    matched = topic_matches_pattern(topic, pattern)
-    elapsed = time.monotonic() - started
-    if matched:
-        fail("topic matcher returned a match for a pattern that cannot match; the port is wrong")
-    elif elapsed > 1.0:
-        fail(f"topic match took {elapsed:.1f}s on a chain-legal pattern: this host is still on the regex matcher")
-    else:
-        ok(f"topic globs match in linear time ({elapsed * 1000:.1f}ms on the worst chain-legal pattern)")
-
-
-def check_stats_roster_configured() -> None:
-    """H-2: admin stats fan-out now goes to a configured roster.
-
-    An absent key means the deploy migration did not run. An empty value is
-    valid and merely disables fan-out, so it is a NOTE and not a failure — but
-    it is the one thing an operator has to fill in by hand this release.
-    """
-    for env_path in (Path("/root/.mirage/env/backend.env"), repo_root() / "deploy/templates/env/backend.env"):
-        text = env_file_text(env_path)
-        if text is None:
-            continue
-        value = ""
-        found = False
-        for line in text.splitlines():
-            if line.startswith("STATS_FLEET_ROSTER="):
-                found = True
-                value = line.split("=", 1)[1].strip()
-                break
-        if not found:
-            fail(f"{env_path} has no STATS_FLEET_ROSTER: the v1.36.0 deploy migration has not run on this host")
-        elif not value:
-            note(f"STATS_FLEET_ROSTER is empty in {env_path}: admin stats fan-out is disabled until it is filled in")
-            ok("STATS_FLEET_ROSTER is present")
-        elif any(not h.strip().startswith("https://") for h in value.split(",") if h.strip()):
-            fail(f"STATS_FLEET_ROSTER in {env_path} contains a non-https entry: admin proofs would leave in cleartext")
+    if tag_rows == 0:
+        if tx_rows == 0:
+            note("no transactions indexed yet, so no tags to check")
         else:
-            ok(f"STATS_FLEET_ROSTER configured with {len([h for h in value.split(',') if h.strip()])} https host(s)")
+            fail(
+                f"{tx_rows} transaction(s) indexed but net_tags is empty: this node is relaying without "
+                f"attaching tags, or the indexer is not projecting them"
+            )
         return
-    note("backend.env not present: stats roster not verifiable from here")
+    ok(f"{tag_rows} network tag(s) projected; top groups (epoch, family, class, n): {breakdown[:3]}")
 
 
-def check_security_headers_enforcing() -> None:
-    """Frontend M-1: the CSP must be enforcing, with COOP and CORP alongside it.
-
-    Read from the served Caddyfile rather than the repo template, because the
-    defect this closes was a policy that shipped in report-only mode and stayed
-    there. A host running the old template would look fixed in git and be
-    unprotected in the browser.
-    """
-    for path in (Path("/etc/caddy/Caddyfile"), repo_root() / "deploy/templates/caddy/Caddyfile"):
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        if "Content-Security-Policy-Report-Only" in text:
-            fail(f"{path} still serves the CSP in report-only mode: it blocks nothing")
-            return
-        if "Content-Security-Policy" not in text:
-            fail(f"{path} serves no Content-Security-Policy at all")
-            return
-        missing = [
-            h
-            for h in ("Cross-Origin-Opener-Policy", "Cross-Origin-Resource-Policy", "X-Frame-Options")
-            if h not in text
-        ]
-        if missing:
-            fail(f"{path} is missing {', '.join(missing)}")
-            return
-        # Enforcing is only half of it: the policy also has to permit the media
-        # the app plays. hls.js pulls Bunny manifests and segments over XHR, and
-        # connect-src governs that — media-src does not. v1.36.0 enforced a
-        # connect-src without the CDN and parked every Bunny video behind
-        # "Video is still processing..." on any browser lacking native HLS.
-        header = re.search(r'Content-Security-Policy\s+"([^"]*)"', text)
-        if header is None:
-            fail(f"{path} has no parseable Content-Security-Policy value")
-            return
-        connect = ""
-        for directive in header.group(1).split(";"):
-            if directive.strip().startswith("connect-src"):
-                connect = directive
-        if "b-cdn.net" not in connect:
-            fail(f"{path} connect-src omits the Bunny CDN: hls.js cannot load any video manifest")
-            return
-        ok(f"CSP is enforcing, with COOP and CORP present and HLS reachable ({path})")
-        return
-    note("no Caddyfile readable from here: response headers not verifiable")
-
-
-def check_attribution_encoding_pinned() -> None:
-    """Frontend L-2: the invite-code signature only works if both sides agree.
-
-    A drift between shared/canon.py and canonicalEncoding.js does not fail
-    loudly on its own — it turns every invited signup into a rejection, which
-    looks like an invite-code bug rather than an encoding bug. The vector below
-    is the same one both test suites pin.
-    """
-    p = deployed_source("shared/canon.py")
+def check_memo_within_budget_on_chain() -> None:
+    """Real memos must be inside the chain's memo budget, not just synthetic ones."""
+    p = deployed_source("shared/nettag.py")
     if p is None:
-        p = repo_root() / "shared/canon.py"
+        note("shared/nettag.py not present: memo budget not verifiable from here")
+        return
     sys.path.insert(0, str(p.parent.parent))
     try:
-        from shared.canon import canon_attribution
+        from shared.nettag import MEMO_MAX_BYTES, NET_CLASSES, TAG_BYTES, NAMESPACE_BYTES, b64u_encode, encode_memo
     except Exception as e:
-        fail(f"shared.canon.canon_attribution is not importable ({e}): invited signups cannot be verified")
+        note(f"shared.nettag not importable here ({e}); memo budget checked by presence only")
+        ok("shared/nettag.py is deployed")
         return
 
-    expected = (
-        "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d6500"
-        "6d69726167653161626300414243442d31323334000031373836383136383539343430313233"
+    worst = encode_memo(
+        b64u_encode(b"\xff" * NAMESPACE_BYTES),
+        "2026-W53",
+        6,
+        b64u_encode(b"\xff" * TAG_BYTES),
+        max(NET_CLASSES, key=len),
     )
-    got = canon_attribution("set_username", "MIRAGE1abc", "ABCD-1234", "", 1786816859440123).hex()
-    if got != expected:
-        fail("attribution encoding drifted from the pinned vector: every invited signup would be rejected")
-        return
-    if canon_attribution("set_username", "mirage1abc", "X", "", 1) == canon_attribution(
-        "set_username", "mirage1abc", "X", "", 2
-    ):
-        fail("attribution encoding does not bind the nonce: a signature can be replayed onto another request")
-        return
-    ok("attribution encoding matches the pinned cross-language vector and binds the nonce")
-
-
-def check_expo_token_open_item() -> None:
-    """The one finding this release documents rather than fixes.
-
-    Hard-failing startup on an empty token would have taken every node offline
-    on upgrade, so the backend warns instead. This surfaces the same warning at
-    verification time; it never affects the exit code.
-    """
-    text = env_file_text(Path("/root/.mirage/env/backend.env"))
-    if text is None:
-        return
-    push_on = any(
-        line.startswith("PUSH_NOTIFICATIONS_ENABLED=") and line.split("=", 1)[1].strip().lower() in ("1", "true")
-        for line in text.splitlines()
-    )
-    token = ""
-    for line in text.splitlines():
-        if line.startswith("EXPO_ACCESS_TOKEN="):
-            token = line.split("=", 1)[1].strip()
-    if push_on and not token:
-        note(
-            "EXPO_ACCESS_TOKEN is empty while push is enabled: pushes go out unauthenticated. Known open item for "
-            "this release, tracked in docs/security/open-items.md"
-        )
-
-
-def query_params() -> dict:
-    return (http_json(f"{REST_URL}/mirage/core/v1/params").get("params")) or {}
-
-
-def check_required_params_present() -> None:
-    try:
-        params = query_params()
-    except Exception as e:
-        fail(f"params query failed: {e}")
-        return
-    missing = [name for name in REQUIRED_PARAMS if params.get(name) is None]
-    if missing:
-        fail(f"params query is missing required field(s): {missing}")
-        return
-    ok(f"all {len(REQUIRED_PARAMS)} runtime-required params present")
-
-
-def check_param_bounds() -> None:
-    """Assert the chain's live parameters are inside the governance bounds.
-
-    Restored from the pre-v1.35.0 script (review L-3) and retightened for the
-    v1.36.0 governance rules.
-    """
-    try:
-        params = query_params()
-    except Exception as e:
-        fail(f"params bounds check: params query failed: {e}")
-        return
-
-    violations: list[str] = []
-    checked = 0
-    int_values: dict[str, int] = {}
-    for name, (low, high) in INTEGER_PARAM_BOUNDS.items():
-        checked += 1
-        raw = params.get(name)
-        if raw is None:
-            violations.append(f"{name} missing")
-            continue
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            violations.append(f"{name}={raw!r} not an integer")
-            continue
-        int_values[name] = value
-        if value < low or value > high:
-            violations.append(f"{name}={value} outside [{low}, {high}]")
-
-    for name, (low, high) in FLOAT_PARAM_BOUNDS.items():
-        checked += 1
-        raw = params.get(name)
-        try:
-            value = float(raw)
-            if not math.isfinite(value):
-                violations.append(f"{name}={value} is not finite")
-            elif value < low or value > high:
-                violations.append(f"{name}={value} outside [{low}, {high}]")
-        except (TypeError, ValueError):
-            violations.append(f"{name}={raw!r} not a number")
-
-    pow_limit = int_values.get("pow_message_limit")
-    calm_definition = int_values.get("pow_calm_period_definition")
-    if pow_limit is not None and calm_definition is not None and calm_definition >= pow_limit:
-        violations.append(
-            f"pow_calm_period_definition={calm_definition} must be < pow_message_limit={pow_limit}"
-        )
-
-    pow_window = int_values.get("pow_message_window")
-    allowance = int_values.get("pow_difficulty_allowance")
-    if pow_window is not None and allowance is not None and allowance > 2 * pow_window:
-        violations.append(
-            f"pow_difficulty_allowance={allowance} must be <= 2*pow_message_window={2 * pow_window}"
-        )
-
-    min_username = int_values.get("min_username_size")
-    max_username = int_values.get("max_username_size")
-    if min_username is not None and max_username is not None and min_username > max_username:
-        violations.append(f"min_username_size={min_username} exceeds max_username_size={max_username}")
-
-    min_topic = int_values.get("min_topic_size")
-    max_topic = int_values.get("max_topic_size")
-    if min_topic is not None and max_topic is not None and min_topic > max_topic:
-        violations.append(f"min_topic_size={min_topic} exceeds max_topic_size={max_topic}")
-
-    tiers = params.get("tiers")
-    if not isinstance(tiers, list) or len(tiers) != 3:
-        violations.append(f"tiers must contain exactly 3 entries, got {tiers!r}")
+    size = len(worst.encode("ascii"))
+    if size > MEMO_MAX_BYTES:
+        fail(f"the largest legal memo is {size} bytes, over the {MEMO_MAX_BYTES} budget")
     else:
-        for index, tier in enumerate(tiers):
-            if not isinstance(tier, dict):
-                violations.append(f"tiers[{index}] is not an object")
-                continue
-            for name in PROFILE_LIST_LIMIT_FIELDS:
-                checked += 1
-                raw = tier.get(name)
-                try:
-                    value = int(raw)
-                except (TypeError, ValueError):
-                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
-                    continue
-                if value < 0 or value > MAX_PROFILE_LIST_ENTRIES:
-                    violations.append(
-                        f"tiers[{index}].{name}={value} outside [0, {MAX_PROFILE_LIST_ENTRIES}]"
-                    )
-            for name in ("period_fee", "max_title_length", "max_content_length"):
-                checked += 1
-                raw = tier.get(name)
-                try:
-                    value = int(raw)
-                except (TypeError, ValueError):
-                    violations.append(f"tiers[{index}].{name}={raw!r} not an integer")
-                    continue
-                if value < 0:
-                    violations.append(f"tiers[{index}].{name}={value} must be non-negative")
-                if name in ("max_title_length", "max_content_length") and value == 0:
-                    violations.append(f"tiers[{index}].{name} must be > 0")
-                if index == 0 and name == "period_fee" and value != 0:
-                    violations.append(f"tiers[0].period_fee={value} must be 0")
-
-            checked += 1
-            raw_vote_weight = tier.get("vote_weight")
-            try:
-                vote_weight = float(raw_vote_weight)
-                if not math.isfinite(vote_weight):
-                    violations.append(f"tiers[{index}].vote_weight={vote_weight} is not finite")
-                elif vote_weight < 0.0 or vote_weight > MAX_VOTE_WEIGHT:
-                    violations.append(
-                        f"tiers[{index}].vote_weight={vote_weight} outside [0.0, {MAX_VOTE_WEIGHT}]"
-                    )
-            except (TypeError, ValueError):
-                violations.append(f"tiers[{index}].vote_weight={raw_vote_weight!r} not a number")
-
-    award_configs = params.get("award_configs")
-    if not isinstance(award_configs, list) or not award_configs:
-        violations.append(f"award_configs must be a non-empty list, got {award_configs!r}")
-    else:
-        award_names: set[str] = set()
-        for index, award in enumerate(award_configs):
-            if not isinstance(award, dict):
-                violations.append(f"award_configs[{index}] is not an object")
-                continue
-            checked += 2
-            name = award.get("name")
-            if not isinstance(name, str) or name == "":
-                violations.append(f"award_configs[{index}].name must be non-empty")
-            elif name in award_names:
-                violations.append(f"award_configs[{index}].name={name!r} is duplicated")
-            else:
-                award_names.add(name)
-            raw_cost = award.get("cost")
-            try:
-                cost = int(raw_cost)
-            except (TypeError, ValueError):
-                violations.append(f"award_configs[{index}].cost={raw_cost!r} not an integer")
-                continue
-            if cost < 0 or cost > MAX_AWARD_CONFIG_COST:
-                violations.append(
-                    f"award_configs[{index}].cost={cost} outside [0, {MAX_AWARD_CONFIG_COST}]"
-                )
-
-    if violations:
-        fail("stored params violate the v1.36.0 governance bounds: " + "; ".join(violations))
-        return
-    ok(f"stored params satisfy the v1.36.0 governance bounds ({checked} values checked)")
+        ok(f"largest legal memo is {size} bytes, inside the {MEMO_MAX_BYTES} budget")
 
 
 def main() -> int:
-    print(f"verify_upgrade.py for {RELEASE_VERSION}")
+    print(f"verify_upgrade.py for {RELEASE_VERSION} (no chain upgrade: blockchain/ is unchanged)")
     check_version_txt()
     check_binary_version()
-    check_upgrade_applied()
-    check_chain_live_past_upgrade()
-    check_required_params_present()
-    check_param_bounds()
+    check_no_pending_upgrade_plan()
+    check_chain_live()
     check_indexer_advancing()
-    check_event_attrs_not_decoded()
-    check_admin_levels_by_range()
-    check_delete_retracts_standing()
-    check_standing_migration_applied()
-    check_no_standing_from_deleted_posts()
-    check_startup_backfill_removed()
-    check_topic_matcher_is_linear()
-    check_stats_roster_configured()
-    check_security_headers_enforcing()
-    check_attribution_encoding_pinned()
-    check_expo_token_open_item()
+    check_net_tag_key_provisioned()
+    check_memo_injected_at_chokepoint()
+    check_net_tags_table()
+    check_asn_dataset()
+    check_tags_landing_on_chain()
+    check_memo_within_budget_on_chain()
     note(
-        "the full behaviour of every fix in this release, including the database-level ones, is proven by "
-        "tests/test_backend.py --category indexer_hardening,backend_hardening (offline; no chain traffic), "
-        "and the frontend fixes by web/frontend: npm run test && npm run check:mutation"
+        "the tag construction, memo grammar, hostile-memo parser, ASN lookup and import-time key requirement "
+        "are proven by tests/test_backend.py --category net_tags (offline; no chain traffic)"
     )
     print(f"\nResult: {passed} passed, {failed} failed")
     return 1 if failed else 0

@@ -386,6 +386,56 @@ class Indexer:
 
         self._record_optional_telemetry(height)
 
+    def _record_net_tag(self, tx_hash: str, tx_body, height: int, ts: int) -> None:
+        """Project the network tag a relayer published in the tx memo.
+
+        The memo is attacker-controlled: anyone who pays a fee can write
+        anything there, including a copied namespace. Everything stored here is
+        therefore a claim by the relayer named alongside it, and it is only
+        meaningful when scoped to relayers the reader trusts.
+        """
+        from indexer.message_processor import relayer_from_message
+        from shared.nettag import STATUS_ABSENT, STATUS_INVALID, parse_memo
+
+        parsed = parse_memo(tx_body.memo)
+        if parsed.status == STATUS_ABSENT:
+            return
+        if parsed.status == STATUS_INVALID:
+            logger.warning(
+                "net_tag.invalid height=%s txhash=%s reason=%s",
+                height,
+                tx_hash,
+                parsed.reason,
+            )
+            return
+
+        relayer = ""
+        for any_msg in tx_body.messages:
+            if any_msg.type_url.startswith("/mirage.core.v1."):
+                relayer = relayer_from_message(any_msg.type_url, any_msg.value)
+                break
+
+        self.db.upsert_net_tag(
+            tx_hash,
+            parsed.namespace,
+            parsed.epoch,
+            parsed.family,
+            parsed.tag,
+            parsed.net_class,
+            relayer,
+            height,
+            ts,
+        )
+        logger.debug(
+            "net_tag.stored height=%s txhash=%s epoch=%s family=%s class=%s relayer=%s",
+            height,
+            tx_hash,
+            parsed.epoch,
+            parsed.family,
+            parsed.net_class,
+            relayer,
+        )
+
     def _process_tx(self, idx: int, tx_b64: str, tx_result: dict, height: int, ts: int):
         """Decode and project one transaction. Must run inside the block transaction."""
         raw_tx_bytes = base64.b64decode(tx_b64)
@@ -400,6 +450,10 @@ class Indexer:
 
         core_types = [m.type_url for m in tx_body.messages if m.type_url.startswith("/mirage.core.v1.")]
         code = int(tx_result.get("code", 0) or 0)
+
+        # Before the failure branch on purpose: a farm's rejected attempts are
+        # evidence too, and the relayer paid for the tx either way.
+        self._record_net_tag(tx_hash, tx_body, height, ts)
 
         if code != 0:
             tx_type = type_url_to_tx_type(core_types[0]) if core_types else "unknown"

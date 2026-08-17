@@ -28,6 +28,7 @@ from cosmpy.protos.cosmos.base.v1beta1.coin_pb2 import Coin
 
 from node import min_gas_price_umirage, require_runtime
 from db import connect_db
+from net_tag import request_memo
 from shared.client import der_to_compact_sig
 
 _log = _logging.getLogger("tx")
@@ -61,7 +62,7 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
         mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
         si = SignerInfo(public_key=pub_any, mode_info=mode, sequence=0)
         auth = AuthInfo(signer_infos=[si], fee=fee)
-        signed_body = _append_unordered_timeout(body_bytes, _unique_timeout_ns())
+        signed_body = _prepare_signed_body(body_bytes, _unique_timeout_ns())
         tx_raw = TxRaw(
             body_bytes=signed_body,
             auth_info_bytes=auth.SerializeToString(),
@@ -135,7 +136,7 @@ def build_signed_tx(
     auth_bytes = auth.SerializeToString()
 
     timeout_ns = _unique_timeout_ns()
-    signed_body = _append_unordered_timeout(body_bytes, timeout_ns)
+    signed_body = _prepare_signed_body(body_bytes, timeout_ns)
 
     sign_doc = SignDoc(
         body_bytes=signed_body,
@@ -415,6 +416,32 @@ def _append_unordered_timeout(body_bytes: bytes, timeout_ns: int) -> bytes:
     # field 5, wire type 2 (length-delimited)
     timeout = b"\x2a" + _encode_varint(len(ts_bytes)) + ts_bytes
     return body_bytes + unordered + timeout
+
+
+def _append_memo(body_bytes: bytes, memo: str) -> bytes:
+    """Append TxBody field 2 (memo) as raw wire bytes.
+
+    Same technique as _append_unordered_timeout. Routes build the TxBody with
+    memo="" and proto3 omits empty strings, so field 2 is absent from
+    body_bytes and this can never duplicate it.
+    """
+    if not memo:
+        return body_bytes
+    raw = memo.encode("ascii")
+    # field 2, wire type 2 (length-delimited)
+    return body_bytes + b"\x12" + _encode_varint(len(raw)) + raw
+
+
+def _prepare_signed_body(body_bytes: bytes, timeout_ns: int) -> bytes:
+    """Body as it will be signed: messages, then memo, then unordered/timeout.
+
+    The single place the relay's network tag enters a transaction. Both the gas
+    estimator's size probe and the real signing path go through here, so the
+    estimate, the simulated tx and the broadcast tx are byte-identical and the
+    memo cannot be charged for but missing (or present but uncharged). Field
+    order stays canonical at 1, 2, 4, 5.
+    """
+    return _append_unordered_timeout(_append_memo(body_bytes, request_memo()), timeout_ns)
 
 
 def _sign_sign_doc(privkey_bytes: bytes, sign_doc_bytes: bytes) -> bytes:

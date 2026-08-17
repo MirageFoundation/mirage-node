@@ -186,6 +186,25 @@ def type_url_to_tx_type(type_url: str) -> str:
     return "_".join(parts)
 
 
+def relayer_from_message(type_url: str, value: bytes) -> str:
+    """Relaying node address from a core message's authority field.
+
+    Every core message carries the relaying validator in ``authority`` (never
+    the user, whose address is derived from ``envelope_pubkey``), and it is
+    covered by the relayer's outer signature. Returns "" for a type this build
+    does not know, which is a missing attribution rather than a wrong one.
+    """
+    proto_cls = TYPE_URL_TO_PROTO.get(type_url)
+    if proto_cls is None:
+        return ""
+    try:
+        parsed = proto_cls()
+        parsed.ParseFromString(value)
+    except Exception:
+        return ""
+    return str(getattr(parsed, "authority", "") or "").strip().lower()
+
+
 class MessageProcessor:
     """Handles processing of all message types."""
 

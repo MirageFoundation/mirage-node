@@ -265,6 +265,35 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_index_tx_type ON tx_index(tx_type)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_tx_index_created_at ON tx_index(created_at DESC)")
 
+                # v1.36.1: net_tags — epoch-scoped network tag parsed from the
+                # relay tx memo. Keyed by txhash so posts.txhash and votes.txhash
+                # both join to it and no future action type needs its own copy.
+                #
+                # Deliberately NOT in tx_index: that table is capped at
+                # TX_INDEX_CAP and pruned on every upsert, so tags kept there
+                # would be deleted within hours. This table has the opposite
+                # lifecycle — the whole point is historical farm analysis.
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS net_tags (
+                        txhash TEXT PRIMARY KEY,
+                        namespace TEXT NOT NULL,
+                        epoch TEXT NOT NULL,
+                        family SMALLINT NOT NULL,
+                        tag TEXT NOT NULL,
+                        net_class TEXT,
+                        relayer TEXT,
+                        height BIGINT NOT NULL DEFAULT 0,
+                        created_at BIGINT NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+                # tag is where every agent query starts; without this it is a scan.
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_net_tags_tag ON net_tags(tag)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_net_tags_created_at ON net_tags(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_net_tags_relayer_lower ON net_tags(LOWER(relayer))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_net_tags_epoch ON net_tags(epoch)")
+
                 # Awards (burn-only signals on posts/comments)
                 cur.execute(
                     """
@@ -1581,6 +1610,55 @@ class DatabaseManager:
                         (TX_INDEX_CAP,),
                     )
                     logger.debug("Pruned tx_index to cap=%s (total=%s)", TX_INDEX_CAP, total)
+
+    def upsert_net_tag(
+        self,
+        txhash: str,
+        namespace: str,
+        epoch: str,
+        family: int,
+        tag: str,
+        net_class: str | None,
+        relayer: str,
+        height: int,
+        created_at: int,
+    ) -> None:
+        """Store the network tag a relayer published in a transaction's memo.
+
+        Never pruned. Do not add a row-count cap here the way tx_index has one:
+        the value of a tag is precisely that it can be correlated with activity
+        weeks later, and the SELECT-COUNT-then-DELETE-NOT-IN pattern used there
+        would also run a full count on every single indexed transaction. If this
+        ever needs bounding, delete by created_at, not by rank.
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO net_tags(txhash, namespace, epoch, family, tag, net_class, relayer, height, created_at)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(txhash) DO UPDATE SET
+                      namespace=EXCLUDED.namespace,
+                      epoch=EXCLUDED.epoch,
+                      family=EXCLUDED.family,
+                      tag=EXCLUDED.tag,
+                      net_class=EXCLUDED.net_class,
+                      relayer=EXCLUDED.relayer,
+                      height=EXCLUDED.height,
+                      created_at=EXCLUDED.created_at
+                    """,
+                    (
+                        txhash,
+                        self._strip_nul(str(namespace or "")),
+                        self._strip_nul(str(epoch or "")),
+                        int(family),
+                        self._strip_nul(str(tag or "")),
+                        self._strip_nul(str(net_class)) if net_class else None,
+                        self._strip_nul(str(relayer or "")),
+                        int(height),
+                        int(created_at),
+                    ),
+                )
 
     def is_topic_followed(self, owner: str, topic: str) -> bool:
         """Return True if the owner currently follows the given topic."""
