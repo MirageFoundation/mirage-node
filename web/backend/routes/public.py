@@ -384,14 +384,30 @@ def _sanitize_wh(w, h) -> dict:
     return {}
 
 
+# Rumble embed ids, optionally publisher-qualified. This value is interpolated
+# into an iframe src by the clients, so it is matched whole rather than escaped.
+_EMBED_ID_RE = re.compile(r"^(?:[a-z0-9]+\.)?v[a-z0-9]+$", re.IGNORECASE)
+
+
+def _sanitize_embed_id(value) -> str | None:
+    """Return the embed id if it is one, else None."""
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    return value if _EMBED_ID_RE.match(value) else None
+
+
 def _sanitize_media_meta_list(raw_list: list) -> list[dict]:
-    """Sanitize a list of media meta dicts, ensuring valid w/h on each."""
+    """Sanitize a list of media meta dicts, ensuring valid w/h and embed on each."""
     result = []
     for item in raw_list or []:
-        if isinstance(item, dict) and item.get("w") and item.get("h"):
-            result.append(_sanitize_wh(item["w"], item["h"]))
-        else:
-            result.append({})
+        entry = {}
+        if isinstance(item, dict):
+            if item.get("w") and item.get("h"):
+                entry = _sanitize_wh(item["w"], item["h"])
+            embed = _sanitize_embed_id(item.get("embed"))
+            if embed:
+                entry["embed"] = embed
+        result.append(entry)
     return result
 
 

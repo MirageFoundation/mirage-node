@@ -2170,6 +2170,464 @@ def _indexer_hardening_corrupt_profile_check(backend: str) -> None:
             _fail("indexer_hardening.corrupt_profile_cleanup", f"left the corrupt row behind: {e}")
 
 
+def test_redgifs_thumbnails(backend: str):
+    """The RedGIFs resolver, which is the one place the indexer talks to a third party.
+
+    Hermetic: no network. What matters is not that a live lookup works but that
+    the guards around it hold — the id that goes out, the URL that comes back,
+    the batch cap, and the fact that a dead gif cannot wedge the pass.
+    """
+    del backend
+
+    if not _check_local_docker():
+        _skip("redgifs.id_extraction", "local docker required")
+        return
+
+    import sys
+
+    sys.path.insert(0, "/opt/mirage")
+    from indexer import redgifs
+    from indexer.main import Indexer, REDGIFS_BACKFILL_BATCH
+
+    # ── the id that goes out ──────────────────────────────────────────────
+    # Only the id is attacker-controlled, so it is the only thing that could
+    # bend the request away from the fixed host it is interpolated into.
+    id_cases = [
+        ("https://www.redgifs.com/watch/prettywrithinghornet", "prettywrithinghornet"),
+        ("https://redgifs.com/watch/craftysimplebettong", "craftysimplebettong"),
+        ("https://v3.redgifs.com/watch/857346293912490649", "857346293912490649"),
+        ("https://www.redgifs.com/ifr/everyawfulmullet", "everyawfulmullet"),
+        ("https://www.redgifs.com/watch/foo?utm=1", "foo"),
+        ("https://evil.example/watch/foo", None),
+        ("https://notredgifs.com.evil.example/watch/foo", None),
+        ("https://www.redgifs.com/watch/../../etc/passwd", None),
+        ("https://www.redgifs.com/", None),
+        ("javascript:alert(1)", None),
+    ]
+    bad_ids = [f"{raw} -> {redgifs.extract_gif_id(raw)} (want {want})" for raw, want in id_cases if redgifs.extract_gif_id(raw) != want]
+    if bad_ids:
+        _fail("redgifs.id_extraction", "; ".join(bad_ids))
+    else:
+        _pass("redgifs.id_extraction", cases=len(id_cases))
+
+    # ── the URL that comes back ───────────────────────────────────────────
+    # This is the allowlist that matters: the value is stored and later handed
+    # to a browser as an image source, and it arrives from a third party.
+    url_cases = [
+        ("https://media.redgifs.com/X-mobile.jpg", True),
+        ("https://redgifs.com/x.jpg", True),
+        ("http://media.redgifs.com/X.jpg", False),
+        ("https://evil.example/X.jpg", False),
+        ("https://media.redgifs.com.evil.example/X.jpg", False),
+        ("javascript:alert(1)", False),
+        ("", False),
+    ]
+    bad_urls = [f"{raw} -> {redgifs._is_redgifs_media_url(raw)}" for raw, want in url_cases if redgifs._is_redgifs_media_url(raw) != want]
+    if bad_urls:
+        _fail("redgifs.response_url_allowlist", "; ".join(bad_urls))
+    else:
+        _pass("redgifs.response_url_allowlist", cases=len(url_cases))
+
+    # A non-id must be refused before a request is built, not sanitized into one.
+    refused = []
+    for probe in ("../../etc/passwd", "a/b", "", "x" * 100, "a b"):
+        try:
+            redgifs.RedgifsResolver().resolve_thumbnail(probe)
+            refused.append(f"accepted {probe!r}")
+        except ValueError:
+            pass
+        except Exception as e:
+            refused.append(f"{probe!r} raised {type(e).__name__} instead of ValueError: {e}")
+    if refused:
+        _fail("redgifs.refuses_non_id_before_request", "; ".join(refused))
+    else:
+        _pass("redgifs.refuses_non_id_before_request")
+
+    # ── the backfill loop ─────────────────────────────────────────────────
+    class _StubDB:
+        """Stands in for the real query, including its exclusion behaviour."""
+
+        def __init__(self, rows):
+            self.rows = rows
+            self.updated: list[tuple[str, str]] = []
+
+        def select_redgifs_posts_missing_thumbnail(self, limit, exclude_txhashes=()):
+            excluded = set(exclude_txhashes)
+            live = [r for r in self.rows if r[0] not in excluded and not any(u[0] == r[0] for u in self.updated)]
+            return live[:limit]
+
+        def update_post_thumbnail(self, txhash, url):
+            self.updated.append((txhash, url))
+
+    class _StubResolver:
+        def __init__(self, behavior):
+            self.behavior = behavior
+            self.calls: list[str] = []
+
+        def resolve_thumbnail(self, gif_id):
+            self.calls.append(gif_id)
+            outcome = self.behavior(gif_id)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    class _Stub:
+        def __init__(self, db, resolver):
+            self.db = db
+            self._redgifs = resolver
+            self._redgifs_missing = set()
+            self._redgifs_skip = set()
+
+        _skip_redgifs_post = Indexer._skip_redgifs_post
+
+    rows = [(f"tx{i:03d}", "[]", f"https://www.redgifs.com/watch/gif{i:03d}") for i in range(REDGIFS_BACKFILL_BATCH + 7)]
+
+    db = _StubDB(rows)
+    resolver = _StubResolver(lambda gid: f"https://media.redgifs.com/{gid}-mobile.jpg")
+    Indexer._backfill_redgifs_thumbnails(_Stub(db, resolver))
+    if len(resolver.calls) == REDGIFS_BACKFILL_BATCH and len(db.updated) == REDGIFS_BACKFILL_BATCH:
+        _pass("redgifs.batch_is_capped", batch=REDGIFS_BACKFILL_BATCH)
+    else:
+        _fail(
+            "redgifs.batch_is_capped",
+            f"{len(resolver.calls)} lookups and {len(db.updated)} writes for a cap of {REDGIFS_BACKFILL_BATCH}",
+        )
+
+    # A gif that is gone is recorded once and never asked about again, or a
+    # handful of deleted ids would fill every pass and starve the live ones.
+    db = _StubDB(rows)
+    resolver = _StubResolver(lambda gid: None)
+    stub = _Stub(db, resolver)
+    Indexer._backfill_redgifs_thumbnails(stub)
+    first_pass = list(resolver.calls)
+    Indexer._backfill_redgifs_thumbnails(stub)
+    repeated = sorted(set(first_pass) & set(resolver.calls[len(first_pass):]))
+    # Each pass spends its whole budget on ids it has not seen, so two passes
+    # record two batches and revisit nothing.
+    expected_missing = 2 * REDGIFS_BACKFILL_BATCH
+    if not db.updated and len(stub._redgifs_missing) == expected_missing and not repeated:
+        _pass("redgifs.gone_ids_are_not_retried", recorded=expected_missing)
+    else:
+        _fail(
+            "redgifs.gone_ids_are_not_retried",
+            f"writes={db.updated} missing={len(stub._redgifs_missing)} "
+            f"(expected {expected_missing}) retried={repeated}",
+        )
+
+    # An unreachable API aborts the pass instead of grinding through the batch,
+    # and must not leave a transient failure recorded as a permanent one.
+    db = _StubDB(rows)
+    resolver = _StubResolver(lambda gid: redgifs.RedgifsUnavailable("probe outage"))
+    stub = _Stub(db, resolver)
+    try:
+        Indexer._backfill_redgifs_thumbnails(stub)
+        aborted = False
+    except redgifs.RedgifsUnavailable:
+        aborted = True
+    if aborted and len(resolver.calls) == 1 and not stub._redgifs_missing and not db.updated:
+        _pass("redgifs.outage_aborts_pass")
+    else:
+        _fail(
+            "redgifs.outage_aborts_pass",
+            f"aborted={aborted} calls={len(resolver.calls)} missing={len(stub._redgifs_missing)}",
+        )
+
+    # A row that can never resolve must not hold its place in the scan window.
+    # Dead gifs only accumulate, so if they stayed, the window would eventually
+    # be nothing but rows that cannot resolve and every older post behind them
+    # would be stranded. This is the check that the backlog keeps draining.
+    from indexer.main import REDGIFS_BACKFILL_SCAN
+
+    dead = [(f"dead{i:03d}", "[]", f"https://www.redgifs.com/watch/gone{i:03d}") for i in range(REDGIFS_BACKFILL_SCAN)]
+    unparseable = [(f"bare{i:03d}", "[]", "see redgifs.com for more") for i in range(5)]
+    alive = [("live001", "[]", "https://www.redgifs.com/watch/stillhere")]
+    db = _StubDB(dead + unparseable + alive)
+    resolver = _StubResolver(lambda gid: "https://media.redgifs.com/StillHere-mobile.jpg" if gid == "stillhere" else None)
+    stub = _Stub(db, resolver)
+
+    # Enough passes to clear the dead head of the window, with a hard bound so
+    # a regression fails the test rather than spinning.
+    max_passes = (len(dead) // REDGIFS_BACKFILL_BATCH) + 5
+    for _ in range(max_passes):
+        Indexer._backfill_redgifs_thumbnails(stub)
+        if db.updated:
+            break
+    if db.updated == [("live001", "https://media.redgifs.com/StillHere-mobile.jpg")]:
+        _pass("redgifs.backlog_drains_past_dead_rows", passes_bounded_by=max_passes)
+    else:
+        _fail(
+            "redgifs.backlog_drains_past_dead_rows",
+            f"the reachable post was never resolved in {max_passes} passes: updated={db.updated} "
+            f"skipped={len(stub._redgifs_skip)}",
+        )
+
+    # ── the architectural boundary ────────────────────────────────────────
+    # The whole point of putting this in its own module is that block
+    # projection stays offline. Importing it into the message path would undo
+    # H-5 while every H-5 guard kept passing, since they only look for the
+    # HTTP libraries by name.
+    mp_path = os.path.join("/opt/mirage", "indexer", "message_processor.py")
+    with open(mp_path, "r", encoding="utf-8") as fh:
+        mp_src = fh.read()
+    leaked = [tok for tok in ("import redgifs", "from indexer.redgifs", "from . import redgifs", "redgifs.") if tok in mp_src]
+    if leaked:
+        _fail("redgifs.absent_from_message_path", f"message_processor.py references the resolver: {leaked}")
+    else:
+        _pass("redgifs.absent_from_message_path")
+
+
+def test_rumble_embeds(backend: str):
+    """Rumble resolution, whose whole reason to exist is a wrong-video bug.
+
+    Rumble runs two id namespaces that collide: an embed built from a watch id
+    frames an unrelated video instead of failing. These checks pin that the
+    embed id can only come from a resolved answer and never from the URL.
+    """
+    del backend
+
+    if not _check_local_docker():
+        _skip("rumble.canonical_url", "local docker required")
+        return
+
+    import sys
+
+    sys.path.insert(0, "/opt/mirage")
+    from indexer import rumble
+    from indexer.main import Indexer, RUMBLE_BACKFILL_BATCH
+
+    # ── what may reach the wire ───────────────────────────────────────────
+    # oEmbed matches on the full watch URL, so unlike RedGIFs the posted URL
+    # itself is sent. It only goes as a urlencoded parameter of a fixed
+    # endpoint, and only after the host and path shape are confirmed.
+    url_cases = [
+        ("https://rumble.com/v7b3y1w-outlaws.html?e9s=src", "https://rumble.com/v7b3y1w-outlaws.html"),
+        ("https://www.rumble.com/v7am7nc-insomnia.html", "https://rumble.com/v7am7nc-insomnia.html"),
+        ("https://rumble.com/v7b3y1w-outlaws", "https://rumble.com/v7b3y1w-outlaws.html"),
+        ("https://rumble.com/embed/v78xa1o/", "https://rumble.com/embed/v78xa1o/"),
+        ("https://evil.example/v7b3y1w-x.html", None),
+        ("https://rumble.com.evil.example/v7b3y1w-x.html", None),
+        ("https://rumble.com/user/blackpilled", None),
+        ("javascript:alert(1)", None),
+        ("https://rumble.com/v7b3y1w-x.html?url=https://evil.example", "https://rumble.com/v7b3y1w-x.html"),
+    ]
+    bad = [f"{raw} -> {rumble.canonical_watch_url(raw)} (want {want})" for raw, want in url_cases if rumble.canonical_watch_url(raw) != want]
+    if bad:
+        _fail("rumble.canonical_url", "; ".join(bad))
+    else:
+        _pass("rumble.canonical_url", cases=len(url_cases))
+
+    refused = []
+    for probe in ("https://evil.example/x", "https://rumble.com/user/x", ""):
+        try:
+            rumble.RumbleResolver().resolve(probe)
+            refused.append(f"accepted {probe!r}")
+        except ValueError:
+            pass
+        except Exception as e:
+            refused.append(f"{probe!r} raised {type(e).__name__}: {e}")
+    if refused:
+        _fail("rumble.refuses_non_canonical_before_request", "; ".join(refused))
+    else:
+        _pass("rumble.refuses_non_canonical_before_request")
+
+    # ── what may come back ────────────────────────────────────────────────
+    # Both values are stored: the thumbnail becomes an image source and the
+    # embed id is interpolated into an iframe src.
+    thumb_cases = [
+        ("https://1a-1791.com/video/x.jpg", True),
+        ("https://sp.rmbl.ws/x.jpg", True),
+        ("http://1a-1791.com/x.jpg", False),
+        ("https://evil.example/x.jpg", False),
+        ("https://1a-1791.com.evil.example/x.jpg", False),
+    ]
+    bad = [raw for raw, want in thumb_cases if rumble._is_rumble_thumbnail_url(raw) != want]
+    embed_cases = [
+        ('<iframe src="https://rumble.com/embed/v78xa1o/">', "v78xa1o"),
+        ('<iframe src="https://rumble.com/embed/uABC.v78xa1o/">', "uABC.v78xa1o"),
+        ('<iframe src="https://evil.example/embed/v1/">', None),
+        ('<iframe src="https://rumble.com/embed/../../x/">', None),
+        ("", None),
+    ]
+    bad += [html for html, want in embed_cases if rumble._embed_id_from_html(html) != want]
+    if bad:
+        _fail("rumble.response_allowlists", f"{len(bad)} wrong: {bad[:3]}")
+    else:
+        _pass("rumble.response_allowlists", cases=len(thumb_cases) + len(embed_cases))
+
+    # ── URL discovery in real post content ────────────────────────────────
+    # Posts are markdown, so [title](url) is the common shape and a greedy
+    # match takes the closing bracket with it.
+    content_cases = [
+        ("[Crowder vs Fuentes](https://rumble.com/v79qrke-crowder.html) debate", "https://rumble.com/v79qrke-crowder.html"),
+        ("https://rumble.com/v7am7nc-insomnia.html?e9s=sr", "https://rumble.com/v7am7nc-insomnia.html"),
+        ("watch it https://rumble.com/v75gmmg-shorts.html.", "https://rumble.com/v75gmmg-shorts.html"),
+        ("nothing here", None),
+    ]
+    bad = [f"{txt!r} -> {rumble.find_watch_url([], txt)}" for txt, want in content_cases if rumble.find_watch_url([], txt) != want]
+    if bad:
+        _fail("rumble.finds_url_in_markdown", "; ".join(bad))
+    else:
+        _pass("rumble.finds_url_in_markdown", cases=len(content_cases))
+
+    # ── the media_meta merge ──────────────────────────────────────────────
+    # The embed rides in an existing column beside dimensions the offline
+    # derivation wrote. Losing those would resize every such post.
+    merge_cases = [
+        ('[{"w": 320, "h": 180}]', [{"w": 320, "h": 180, "embed": "v1"}]),
+        ("[]", [{"embed": "v1"}]),
+        ("not json", [{"embed": "v1"}]),
+        ('[{"w": 1, "h": 2}, {"w": 3, "h": 4}]', [{"w": 1, "h": 2, "embed": "v1"}, {"w": 3, "h": 4}]),
+        ('["junk"]', [{"embed": "v1"}]),
+    ]
+    bad = []
+    for raw, want in merge_cases:
+        got = json.loads(Indexer._media_meta_with_embed(raw, "v1"))
+        if got != want:
+            bad.append(f"{raw} -> {got} (want {want})")
+    if bad:
+        _fail("rumble.media_meta_merge_preserves_dimensions", "; ".join(bad))
+    else:
+        _pass("rumble.media_meta_merge_preserves_dimensions", cases=len(merge_cases))
+
+    # ── the backfill loop ─────────────────────────────────────────────────
+    class _StubDB:
+        def __init__(self, rows):
+            self.rows = rows
+            self.thumbs: list[tuple[str, str]] = []
+            self.metas: list[tuple[str, str]] = []
+
+        def select_rumble_posts_needing_resolution(self, limit, exclude_txhashes=()):
+            excluded = set(exclude_txhashes)
+            return [r for r in self.rows if r[0] not in excluded][:limit]
+
+        def update_post_thumbnail(self, txhash, url):
+            self.thumbs.append((txhash, url))
+
+        def update_post_media_meta(self, txhash, meta_json):
+            self.metas.append((txhash, meta_json))
+
+    class _StubResolver:
+        def __init__(self, behavior):
+            self.behavior = behavior
+            self.calls: list[str] = []
+
+        def resolve(self, watch_url):
+            self.calls.append(watch_url)
+            outcome = self.behavior(watch_url)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    class _Stub:
+        def __init__(self, db, resolver):
+            self.db = db
+            self._rumble = resolver
+            self._rumble_skip = set()
+
+        _skip_rumble_post = Indexer._skip_rumble_post
+        _media_meta_with_embed = staticmethod(Indexer._media_meta_with_embed)
+
+    def _rows(n, thumbnail=""):
+        return [
+            (f"tx{i:03d}", "[]", f"https://rumble.com/v{i:03d}aaa-slug.html", "[]", thumbnail)
+            for i in range(n)
+        ]
+
+    answer = {"embed_id": "v78xa1o", "thumbnail": "https://1a-1791.com/x.jpg"}
+
+    db = _StubDB(_rows(RUMBLE_BACKFILL_BATCH + 4))
+    resolver = _StubResolver(lambda u: dict(answer))
+    Indexer._backfill_rumble_media(_Stub(db, resolver))
+    if len(resolver.calls) == RUMBLE_BACKFILL_BATCH and len(db.metas) == RUMBLE_BACKFILL_BATCH:
+        _pass("rumble.batch_is_capped", batch=RUMBLE_BACKFILL_BATCH)
+    else:
+        _fail("rumble.batch_is_capped", f"{len(resolver.calls)} lookups, {len(db.metas)} writes")
+
+    # An author's own attached image already won the offline derivation; the
+    # video's poster frame must not displace it.
+    db = _StubDB(_rows(1, thumbnail="https://imagedelivery.net/mine/public"))
+    Indexer._backfill_rumble_media(_Stub(db, _StubResolver(lambda u: dict(answer))))
+    if not db.thumbs and len(db.metas) == 1:
+        _pass("rumble.keeps_existing_thumbnail")
+    else:
+        _fail("rumble.keeps_existing_thumbnail", f"overwrote thumbnail: {db.thumbs}")
+
+    db = _StubDB(_rows(1))
+    Indexer._backfill_rumble_media(_Stub(db, _StubResolver(lambda u: dict(answer))))
+    if db.thumbs == [("tx000", answer["thumbnail"])]:
+        _pass("rumble.fills_empty_thumbnail")
+    else:
+        _fail("rumble.fills_empty_thumbnail", f"{db.thumbs}")
+
+    db = _StubDB(_rows(RUMBLE_BACKFILL_BATCH + 4))
+    resolver = _StubResolver(lambda u: rumble.RumbleUnavailable("probe outage"))
+    stub = _Stub(db, resolver)
+    try:
+        Indexer._backfill_rumble_media(stub)
+        aborted = False
+    except rumble.RumbleUnavailable:
+        aborted = True
+    if aborted and len(resolver.calls) == 1 and not stub._rumble_skip and not db.metas:
+        _pass("rumble.outage_aborts_pass")
+    else:
+        _fail("rumble.outage_aborts_pass", f"aborted={aborted} calls={len(resolver.calls)}")
+
+    # ── the architectural boundary ────────────────────────────────────────
+    mp_path = os.path.join("/opt/mirage", "indexer", "message_processor.py")
+    with open(mp_path, "r", encoding="utf-8") as fh:
+        mp_src = fh.read()
+    leaked = [tok for tok in ("import rumble", "from indexer.rumble", "rumble.") if tok in mp_src]
+    if leaked:
+        _fail("rumble.absent_from_message_path", f"message_processor.py references the resolver: {leaked}")
+    else:
+        _pass("rumble.absent_from_message_path")
+
+    # ── the client contract ───────────────────────────────────────────────
+    # The backend strips anything it does not recognise out of media_meta, so
+    # an embed id that does not survive sanitising never reaches a client and
+    # the fix silently does nothing.
+    backend_src = "/opt/mirage/web/backend"
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        from routes.public import _sanitize_media_meta_list
+    except Exception as e:
+        _skip("rumble.embed_survives_backend_sanitizer", f"backend modules not importable: {e}")
+        _sanitize_media_meta_list = None
+
+    sanitize_cases = [
+        ([{"embed": "v78xa1o"}], [{"embed": "v78xa1o"}]),
+        ([{"w": 320, "h": 180, "embed": "uABC.v1"}], [{"w": 320, "h": 180, "embed": "uABC.v1"}]),
+        ([{"embed": "../../evil"}], [{}]),
+        ([{"embed": '"><script>'}], [{}]),
+        ([{"embed": "x" * 99}], [{}]),
+        ([{"embed": 123}], [{}]),
+        ([{"w": 320, "h": 180}], [{"w": 320, "h": 180}]),
+    ]
+    if _sanitize_media_meta_list is not None:
+        bad = [f"{raw} -> {_sanitize_media_meta_list(raw)}" for raw, want in sanitize_cases if _sanitize_media_meta_list(raw) != want]
+        if bad:
+            _fail("rumble.embed_survives_backend_sanitizer", "; ".join(bad))
+        else:
+            _pass("rumble.embed_survives_backend_sanitizer", cases=len(sanitize_cases))
+
+    # The clients must never build an embed from the posted URL. That is the
+    # bug: watch id v7b3y1w embeds "Tokyo Revengers", not "Outlaws".
+    guessers = []
+    for theme in ("default", "onyx", "bluemoon", "oldreddit"):
+        path = os.path.join("/opt/mirage/web/frontend/src/themes", theme, "components/InlineMedia.js")
+        if not os.path.exists(path):
+            continue
+        with open(path, "r", encoding="utf-8") as fh:
+            src = fh.read()
+        if "buildRumbleEmbedUrl(rumbleId" in src:
+            guessers.append(theme)
+    if guessers:
+        _fail("rumble.client_never_guesses_embed_id", f"themes still building an embed from the URL id: {guessers}")
+    else:
+        _pass("rumble.client_never_guesses_embed_id")
+
+
 def test_tx_index(backend: str):
     """Verify tx_index table behaviour: successful non-post/vote txs are indexed,
     failed txs (same-nonce) are indexed with error details, and the old tx_receipts

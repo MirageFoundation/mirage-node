@@ -124,6 +124,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
     const hlsInstanceRef = React.useRef(null);
     const retryTimerRef = React.useRef(null);
     const [isProcessing, setIsProcessing] = React.useState(false);
+    const [loadFailed, setLoadFailed] = React.useState(false);
 
     const isMobile = React.useMemo(() => {
         try {
@@ -268,7 +269,12 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
 
                             const retries = { count: 0, max: 20 };
                             const scheduleRetry = () => {
-                                if (!mountedRef.current || !hlsInstanceRef.current || retries.count >= retries.max) return;
+                                if (!mountedRef.current || !hlsInstanceRef.current) return;
+                                if (retries.count >= retries.max) {
+                                    setIsProcessing(false);
+                                    setLoadFailed(true);
+                                    return;
+                                }
                                 const delayMs = Math.min(5000, 1000 * Math.pow(1.3, retries.count));
                                 retries.count += 1;
                                 if (mountedRef.current) setIsProcessing(true);
@@ -289,6 +295,10 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
                                         hlsInstance.recoverMediaError();
                                     } else {
                                         hlsInstance.destroy();
+                                        if (mountedRef.current) {
+                                            setIsProcessing(false);
+                                            setLoadFailed(true);
+                                        }
                                     }
                                 }
                             });
@@ -363,10 +373,26 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
             );
         }
 
-        // Rumble embed
+        // Rumble embed. The embed id has to come from the indexer, which asks
+        // Rumble for it: watch ids and embed ids are separate namespaces that
+        // collide, so an id lifted from the posted URL frames a stranger's
+        // video rather than failing. Link out until it has been resolved.
         const rumbleId = extractRumbleId(url);
         if (rumbleId) {
-            const embedUrl = buildRumbleEmbedUrl(rumbleId, autoPlay);
+            const rumbleEmbedId = (mediaMeta && typeof mediaMeta.embed === 'string') ? mediaMeta.embed : null;
+            if (!rumbleEmbedId) {
+                return (
+                    <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        style={{ display: 'block', padding: '1rem', background: '#222', borderRadius: '4px', color: '#fff', textDecoration: 'none' }}
+                    >
+                        Watch on Rumble
+                    </a>
+                );
+            }
+            const embedUrl = buildRumbleEmbedUrl(rumbleEmbedId, autoPlay);
             const aspectPadding = '56.25%'; // 16:9 default
             return (
                 <div style={{ position: 'relative', width: '100%', paddingTop: aspectPadding, borderRadius: '4px', overflow: 'hidden' }}>
@@ -472,14 +498,14 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
                             <div style={{ position: 'absolute', top: 0, right: 0, width: '12px', height: '100%', cursor: 'ew-resize', zIndex: 20, userSelect: 'none', touchAction: 'none' }} {...resizeHandlers} />
                         </>
                     )}
-                    {isProcessing && (
+                    {(isProcessing || loadFailed) && (
                         <div style={{
                             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             background: theme.colors.overlay, color: theme.colors.text, zIndex: 10,
                             fontSize: '0.9rem', pointerEvents: 'none'
                         }}>
-                            Video is still processing...
+                            {loadFailed ? 'Video failed to load' : 'Video is still processing...'}
                         </div>
                     )}
                     <video
@@ -497,7 +523,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
                             setNaturalWidth(e.currentTarget.videoWidth);
                             setNaturalHeight(e.currentTarget.videoHeight);
                         }}
-                        onCanPlay={() => setIsProcessing(false)}
+                        onCanPlay={() => { setIsProcessing(false); setLoadFailed(false); }}
                         preload={autoPlay ? "auto" : "none"}
                     >
                         Your browser does not support HLS video playback.

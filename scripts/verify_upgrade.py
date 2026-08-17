@@ -100,6 +100,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 import time
@@ -703,8 +704,24 @@ def check_security_headers_enforcing() -> None:
         ]
         if missing:
             fail(f"{path} is missing {', '.join(missing)}")
-        else:
-            ok(f"CSP is enforcing, with COOP and CORP present ({path})")
+            return
+        # Enforcing is only half of it: the policy also has to permit the media
+        # the app plays. hls.js pulls Bunny manifests and segments over XHR, and
+        # connect-src governs that — media-src does not. v1.36.0 enforced a
+        # connect-src without the CDN and parked every Bunny video behind
+        # "Video is still processing..." on any browser lacking native HLS.
+        header = re.search(r'Content-Security-Policy\s+"([^"]*)"', text)
+        if header is None:
+            fail(f"{path} has no parseable Content-Security-Policy value")
+            return
+        connect = ""
+        for directive in header.group(1).split(";"):
+            if directive.strip().startswith("connect-src"):
+                connect = directive
+        if "b-cdn.net" not in connect:
+            fail(f"{path} connect-src omits the Bunny CDN: hls.js cannot load any video manifest")
+            return
+        ok(f"CSP is enforcing, with COOP and CORP present and HLS reachable ({path})")
         return
     note("no Caddyfile readable from here: response headers not verifiable")
 

@@ -1334,6 +1334,76 @@ class DatabaseManager:
                     ),
                 )
 
+    def select_redgifs_posts_missing_thumbnail(
+        self, limit: int, exclude_txhashes: "list[str] | tuple[str, ...]" = ()
+    ) -> list[tuple[str, str, str]]:
+        """(txhash, media, content) for root posts linking RedGIFs with no thumbnail.
+
+        Newest first: a post someone may still be looking at is worth more than
+        one from last year, and the caller resolves only a small batch per pass.
+
+        ``exclude_txhashes`` drops rows the caller has already found
+        unresolvable. Without it a deleted gif is a permanent resident of this
+        window — it can never gain a thumbnail and can never leave — so once
+        enough of them accumulate at the head of the ordering, the window fills
+        with rows that can never resolve and no older post is ever reached.
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT txhash, COALESCE(media, '[]'), COALESCE(content, '')
+                    FROM posts
+                    WHERE COALESCE(thumbnail_url, '') = ''
+                      AND COALESCE(target, '') = ''
+                      AND deleted = FALSE
+                      AND (content ILIKE %s OR media ILIKE %s)
+                      AND NOT (txhash = ANY(%s))
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    ("%redgifs.com%", "%redgifs.com%", list(exclude_txhashes), int(limit)),
+                )
+                return [(row[0], row[1], row[2]) for row in cur.fetchall()]
+
+    def select_rumble_posts_needing_resolution(
+        self, limit: int, exclude_txhashes: "list[str] | tuple[str, ...]" = ()
+    ) -> list[tuple[str, str, str, str, str]]:
+        """(txhash, media, content, media_meta, thumbnail_url) for unresolved Rumble posts.
+
+        A post qualifies while it is missing either half of what one oEmbed
+        answer provides: the thumbnail, or the embed id that the clients need
+        in order to frame the right video. The embed test is a substring match
+        because media_meta is TEXT; the caller re-checks it properly.
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT txhash, COALESCE(media, '[]'), COALESCE(content, ''),
+                           COALESCE(media_meta, '[]'), COALESCE(thumbnail_url, '')
+                    FROM posts
+                    WHERE COALESCE(target, '') = ''
+                      AND deleted = FALSE
+                      AND (content ILIKE %s OR media ILIKE %s)
+                      AND (COALESCE(thumbnail_url, '') = '' OR COALESCE(media_meta, '[]') NOT LIKE %s)
+                      AND NOT (txhash = ANY(%s))
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    ("%rumble.com%", "%rumble.com%", '%"embed"%', list(exclude_txhashes), int(limit)),
+                )
+                return [(row[0], row[1], row[2], row[3], row[4]) for row in cur.fetchall()]
+
+    def update_post_media_meta(self, txhash: str, media_meta_json: str) -> None:
+        """Replace the derived per-media metadata for a post."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE posts SET media_meta = %s WHERE LOWER(txhash) = LOWER(%s)",
+                    (media_meta_json, txhash),
+                )
+
     def update_post_thumbnail(self, txhash: str, thumbnail_url: str | None) -> None:
         """Update thumbnail URL for a post."""
         with self._connect() as conn:

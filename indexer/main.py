@@ -42,6 +42,7 @@ from indexer.database import (
 from indexer.chain_client import ChainClient
 from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
 from indexer.migrations import run_migrations
+from indexer import redgifs, rumble
 from indexer.params import load_params as load_chain_params, get_raw_params
 from indexer.settings import (
     CATCHUP_PROGRESS_INTERVAL,
@@ -70,6 +71,27 @@ HEAD_HEIGHT_SAMPLE_INTERVAL = 10
 PEERS_SAMPLE_INTERVAL = 20
 BLOCK_PRUNE_INTERVAL = 1000
 RECENT_BLOCKS_KEEP = 1000
+REDGIFS_BACKFILL_INTERVAL = 20
+
+# One pass resolves at most this many gifs, scanning at most this many rows to
+# find them. RedGIFs answers one id per request, so the batch is what keeps a
+# backlog from turning a block boundary into a long run of HTTP calls; the scan
+# is larger because rows already known missing are skipped without a request.
+REDGIFS_BACKFILL_BATCH = 5
+REDGIFS_BACKFILL_SCAN = 50
+
+# Rumble is far rarer than RedGIFs, and one answer settles both the thumbnail
+# and the embed, so it needs less of both.
+RUMBLE_BACKFILL_INTERVAL = 30
+RUMBLE_BACKFILL_BATCH = 3
+RUMBLE_BACKFILL_SCAN = 30
+
+# Gifs the API said are gone, and the posts carrying them or carrying no
+# resolvable id at all. Both are retried once per process rather than once per
+# pass: a row that can never resolve would otherwise sit in the scan window
+# forever, and enough of them would leave no room for rows that can. Bounded
+# because it is memory, and a restart is a cheap re-check.
+REDGIFS_MISSING_CAP = 10000
 
 
 def _synthesize_raw_log(tx_result: dict, height: int, tx_hash: str) -> str:
@@ -181,6 +203,11 @@ class Indexer:
         self.running = False
         self.ws = None
         self._catch_up_mode: bool = False
+        self._redgifs = redgifs.RedgifsResolver()
+        self._redgifs_missing: set[str] = set()
+        self._redgifs_skip: set[str] = set()
+        self._rumble = rumble.RumbleResolver()
+        self._rumble_skip: set[str] = set()
 
         try:
             import yaml as _yaml  # type: ignore
@@ -548,6 +575,163 @@ class Indexer:
                 self._sync_connected_peers()
             except Exception as e:
                 logger.warning("Telemetry: connected peers refresh failed at height %s: %s", height, e)
+
+        if height % REDGIFS_BACKFILL_INTERVAL == 0:
+            try:
+                self._backfill_redgifs_thumbnails()
+            except Exception as e:
+                logger.warning("Telemetry: redgifs thumbnail backfill failed at height %s: %s", height, e)
+
+        if height % RUMBLE_BACKFILL_INTERVAL == 0:
+            try:
+                self._backfill_rumble_media()
+            except Exception as e:
+                logger.warning("Telemetry: rumble media backfill failed at height %s: %s", height, e)
+
+    def _backfill_redgifs_thumbnails(self) -> None:
+        """Fill in thumbnails for RedGIFs posts, which cannot be derived offline.
+
+        Runs here rather than in the message path on purpose. A network call
+        while a block is being projected would let a slow third party stall
+        indexing, and a rebuild would replay it once per historical post; from
+        here it is post-commit, skipped entirely during catch-up, and capped
+        per pass. Nothing downstream changes: the value lands in the same
+        posts.thumbnail_url column the offline derivation writes, so the
+        backend and the clients need to know nothing about any of this.
+
+        An edit resets the column to the offline derivation, which for RedGIFs
+        is empty. That post simply becomes a candidate again on a later pass.
+        """
+        candidates = self.db.select_redgifs_posts_missing_thumbnail(
+            REDGIFS_BACKFILL_SCAN, sorted(self._redgifs_skip)
+        )
+        if not candidates:
+            return
+
+        resolved = 0
+        filled = 0
+        for txhash, media_raw, content in candidates:
+            if resolved >= REDGIFS_BACKFILL_BATCH:
+                break
+            try:
+                media = json.loads(media_raw or "[]")
+            except (ValueError, TypeError):
+                media = []
+            gif_id = redgifs.find_gif_id(media if isinstance(media, list) else [], content)
+            if not gif_id:
+                # Mentions redgifs.com but carries no id — a bare domain, or a
+                # link shape this does not read. Nothing to ask about.
+                self._skip_redgifs_post(txhash)
+                continue
+            if gif_id in self._redgifs_missing:
+                self._skip_redgifs_post(txhash)
+                continue
+
+            # A transport failure aborts the pass rather than the row: if the
+            # API is unreachable the next id will not fare better, and the
+            # caller logs it once.
+            url = self._redgifs.resolve_thumbnail(gif_id)
+            resolved += 1
+            if url is None:
+                if len(self._redgifs_missing) < REDGIFS_MISSING_CAP:
+                    self._redgifs_missing.add(gif_id)
+                self._skip_redgifs_post(txhash)
+                logger.info("[redgifs] no thumbnail for %s (gone or private)", gif_id)
+                continue
+            self.db.update_post_thumbnail(txhash, url)
+            filled += 1
+            logger.info("[redgifs] thumbnail for tx=%s id=%s -> %s", txhash[:12], gif_id, url)
+
+        if filled:
+            logger.info("[redgifs] backfilled %d thumbnail(s) from %d candidate(s)", filled, len(candidates))
+
+    def _skip_redgifs_post(self, txhash: str) -> None:
+        """Keep a row that cannot resolve out of the next scan window."""
+        if len(self._redgifs_skip) < REDGIFS_MISSING_CAP:
+            self._redgifs_skip.add(txhash)
+
+    def _backfill_rumble_media(self) -> None:
+        """Resolve Rumble posts to their thumbnail and their real embed id.
+
+        The embed id is not cosmetic. Rumble's watch ids and embed ids are
+        different namespaces that collide, so an embed built from the watch id
+        plays an unrelated video rather than failing. Until this has run, the
+        clients have no correct id and must not guess one.
+
+        Same placement rationale as the RedGIFs pass: post-commit, never fatal,
+        never during catch-up, capped per pass.
+        """
+        candidates = self.db.select_rumble_posts_needing_resolution(
+            RUMBLE_BACKFILL_SCAN, sorted(self._rumble_skip)
+        )
+        if not candidates:
+            return
+
+        resolved = 0
+        for txhash, media_raw, content, meta_raw, thumbnail in candidates:
+            if resolved >= RUMBLE_BACKFILL_BATCH:
+                break
+            try:
+                media = json.loads(media_raw or "[]")
+            except (ValueError, TypeError):
+                media = []
+            watch_url = rumble.find_watch_url(media if isinstance(media, list) else [], content)
+            if not watch_url:
+                self._skip_rumble_post(txhash)
+                continue
+
+            # As with RedGIFs, an outage ends the pass rather than the row.
+            answer = self._rumble.resolve(watch_url)
+            resolved += 1
+            if answer is None:
+                self._skip_rumble_post(txhash)
+                logger.info("[rumble] nothing to resolve for %s (gone or private)", watch_url)
+                continue
+
+            # Only fill an empty thumbnail. A post that already has one got it
+            # from the offline derivation, which prefers the author's own
+            # attached image — that choice outranks the video's poster frame.
+            if answer["thumbnail"] and not thumbnail:
+                self.db.update_post_thumbnail(txhash, answer["thumbnail"])
+            if answer["embed_id"]:
+                self.db.update_post_media_meta(
+                    txhash, self._media_meta_with_embed(meta_raw, answer["embed_id"])
+                )
+            logger.info(
+                "[rumble] tx=%s embed=%s thumb=%s",
+                txhash[:12],
+                answer["embed_id"],
+                (answer["thumbnail"] or "")[:60],
+            )
+            if not answer["embed_id"]:
+                # Nothing more to learn about this one, and it would otherwise
+                # keep matching the "no embed" half of the candidate test.
+                self._skip_rumble_post(txhash)
+
+    @staticmethod
+    def _media_meta_with_embed(meta_raw: str, embed_id: str) -> str:
+        """Set the embed id on the first media-meta slot, preserving the rest.
+
+        Slot 0 because that is the one the clients read alongside the post's
+        first link, which is the only place find_watch_url looks.
+        """
+        try:
+            meta = json.loads(meta_raw or "[]")
+        except (ValueError, TypeError):
+            meta = []
+        if not isinstance(meta, list):
+            meta = []
+        if not meta:
+            meta = [{}]
+        if not isinstance(meta[0], dict):
+            meta[0] = {}
+        meta[0]["embed"] = embed_id
+        return json.dumps(meta)
+
+    def _skip_rumble_post(self, txhash: str) -> None:
+        """Keep a row that cannot resolve out of the next scan window."""
+        if len(self._rumble_skip) < REDGIFS_MISSING_CAP:
+            self._rumble_skip.add(txhash)
 
     # ------------------------------------------------------------------
     # Continuity / history bookkeeping

@@ -92,6 +92,8 @@ from tests.cases.test_backend_indexer import (
     test_tx_index,
     test_indexer_hardening,
     test_indexer_topic_edit,
+    test_redgifs_thumbnails,
+    test_rumble_embeds,
 )
 from tests.cases.test_backend_hardening import test_backend_hardening
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
@@ -164,6 +166,8 @@ ALL_CATEGORIES = {
     "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer": test_indexer,
     "indexer_hardening": test_indexer_hardening,
+    "redgifs_thumbnails": test_redgifs_thumbnails,
+    "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
     "indexer_topic_edit": test_indexer_topic_edit,
     "tx_index": test_tx_index,
@@ -206,6 +210,8 @@ STATELESS_CATEGORIES = {
     "indexer_fail_hard",
     "block_hash_window",
     "indexer_hardening",
+    "redgifs_thumbnails",
+    "rumble_embeds",
     "route_authz",
     "admin_authz",
     "cross_user_reads",
@@ -243,6 +249,8 @@ WALLETLESS_CATEGORIES = {
     "hash_salt",
     "upload_bound",
     "invite_code_hygiene",
+    "redgifs_thumbnails",
+    "rumble_embeds",
     "runner_accounting",
     "quest_config",
     "quest_assignment",

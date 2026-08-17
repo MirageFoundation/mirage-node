@@ -171,7 +171,10 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 			# reached — it was a no-op with a plan attached. img-src and media-src stay
 			# permissive by decision: tightening them to the mediaPolicy.js allowlist
 			# would break inline media from arbitrary hosts.
-			Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
+			# connect-src carries b-cdn.net because hls.js pulls Bunny manifests and
+			# segments over XHR, which media-src does not cover. Cloudflare Stream is
+			# not listed: it is fetched through the same-origin /api/stream_proxy.
+			Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com https://*.b-cdn.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; upgrade-insecure-requests"
 		}
 
 		@aasa path /.well-known/apple-app-site-association

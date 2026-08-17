@@ -39,6 +39,15 @@ const REQUIRED_CSP_DIRECTIVES = [
     "frame-ancestors 'none'",
 ];
 
+// A policy is also wrong when it is too tight. hls.js pulls Bunny manifests and
+// segments over XHR, which connect-src governs and media-src does not cover, so
+// dropping the CDN passes every restriction check above and still stalls every
+// Bunny video behind a load error on browsers without native HLS. v1.36.0
+// enforced exactly that policy and took 1016 posts' videos down with it.
+const REQUIRED_CSP_SOURCES = [
+    ['connect-src', 'b-cdn.net'],
+];
+
 const text = readFileSync(CADDYFILE, 'utf8');
 const failures = [];
 
@@ -58,6 +67,12 @@ if (!cspMatch) {
             failures.push(`CSP is missing directive: ${directive}`);
         }
     }
+    for (const [directive, source] of REQUIRED_CSP_SOURCES) {
+        const value = cspMatch[1].split(';').find((d) => d.trim().startsWith(directive));
+        if (!value || !value.includes(source)) {
+            failures.push(`CSP ${directive} must allow ${source} or video playback breaks`);
+        }
+    }
 }
 
 if (/Content-Security-Policy-Report-Only/.test(text)) {
@@ -70,4 +85,4 @@ if (failures.length > 0) {
     process.exit(1);
 }
 
-console.log(`ok (${REQUIRED.length} headers + enforcing CSP with ${REQUIRED_CSP_DIRECTIVES.length} required directives)`);
+console.log(`ok (${REQUIRED.length} headers + enforcing CSP with ${REQUIRED_CSP_DIRECTIVES.length} required directives and ${REQUIRED_CSP_SOURCES.length} required sources)`);
