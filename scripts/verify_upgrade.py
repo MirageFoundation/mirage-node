@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.36.1.
+Post-deploy verification for v1.36.2.
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes:
@@ -8,8 +8,17 @@ what THIS release changes:
   python scripts/verify_upgrade.py
   docker exec mirage python3 /opt/mirage/scripts/verify_upgrade.py
 
-v1.36.1 IS NOT A CHAIN UPGRADE
-------------------------------
+v1.36.2 is a hotfix on top of v1.36.1: it restores the upload request shape that
+every shipped mobile build sends, which v1.36.0 stopped accepting. Its own check
+is 12, at the end.
+
+The v1.36.1 checks are retained rather than dropped because the fleet run of them
+was interrupted, so they have never actually been executed against all four
+hosts. They verify deployment artifacts, not a one-time migration, so re-running
+them costs nothing and closes that gap.
+
+NEITHER v1.36.1 NOR v1.36.2 IS A CHAIN UPGRADE
+----------------------------------------------
 There is no upgrade handler, no software-upgrade proposal and no halt height,
 because there is no binary change: `git diff v1.36.0..v1.36.1 -- blockchain/` is
 empty. Everything in this release is backend, indexer and deploy tooling.
@@ -65,8 +74,13 @@ Checks:
      memos. This is the end-to-end check; everything above it can pass while no
      tag is ever written.
  11. Memos on chain are within the chain's memo budget.
+ 12. The deployed upload endpoint still reads `kind` from the query string first
+     — that is what lets it size-cap a body before accepting it — and falls back
+     to the form field, which is the only shape any shipped mobile build sends.
+     v1.36.0 honoured the query string alone and rejected every app upload for
+     half a day.
 
-Checks 5 through 11 read deployment artifacts (the deployed source, the indexer
+Checks 5 through 12 read deployment artifacts (the deployed source, the indexer
 database, backend.env) that are not reachable from every vantage point. When the
 artifact is absent they report NOTE and do not affect the exit code, because a
 missing artifact means "not verifiable from here", not "verified". Run both
@@ -94,7 +108,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-RELEASE_VERSION = "v1.36.1"
+RELEASE_VERSION = "v1.36.2"
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
 
@@ -400,6 +414,44 @@ def check_memo_injected_at_chokepoint() -> None:
     ok("the memo is attached at the single signing chokepoint")
 
 
+def check_upload_accepts_both_kind_shapes() -> None:
+    """Both request shapes, or one whole client population cannot post media.
+
+    The query string has to be read first so the per-kind size cap is chosen
+    before the body is accepted. The form field has to remain readable because
+    every mobile build already on a phone sends `kind` only there, with no query
+    string at all — and the resulting rejection is returned before the body is
+    read, so the client sees a dropped connection rather than the 400 and reports
+    it as a network fault.
+    """
+    p = deployed_source("web/backend/routes/public.py")
+    if p is None:
+        note("web/backend/routes/public.py absent: upload contract not verifiable from here")
+        return
+    src = p.read_text(encoding="utf-8")
+    start = src.find("def upload_media")
+    if start < 0:
+        fail(f"{p} has no upload_media: this host is not running the v1.36.2 backend")
+        return
+    # Comments here quote both attribute names while explaining the rule, so
+    # strip them before deciding which one the code actually reads first.
+    body = "\n".join(
+        line for line in src[start:start + 4000].splitlines()
+        if not line.strip().startswith("#")
+    )
+    head, _, tail = body.partition("request.files")
+    if "request.args" not in head:
+        fail(f"{p}: upload_media does not read `kind` from the query string before the body, so the per-kind size cap cannot be applied")
+        return
+    if "request.form" in head:
+        fail(f"{p}: upload_media reads the form before the body is bounded, which is the defect M-3 closed")
+        return
+    if "request.form" not in tail:
+        fail(f"{p}: upload_media has no form fallback for `kind`; every shipped mobile build uploads with no query string and will be rejected")
+        return
+    ok("upload_media reads `kind` from the query string first and still accepts the shipped app's form-only shape")
+
+
 def check_net_tags_table() -> None:
     db_url = indexer_db_url()
     if not db_url:
@@ -569,6 +621,7 @@ def main() -> int:
     check_asn_dataset()
     check_tags_landing_on_chain()
     check_memo_within_budget_on_chain()
+    check_upload_accepts_both_kind_shapes()
     note(
         "the tag construction, memo grammar, hostile-memo parser, ASN lookup and import-time key requirement "
         "are proven by tests/test_backend.py --category net_tags (offline; no chain traffic)"

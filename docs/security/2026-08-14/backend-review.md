@@ -333,7 +333,23 @@ Same code path, secondary effect: up to 200 posts are enqueued in one transactio
 
 ## M-3 (Medium) — `/api/upload_media` parses the whole body before the per-kind cap
 
-**Status: fixed in v1.36.0.**
+**Status: fixed in v1.36.0, amended in v1.36.2.**
+
+The v1.36.0 fix read `kind` from the query string *only*. Every shipped mobile
+build sends it as a multipart form field with no query string at all, so from the
+moment v1.36.0 reached the fleet every upload from the app was rejected with
+`media_invalid_kind` — 218 of 261 uploads in the first half day. The rejection is
+returned before the body is read, so gunicorn drops the connection and the client
+sees a transport error rather than the 400, and the branch logged nothing, so the
+failure was invisible in the backend log.
+
+v1.36.2 restores the form field as a fallback, taken only after the query string
+is absent. The transfer is then bounded by the video cap — the largest body this
+endpoint accepts from anyone, and already reachable unauthenticated with
+`?kind=video` — and the exact per-kind cap is applied once the kind is known, so
+an oversized image is still a 413 on both request shapes. The fallback is logged
+as `upload_media.legacy_form_kind` so it can be retired once the app update that
+sends `?kind=` has rolled out.
 
 The comment states the probe runs before the body is materialized. The line above it already materialized it:
 

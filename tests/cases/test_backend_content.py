@@ -1482,11 +1482,11 @@ def test_upload_media(backend: str) -> None:
     # Minimal sniffable MP4 header (ftyp/mp42)
     fake_mp4 = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
 
-    # `kind` travels in the query string. The endpoint has to pick the per-kind
-    # size cap *before* Werkzeug parses the body, and reading a form field is
-    # what forces that parse — so a form-only `kind` is rejected by design
-    # (backend review M-3, v1.36.0). The form copy stays on these requests
-    # because the real client sends both; the query string is what is honoured.
+    # `kind` travels in the query string so the endpoint can pick the per-kind
+    # size cap *before* Werkzeug parses the body (backend review M-3, v1.36.0).
+    # Clients released before that change send it as a form field only, so both
+    # shapes have to work — v1.36.0 honoured the query string alone and broke
+    # every already-installed mobile app for half a day.
     url = f"{backend}/api/upload_media"
 
     def upload_url(kind: str) -> str:
@@ -1499,15 +1499,23 @@ def test_upload_media(backend: str) -> None:
     else:
         _fail("upload_media.invalid_kind_rejected", f"code={r.status_code} body={r.text[:200]}")
 
-    # `kind` in the form body only must NOT be honoured: accepting it would put
-    # the whole body on disk before the per-kind cap could be chosen, which is
-    # exactly the defect M-3 closed. Without this case the suite cannot tell a
-    # working endpoint from one that has quietly gone back to reading the form.
+    # The shape every shipped mobile build sends: no query string at all, `kind`
+    # as a form field. This is the pin for the v1.36.0 regression — it fails the
+    # moment the endpoint goes back to honouring the query string alone.
     r = _post_multipart(url, {"kind": "image"}, {"file": ("x.png", png, "image/png")})
-    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
-        _pass("upload_media.form_kind_not_honoured")
+    if r.status_code == 200 and (r.json() or {}).get("kind") == "image":
+        _pass("upload_media.form_kind_honoured")
+    elif r.status_code in (500, 502) and (r.json() or {}).get("error_code") == "media_provider_not_configured":
+        _skip("upload_media.form_kind_honoured", "provider not configured")
     else:
-        _fail("upload_media.form_kind_not_honoured", f"code={r.status_code} body={r.text[:200]}")
+        _fail("upload_media.form_kind_honoured", f"code={r.status_code} body={r.text[:200]}")
+
+    # A form-only `kind` still has to be a real kind.
+    r = _post_multipart(url, {"kind": "bogus"}, {"file": ("x.png", png, "image/png")})
+    if r.status_code == 400 and (r.json() or {}).get("error_code") == "media_invalid_kind":
+        _pass("upload_media.form_kind_validated")
+    else:
+        _fail("upload_media.form_kind_validated", f"code={r.status_code} body={r.text[:200]}")
 
     # Missing file -> 400 media_file_required
     r = _post_multipart(upload_url("image"), {"kind": "image"})

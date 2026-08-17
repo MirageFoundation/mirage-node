@@ -1390,7 +1390,9 @@ def test_upload_body_bound(backend):
     # Dynamic: exceed the image limit and require a clean 413, not a 500.
     # `kind` goes in the query string: reading it from the form is what forced the
     # whole body to be parsed before the per-kind cap could be chosen (M-3), so the
-    # endpoint now reads it from the query string only.
+    # endpoint prefers the query string and falls back to the form for clients
+    # released before that change. Both shapes are checked — the fallback is where
+    # the image cap could silently stop being enforced.
     limit_mb = 15
     oversize = b"\xff\xd8\xff" + b"\x00" * (limit_mb * 1024 * 1024 + 1024)
     try:
@@ -1411,6 +1413,28 @@ def test_upload_body_bound(backend):
         _fail("upload_bound.oversize_rejected", f"an oversized upload was ACCEPTED: {r.text[:200]}")
     else:
         _fail("upload_bound.oversize_rejected", f"expected 413, got {r.status_code}: {r.text[:200]}")
+
+    # Same payload in the legacy shape: no query string, `kind` in the form. The
+    # transfer is bounded by the video cap here, so the image cap has to be
+    # applied after the parse or a 1.5 GB "image" becomes acceptable.
+    try:
+        r = _post_multipart(
+            f"{backend}/api/upload_media",
+            {"kind": "image"},
+            {"file": ("big.jpg", oversize, "image/jpeg")},
+        )
+    except requests.RequestException as e:
+        _fail("upload_bound.oversize_rejected_form_kind", f"upload raised {type(e).__name__}: {e}")
+        return
+
+    if r.status_code == 413:
+        _pass("upload_bound.oversize_rejected_form_kind", code=r.status_code)
+    elif r.status_code == 403 and "uploads_disabled" in r.text:
+        _skip("upload_bound.oversize_rejected_form_kind", "uploads disabled on this node")
+    elif r.status_code == 200:
+        _fail("upload_bound.oversize_rejected_form_kind", f"an oversized upload was ACCEPTED: {r.text[:200]}")
+    else:
+        _fail("upload_bound.oversize_rejected_form_kind", f"expected 413, got {r.status_code}: {r.text[:200]}")
 
 
 def test_invite_code_hygiene(backend):

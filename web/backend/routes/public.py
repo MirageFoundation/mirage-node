@@ -8344,8 +8344,12 @@ def _parse_int_field(raw) -> Optional[int]:
 def upload_media():
     """Uniform, provider-agnostic media upload endpoint.
 
+    query string:
+      - kind: "image" | "video" — read here so the per-kind size cap can be
+        applied before the body is transferred. Clients released before this
+        moved out of the form body may still send it as a form field.
+
     multipart form:
-      - kind: "image" | "video"
       - file: the bytes
       - duration, height: required for video (probed client-side)
 
@@ -8369,14 +8373,17 @@ def upload_media():
         )
         from media.base import max_image_bytes, max_video_bytes
 
-        # Query string only. Reading `kind` from request.form invokes Werkzeug's
-        # multipart parser, which consumes the whole stream and spools the file
-        # part to disk — so the per-kind cap below used to be evaluated after the
-        # body it was meant to bound had already been transferred and written. The
-        # only limit that applied during that parse was the global one, which is
-        # sized for video, making a 15 MiB image cap really ~1516 MiB.
+        # Prefer the query string. Reading `kind` from request.form invokes
+        # Werkzeug's multipart parser, which consumes the whole stream and spools
+        # the file part to disk — so a form-only `kind` cannot bound the transfer
+        # it is meant to bound. Clients released before that change send `kind` as
+        # a form field only; those requests are bounded by the video cap, the
+        # largest body this endpoint accepts from anyone, and the exact per-kind
+        # cap is applied below once the kind is known.
         kind = (request.args.get("kind") or "").strip().lower()
-        if kind not in ("image", "video"):
+        kind_from_query = kind in ("image", "video")
+        if kind and not kind_from_query:
+            log_event(rid, "upload_media.rejected", code="media_invalid_kind", kind=kind)
             return api_error_code("media_invalid_kind", 400)
 
         # Bound before request.files materializes the body into memory/disk.
@@ -8396,7 +8403,17 @@ def upload_media():
 
         f = request.files.get("file")
         if f is None:
+            log_event(rid, "upload_media.rejected", code="media_file_required", kind=kind)
             return api_error_code("media_file_required", 400)
+
+        if not kind_from_query:
+            kind = (request.form.get("kind") or "").strip().lower()
+            if kind not in ("image", "video"):
+                log_event(rid, "upload_media.rejected", code="media_invalid_kind", kind=kind)
+                return api_error_code("media_invalid_kind", 400)
+            max_bytes = max_image_bytes() if kind == "image" else max_video_bytes()
+            log_event(rid, "upload_media.legacy_form_kind", kind=kind)
+
         data = f.read()
         if len(data) > max_bytes:
             log_event(rid, "upload_media.too_large", kind=kind, size=len(data), max=max_bytes)
