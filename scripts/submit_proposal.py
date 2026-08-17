@@ -457,8 +457,19 @@ def wait_for_proposal_id_from_blocks(rpc_endpoint: str, expected_title: str, max
             log_debug(f"Block height regressed: current={current_height} last={last_height}")
             time.sleep(1)
             continue
+        scanned_through = current_height
         for height in range(last_height + 1, current_height + 1):
-            result = _get_block_results(rpc_endpoint, height)
+            try:
+                result = _get_block_results(rpc_endpoint, height)
+            except requests.RequestException as e:
+                # /status can report a height whose block_results the node will
+                # not serve yet, most often right after a restart. Retry this
+                # height instead of aborting, and do not advance past it: a
+                # skipped block is a proposal silently missed. The outer
+                # deadline still bounds this and still fails hard on timeout.
+                log_debug(f"block_results height={height} unavailable, will retry: {e}")
+                scanned_through = height - 1
+                break
             proposal_ids = _scan_block_for_proposals(result)
             if proposal_ids:
                 log_debug(f"height={height} proposal_ids={proposal_ids}")
@@ -469,7 +480,7 @@ def wait_for_proposal_id_from_blocks(rpc_endpoint: str, expected_title: str, max
                 if proposal.get("title") == expected_title:
                     log_debug(f"Matched proposal_id={proposal_id} title={expected_title!r} height={height}")
                     return str(proposal_id)
-        last_height = current_height
+        last_height = max(last_height, scanned_through)
         time.sleep(1)
     return None
 
