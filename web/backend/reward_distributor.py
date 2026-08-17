@@ -126,6 +126,11 @@ def _generate_unique_invite_codes(cur, owner: str, count: int) -> List[str]:
     return codes
 
 
+# sdkerrors.ErrTxInMempoolCache. The node is telling us it already holds this tx,
+# which is a broadcast that succeeded, not a rejection. It arrives with an empty
+# raw_log, so the "tx already exists in cache" match cannot see it.
+_TX_IN_MEMPOOL_CODE = 19
+
 # CheckTx rejections that prove the tx never entered a mempool, so the reserved
 # reward rows can be released back to the user.
 _DEFINITIVE_REJECT_CODES = {
@@ -331,7 +336,7 @@ class RewardDistributor:
         release_definitive: bool = True,
     ) -> str:
         """Map a CheckTx result onto the payout state. Returns broadcast/failed/pending."""
-        if code == 0 or "tx already exists in cache" in raw_log.lower():
+        if code == 0 or int(code) == _TX_IN_MEMPOOL_CODE or "tx already exists in cache" in raw_log.lower():
             self._mark_broadcast(payout_id)
             return "broadcast"
         if release_definitive and int(code) in _DEFINITIVE_REJECT_CODES:

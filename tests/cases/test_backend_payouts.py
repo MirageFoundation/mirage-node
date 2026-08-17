@@ -379,10 +379,16 @@ def test_payout_release_rules(backend: str):
 
     # CheckTx verdicts: a definitive rejection releases, anything ambiguous must
     # keep the rows claimed so a tx sitting in a mempool cannot be paid twice.
-    for label, code, expect_release, release_definitive in (
-        ("definitive_reject", 5, True, True),
-        ("ambiguous_reject", 99, False, True),
-        ("rebroadcast_reject", 5, False, False),
+    #
+    # Code 19 is ErrTxInMempoolCache, which is a broadcast the node already has,
+    # not a rejection. The probe's raw_log deliberately omits "tx already exists
+    # in cache": the node returns that code with an empty log, so recognising it
+    # by code is the whole point.
+    for label, code, expect_release, release_definitive, expect_state in (
+        ("definitive_reject", 5, True, True, "failed"),
+        ("ambiguous_reject", 99, False, True, "pending"),
+        ("rebroadcast_reject", 5, False, False, "pending"),
+        ("already_in_mempool", 19, False, True, "broadcast"),
     ):
         verdict = _probe(
             "owner = derive_address_from_pubkey(bytes([2]) + secrets.token_bytes(32))\n"
@@ -414,12 +420,13 @@ def test_payout_release_rules(backend: str):
             "        cur.execute('DELETE FROM reward_payouts WHERE id = %s', (payout_id,))\n"
             "emit({'state': state, 'status': status, 'released': claimed is None})\n"
         )
-        if verdict["released"] == expect_release:
+        if verdict["released"] == expect_release and verdict["state"] == expect_state:
             _pass(f"payout_release.{label}", state=verdict["state"], status=verdict["status"])
         else:
             _fail(
                 f"payout_release.{label}",
-                f"code {code} released={verdict['released']} (expected {expect_release}): {verdict}",
+                f"code {code} released={verdict['released']} state={verdict['state']} "
+                f"(expected released={expect_release} state={expect_state}): {verdict}",
             )
 
 
