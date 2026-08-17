@@ -3,6 +3,7 @@ Message processing logic for the indexer.
 """
 
 import logging
+import re
 import time
 from typing import Optional
 from google.protobuf.json_format import MessageToDict
@@ -186,6 +187,9 @@ def type_url_to_tx_type(type_url: str) -> str:
     return "_".join(parts)
 
 
+_MIRAGE_ADDRESS_RE = re.compile(r"^mirage1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{38}$")
+
+
 def relayer_from_message(type_url: str, value: bytes) -> str:
     """Relaying node address from a core message's authority field.
 
@@ -202,7 +206,14 @@ def relayer_from_message(type_url: str, value: bytes) -> str:
         parsed.ParseFromString(value)
     except Exception:
         return ""
-    return str(getattr(parsed, "authority", "") or "").strip().lower()
+    authority = str(getattr(parsed, "authority", "") or "").strip().lower()
+    # Network tags are projected before message-specific processing, so this
+    # bound is also a database safety boundary. In particular, an oversized
+    # authority must never reach the LOWER(relayer) btree index and wedge the
+    # indexer on the same block forever.
+    if not _MIRAGE_ADDRESS_RE.fullmatch(authority):
+        return ""
+    return authority
 
 
 class MessageProcessor:

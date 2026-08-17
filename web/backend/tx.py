@@ -44,7 +44,12 @@ _TX_HASH_RE = _re.compile(r"[0-9A-F]{64}")
 _MAX_SCAN_BLOCKS = 500
 
 
-def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
+def estimate_total_gas_limit(
+    body_bytes: bytes,
+    content_len: int,
+    *,
+    include_request_memo: bool = True,
+) -> int:
     """Heuristic gas estimator (uniform across message types)."""
     ante_gas = _ANTE_GAS
     tx_size_ppb = _get_tx_size_cost_per_byte()
@@ -62,7 +67,11 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
         mode = ModeInfo(single=ModeInfo.Single(mode=SignMode.SIGN_MODE_DIRECT))
         si = SignerInfo(public_key=pub_any, mode_info=mode, sequence=0)
         auth = AuthInfo(signer_infos=[si], fee=fee)
-        signed_body = _prepare_signed_body(body_bytes, _unique_timeout_ns())
+        signed_body = _prepare_signed_body(
+            body_bytes,
+            _unique_timeout_ns(),
+            include_request_memo=include_request_memo,
+        )
         tx_raw = TxRaw(
             body_bytes=signed_body,
             auth_info_bytes=auth.SerializeToString(),
@@ -107,6 +116,7 @@ def build_signed_tx(
     pubkey_bytes: bytes,
     account_number: int,
     fee_payer: str = "",
+    include_request_memo: bool = True,
 ) -> Tuple[bytes, int]:
     """Sign an unordered tx with an explicit signer.
 
@@ -136,7 +146,11 @@ def build_signed_tx(
     auth_bytes = auth.SerializeToString()
 
     timeout_ns = _unique_timeout_ns()
-    signed_body = _prepare_signed_body(body_bytes, timeout_ns)
+    signed_body = _prepare_signed_body(
+        body_bytes,
+        timeout_ns,
+        include_request_memo=include_request_memo,
+    )
 
     sign_doc = SignDoc(
         body_bytes=signed_body,
@@ -159,7 +173,7 @@ def build_signed_tx(
     return tx_bytes, timeout_ns
 
 
-def bank_send_body_bytes(from_address: str, to_address: str, amount: int, memo: str = "") -> bytes:
+def bank_send_body_bytes(from_address: str, to_address: str, amount: int) -> bytes:
     """Serialize a TxBody carrying a single cosmos bank MsgSend of umirage."""
     from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
     from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
@@ -171,7 +185,7 @@ def bank_send_body_bytes(from_address: str, to_address: str, amount: int, memo: 
     any_msg = AnyPB()
     any_msg.Pack(msg)
     any_msg.type_url = "/cosmos.bank.v1beta1.MsgSend"
-    return TxBody(messages=[any_msg], memo=memo).SerializeToString()
+    return TxBody(messages=[any_msg], memo="").SerializeToString()
 
 
 def chain_head() -> Tuple[int, float]:
@@ -421,13 +435,9 @@ def _append_unordered_timeout(body_bytes: bytes, timeout_ns: int) -> bytes:
 def _append_memo(body_bytes: bytes, memo: str) -> bytes:
     """Append TxBody field 2 (memo) as raw wire bytes.
 
-    Same technique as _append_unordered_timeout. Every relay route builds its
-    TxBody with memo="" and proto3 omits empty strings, so field 2 is absent
-    from body_bytes and appending cannot duplicate it. The one builder that
-    accepts a memo, bank_send_body_bytes, is only reached by the reward
-    distributor, which runs outside a request and therefore appends nothing —
-    but a caller that passed both would emit field 2 twice, so keep that
-    parameter unused.
+    Same technique as _append_unordered_timeout. Every body builder uses
+    memo="" and proto3 omits empty strings, so field 2 is absent from body_bytes
+    and appending cannot duplicate it.
     """
     if not memo:
         return body_bytes
@@ -436,7 +446,12 @@ def _append_memo(body_bytes: bytes, memo: str) -> bytes:
     return body_bytes + b"\x12" + _encode_varint(len(raw)) + raw
 
 
-def _prepare_signed_body(body_bytes: bytes, timeout_ns: int) -> bytes:
+def _prepare_signed_body(
+    body_bytes: bytes,
+    timeout_ns: int,
+    *,
+    include_request_memo: bool = True,
+) -> bytes:
     """Body as it will be signed: messages, then memo, then unordered/timeout.
 
     The single place the relay's network tag enters a transaction. The gas
@@ -447,7 +462,8 @@ def _prepare_signed_body(body_bytes: bytes, timeout_ns: int) -> bytes:
     bytes to every one of them, which is the part the size accounting depends
     on. Field order stays canonical at 1, 2, 4, 5.
     """
-    return _append_unordered_timeout(_append_memo(body_bytes, request_memo()), timeout_ns)
+    memo = request_memo() if include_request_memo else ""
+    return _append_unordered_timeout(_append_memo(body_bytes, memo), timeout_ns)
 
 
 def _sign_sign_doc(privkey_bytes: bytes, sign_doc_bytes: bytes) -> bytes:

@@ -414,6 +414,16 @@ class Indexer:
             if any_msg.type_url.startswith("/mirage.core.v1."):
                 relayer = relayer_from_message(any_msg.type_url, any_msg.value)
                 break
+        if not relayer:
+            # An unattributed tag has no trustworthy scope and is analytically
+            # worthless. Skipping it also prevents ordinary bank transactions
+            # from polluting the permanent table with copied tags.
+            logger.warning(
+                "net_tag.unattributed height=%s txhash=%s; not storing",
+                height,
+                tx_hash,
+            )
+            return
 
         self.db.upsert_net_tag(
             tx_hash,
@@ -451,10 +461,6 @@ class Indexer:
         core_types = [m.type_url for m in tx_body.messages if m.type_url.startswith("/mirage.core.v1.")]
         code = int(tx_result.get("code", 0) or 0)
 
-        # Before the failure branch on purpose: a farm's rejected attempts are
-        # evidence too, and the relayer paid for the tx either way.
-        self._record_net_tag(tx_hash, tx_body, height, ts)
-
         if code != 0:
             tx_type = type_url_to_tx_type(core_types[0]) if core_types else "unknown"
             raw_log = str(tx_result.get("log", "") or "")
@@ -467,6 +473,12 @@ class Indexer:
                 tx_hash,
             )
             return
+
+        # Only a successful transaction has a chain-validated authority. A
+        # failed transaction may contain an arbitrary authority string supplied
+        # by a proposer, so projecting it would make relayer attribution false
+        # and could feed unbounded text into the relayer index.
+        self._record_net_tag(tx_hash, tx_body, height, ts)
 
         if core_types:
             tx_type = type_url_to_tx_type(core_types[0]) if len(core_types) == 1 else "multi"

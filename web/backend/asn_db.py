@@ -204,7 +204,12 @@ def _log_freshness(state: _State) -> None:
 def _load() -> _State:
     directory = db_dir()
     v4 = _open_table(directory / _V4_FILE, MAGIC_V4, V4_RECORD)
-    v6 = _open_table(directory / _V6_FILE, MAGIC_V6, V6_RECORD)
+    try:
+        v6 = _open_table(directory / _V6_FILE, MAGIC_V6, V6_RECORD)
+    except Exception:
+        if v4 is not None:
+            v4.close()
+        raise
     state = _State(v4, v6, _read_built_at(directory), time.time())
     _log_freshness(state)
     return state
@@ -232,15 +237,36 @@ def _current() -> _State:
     global _state, _last_stat_check
     now = time.monotonic()
     if _state is None:
-        _state = _load()
+        try:
+            _state = _load()
+        except Exception:
+            # This dataset is advisory. An I/O failure must not turn every
+            # relayed action into HTTP 500; omit the class and retry after the
+            # bounded restat interval. The tag itself is still produced.
+            _log.exception("[asn_db] initial dataset load failed; network class will be omitted")
+            _state = _State(None, None, None, time.time())
         _last_stat_check = now
         return _state
     if now - _last_stat_check >= _RESTAT_INTERVAL_S:
         _last_stat_check = now
-        if _changed_on_disk(_state):
+        try:
+            changed = _changed_on_disk(_state)
+        except Exception:
+            # Keep the already-mapped dataset. A transient stat/permission
+            # error is not evidence that stale-but-valid data became unusable.
+            _log.exception("[asn_db] dataset restat failed; keeping loaded dataset")
+            return _state
+        if changed:
             _log.info("[asn_db] dataset changed on disk; reloading")
             old = _state
-            _state = _load()
+            try:
+                replacement = _load()
+            except Exception:
+                # Atomic refresh means an old mmap remains valid after rename.
+                # Keep it until a complete replacement can be loaded.
+                _log.exception("[asn_db] dataset reload failed; keeping loaded dataset")
+                return _state
+            _state = replacement
             for table in (old.v4, old.v6):
                 if table is not None:
                     table.close()

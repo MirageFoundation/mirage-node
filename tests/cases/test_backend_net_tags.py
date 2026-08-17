@@ -277,14 +277,50 @@ def _test_tx_builder_emits_one_memo() -> None:
     )
     _probe("net_tags.tx_builder_memo_bytes", code)
 
-    # Outside a request there is no client, so a payout must carry no memo.
+    # Infrastructure traffic must stay untagged even when it is built inside a
+    # claimant's Flask request. This is an explicit tx-builder choice; ambient
+    # request context is not a safe discriminator.
     _probe(
-        "net_tags.no_memo_outside_request",
+        "net_tags.payout_explicitly_untagged",
         "import sys\n"
         "sys.path.insert(0, '/opt/mirage')\n"
         "sys.path.insert(0, '/opt/mirage/web/backend')\n"
-        "import net_tag\n"
-        "print('OK' if net_tag.request_memo() == '' else 'BAD')\n",
+        "import tx\n"
+        "from flask import Flask\n"
+        "from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody\n"
+        "app = Flask(__name__)\n"
+        "with app.test_request_context('/', environ_base={'REMOTE_ADDR': '203.0.113.9'}):\n"
+        "    tagged_raw = tx._prepare_signed_body(b'', 1893456000000000000)\n"
+        "    payout_raw = tx._prepare_signed_body(b'', 1893456000000000000, include_request_memo=False)\n"
+        "tagged = TxBody(); tagged.ParseFromString(tagged_raw)\n"
+        "payout = TxBody(); payout.ParseFromString(payout_raw)\n"
+        "print('OK' if tagged.memo and payout.memo == '' else ('BAD', tagged.memo, payout.memo))\n",
+    )
+
+    # The production payout path must pass the exclusion through its estimate,
+    # simulation build and final build. Spies make this independent of chain
+    # state while exercising RewardDistributor.build_payout_tx itself.
+    _probe(
+        "net_tags.payout_path_declares_exclusion",
+        "import sys, types\n"
+        "sys.path.insert(0, '/opt/mirage')\n"
+        "sys.path.insert(0, '/opt/mirage/web/backend')\n"
+        "import reward_distributor as rd\n"
+        "calls = []\n"
+        "addr = 'mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5'\n"
+        "rt = types.SimpleNamespace(rewards_pool_privkey_bytes=b'x'*32, rewards_pool_pubkey_bytes=b'y'*33,\n"
+        "    rewards_pool_account_number=1, rewards_pool_addr=addr, min_gas_price_umirage=1)\n"
+        "rd.require_runtime = lambda: rt\n"
+        "rd.estimate_total_gas_limit = lambda *a, **kw: (calls.append(('estimate', kw)), 100000)[1]\n"
+        "rd.build_signed_tx = lambda *a, **kw: (calls.append(('build', kw)), (b'tx', 1893456000000000000))[1]\n"
+        "rd.simulate_gas = lambda tx: 50000\n"
+        "rd.chain_head = lambda: (100, 0.0)\n"
+        "obj = rd.RewardDistributor.__new__(rd.RewardDistributor)\n"
+        "obj.pool_address = addr\n"
+        "obj.get_pool_balance = lambda: 10**30\n"
+        "obj.build_payout_tx(addr, 1)\n"
+        "ok = len(calls) == 3 and all(c[1].get('include_request_memo') is False for c in calls)\n"
+        "print('OK' if ok else ('BAD', calls))\n",
     )
 
     # One request, many builds, identical bytes.
@@ -352,6 +388,58 @@ def _test_asn_classification() -> None:
         "asn_db._state = None\n"
         "ok = asn_db.classify_ip('203.0.113.7') is None and not asn_db.dataset_status()['available']\n"
         "print('OK' if ok else 'BAD')\n",
+    )
+
+    # The ASN dataset is explicitly advisory. Permission errors and mmap
+    # failures must omit only the class, never fail the relayed transaction.
+    _probe(
+        "net_tags.asn_io_failure_yields_none",
+        "import sys\n"
+        "sys.path.insert(0, '/opt/mirage')\n"
+        "sys.path.insert(0, '/opt/mirage/web/backend')\n"
+        "import asn_db\n"
+        "asn_db._state = None\n"
+        "asn_db._load = lambda: (_ for _ in ()).throw(PermissionError('denied'))\n"
+        "ok = asn_db.classify_ip('203.0.113.7') is None and asn_db._state is not None\n"
+        "print('OK' if ok else 'BAD')\n",
+    )
+
+
+def _test_indexer_attribution_guards() -> None:
+    """Only successful, attributable core transactions may create tag rows."""
+    _probe(
+        "net_tags.relayer_is_bounded",
+        "import sys\n"
+        "sys.path.insert(0, '/opt/mirage')\n"
+        "from indexer.message_processor import relayer_from_message\n"
+        "from shared.datatypes import MsgPost\n"
+        "valid = 'mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5'\n"
+        "good = MsgPost(); good.authority = valid\n"
+        "huge = MsgPost(); huge.authority = 'mirage1' + 'q' * 5000\n"
+        "ok = (relayer_from_message('/mirage.core.v1.MsgPost', good.SerializeToString()) == valid\n"
+        "      and relayer_from_message('/mirage.core.v1.MsgPost', huge.SerializeToString()) == '')\n"
+        "print('OK' if ok else 'BAD')\n",
+    )
+
+    _probe(
+        "net_tags.failed_and_unattributed_not_projected",
+        "import base64, sys, types\n"
+        "sys.path.insert(0, '/opt/mirage')\n"
+        "from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, TxRaw\n"
+        "from indexer.main import Indexer\n"
+        "from shared.nettag import b64u_encode, encode_memo\n"
+        "memo = encode_memo(b64u_encode(b'12345678'), '2026-W34', 4, b64u_encode(b'1'*16), 'isp')\n"
+        "raw = TxRaw(body_bytes=TxBody(memo=memo).SerializeToString()).SerializeToString()\n"
+        "class DB:\n"
+        "    def __init__(self): self.tags = 0; self.failed = 0\n"
+        "    def upsert_net_tag(self, *a): self.tags += 1\n"
+        "    def upsert_tx_index(self, *a): self.failed += 1\n"
+        "idx = Indexer.__new__(Indexer); idx.db = DB()\n"
+        "idx._process_tx(0, base64.b64encode(raw).decode(), {'code': 7, 'log': 'rejected'}, 10, 20)\n"
+        "failed_ok = idx.db.failed == 1 and idx.db.tags == 0\n"
+        "idx._record_net_tag('a'*64, TxBody(memo=memo), 11, 21)\n"
+        "unattributed_ok = idx.db.tags == 0\n"
+        "print('OK' if failed_ok and unattributed_ok else ('BAD', idx.db.failed, idx.db.tags))\n",
     )
 
 
@@ -583,4 +671,5 @@ def test_net_tags(backend: str) -> None:
     _test_tx_builder_emits_one_memo()
     _test_asn_binary_lookup()
     _test_indexer_projection()
+    _test_indexer_attribution_guards()
     _debug("net_tags: done")

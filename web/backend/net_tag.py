@@ -165,7 +165,9 @@ def request_memo() -> str:
     simulated transaction differs in size from the broadcast one. Recomputing
     would let an ISO-week rollover or an ASN dataset refresh land mid-request.
 
-    Returns "" outside a request context, so reward payouts stay untagged.
+    Returns "" outside a request context. Infrastructure transactions built
+    during a request, such as reward payouts, must also opt out explicitly at
+    the tx builder; request context alone does not identify relay traffic.
     """
     if not has_request_context():
         return ""

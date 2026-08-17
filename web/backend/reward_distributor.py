@@ -213,13 +213,28 @@ class RewardDistributor:
             "pubkey_bytes": rt.rewards_pool_pubkey_bytes,
             "account_number": int(rt.rewards_pool_account_number),
         }
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(recipient)))
+        # A payout is infrastructure traffic signed by the rewards pool, not a
+        # user action relayed by a validator. The claim route runs inside the
+        # claimant's Flask request, so relying on request-context absence would
+        # publish the claimant's tag on an unattributable bank transaction.
+        gas_est = int(
+            estimate_total_gas_limit(
+                body_bytes,
+                len(recipient),
+                include_request_memo=False,
+            )
+        )
         minimum_required = int(amount) + int(math.ceil(gas_est * rt.min_gas_price_umirage))
         if self.get_pool_balance() < minimum_required:
             raise InsufficientPoolBalance(
                 f"pool balance does not cover amount plus estimated fee: required={minimum_required}"
             )
-        probe_bytes, _ = build_signed_tx(body_bytes, gas_est, **signer)
+        probe_bytes, _ = build_signed_tx(
+            body_bytes,
+            gas_est,
+            include_request_memo=False,
+            **signer,
+        )
         gas_used = int(simulate_gas(probe_bytes))
         gas_limit = max(gas_est, int(gas_used * _PAYOUT_GAS_BUFFER))
         required = int(amount) + int(math.ceil(gas_limit * rt.min_gas_price_umirage))
@@ -227,7 +242,12 @@ class RewardDistributor:
             raise InsufficientPoolBalance(f"pool balance does not cover amount plus fee: required={required}")
         # Read the head before signing: the tx cannot appear in an earlier block.
         scan_height, _head_time = chain_head()
-        tx_bytes, timeout_ns = build_signed_tx(body_bytes, gas_limit, **signer)
+        tx_bytes, timeout_ns = build_signed_tx(
+            body_bytes,
+            gas_limit,
+            include_request_memo=False,
+            **signer,
+        )
         tx_hash = hashlib.sha256(tx_bytes).hexdigest().upper()
         timeout_at = int(math.ceil(timeout_ns / 1_000_000_000))
         logger.info(
