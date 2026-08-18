@@ -200,15 +200,15 @@ def _test_pinned_bootstrap_dependencies() -> None:
 
 
 def _test_docker_context_excludes_private_key() -> None:
-    dockerignore = Path(REPO_ROOT, ".dockerignore").read_text(encoding="utf-8").splitlines()
-    required = {".release_signing.pem", ".env", ".envrc"}
-    if not required.issubset(dockerignore):
-        _fail("install.docker_context.secrets", f"Docker build context exclusions missing: {sorted(required - set(dockerignore))}")
+    forbidden = (".release_signing.pem", ".env", ".envrc", "release-manifest.candidate.json")
+    present = [name for name in forbidden if Path(REPO_ROOT, name).exists()]
+    if present:
+        _fail("install.image.secrets", f"sensitive build-context files present in runtime image: {present}")
         return
-    if "deploy/hosttools/pubkey.pem" in dockerignore:
-        _fail("install.docker_context.pubkey", "Docker build context excludes the public trust anchor")
+    if not Path(PUBKEY).is_file():
+        _fail("install.image.pubkey", "runtime image is missing the public trust anchor")
         return
-    _pass("install.docker_context.secrets_excluded")
+    _pass("install.image.secrets_excluded")
 
 
 def _test_pubkey_fingerprint() -> None:
