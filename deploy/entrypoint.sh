@@ -165,16 +165,14 @@ mkdir -p /root/.mirage/well-known
 publish_well_known /opt/mirage/deploy/install.sh install.sh
 publish_well_known /opt/mirage/deploy/harden_server.sh harden_server.sh
 publish_well_known /opt/mirage/deploy/release_verify.py release_verify.py
-if [ -f /root/.mirage/env/release-manifest.json ]; then
-  publish_well_known /root/.mirage/env/release-manifest.json manifest.json
-  publish_well_known /root/.mirage/env/release-manifest.json.sig manifest.json.sig
-else
-  # The current image's release manifest is created after the image digest
-  # exists, so any copy baked into the image necessarily describes an older
-  # release. Never mirror that stale bootstrap metadata.
-  publish_well_known /root/.mirage/env/release-manifest.json manifest.json
-  publish_well_known /root/.mirage/env/release-manifest.json.sig manifest.json.sig
-fi
+# Only the release manifest this node verified and stored gets mirrored. A
+# release manifest is signed after its image digest exists, so the copy baked
+# into the image necessarily describes an older release, and mirroring that
+# would hand out stale bootstrap metadata. When the file is absent — a node
+# deployed by deploy.sh rather than the installer — publish_well_known clears
+# the path and the mirror omits it rather than serving something wrong.
+publish_well_known /root/.mirage/env/release-manifest.json manifest.json
+publish_well_known /root/.mirage/env/release-manifest.json.sig manifest.json.sig
 if [ -f /root/.mirage/env/network-manifest.json ]; then
   publish_well_known /root/.mirage/env/network-manifest.json network.json
   publish_well_known /root/.mirage/env/network-manifest.json.sig network.json.sig
