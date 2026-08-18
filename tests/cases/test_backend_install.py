@@ -86,12 +86,17 @@ def _test_version_file() -> None:
     if not __import__("re").fullmatch(r"v\d+\.\d+\.\d+", value):
         _fail("install.version_semver", f"VERSION={value!r}")
         return
-    makefile = Path(REPO_ROOT, "blockchain", "Makefile").read_text(encoding="utf-8")
-    if "git describe" in makefile:
-        _fail("install.makefile_no_git_describe", "blockchain/Makefile still uses git describe")
+    binary = os.path.join(REPO_ROOT, "blockchain", "bin", "miraged")
+    result = _run([binary, "version", "--long"])
+    if result.returncode != 0:
+        _fail("install.binary_version_command", result.stderr[-300:])
         return
-    if "../VERSION" not in makefile:
-        _fail("install.makefile_reads_version", "blockchain/Makefile does not read ../VERSION")
+    reported = next(
+        (line.split(":", 1)[1].strip() for line in result.stdout.splitlines() if line.startswith("version:")),
+        "",
+    )
+    if reported.lstrip("v") != value.lstrip("v"):
+        _fail("install.binary_version", f"binary={reported!r} VERSION={value!r}")
         return
     _pass("install.version_file", version=value)
 
