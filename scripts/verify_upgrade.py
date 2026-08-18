@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.36.6 measured host-requirements release."""
+"""Post-deploy verification for the v1.36.7 profile-preflight release."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.36.6"
+VERSION = "v1.36.7"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 passed = 0
@@ -186,30 +186,36 @@ def check_installer_payload() -> None:
         fail("updater host-tool refresh or rollback policy missing")
 
 
-def check_host_requirements() -> None:
-    """v1.36.6 reset the preflight thresholds to what the fleet measurably uses."""
+def check_profile_preflight() -> None:
+    """v1.36.7 narrowed the cross-endpoint profile check to chain-derived fields.
+
+    Comparing whole get_profile documents rejected every funded account, because
+    the response also reports each node's own inbox state.
+    """
     install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-    harden = (ROOT / "deploy/harden_server.sh").read_text(encoding="utf-8")
 
-    if "80 GiB free" in install or "80 * 1024 * 1024 * 1024" in install:
-        fail("installer still demands 80 GiB free, which no supported disk can satisfy")
-    elif "disk_gib < 20" in install and "disk_gib < 40" in install:
-        ok("disk preflight is a 20 GiB floor with a 40 GiB headroom warning")
+    if 'agree_json "$api" "/api/get_profile?address=${ADDRESS}" "username"' in install:
+        ok("profile preflight compares only the username it acts on")
     else:
-        fail("disk preflight thresholds are not the measured ones")
+        fail("profile preflight does not narrow the cross-endpoint comparison to username")
 
-    if "mem_mib < 3800" in install and "mem_mib < 7600" not in install:
-        ok("memory preflight accepts a 4 GB plan and no longer recommends 8 GB")
+    if 'compare = [k for k in keys.split(",") if k]' in install and "body if not compare" in install:
+        ok("agree_json accepts a key list and compares whole documents without one")
     else:
-        fail("memory preflight thresholds are not the measured ones")
+        fail("agree_json does not support narrowing the compared keys")
 
-    swap_markers = [m for m in ("fallocate -l 2G", "mkswap", "swapon /swapfile") if m in harden]
-    if swap_markers:
-        fail(f"hardening still provisions a swapfile: {swap_markers}")
-    elif "swapon --show" in harden:
-        fail("hardening runs swapon --show under set -e on a swapless host")
+    calls = [line.strip() for line in install.splitlines() if re.search(r'=\$\(agree_json "', line)]
+    narrowed = [line for line in calls if line.endswith('"username")')]
+    if len(calls) == 3 and len(narrowed) == 1:
+        ok("only the profile query is narrowed; the two chain queries stay byte-strict")
     else:
-        ok("hardening provisions no swapfile")
+        fail(f"unexpected set of cross-endpoint comparisons: {calls}")
+
+    suite = (ROOT / "tests/cases/test_backend_install.py").read_text(encoding="utf-8")
+    if "_test_agree_json_ignores_node_local_state" in suite:
+        ok("deployed suite pins the narrowing against regression")
+    else:
+        fail("deployed suite carries no regression test for the profile preflight")
 
     pin = re.search(r'^EXPECTED_HARDEN_SHA256="([0-9a-f]{64})"$', install, re.MULTILINE)
     actual = hashlib.sha256((ROOT / "deploy/harden_server.sh").read_bytes()).hexdigest()
@@ -227,7 +233,7 @@ def main() -> int:
         check_progress,
         check_manifests,
         check_installer_payload,
-        check_host_requirements,
+        check_profile_preflight,
     )
     for check in checks:
         try:
