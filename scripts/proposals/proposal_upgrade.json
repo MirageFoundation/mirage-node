@@ -1,12 +1,12 @@
 {
-    "title": "Release v1.36.4 (public validator installer)",
-    "summary": "NOT SUBMITTED FOR v1.36.4. This release changes deployment, release verification and operator tooling but does not change consensus state or transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
+    "title": "Release v1.36.5 (initial Ubuntu full upgrade)",
+    "summary": "NOT SUBMITTED FOR v1.36.5. This release updates Ubuntu during first-time host setup but does not change consensus state or transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.36.4",
+                "name": "v1.36.5",
                 "height": "T+50",
                 "info": ""
             }

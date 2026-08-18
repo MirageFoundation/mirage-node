@@ -203,11 +203,16 @@ write_file() {
 }
 
 # -----------------------------------------------------------------------------
-# Step 1 — apt baseline
+# Step 1 — apt upgrade and baseline
 # -----------------------------------------------------------------------------
-say "apt update + baseline packages"
+say "apt update + full upgrade + baseline packages"
 export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
 run 'apt-get -qq update'
+run 'apt-get -qq -y \
+    -o Dpkg::Options::="--force-confdef" \
+    -o Dpkg::Options::="--force-confold" \
+    full-upgrade'
 run 'apt-get -qq -y install \
     ufw fail2ban unattended-upgrades \
     curl ca-certificates gnupg \

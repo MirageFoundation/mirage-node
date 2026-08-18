@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.36.4 public validator installer release."""
+"""Post-deploy verification for the v1.36.5 Ubuntu full-upgrade installer release."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.36.4"
+VERSION = "v1.36.5"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 passed = 0
@@ -134,12 +134,12 @@ def check_manifests() -> None:
     network = verify_manifest(ROOT / "release/network.json")
     release = verify_manifest(ROOT / "release/manifest.json")
 
-    if network["generation"] == 2 and network["min_release"] == VERSION:
+    if network["generation"] == 2 and network["min_release"] == "v1.36.4":
         ok("network policy generation and minimum release are current")
     else:
         fail(
             f"network policy generation/min_release={network['generation']}/{network['min_release']}, "
-            f"expected 2/{VERSION}"
+            "expected 2/v1.36.4"
         )
     if len(network["persistent_peers"]) == 4:
         ok("signed network policy contains all four persistent peers")

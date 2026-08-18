@@ -18,6 +18,8 @@ ssh root@YOUR_IP
 curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
 ```
 
+The installer updates Ubuntu, applies a noninteractive full upgrade, and installs the host baseline before starting Mirage. If Ubuntu requires a reboot, the installer stops before launching the node; reboot and run the same command again to resume.
+
 When prompted, paste the 12-word mnemonic. The node comes up on HTTP at `http://YOUR_IP` immediately. It state-syncs, then registers itself as a validator. Do not run create-validator by hand.
 
 If GitHub is unreachable, any already-running node serves the script, its hash-pinned bootstrap helpers, and signed manifests. Use one node consistently:

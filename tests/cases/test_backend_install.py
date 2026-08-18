@@ -62,6 +62,7 @@ def test_install(backend: str) -> None:
     _test_install_non_tty()
     _test_mnemonic_word_count()
     _test_pinned_bootstrap_dependencies()
+    _test_ubuntu_full_upgrade()
     _test_docker_context_excludes_private_key()
     _test_pubkey_fingerprint()
     _test_manifest_signatures()
@@ -197,6 +198,23 @@ def _test_pinned_bootstrap_dependencies() -> None:
             _fail("install.bootstrap.pin_stale", f"{relative}: pin={match.group(1)} actual={actual}")
             return
     _pass("install.bootstrap.dependencies_pinned")
+
+
+def _test_ubuntu_full_upgrade() -> None:
+    harden = Path(REPO_ROOT, "deploy", "harden_server.sh").read_text(encoding="utf-8")
+    step_one = harden.partition("# Step 1")[2].partition("# Step 2")[0]
+    if "apt-get -qq update" not in step_one or "full-upgrade" not in step_one:
+        _fail("install.ubuntu.initial_upgrade", "initial hardening does not update and fully upgrade Ubuntu")
+        return
+    if "DEBIAN_FRONTEND=noninteractive" not in step_one or "NEEDRESTART_MODE=a" not in step_one:
+        _fail("install.ubuntu.noninteractive_upgrade", "initial Ubuntu upgrade can prompt for input")
+        return
+
+    install = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if 'bash "$script" --no-reboot' not in install or install.count("/var/run/reboot-required") < 2:
+        _fail("install.ubuntu.reboot_resume", "installer does not stop and resume safely after an Ubuntu upgrade")
+        return
+    _pass("install.ubuntu.full_upgrade")
 
 
 def _test_docker_context_excludes_private_key() -> None:
