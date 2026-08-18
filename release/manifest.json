@@ -1,8 +1,8 @@
 {
   "version": "v1.36.5",
   "release_id": 1036005,
-  "commit": "4252ef6ce18dbc3b566ca9bbfeb3a6b9e3f8de54",
-  "image": "ghcr.io/miragefoundation/mirage-node@sha256:2dc7f3a17ff29381fa7bf45444611e3c9fc65e859b485d3de702deca71bbc472",
+  "commit": "4aea8939ca0bd54910af90ca7820490cd18f372c",
+  "image": "ghcr.io/miragefoundation/mirage-node@sha256:6c790afeca8d6462fb9efaed3c9935c3bcab82908f562fe4abaf848bca6aca87",
   "min_prior_version": "v1.36.4",
   "activation": "ordinary",
   "upgrade_name": "",
