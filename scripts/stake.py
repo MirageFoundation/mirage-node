@@ -4,16 +4,18 @@
   scripts/stake.py 50000
   scripts/stake.py --stake-all-above 20000000 --yes
 
---stake-all-above N  Self-delegate every whole MIRAGE above N spendable
-                     (minimum 1,000,000). With --yes this is cron-safe:
-                     exit 0 when liquid is already at or below N.
+--stake-all-above N  Self-delegate every whole MIRAGE above N spendable.
+                     With --yes this is cron-safe: exit 0 when liquid is
+                     already at or below N.
 
-The validator account pays relay gas. N cannot be below 1,000,000 MIRAGE.
+The validator account pays relay gas. N cannot be below the network
+manifest's min_liquid_umirage (currently 1,000,000 MIRAGE).
 """
 
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import math
 import os
@@ -23,7 +25,6 @@ import time
 from typing import NoReturn
 
 UMIRAGE_PER_MIRAGE = 1_000_000
-MIN_KEEP_LIQUID_MIRAGE = 1_000_000
 KEY_NAME = "validator"
 CHAIN_ID = "mirage-1"
 RPC_URL = "tcp://127.0.0.1:26657"
@@ -140,7 +141,37 @@ def confirm_or_die(yes: bool) -> None:
         die("aborted", code=0)
 
 
-def parse_args() -> argparse.Namespace:
+def load_min_keep_liquid_mirage() -> int:
+    """Liquid floor from the signed network manifest. No hardcoded default."""
+    candidates = [
+        os.path.join(os.path.expanduser("~"), ".mirage", "env", "network-manifest.json"),
+        "/opt/mirage/release/network.json",
+    ]
+    path = None
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            path = candidate
+            break
+    if path is None:
+        die("network manifest not found " f"(tried {', '.join(candidates)}); cannot stake without min_liquid_umirage")
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        die(f"network manifest is not JSON: {path}: {e}")
+    raw = data.get("min_liquid_umirage")
+    if raw is None:
+        die(f"min_liquid_umirage missing from {path}")
+    try:
+        um = int(raw)
+    except (TypeError, ValueError):
+        die(f"invalid min_liquid_umirage in {path}: {raw!r}")
+    if um < UMIRAGE_PER_MIRAGE:
+        die(f"min_liquid_umirage too small in {path}: {um}")
+    return um // UMIRAGE_PER_MIRAGE
+
+
+def parse_args(min_keep: int) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Self-delegate MIRAGE from the local validator account.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -157,7 +188,7 @@ def parse_args() -> argparse.Namespace:
         "--stake-all-above",
         type=int,
         metavar="N",
-        help=f"self-delegate every whole MIRAGE above N liquid (minimum {MIN_KEEP_LIQUID_MIRAGE:,})",
+        help=f"self-delegate every whole MIRAGE above N liquid (minimum {min_keep:,})",
     )
     parser.add_argument(
         "-y",
@@ -170,13 +201,22 @@ def parse_args() -> argparse.Namespace:
         parser.error("specify either AMOUNT or --stake-all-above N")
     if args.amount is not None and args.amount <= 0:
         parser.error("AMOUNT must be a positive integer")
-    if args.stake_all_above is not None and args.stake_all_above < MIN_KEEP_LIQUID_MIRAGE:
-        parser.error(f"--stake-all-above must be >= {MIN_KEEP_LIQUID_MIRAGE:,} MIRAGE")
+    if args.stake_all_above is not None and args.stake_all_above < min_keep:
+        parser.error(f"--stake-all-above must be >= {min_keep:,} MIRAGE")
     return args
 
 
 def main() -> None:
-    args = parse_args()
+    min_keep = load_min_keep_liquid_mirage()
+    args = parse_args(min_keep)
+
+    lock_path = os.path.join(os.path.expanduser("~"), ".mirage", "stake.lock")
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_f = open(lock_path, "a+")
+    try:
+        fcntl.flock(lock_f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        die("another stake.py is already running")
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bin_path = find_miraged(root_dir)
@@ -234,14 +274,14 @@ def main() -> None:
         print(f"{'─' * 40}")
     else:
         amount_um = args.amount * UMIRAGE_PER_MIRAGE
-        min_remain_um = MIN_KEEP_LIQUID_MIRAGE * UMIRAGE_PER_MIRAGE + fee_um
+        min_remain_um = min_keep * UMIRAGE_PER_MIRAGE + fee_um
         needed = amount_um + min_remain_um
         if balance_um < needed:
             die(
                 f"cannot stake {args.amount:,} MIRAGE: liquid "
                 f"{balance_um / UMIRAGE_PER_MIRAGE:,.6f} MIRAGE, "
                 f"need {needed / UMIRAGE_PER_MIRAGE:,.6f} "
-                f"(keeps {MIN_KEEP_LIQUID_MIRAGE:,} MIRAGE plus fee reserve)"
+                f"(keeps {min_keep:,} MIRAGE plus fee reserve)"
             )
         print(f"\n{'─' * 40}")
         print(f"Stake: {args.amount:,} MIRAGE")
@@ -271,6 +311,9 @@ def main() -> None:
             CHAIN_ID,
             "--node",
             RPC_URL,
+            "--unordered",
+            "--timeout-duration",
+            "2m",
             "--broadcast-mode",
             "sync",
             "--yes",

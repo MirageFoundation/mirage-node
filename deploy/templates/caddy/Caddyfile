@@ -149,6 +149,13 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		reverse_proxy 127.0.0.1:1317
 	}
 
+	handle /.well-known/mirage/* {
+		root * /root/.mirage/well-known
+		uri strip_prefix /.well-known/mirage
+		header Cache-Control "no-store"
+		file_server
+	}
+
 	handle {
 		root * /opt/mirage/web/frontend/build
 

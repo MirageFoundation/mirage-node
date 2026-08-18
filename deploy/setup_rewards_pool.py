@@ -16,15 +16,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    import requests
-except ImportError:
-    print("Missing dependency: requests")
-    print("Install with: pip install requests")
-    sys.exit(1)
-
-# Constants
-BIP39_WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
 _BIP39_WORDS = None
 
 MIRAGED_BIN = Path("/opt/mirage/blockchain/bin/miraged")
@@ -158,17 +149,14 @@ def format_mirage(umirage: int) -> str:
 
 
 def get_bip39_wordlist() -> list[str]:
-    """Load BIP39 English wordlist."""
+    """Load BIP39 English wordlist from the mnemonic package baked into the image."""
     global _BIP39_WORDS
     if _BIP39_WORDS is None:
-        cache_path = Path("/tmp/bip39_english.txt")
-        if cache_path.exists():
-            _BIP39_WORDS = cache_path.read_text().strip().split("\n")
-        else:
-            resp = requests.get(BIP39_WORDLIST_URL, timeout=10)
-            resp.raise_for_status()
-            _BIP39_WORDS = resp.text.strip().split("\n")
-            cache_path.write_text(resp.text)
+        from mnemonic import Mnemonic
+
+        _BIP39_WORDS = list(Mnemonic("english").wordlist)
+        if len(_BIP39_WORDS) != 2048:
+            raise RuntimeError(f"BIP39 wordlist length {len(_BIP39_WORDS)}, expected 2048")
     return _BIP39_WORDS
 
 
@@ -182,8 +170,8 @@ def validate_mnemonic(mnemonic: str) -> tuple[bool, str]:
         for i, word in enumerate(words):
             if word not in wordlist:
                 return False, f"Word {i+1} '{word}' is not a valid BIP39 word"
-    except Exception:
-        pass  # Skip validation if wordlist unavailable
+    except Exception as e:
+        return False, f"BIP39 wordlist unavailable: {e}"
     return True, ""
 
 

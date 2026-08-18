@@ -140,26 +140,56 @@ echo "Moniker:   $MONIKER"
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
 
-# Ensure Caddyfile exists and is correct
-# If DOMAIN is set and Caddyfile already has HTTPS config for that domain, don't overwrite
+# Always re-render from the template so Caddyfile changes reach already-HTTPS
+# nodes. The www redirect block is re-appended when DOMAIN is set.
 mkdir -p /etc/caddy
 CADDYFILE="/etc/caddy/Caddyfile"
-SHOULD_RENDER=1
 
-if [ -n "${DOMAIN:-}" ] && [ -f "$CADDYFILE" ]; then
-  # Check if existing Caddyfile already has HTTPS for this domain (not just :80)
-  if grep -q "^${DOMAIN}" "$CADDYFILE" 2>/dev/null; then
-    echo "==> Caddyfile already configured for $DOMAIN (HTTPS), keeping existing config"
-    SHOULD_RENDER=0
+# Mirror the installer and the manifests this node verified, so an operator who
+# cannot reach GitHub can install from any running node. Availability only, not
+# integrity: the signature is what makes a copy trustworthy. A failure here must
+# never keep a validator from starting.
+publish_well_known() {
+  local src dest
+  src="$1"
+  dest="/root/.mirage/well-known/$2"
+  if [ ! -f "$src" ]; then
+    rm -f "$dest"
+    return 0
   fi
+  if ! install -m 0644 "$src" "$dest"; then
+    echo "WARNING: could not publish $dest" >&2
+  fi
+}
+mkdir -p /root/.mirage/well-known
+publish_well_known /opt/mirage/deploy/install.sh install.sh
+publish_well_known /opt/mirage/deploy/harden_server.sh harden_server.sh
+publish_well_known /opt/mirage/deploy/release_verify.py release_verify.py
+if [ -f /root/.mirage/env/release-manifest.json ]; then
+  publish_well_known /root/.mirage/env/release-manifest.json manifest.json
+  publish_well_known /root/.mirage/env/release-manifest.json.sig manifest.json.sig
+else
+  # The current image's release manifest is created after the image digest
+  # exists, so any copy baked into the image necessarily describes an older
+  # release. Never mirror that stale bootstrap metadata.
+  publish_well_known /root/.mirage/env/release-manifest.json manifest.json
+  publish_well_known /root/.mirage/env/release-manifest.json.sig manifest.json.sig
+fi
+if [ -f /root/.mirage/env/network-manifest.json ]; then
+  publish_well_known /root/.mirage/env/network-manifest.json network.json
+  publish_well_known /root/.mirage/env/network-manifest.json.sig network.json.sig
+else
+  publish_well_known /opt/mirage/release/network.json network.json
+  publish_well_known /opt/mirage/release/network.json.sig network.json.sig
 fi
 
-if [ "$SHOULD_RENDER" = "1" ]; then
-  echo "==> Rendering Caddyfile..."
-  if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "$CADDYFILE"; then
-    echo "ERROR: Failed to render Caddyfile" >&2
-    exit 1
-  fi
+echo "==> Rendering Caddyfile..."
+if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "$CADDYFILE"; then
+  echo "ERROR: Failed to render Caddyfile" >&2
+  exit 1
+fi
+if [ -n "${DOMAIN:-}" ]; then
+  printf '\nwww.%s {\n\tredir https://%s{uri} permanent\n}\n' "$DOMAIN" "$DOMAIN" >> "$CADDYFILE"
 fi
 
 # Verify Caddyfile contains expected content (API proxy)

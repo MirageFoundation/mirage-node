@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Verify a signed release or network manifest against the compiled-in pubkey.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+PUBKEY="${MIRAGE_PUBKEY:-}"
+MANIFEST=""
+SIGNATURE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --manifest) MANIFEST="${2:-}"; shift 2 ;;
+    --signature) SIGNATURE="${2:-}"; shift 2 ;;
+    --pubkey) PUBKEY="${2:-}"; shift 2 ;;
+    -h|--help)
+      echo "usage: mirage-verify --manifest PATH [--signature PATH] [--pubkey PATH]"
+      exit 0
+      ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "$MANIFEST" ]]; then
+  echo "ERROR: --manifest is required" >&2
+  exit 2
+fi
+
+# On a host the key installed by install.sh is the anchor. Inside the image the
+# only copy is the one next to this script. The image's copy is never used to
+# verify on a host: install.sh refuses an image whose key differs.
+if [[ -z "$PUBKEY" ]]; then
+  for candidate in \
+    /usr/local/share/mirage/pubkey.pem \
+    "$SCRIPT_DIR/pubkey.pem"
+  do
+    if [[ -f "$candidate" ]]; then
+      PUBKEY="$candidate"
+      break
+    fi
+  done
+fi
+if [[ -z "$PUBKEY" || ! -f "$PUBKEY" ]]; then
+  echo "ERROR: release public key not found" >&2
+  exit 1
+fi
+
+VERIFY_PY=""
+for candidate in \
+  /usr/local/share/mirage/release_verify.py \
+  /opt/mirage/deploy/release_verify.py \
+  "$SCRIPT_DIR/../release_verify.py"
+do
+  if [[ -f "$candidate" ]]; then
+    VERIFY_PY="$candidate"
+    break
+  fi
+done
+if [[ -z "$VERIFY_PY" ]]; then
+  echo "ERROR: release_verify.py not found" >&2
+  exit 1
+fi
+
+ARGS=(python3 "$VERIFY_PY" verify --manifest "$MANIFEST" --pubkey "$PUBKEY")
+if [[ -n "$SIGNATURE" ]]; then
+  ARGS+=(--signature "$SIGNATURE")
+fi
+exec "${ARGS[@]}"

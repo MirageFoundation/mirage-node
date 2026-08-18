@@ -917,6 +917,27 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
     return result
 
 
+def _load_min_liquid_mirage() -> Optional[float]:
+    """Liquid floor in MIRAGE from the signed network manifest. None if absent."""
+    candidates = [
+        os.path.join(os.path.expanduser("~"), ".mirage", "env", "network-manifest.json"),
+        "/opt/mirage/release/network.json",
+    ]
+    for path in candidates:
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            um = int(data["min_liquid_umirage"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+            debug_log(f"validator: cannot read min_liquid_umirage from {path}: {e}")
+            continue
+        if um >= 1_000_000:
+            return um / 1_000_000
+    return None
+
+
 def check_validator() -> ServiceStatus:
     """Check validator status."""
     node_home = os.path.expanduser("~/.mirage/node")
@@ -966,6 +987,7 @@ def check_validator() -> ServiceStatus:
         tokens = None
         total_tokens = 0
         power_pct = None
+        found_on_chain = False
         try:
             result = subprocess.run(
                 [get_miraged_bin(), "query", "staking", "validators", "--home", node_home, "-o", "json"],
@@ -984,6 +1006,7 @@ def check_validator() -> ServiceStatus:
                 # Find our validator
                 for v in val_data.get("validators", []):
                     if v.get("consensus_pubkey", {}).get("value") == local_pubkey:
+                        found_on_chain = True
                         moniker = v.get("description", {}).get("moniker")
                         jailed = v.get("jailed", False)
                         # Tokens (convert from smallest unit)
@@ -1011,6 +1034,11 @@ def check_validator() -> ServiceStatus:
             if raw_balance is not None:
                 balance_mirage = raw_balance / 1_000_000
 
+        # The manifest floor is the number the chain-side rules are written
+        # against; SERVER_BALANCE_ERROR only covers a host with no manifest.
+        min_liquid = _load_min_liquid_mirage()
+        floor = min_liquid if min_liquid is not None else float(SERVER_BALANCE_ERROR)
+
         base_details = {
             "configured": True,
             "moniker": moniker,
@@ -1018,6 +1046,8 @@ def check_validator() -> ServiceStatus:
             "power_pct": power_pct,
             "voting_power": voting_power,
             "balance_mirage": balance_mirage,
+            "min_liquid_mirage": floor,
+            "registered": found_on_chain,
         }
 
         if jailed:
@@ -1048,22 +1078,31 @@ def check_validator() -> ServiceStatus:
 
         if in_set:
             active_details = {**base_details, "active": True, "voting_power": voting_power}
-            if balance_mirage is not None and balance_mirage < SERVER_BALANCE_ERROR:
+            if balance_mirage is not None and balance_mirage < floor:
                 return ServiceStatus(
-                    name="Validator", status=Status.ERROR, message="Balance critical", details=active_details
+                    name="Validator",
+                    status=Status.ERROR,
+                    message="Liquid below floor",
+                    details=active_details,
                 )
             if balance_mirage is not None and balance_mirage < SERVER_BALANCE_WARN:
                 return ServiceStatus(
                     name="Validator", status=Status.WARN, message="Balance low", details=active_details
                 )
             return ServiceStatus(name="Validator", status=Status.OK, message="Active", details=active_details)
-        else:
+        if found_on_chain:
             return ServiceStatus(
                 name="Validator",
                 status=Status.ERROR,
-                message="Not in active set",
+                message="Registered, not in active set",
                 details={**base_details, "active": False},
             )
+        return ServiceStatus(
+            name="Validator",
+            status=Status.WARN,
+            message="Not registered",
+            details={**base_details, "active": False, "enrollment": "pending"},
+        )
 
     except Exception as e:
         return ServiceStatus(name="Validator", status=Status.ERROR, message=str(e)[:30], details={"configured": True})
@@ -2251,15 +2290,20 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
         balance_mirage = details.get("balance_mirage")
         if balance_mirage is not None:
-            if balance_mirage < SERVER_BALANCE_ERROR:
+            min_liquid = details.get("min_liquid_mirage")
+            if min_liquid is not None and balance_mirage < min_liquid:
                 bal_color = Colors.BRIGHT_RED
             elif balance_mirage < SERVER_BALANCE_WARN:
                 bal_color = Colors.BRIGHT_YELLOW
             else:
                 bal_color = Colors.BRIGHT_GREEN
+            floor_note = f" {Colors.DIM}(floor {min_liquid:,.0f}){Colors.RESET}" if min_liquid is not None else ""
             lines.append(
-                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Liquid:{Colors.RESET} "
+                f"{bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}{floor_note}"
             )
+        if details.get("enrollment") == "pending":
+            lines.append(f"{bullet}{Colors.BRIGHT_YELLOW}Enrollment pending{Colors.RESET}")
         if details.get("tombstoned"):
             lines.append(f"{bullet}{Colors.BRIGHT_RED}TOMBSTONED (permanent){Colors.RESET}")
         elif details.get("jailed"):

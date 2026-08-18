@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# One bounded enrollment attempt. Invoked by mirage-enroll.timer. Never loops.
+set -euo pipefail
+
+if ! docker inspect mirage --format '{{.State.Status}}' 2>/dev/null | grep -qx running; then
+  echo "STATE=waiting_for_rpc"
+  exit 0
+fi
+
+rc=0
+out=$(docker exec mirage bash /opt/mirage/deploy/create_validator.sh 2>&1) || rc=$?
+echo "$out"
+state=$(echo "$out" | grep -E '^STATE=' | tail -1 | cut -d= -f2- || true)
+if [[ "$rc" -ne 0 ]]; then
+  echo "ERROR: enrollment attempt failed (state=${state:-none} exit=$rc)" >&2
+  exit 1
+fi
+case "$state" in
+  registered)
+    systemctl disable --now mirage-enroll.timer
+    exit 0
+    ;;
+  waiting_for_rpc|syncing)
+    exit 0
+    ;;
+  *)
+    echo "ERROR: enrollment attempt failed (state=${state:-none} exit=$rc)" >&2
+    exit 1
+    ;;
+esac

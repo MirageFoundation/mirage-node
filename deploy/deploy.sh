@@ -251,23 +251,15 @@ maybe_proto_gen_and_go_build() {
     fi
   fi
 
-  # Check the embedded version. It comes from `git describe` at build time, not
-  # from any file, so moving a tag onto an existing commit changes what the
-  # binary should report while leaving every source mtime and the content hash
-  # untouched. Both checks above then say "up to date" and the fleet keeps
-  # serving a binary that reports e.g. v1.36.0-1-gd783da08 for a v1.36.0
-  # release — which is exactly what verify_upgrade fails on.
-  # The `-dirty` suffix is deliberately ignored on both sides: it flips on any
-  # edit anywhere in the tree, including docs, and rebuilding Go for that would
-  # make every deploy from a working tree pay a full build. The tag and commit
-  # are what must match.
+  # Embedded version comes from the root VERSION file (Makefile ldflags), not
+  # git describe. A moved tag must not change what the binary reports.
   if [ "$need_build" -eq 0 ]; then
     local want_version have_version
-    want_version="$(cd "$REPO_ROOT" && git describe --tags --always 2>/dev/null || echo "")"
+    want_version="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION" 2>/dev/null || echo "")"
     have_version="$("$miraged_bin" version 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
     have_version="${have_version%-dirty}"
     if [ -n "$want_version" ] && [ "$want_version" != "$have_version" ]; then
-      echo "==> miraged reports '$have_version' but the tree is '$want_version'; rebuild needed"
+      echo "==> miraged reports '$have_version' but VERSION is '$want_version'; rebuild needed"
       need_build=1
     fi
   fi
@@ -336,7 +328,11 @@ docker_build() {
     cache_args+=(--cache-to "type=local,dest=$cache_base,mode=max")
   fi
 
+  # amd64 only: the Dockerfile copies the miraged binary built on this machine,
+  # so a second platform would ship an image whose chain binary cannot run.
+  # Arm64 needs the binary built inside the image first.
   docker buildx build \
+    --platform linux/amd64 \
     --push \
     "${tags[@]}" \
     "${cache_args[@]}" \
@@ -466,18 +462,15 @@ if [ "$MODE" = "init" ]; then
   fi
 fi
 
-# Ensure docker on remote (skip for local - docker is already running)
+# Docker CE is required (harden_server.sh / install.sh). No docker.io fallback.
 if [ "$LOCAL_MODE" -eq 0 ]; then
-  echo "==> Ensuring Docker is installed on remote..."
-  run_ssh '
-    set -euo pipefail
-    if ! command -v docker >/dev/null 2>&1; then
-      export DEBIAN_FRONTEND=noninteractive
-      apt-get update -y
-      apt-get install -y docker.io
-      systemctl enable --now docker
-    fi
-  '
+  echo "==> Checking Docker on remote..."
+  if ! run_ssh 'command -v docker >/dev/null 2>&1'; then
+    echo "ERROR: docker is not installed on the remote host." >&2
+    echo "       Run deploy/harden_server.sh (or deploy/install.sh) first so Docker CE is present." >&2
+    close_ssh_socket
+    exit 1
+  fi
 fi
 
 # No seed file verification required
@@ -623,30 +616,23 @@ if [ "$MODE" = "init" ]; then
   fi
   # Ensure data dirs exist on remote
   run_ssh 'mkdir -p ~/.mirage/node/config ~/.caddy'
-  # Prompt for consensus derivation index (default 0)
-  read -p "Consensus derivation index [0] (default 0; do not change unless rotating): " CONS_INDEX
-  CONS_INDEX="${CONS_INDEX:-0}"
-  if ! echo "$CONS_INDEX" | grep -Eq '^[0-9]+$'; then
-    echo "ERROR: Derivation index must be a non-negative integer." >&2
-    exit 1
-  fi
   # Double-check consensus key doesn't exist on remote (sanity check before deriving)
   if run_ssh "test -f ~/.mirage/node/config/priv_validator_key.json"; then
     echo "ERROR: Consensus key already exists on remote. Aborting to avoid overwrite." >&2
     exit 1
   fi
-  # Derive consensus key on remote using Docker
+  # Derive consensus key on remote using Docker. Index is fixed at 0.
   echo "==> Deriving consensus key on remote..."
-  if ! echo "$MNEMONIC" | run_ssh "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
+  if ! echo "$MNEMONIC" | run_ssh "docker run --rm -i \
     --entrypoint python3 \
     -v ~/.mirage:/root/.mirage \
-      '$DEPLOY_IMAGE' /opt/mirage/deploy/derive_consensus_key.py"; then
+      '$DEPLOY_IMAGE' /opt/mirage/deploy/derive_consensus_key.py --index 0"; then
   echo "ERROR: Failed to derive consensus key." >&2
   exit 1
   fi
   # Set correct permissions on remote
   run_ssh 'chmod 600 ~/.mirage/node/config/priv_validator_key.json'
-  echo "✓ Consensus key derived (index $CONS_INDEX)."
+  echo "✓ Consensus key derived (index 0)."
   # Import using a one-shot container into the mounted volume to avoid storing the mnemonic as an env var
   if ! echo "$MNEMONIC" | run_ssh "docker run --rm -i \
     --entrypoint /bin/sh \
@@ -767,18 +753,25 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
   # a stray error. The value matches what harden_server.sh already intends.
   docker run -d $PORTS $ENV_ARGS --name mirage --hostname testnet --restart unless-stopped --shm-size=2g --ulimit nofile=131072:131072 $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" "$DEPLOY_IMAGE"
 else
-  run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped --shm-size=2g --ulimit nofile=131072:131072 $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy '$DEPLOY_IMAGE'"
+  if run_ssh 'command -v mirage-launch >/dev/null 2>&1'; then
+    echo "==> Starting remote container via mirage-launch..."
+    if [ "$MONIKER_VALUE" != "mirage-node" ]; then
+      run_ssh "mirage-launch --image '$DEPLOY_IMAGE' --moniker '$MONIKER_VALUE'"
+    else
+      run_ssh "mirage-launch --image '$DEPLOY_IMAGE'"
+    fi
+  else
+    run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped --shm-size=2g --ulimit nofile=131072:131072 $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy '$DEPLOY_IMAGE'"
+  fi
 fi
 
 echo "==> Waiting briefly for container to become healthy..."
 sleep 2
 
-# Prune only once the new container holds a reference to the image. A stopped
-# container leaves its image unreferenced, so pruning before the start deletes
-# the image this deploy just loaded and leaves the host with nothing to run.
+# Drop unreferenced Mirage images only. Never `docker image prune -af`.
 if [ "$LOCAL_MODE" -eq 0 ]; then
-  echo "==> Pruning old Docker images..."
-  run_ssh 'docker image prune -af && rm -f /tmp/mirage-docker.tar.gz'
+  echo "==> Pruning old Mirage images..."
+  run_ssh 'if [ -x /usr/local/bin/prune_mirage_images.sh ]; then /usr/local/bin/prune_mirage_images.sh; fi; rm -f /tmp/mirage-docker.tar.gz'
 fi
 
 # Ensure container is running and stable (handle restart loop) before docker exec

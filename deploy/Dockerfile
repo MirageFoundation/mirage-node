@@ -65,6 +65,8 @@ COPY web/frontend/ /opt/mirage/web/frontend/
 # reads ../../docs/FAQ.md (resolves to /opt/mirage/docs/FAQ.md). It must exist
 # before `npm run build` or the React build fails with ENOENT.
 COPY docs/FAQ.md /opt/mirage/docs/FAQ.md
+COPY VERSION /opt/mirage/VERSION
+RUN cp /opt/mirage/VERSION /opt/mirage/web/frontend/public/version.txt
 
 # Verify vendored PoW assets match the locked argon2-browser package
 RUN npm run check:pow-assets
@@ -89,6 +91,7 @@ COPY indexer/ /opt/mirage/indexer/
 COPY shared/ /opt/mirage/shared/
 COPY tests/ /opt/mirage/tests/
 COPY deploy/ /opt/mirage/deploy/
+COPY release/ /opt/mirage/release/
 
 ## Note: We trust upstream build step to produce /opt/mirage/blockchain/bin/miraged
 
@@ -179,6 +182,8 @@ COPY --from=builder /opt/mirage/tests /opt/mirage/tests
 # few workstation-only scripts (deploy.sh, harden_server.sh, etc.) are
 # inert in the running container and worth the noise.
 COPY --from=builder /opt/mirage/deploy /opt/mirage/deploy
+COPY --from=builder /opt/mirage/release /opt/mirage/release
+COPY --from=builder /opt/mirage/VERSION /opt/mirage/VERSION
 
 # Set working directory
 WORKDIR /opt/mirage

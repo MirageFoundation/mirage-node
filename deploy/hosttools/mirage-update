@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+# Activate a staged ordinary release, or tick the updater (verify + pre-stage).
+set -euo pipefail
+
+HOME="${HOME:-/root}"
+STATE_DIR=/var/lib/mirage/update
+STATE_FILE="$STATE_DIR/state.json"
+LOCK_DIR="$STATE_DIR"
+MANIFEST_URL="${MIRAGE_MANIFEST_URL:-https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/release/manifest.json}"
+NETWORK_URL="${MIRAGE_NETWORK_URL:-https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/release/network.json}"
+PUBKEY=/usr/local/share/mirage/pubkey.pem
+VERIFY=/usr/local/bin/mirage-verify
+LAUNCH=/usr/local/bin/mirage-launch
+SAFETY_BLOCKS="${UPGRADE_PREFLIGHT_SAFETY_BLOCKS:-500}"
+
+mkdir -p "$STATE_DIR"
+
+exec 9>"$LOCK_DIR/lock"
+if ! flock -n 9; then
+  echo "ERROR: updater already running" >&2
+  exit 1
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+fetch_verify() {
+  local url="$1" dest="$2"
+  curl -fsSL "$url" -o "$dest"
+  curl -fsSL "${url}.sig" -o "${dest}.sig"
+  "$VERIFY" --manifest "$dest" --signature "${dest}.sig" --pubkey "$PUBKEY"
+}
+
+running_version() {
+  local value
+  if ! value=$(docker exec mirage cat /opt/mirage/VERSION); then
+    echo "ERROR: cannot read /opt/mirage/VERSION from the running container" >&2
+    return 1
+  fi
+  value=$(echo "$value" | tr -d '[:space:]')
+  if [[ ! "$value" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "ERROR: running container reports invalid VERSION '$value'" >&2
+    return 1
+  fi
+  echo "$value"
+}
+
+# Exit 0 when $1 >= $2, both vX.Y.Z.
+version_at_least() {
+  python3 - "$1" "$2" <<'PY'
+import re, sys
+def parse(v):
+    if not re.fullmatch(r"v\d+\.\d+\.\d+", v):
+        sys.exit(2)
+    return tuple(int(p) for p in v[1:].split("."))
+have, want = parse(sys.argv[1]), parse(sys.argv[2])
+sys.exit(0 if have >= want else 1)
+PY
+}
+
+wait_for_rpc() {
+  local attempt
+  for attempt in $(seq 1 120); do
+    if curl -fsS --max-time 2 http://127.0.0.1:26657/status >/dev/null; then
+      echo "RPC ready after ${attempt}s"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+activate_staged() {
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo "ERROR: no updater state; nothing is staged" >&2
+    exit 1
+  fi
+  staged=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged") or "")' "$STATE_FILE")
+  if [[ -z "$staged" ]]; then
+    echo "ERROR: no staged release" >&2
+    exit 1
+  fi
+  activation=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged_activation") or "")' "$STATE_FILE")
+  if [[ "$activation" == "upgrade-halt" ]]; then
+    echo "ERROR: upgrade-halt releases cannot be activated manually; use the governed upgrade procedure" >&2
+    exit 1
+  fi
+  if [[ "$activation" != "ordinary" ]]; then
+    echo "ERROR: staged release has invalid activation policy '$activation'" >&2
+    exit 1
+  fi
+  plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan)
+  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("height") or "0")')
+  if [[ -n "$plan_name" ]]; then
+    height=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
+    remaining=$((plan_h - height))
+    if (( remaining >= 0 && remaining <= SAFETY_BLOCKS )); then
+      echo "ERROR: upgrade plan $plan_name in $remaining blocks; refusing ordinary activation" >&2
+      exit 1
+    fi
+  fi
+  catching=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
+  if [[ "$catching" != "False" && "$catching" != "false" ]]; then
+    echo "ERROR: node is catching up; refusing activation" >&2
+    exit 1
+  fi
+  # The running container is the version we are upgrading from, so this is the
+  # place where min_prior_version can actually be checked.
+  local manifest min_prior have_version manifest_image
+  manifest="$HOME/.mirage/env/release-manifest.json"
+  if [[ ! -f "$manifest" ]]; then
+    echo "ERROR: staged release manifest missing: $manifest" >&2
+    exit 1
+  fi
+  manifest_image=$(json_field "$manifest" image)
+  if [[ "$manifest_image" != "$staged" ]]; then
+    echo "ERROR: staged image $staged does not match release manifest $manifest_image" >&2
+    exit 1
+  fi
+  min_prior=$(json_field "$manifest" min_prior_version)
+  if ! have_version=$(running_version); then
+    exit 1
+  fi
+  if ! version_at_least "$have_version" "$min_prior"; then
+    echo "ERROR: this node runs $have_version; the staged release requires at least $min_prior" >&2
+    exit 1
+  fi
+  current=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active") or "")' "$STATE_FILE")
+  staged_rollback_safe=$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1])).get("staged_rollback_safe")))' "$STATE_FILE")
+  if ! "$LAUNCH" --image "$staged" || ! wait_for_rpc; then
+    echo "ERROR: staged image failed to become healthy" >&2
+    if [[ "$staged_rollback_safe" == "True" && -n "$current" ]]; then
+      echo "attempting signed-policy-safe rollback to $current" >&2
+      if "$LAUNCH" --image "$current" && wait_for_rpc; then
+        echo "ERROR: restored previous image; staged release remains available for retry" >&2
+        exit 1
+      fi
+      echo "ERROR: previous image also failed to become healthy" >&2
+    fi
+    python3 - "$STATE_FILE" "$staged" "$current" <<'PY'
+import json, os, sys
+path, staged, current = sys.argv[1:4]
+state = json.load(open(path))
+state["previous"] = current
+state["active"] = staged
+state["active_activation"] = state.get("staged_activation") or ""
+state["active_rollback_safe"] = bool(state.get("staged_rollback_safe"))
+state["active_consensus_breaking"] = bool(state.get("staged_consensus_breaking"))
+state["staged"] = ""
+state["staged_activation"] = ""
+state["staged_rollback_safe"] = False
+state["staged_consensus_breaking"] = False
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+    exit 1
+  fi
+  python3 - "$STATE_FILE" "$staged" <<'PY'
+import json, os, sys
+path, staged = sys.argv[1], sys.argv[2]
+state = json.load(open(path))
+state["previous"] = state.get("active") or ""
+state["active"] = staged
+state["active_activation"] = state.get("staged_activation") or ""
+state["active_rollback_safe"] = bool(state.get("staged_rollback_safe"))
+state["active_consensus_breaking"] = bool(state.get("staged_consensus_breaking"))
+state["staged"] = ""
+state["staged_activation"] = ""
+state["staged_rollback_safe"] = False
+state["staged_consensus_breaking"] = False
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+  echo "activated $staged"
+}
+
+json_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"
+}
+
+canonical_hash() {
+  python3 - "$1" <<'PY'
+import hashlib, json, sys
+obj = json.load(open(sys.argv[1]))
+payload = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+print(hashlib.sha256(payload).hexdigest())
+PY
+}
+
+install_network_manifest() {
+  local source="$1" peers
+  peers=$(python3 -c 'import json,sys; print(",".join(json.load(open(sys.argv[1]))["persistent_peers"]))' "$source")
+  python3 - "$HOME/.mirage/env/node.env" "$HOME/.mirage/node/config/config.toml" "$peers" <<'PY'
+import os, re, sys
+env_path, config_path, peers = sys.argv[1:4]
+
+def replace(path, pattern, replacement):
+    if not os.path.isfile(path):
+        raise SystemExit(f"required peer configuration missing: {path}")
+    text = open(path, encoding="utf-8").read()
+    updated, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.M)
+    if count != 1:
+        raise SystemExit(f"persistent peers setting missing or duplicated in {path}")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(updated)
+    os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    os.replace(tmp, path)
+
+replace(env_path, r"^PERSISTENT_PEERS=.*$", f"PERSISTENT_PEERS={peers}")
+replace(config_path, r'^persistent_peers\s*=.*$', f'persistent_peers = "{peers}"')
+PY
+  install -m 0644 "$source" "$HOME/.mirage/env/network-manifest.json.tmp"
+  mv "$HOME/.mirage/env/network-manifest.json.tmp" "$HOME/.mirage/env/network-manifest.json"
+}
+
+pubkey_fingerprint() {
+  openssl pkey -pubin -in "$1" -outform DER | tail -c 32 | od -An -v -tx1 | tr -d ' \n'
+}
+
+install_hosttools_from_image() {
+  local image="$1" staging="$tmp/hosttools" image_fp host_fp tool
+  mkdir -p "$staging"
+  docker run --rm -v "$staging:/out" --entrypoint /bin/bash "$image" -lc \
+    'cp -a /opt/mirage/deploy/hosttools/. /out/ && cp /opt/mirage/deploy/release_verify.py /out/'
+  image_fp=$(pubkey_fingerprint "$staging/pubkey.pem")
+  host_fp=$(pubkey_fingerprint "$PUBKEY")
+  if [[ "$image_fp" != "$host_fp" ]]; then
+    echo "ERROR: staged image pubkey $image_fp does not match host trust anchor $host_fp" >&2
+    exit 1
+  fi
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll; do
+    install -m 0755 "$staging/$tool" "/usr/local/bin/$tool"
+  done
+  install -m 0755 "$staging/prune_mirage_images.sh" /usr/local/bin/prune_mirage_images.sh
+  install -m 0755 "$staging/mirage-weekly-restart.sh" /usr/local/sbin/mirage-weekly-restart.sh
+  install -m 0644 "$staging/release_verify.py" /usr/local/share/mirage/release_verify.py
+  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer; do
+    install -m 0644 "$staging/systemd/$tool" "/etc/systemd/system/$tool"
+  done
+  systemctl daemon-reload
+}
+
+tick() {
+  mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known"
+  fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
+  fetch_verify "$NETWORK_URL" "$tmp/network.json"
+  image=$(json_field "$tmp/manifest.json" image)
+  release_id=$(json_field "$tmp/manifest.json" release_id)
+  version=$(json_field "$tmp/manifest.json" version)
+  min_prior=$(json_field "$tmp/manifest.json" min_prior_version)
+  min_release=$(json_field "$tmp/network.json" min_release)
+  generation=$(json_field "$tmp/network.json" generation)
+  activation=$(json_field "$tmp/manifest.json" activation)
+  rollback_safe=$(json_field "$tmp/manifest.json" rollback_safe)
+  consensus_breaking=$(json_field "$tmp/manifest.json" consensus_breaking)
+  if ! version_at_least "$version" "$min_release"; then
+    echo "ERROR: release $version is below the network's min_release $min_release" >&2
+    exit 1
+  fi
+  last_id=0
+  last_gen=0
+  if [[ -f "$STATE_FILE" ]]; then
+    last_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("last_release_id") or 0)' "$STATE_FILE")
+    last_gen=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("last_network_generation") or 0)' "$STATE_FILE")
+    # A signature stays valid forever, so an old manifest replayed at us is the
+    # attack this rejects.
+    if (( generation < last_gen )); then
+      echo "ERROR: network manifest generation $generation is older than the last seen $last_gen" >&2
+      exit 1
+    fi
+    if (( generation == last_gen )) && [[ -f "$HOME/.mirage/env/network-manifest.json" ]]; then
+      old_hash=$(canonical_hash "$HOME/.mirage/env/network-manifest.json")
+      new_hash=$(canonical_hash "$tmp/network.json")
+      if [[ "$old_hash" != "$new_hash" ]]; then
+        echo "ERROR: network manifest changed without increasing generation $generation" >&2
+        exit 1
+      fi
+    fi
+  fi
+  if (( generation > last_gen )); then
+    install_network_manifest "$tmp/network.json"
+    install -m 0644 "$tmp/network.json.sig" "$HOME/.mirage/env/network-manifest.json.sig.tmp"
+    mv "$HOME/.mirage/env/network-manifest.json.sig.tmp" "$HOME/.mirage/env/network-manifest.json.sig"
+    install -m 0644 "$tmp/network.json" "$HOME/.mirage/well-known/network.json"
+    install -m 0644 "$tmp/network.json.sig" "$HOME/.mirage/well-known/network.json.sig"
+    python3 - "$STATE_FILE" "$generation" <<'PY'
+import json, os, sys
+path, generation = sys.argv[1], int(sys.argv[2])
+state = json.load(open(path)) if os.path.isfile(path) else {}
+state["last_network_generation"] = generation
+os.makedirs(os.path.dirname(path), exist_ok=True)
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+    echo "installed network manifest generation $generation"
+  fi
+  if (( release_id < last_id )); then
+    echo "ERROR: release manifest id $release_id is older than the last seen $last_id" >&2
+    exit 1
+  fi
+  if (( release_id == last_id )); then
+    if [[ -f "$HOME/.mirage/env/release-manifest.json" ]]; then
+      old_hash=$(canonical_hash "$HOME/.mirage/env/release-manifest.json")
+      new_hash=$(canonical_hash "$tmp/manifest.json")
+      if [[ "$old_hash" != "$new_hash" ]]; then
+        echo "ERROR: release manifest changed without increasing release_id $release_id" >&2
+        exit 1
+      fi
+    fi
+    echo "no newer release (last_release_id=$last_id)"
+    exit 0
+  fi
+  if ! have_version=$(running_version); then
+    exit 1
+  fi
+  if ! version_at_least "$have_version" "$min_prior"; then
+    echo "ERROR: this node runs $have_version but $version requires at least $min_prior; upgrade through the intermediate release first" >&2
+    exit 1
+  fi
+  docker pull "$image"
+  digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
+  if [[ "$digest" != "$image" && "$digest" != *"${image#*@}"* ]]; then
+    echo "ERROR: pulled RepoDigest $digest does not match manifest $image" >&2
+    exit 1
+  fi
+  install_hosttools_from_image "$image"
+  python3 - "$STATE_FILE" "$image" "$release_id" "$generation" "$activation" "$rollback_safe" "$consensus_breaking" <<'PY'
+import json, os, sys
+path, image, rid, gen, activation, rollback_safe, consensus_breaking = sys.argv[1:8]
+state = {}
+if os.path.isfile(path):
+    state = json.load(open(path))
+state["staged"] = image
+state["last_release_id"] = int(rid)
+state["last_network_generation"] = int(gen)
+state["staged_activation"] = activation
+state["staged_rollback_safe"] = rollback_safe == "True"
+state["staged_consensus_breaking"] = consensus_breaking == "True"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+  install -m 0644 "$tmp/manifest.json" "$HOME/.mirage/env/release-manifest.json.tmp"
+  mv "$HOME/.mirage/env/release-manifest.json.tmp" "$HOME/.mirage/env/release-manifest.json"
+  install -m 0644 "$tmp/manifest.json.sig" "$HOME/.mirage/env/release-manifest.json.sig.tmp"
+  mv "$HOME/.mirage/env/release-manifest.json.sig.tmp" "$HOME/.mirage/env/release-manifest.json.sig"
+  install -m 0644 "$tmp/manifest.json" "$HOME/.mirage/well-known/manifest.json"
+  install -m 0644 "$tmp/manifest.json.sig" "$HOME/.mirage/well-known/manifest.json.sig"
+  echo "staged $image activation=$activation"
+  if [[ "$activation" == "upgrade-halt" ]]; then
+    echo "governance-linked release staged; manual activation is disabled"
+  fi
+}
+
+rollback() {
+  if [[ ! -f "$STATE_FILE" ]]; then
+    echo "ERROR: no updater state; nothing to roll back to" >&2
+    exit 1
+  fi
+  previous=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("previous") or "")' "$STATE_FILE")
+  if [[ -z "$previous" ]]; then
+    echo "ERROR: no previous image recorded" >&2
+    exit 1
+  fi
+  rollback_safe=$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1])).get("active_rollback_safe")))' "$STATE_FILE")
+  consensus_breaking=$(python3 -c 'import json,sys; print(bool(json.load(open(sys.argv[1])).get("active_consensus_breaking")))' "$STATE_FILE")
+  if [[ "$rollback_safe" != "True" || "$consensus_breaking" == "True" ]]; then
+    echo "ERROR: the active release manifest does not permit rollback" >&2
+    exit 1
+  fi
+  "$LAUNCH" --image "$previous"
+  python3 - "$STATE_FILE" "$previous" <<'PY'
+import json, os, sys
+path, previous = sys.argv[1], sys.argv[2]
+state = json.load(open(path))
+rolled_back_from = state.get("active") or ""
+rolled_back_activation = state.get("active_activation") or ""
+rolled_back_safe = bool(state.get("active_rollback_safe"))
+rolled_back_consensus = bool(state.get("active_consensus_breaking"))
+state["active"] = previous
+state["active_activation"] = ""
+state["active_rollback_safe"] = False
+state["active_consensus_breaking"] = False
+state["previous"] = ""
+state["staged"] = rolled_back_from
+state["staged_activation"] = rolled_back_activation
+state["staged_rollback_safe"] = rolled_back_safe
+state["staged_consensus_breaking"] = rolled_back_consensus
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+  echo "rolled back to $previous"
+}
+
+case "${1:-}" in
+  --tick) tick ;;
+  --rollback) rollback ;;
+  "") activate_staged ;;
+  *) echo "usage: mirage-update [--tick|--rollback]" >&2; exit 2 ;;
+esac

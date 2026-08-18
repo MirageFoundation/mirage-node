@@ -1,169 +1,87 @@
 # Deploying a Mirage Node
 
-Run your own Mirage validator node in minutes.
+Anyone with an Ubuntu 24.04 VM and an SSH key can run a validator. The installer is provider-agnostic: a real VM (KVM, Xen, Hyper-V, VMware, or bare metal), not LXC or OpenVZ.
 
-## Requirements
+## What you need
 
-- A Linux server (**Ubuntu 24.04 LTS** — see [`server_setup.md`](server_setup.md) for the mandatory OS baseline)
-- Docker installed on the server (the baseline installs it)
-- A domain name pointing to your server (for HTTPS)
-- A funded wallet with at least **15 MIRAGE** (25 recommended)
+1. An account on [mirage.talk](https://mirage.talk) with a username.
+2. **10,000,000 MIRAGE** on that account (5,000,000 will be self-delegated; 5,000,000 stays liquid; staking later keeps at least 1,000,000 liquid for fees).
+3. An Ubuntu 24.04 LTS VM on **amd64**, with at least 4 GiB RAM (8 GiB strongly recommended), 80 GiB free disk, and your SSH public key in `/root/.ssh/authorized_keys`. Released images are amd64 only for now, so the installer refuses arm64 rather than failing later at the image pull.
+4. The **12-word** recovery phrase for that funded account.
 
-### Server specs
+The installer imports that phrase into `keyring-backend test` on the host. Anyone who roots the box can take over the account. That is an accepted operator risk; see [`docs/security/open-items.md`](../security/open-items.md).
 
-Minimum recommended:
-
-- 2 vCPUs
-- 4 GB RAM + **2 GB swap** (the swap is mandatory; a validator that OOMs without swap can silently corrupt its IAVL cache and produce a wrong apphash)
-- 25 GB disk
-
-A DigitalOcean droplet at ~$24/month works, but 8 GB RAM is strongly recommended for production.
-
-## Step 0: Bring the host to baseline
-
-Before `deploy.sh`, the host must satisfy the OS baseline in [`server_setup.md`](server_setup.md) (SSH key-only, UFW, fail2ban, swap, docker-ce, ulimits, weekly restart timer). The shortest path is:
+## Install
 
 ```bash
-scp deploy/harden_server.sh root@your-server:/root/
-ssh root@your-server 'bash /root/harden_server.sh'
+ssh root@YOUR_IP
+curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
 ```
 
-The script is idempotent; re-running it on an already-hardened host is a no-op.
+When prompted, paste the 12-word mnemonic. The node comes up on HTTP at `http://YOUR_IP` immediately. It state-syncs, then registers itself as a validator. Do not run create-validator by hand.
 
-## Step 1: Get a funded mnemonic
-
-You need a wallet with MIRAGE tokens to run a validator node.
-
-**How to get funded:**
-
-1. Visit [mirage.talk](https://mirage.talk)
-2. Create a free account
-3. Post in the **#mirage** topic asking for validator funding
-4. We'll send you MIRAGE tokens and help you get set up
-
-You'll receive a 12-word mnemonic phrase. Keep it safe — this is your validator identity.
-
-## Step 2: Clone the repository
-
-On your **local machine** (not the server):
+If GitHub is unreachable, any already-running node serves the script, its hash-pinned bootstrap helpers, and signed manifests. Use one node consistently:
 
 ```bash
-git clone https://github.com/MirageFoundation/mirage-node.git
-cd mirage-node
+MIRROR=https://<that-node>/.well-known/mirage
+curl -fsSL "$MIRROR/install.sh" | MIRAGE_MANIFEST_MIRROR="$MIRROR" bash
 ```
 
-## Step 3: Point the node at the network
+Integrity is the embedded signing key and bootstrap hashes, not the mirror origin. The public key fingerprint is `679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8` (raw Ed25519, SHA-256 of `deploy/hosttools/pubkey.pem`'s raw key). Confirm it with:
 
-A new node always joins the existing mirage-1 chain, so it needs to know where
-to fetch the genesis and which peers to dial. Neither is committed to this
-repo. Copy the template and fill in two entries:
+```
+openssl pkey -pubin -in deploy/hosttools/pubkey.pem -outform DER | tail -c 32 | od -An -v -tx1 | tr -d ' \n'
+```
+
+Do not eyeball a downloaded script. For a node-served copy, check it against GitHub with `sha256sum -c`. See [`SECURITY.md`](../../SECURITY.md).
+
+### HTTPS later
+
+Point an A/AAAA record at the VM, then:
 
 ```bash
-cp .env.example .env
+mirage-domain example.com
 ```
+
+Wallet features that need a secure origin wait until this step.
+
+### Day-to-day
 
 ```bash
-MIRAGE_REMOTE_RPC=https://mirage.talk/chain/rpc,https://mirage.vote/chain/rpc
-MIRAGE_PERSISTENT_PEERS=<node_id>@<host>:26656,<node_id>@<host>:26656
+mirage-status
+mirage-update             # activate a staged ordinary release
+mirage-update --rollback  # only when the signed release permits rollback
 ```
 
-`MIRAGE_REMOTE_RPC` needs at least two endpoints. The genesis they serve is
-verified against a hash pinned in `deploy/bootstrap_join.py`, so a wrong or
-tampered genesis is refused outright. The state-sync trust hash has no such
-pin, so it is accepted only when the endpoints agree on it — which is why one
-endpoint is not enough. Both are only read during `--init`.
+The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Governance-halt releases also stage, but the host tool refuses to activate them manually; use the governed upgrade procedure at the announced halt. A staged release is refused if this node is too far behind (`min_prior_version`), if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
 
-Get peer IDs from any running node with `scripts/get_persistent_peers.sh`, or
-ask in **#mirage**.
+## What the installer will refuse
 
-## Step 4: Deploy
+- Ubuntu other than 24.04, or any architecture other than amd64
+- Container virtualization (LXC, OpenVZ, Docker-in-Docker)
+- No SSH public key in `/root/.ssh/authorized_keys` (it will not disable password auth and lock you out)
+- A mnemonic that is not exactly 12 BIP-39 English words
+- An account with no username, or with less than 10,000,000 MIRAGE (it prints the actual balance)
+- A seed whose consensus key is already a validator on another host (migrate with `scripts/backup_restore.py --migrate` instead)
+- A network manifest with no persistent peers, an expired one, or a signature that does not match the pinned key
+- A release older than the network manifest's `min_release`
+- A pulled image whose `RepoDigest` does not match the signed manifest
+- An image carrying a different release signing key than the one embedded in the installer
 
-Run the deploy script:
+The installer also gives each host its own weekly container-restart and OS-upgrade windows, derived from the machine ID, so a public fleet does not reboot in lockstep.
 
-```bash
-deploy/deploy.sh root@your-server --init --moniker your-node-name
-```
+Re-running the installer on the same host with the same seed is idempotent: existing key files are left untouched.
 
-Replace:
-- `your-server` with your server's IP or domain
-- `your-node-name` with whatever you want to call your node
+## Existing operators
 
-You'll be prompted for your funded mnemonic. Paste the 12 words when asked.
+Laptop-driven deploys (`deploy/deploy.sh root@host --init`) still work for the current fleet. New nodes should use `install.sh`. `deploy.sh` no longer installs `docker.io` as a fallback and no longer asks for a consensus derivation index (always 0).
 
-That's it! The script builds the Docker image, pushes it to a registry, and starts everything on your server.
+Host baseline details remain in [`server_setup.md`](server_setup.md).
 
-### Registry auth (one-time)
+### State-sync and history
 
-Deploy now uses a public Docker image on `ghcr.io` by default (fast updates: server pulls layers instead of uploading a tarball).
-
-To be able to **push** images, you must log in once on your local machine:
-
-```bash
-docker login ghcr.io
-```
-
-Use your GitHub username and a Personal Access Token with `write:packages`.
-
-## Step 5: Enable HTTPS (optional)
-
-If you have a domain pointing to your server, enable TLS:
-
-```bash
-ssh root@your-server
-docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain=your-domain.com
-```
-
-If you're just using an IP address, skip this step — your node will be accessible at `http://your-server-ip` directly.
-
-## Updating your node
-
-To update to the latest version:
-
-```bash
-deploy/deploy.sh root@your-server --update
-```
-
-This rebuilds the image and restarts the container while preserving all your data and keys.
-
-## What the deploy script does
-
-The script handles everything automatically:
-
-1. **Installs Docker** on the server if it's not already installed
-2. **Builds the Docker image** on your local machine and pushes to GHCR
-3. **Pulls the image** on your server (fast: only downloads changed layers)
-4. **Prompts for your mnemonic** and securely imports your validator keys
-5. **Fetches and verifies the mirage-1 genesis** from your bootstrap endpoints
-6. **Sets up PostgreSQL** inside the container (no manual database config needed)
-7. **Starts all services** (blockchain node, indexer, web backend, frontend)
-8. **Creates your validator** on-chain
-
-All data is persisted in `~/.mirage` on the server, so updates preserve your keys and state.
-
-### Your node starts from a state-sync snapshot
-
-Nodes retain roughly a week of blocks, and genesis begins at height 2096156, so
-there is no one left to serve the millions of blocks in between. A new node
-therefore state-syncs to a recent snapshot instead of replaying history, and
-`--init` derives the trust height for you.
-
-The consequence is worth expecting: your indexer starts at the snapshot height
-and records the blocks before it as a permanent gap, so node health reports
-`history_complete: false` with the missing range listed. That is accurate
-rather than broken — your node genuinely has no record of those blocks, and we
-would rather say so than let it imply a complete archive. It serves current
-traffic normally.
-
-## Monitoring
-
-```bash
-# View logs
-ssh root@your-server 'docker logs mirage'
-
-# Attach to tmux session
-ssh -t root@your-server 'docker exec -it mirage tmux attach -t mirage'
-```
+Nodes retain roughly a week of blocks, and genesis begins at height 2096156, so there is no one left to serve the millions of blocks in between. A new node state-syncs to a recent snapshot. The indexer starts at the snapshot height and records the blocks before it as a permanent gap (`history_complete: false`). That is accurate rather than broken.
 
 ## Need help?
 
-Join the conversation on [mirage.talk/r/mirage](https://mirage.talk/t/mirage). We're happy to help you get your node running!
+Join the conversation on [mirage.talk/t/mirage](https://mirage.talk/t/mirage).

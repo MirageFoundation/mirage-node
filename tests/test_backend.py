@@ -106,6 +106,7 @@ from tests.cases.test_backend_payouts import (
     test_payout_release_rules,
     test_payout_claim_gate,
 )
+from tests.cases.test_backend_install import test_install
 from tests.cases.test_backend_push_outbox import (
     test_push_outbox_schema,
     test_push_outbox_enqueue,
@@ -197,6 +198,7 @@ ALL_CATEGORIES = {
     "push_outbox_delivery": test_push_outbox_delivery,
     "push_outbox_retry": test_push_outbox_retry,
     "push_outbox_cleanup": test_push_outbox_cleanup,
+    "install": test_install,
 }
 
 STATELESS_CATEGORIES = {
@@ -235,6 +237,7 @@ STATELESS_CATEGORIES = {
     # tick clock, so they run sequentially and never lease each other's rows.
     "push_outbox_schema",
     "net_tags",
+    "install",
 }
 
 # These categories use source probes, generated addresses, or direct database
@@ -271,6 +274,7 @@ WALLETLESS_CATEGORIES = {
     "push_outbox_retry",
     "push_outbox_cleanup",
     "net_tags",
+    "install",
 }
 
 # Categories that guard a security or economic invariant. They must execute; a
@@ -312,6 +316,7 @@ RELEASE_GATE_CATEGORIES = {
     # Every offline net_tags check can pass while no tag ever reaches the chain.
     # A skip here means the release shipped the feature unverified end to end.
     "net_tags_live",
+    "install",
 }
 
 

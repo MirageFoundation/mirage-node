@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Post-deploy verification for v1.36.2.
+Post-deploy verification for the version in /opt/mirage/VERSION (currently
+the same string as the git tag).
 
 Per the /upgrade workflow this file is rewritten every release to check ONLY
 what THIS release changes:
@@ -108,7 +109,23 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-RELEASE_VERSION = "v1.36.2"
+_VERSION_PATHS = (
+    Path("/opt/mirage/VERSION"),
+    Path(__file__).resolve().parent.parent / "VERSION",
+)
+
+
+def _load_release_version() -> str:
+    for path in _VERSION_PATHS:
+        if path.is_file():
+            value = path.read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"v\d+\.\d+\.\d+", value):
+                return value
+            raise SystemExit(f"VERSION malformed: {value!r} in {path}")
+    raise SystemExit("VERSION file missing")
+
+
+RELEASE_VERSION = _load_release_version()
 COMET_RPC_URL = "http://127.0.0.1:26657"
 REST_URL = "http://127.0.0.1:1317"
 
@@ -435,19 +452,20 @@ def check_upload_accepts_both_kind_shapes() -> None:
         return
     # Comments here quote both attribute names while explaining the rule, so
     # strip them before deciding which one the code actually reads first.
-    body = "\n".join(
-        line for line in src[start:start + 4000].splitlines()
-        if not line.strip().startswith("#")
-    )
+    body = "\n".join(line for line in src[start : start + 4000].splitlines() if not line.strip().startswith("#"))
     head, _, tail = body.partition("request.files")
     if "request.args" not in head:
-        fail(f"{p}: upload_media does not read `kind` from the query string before the body, so the per-kind size cap cannot be applied")
+        fail(
+            f"{p}: upload_media does not read `kind` from the query string before the body, so the per-kind size cap cannot be applied"
+        )
         return
     if "request.form" in head:
         fail(f"{p}: upload_media reads the form before the body is bounded, which is the defect M-3 closed")
         return
     if "request.form" not in tail:
-        fail(f"{p}: upload_media has no form fallback for `kind`; every shipped mobile build uploads with no query string and will be rejected")
+        fail(
+            f"{p}: upload_media has no form fallback for `kind`; every shipped mobile build uploads with no query string and will be rejected"
+        )
         return
     ok("upload_media reads `kind` from the query string first and still accepts the shipped app's form-only shape")
 
@@ -557,9 +575,7 @@ def check_tags_landing_on_chain() -> None:
                     """
                 )
                 breakdown = cur.fetchall()
-                cur.execute(
-                    "SELECT COUNT(*) FROM net_tags WHERE namespace = '' OR tag = '' OR epoch = ''"
-                )
+                cur.execute("SELECT COUNT(*) FROM net_tags WHERE namespace = '' OR tag = '' OR epoch = ''")
                 malformed = int((cur.fetchone() or [0])[0] or 0)
     except Exception as e:
         fail(f"on-chain tag check failed: {e}")

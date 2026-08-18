@@ -9,14 +9,16 @@ GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.6.0
 export GOSUMDB := sum.golang.org
 export GOTOOLCHAIN := auto
 
+VERSION_FILE := $(CURDIR)/../VERSION
 # do not override user values
 ifeq (,$(VERSION))
-  # Try git describe for tags (includes distance from tag)
-  VERSION := $(shell git describe --tags --always --dirty 2>/dev/null)
-  # if VERSION is still empty, use branch and commit
-  ifeq (,$(VERSION))
-    VERSION := $(BRANCH)-$(COMMIT)
-  endif
+  VERSION := $(shell cat "$(VERSION_FILE)" 2>/dev/null)
+endif
+ifeq (,$(VERSION))
+  $(error VERSION file missing at $(VERSION_FILE))
+endif
+ifeq ($(shell printf '%s' "$(VERSION)" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$'),)
+  $(error VERSION '$(VERSION)' does not match vX.Y.Z)
 endif
 
 # Update the ldflags with the app, client & server names

@@ -109,7 +109,8 @@ You don't need to install anything. Just visit a public node:
 - **[mirage.vote](https://mirage.vote)** (UAT/Public Node)
 
 ### For Node Operators
-- [Deployment Guide](docs/guides/deploy.md)
+- One-line install: `curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash` (Ubuntu 24.04, see [Deployment Guide](docs/guides/deploy.md))
+- Release signing key fingerprint: `679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8` ([SECURITY.md](SECURITY.md))
 - [Infrastructure Guide](docs/troubleshooting/infrastructure.md)
 - **[Join the Mirage Portal](https://t.me/+5SILWcCke8tmODlh)** on Telegram to connect with the team and get setup help (especially if you want to run a node).
 

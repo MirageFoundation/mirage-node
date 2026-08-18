@@ -1,7 +1,14 @@
-# Build artifacts
-release/
+# Build artifacts (Ignite CLI tarballs). Signed release metadata is tracked.
+release/*
+!release/*.schema.json
+!release/*.json
+!release/*.md
+!release/*.sig
 build/
 dist/
+
+# Offline release-signing private key. Never commit.
+.release_signing.pem
 
 # IDE files
 .idea/

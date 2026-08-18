@@ -1,0 +1,29 @@
+{
+    "generation": 1,
+    "issued_at": "2026-08-17T00:00:00Z",
+    "expires_at": "2026-11-17T00:00:00Z",
+    "chain_id": "mirage-1",
+    "genesis_sha256": "79eb6a81a83707cfd34f69e6f17bf6006ffa9f521b130f51dded92e04c6cfc8d",
+    "rpc": [
+        "https://mirage.talk/chain/rpc",
+        "https://mirage.vote/chain/rpc"
+    ],
+    "rest": [
+        "https://mirage.talk/chain/rest",
+        "https://mirage.vote/chain/rest"
+    ],
+    "api": [
+        "https://mirage.talk",
+        "https://mirage.vote"
+    ],
+    "persistent_peers": [
+        "5fe7efb829e75ae8518faee424d6871b7f66714a@159.203.114.27:26656",
+        "b51a4505b20b9a555e3712ed67089762ec934ddf@64.23.136.132:26656",
+        "9517122294159cd191e82439d4f9e2b88185a608@146.190.108.140:26656",
+        "765ad58fd849498c1f45a3c402da6d51029640f1@139.59.9.96:26656"
+    ],
+    "min_release": "v1.36.2",
+    "activation_balance_umirage": "10000000000000",
+    "self_delegation_umirage": "5000000000000",
+    "min_liquid_umirage": "1000000000000"
+}

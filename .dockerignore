@@ -1,0 +1,12 @@
+.git
+.cursor
+.env
+.env.*
+.envrc
+.release_signing.pem
+release-manifest.candidate.json
+
+**/__pycache__
+**/*.pyc
+**/node_modules
+web/frontend/build

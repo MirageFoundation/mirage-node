@@ -1,0 +1,10 @@
+[Unit]
+Description=Mirage validator enrollment (one bounded attempt)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Nice=10
+Environment=HOME=/root
+ExecStart=/usr/local/bin/mirage-enroll

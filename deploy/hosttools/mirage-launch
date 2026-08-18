@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Canonical docker create/start for the mirage container.
+# Used by install, update, rollback, and deploy.sh remote path.
+# Local-dev flags (--hostname testnet, SKIP_*) stay in deploy.sh --local only.
+set -euo pipefail
+
+usage() {
+  echo "usage: mirage-launch --image DIGEST_OR_TAG [--moniker NAME]" >&2
+  exit 2
+}
+
+IMAGE=""
+MONIKER=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --image) IMAGE="${2:-}"; shift 2 ;;
+    --moniker) MONIKER="${2:-}"; shift 2 ;;
+    -h|--help) usage ;;
+    *) echo "unknown flag: $1" >&2; usage ;;
+  esac
+done
+if [[ -z "$IMAGE" ]]; then
+  echo "ERROR: --image is required" >&2
+  usage
+fi
+
+HOME="${HOME:-/root}"
+ENV_DIR="$HOME/.mirage/env"
+
+ARGS=(-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443)
+for f in backend node indexer frontend secrets; do
+  if [[ ! -f "$ENV_DIR/$f.env" ]]; then
+    echo "ERROR: required environment file missing: $ENV_DIR/$f.env" >&2
+    exit 1
+  fi
+  ARGS+=(--env-file "$ENV_DIR/$f.env")
+done
+
+read_env_key() {
+  python3 - "$ENV_DIR/node.env" "$1" "${2:-required}" <<'PY'
+import sys
+path, key, policy = sys.argv[1:4]
+matches = []
+for line in open(path, encoding="utf-8"):
+    if line.startswith(key + "="):
+        matches.append(line.rstrip("\n").split("=", 1)[1])
+if len(matches) > 1:
+    raise SystemExit(f"duplicate {key} entries in {path}")
+if not matches:
+    if policy == "optional":
+        raise SystemExit(0)
+    raise SystemExit(f"required {key} entry missing from {path}")
+value = matches[0]
+if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+    value = value[1:-1]
+print(value)
+PY
+}
+
+DOMAIN_VALUE=$(read_env_key DOMAIN optional)
+if [[ -z "$MONIKER" ]]; then
+  MONIKER=$(read_env_key MONIKER)
+fi
+
+# Hostname only names the tmux session and log prefix. When a domain is set the
+# container derives its own moniker from DOMAIN in node.env, same as deploy.sh.
+if [[ -n "$DOMAIN_VALUE" ]]; then
+  ARGS+=(--hostname "$(echo "$DOMAIN_VALUE" | tr '.' '-')")
+elif [[ -n "$MONIKER" && "$MONIKER" != "mirage-node" ]]; then
+  ARGS+=(-e "MONIKER=$MONIKER")
+  ARGS+=(--hostname "$(echo "$MONIKER" | sed 's|https\?://||' | tr './:' '-')")
+fi
+
+if docker ps -a --format '{{.Names}}' | grep -qx mirage; then
+  echo "==> Stopping existing mirage container"
+  docker stop --timeout=60 mirage
+  docker rm mirage
+fi
+
+echo "==> Starting mirage from $IMAGE"
+docker run -d "${ARGS[@]}" \
+  --name mirage \
+  --restart unless-stopped \
+  --shm-size=2g \
+  --ulimit nofile=131072:131072 \
+  -v "$HOME/.mirage:/root/.mirage" \
+  -v "$HOME/.caddy:/root/.local/share/caddy" \
+  "$IMAGE"
