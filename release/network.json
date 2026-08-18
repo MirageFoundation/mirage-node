@@ -1,5 +1,5 @@
 {
-    "generation": 1,
+    "generation": 2,
     "issued_at": "2026-08-17T00:00:00Z",
     "expires_at": "2026-11-17T00:00:00Z",
     "chain_id": "mirage-1",
@@ -22,7 +22,7 @@
         "9517122294159cd191e82439d4f9e2b88185a608@146.190.108.140:26656",
         "765ad58fd849498c1f45a3c402da6d51029640f1@139.59.9.96:26656"
     ],
-    "min_release": "v1.36.2",
+    "min_release": "v1.36.4",
     "activation_balance_umirage": "10000000000000",
     "self_delegation_umirage": "5000000000000",
     "min_liquid_umirage": "1000000000000"

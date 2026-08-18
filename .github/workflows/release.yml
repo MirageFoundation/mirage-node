@@ -37,7 +37,10 @@ jobs:
           import re, subprocess, sys
           current = tuple(map(int, sys.argv[1][1:].split(".")))
           versions = []
-          for tag in subprocess.check_output(["git", "tag", "--list", "v*.*.*"], text=True).splitlines():
+          for tag in subprocess.check_output(
+              ["git", "tag", "--merged", "origin/prod", "--list", "v*.*.*"],
+              text=True,
+          ).splitlines():
               if re.fullmatch(r"v\d+\.\d+\.\d+", tag):
                   parsed = tuple(map(int, tag[1:].split(".")))
                   if parsed < current:

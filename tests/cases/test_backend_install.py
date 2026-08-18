@@ -589,12 +589,13 @@ def _test_updater_halt_and_rollback() -> bool:
 
 def _test_updater_network_only_refresh() -> bool:
     with tempfile.TemporaryDirectory(prefix="updater-network-") as tmp:
+        current_version = Path(VERSION_FILE).read_text(encoding="utf-8").strip()
         home = os.path.join(tmp, "home")
         work = os.path.join(tmp, "work")
         os.makedirs(os.path.join(home, ".mirage", "env"), exist_ok=True)
         os.makedirs(work, exist_ok=True)
         release = {
-            "version": "v1.36.2",
+            "version": current_version,
             "release_id": 7,
             "commit": "0" * 40,
             "image": "ghcr.io/miragefoundation/mirage-node@sha256:" + ("1" * 64),
@@ -638,7 +639,7 @@ fetch_verify() {{
 }}
 json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
 install_network_manifest() {{ cp "$1" "$HOME/.mirage/env/network-manifest.json"; }}
-running_version() {{ echo v1.36.2; }}
+running_version() {{ echo {current_version}; }}
 docker() {{ echo "docker should not run for network-only refresh" >&2; return 99; }}
 install_hosttools_from_image() {{ echo "hosttools should not install" >&2; return 99; }}
 {functions}

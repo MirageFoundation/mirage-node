@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.36.1 (epoch-scoped network tags)",
-    "summary": "NOT SUBMITTED FOR v1.36.1. This release registers no upgrade handler, because it changes no chain code at all: git diff v1.36.0..v1.36.1 -- blockchain/ is empty. The feature publishes an epoch-scoped, keyed tag for the poster's network in TxBody.memo so that any third-party agent can cluster a vote farm without an IP being disclosed. memo is an existing TxBody field that the relay paths left empty and that the relayer's outer signature already covered, so no validator has to learn anything new, no state, params, store keys or app hash are touched, and mixed binaries cannot diverge — an un-updated node simply emits no tag and an un-updated indexer simply does not store one, both of which are additive gaps rather than disagreements about chain state. Submitting this plan would halt the chain at the plan height with no handler of that name able to resume it. scripts/test_upgrade.sh reads the plan name below, finds no matching SetUpgradeHandler in blockchain/app/upgrades.go, and refuses to run unless --no-chain-upgrade is passed. The file is kept current with the release under test because that is where the rehearsal takes the version from; restore a real title and summary here on the next release that does register a handler.",
+    "title": "Release v1.36.4 (public validator installer)",
+    "summary": "NOT SUBMITTED FOR v1.36.4. This release changes deployment, release verification and operator tooling but does not change consensus state or transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.36.1",
+                "name": "v1.36.4",
                 "height": "T+50",
                 "info": ""
             }
