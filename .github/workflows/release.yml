@@ -136,16 +136,18 @@ jobs:
           VERSION: ${{ steps.version.outputs.value }}
           PREVIOUS: ${{ steps.version.outputs.previous }}
           COMMIT: ${{ github.sha }}
-          RELEASE_ID: ${{ github.run_number }}
         run: |
           python3 - <<'PY'
           import json, os
           digest = os.environ["DIGEST"]
           if not digest.startswith("sha256:"):
               raise SystemExit(f"unexpected digest {digest!r}")
+          major, minor, patch = map(int, os.environ["VERSION"][1:].split("."))
+          if minor >= 1000 or patch >= 1000:
+              raise SystemExit("version components must be below 1000")
           manifest = {
               "version": os.environ["VERSION"],
-              "release_id": int(os.environ["RELEASE_ID"]),
+              "release_id": major * 1_000_000 + minor * 1_000 + patch,
               "commit": os.environ["COMMIT"],
               "image": f"ghcr.io/miragefoundation/mirage-node@{digest}",
               "min_prior_version": os.environ["PREVIOUS"],
