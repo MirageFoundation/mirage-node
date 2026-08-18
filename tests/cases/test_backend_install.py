@@ -377,7 +377,10 @@ def _test_collision_guard_paginates() -> None:
             encoding="utf-8",
         )
         calls = os.path.join(tmp, "calls")
-        function = _shell_function(INSTALL_SH, "collision_guard")
+        function = _shell_function(INSTALL_SH, "collision_guard").replace(
+            "/root/.mirage",
+            os.path.join(tmp, "host-mirage"),
+        )
         script = f"""set -euo pipefail
 MANIFEST_DIR={manifest_dir!r}
 MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
