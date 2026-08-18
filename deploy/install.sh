@@ -118,13 +118,14 @@ preflight_os() {
       die "container virtualization ($(systemd-detect-virt)) is not supported; need KVM/Xen/Hyper-V/VMware/bare metal"
     fi
   fi
-  local mem_kb
+  local mem_kb mem_mib
   mem_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
-  if (( mem_kb < 4 * 1024 * 1024 )); then
-    die "need at least 4 GiB RAM (got $((mem_kb/1024)) MiB)"
+  mem_mib=$((mem_kb / 1024))
+  if (( mem_mib < 3800 )); then
+    die "need a 4 GB RAM VM with at least 3800 MiB visible after provider overhead (got ${mem_mib} MiB)"
   fi
-  if (( mem_kb < 8 * 1024 * 1024 )); then
-    echo "WARNING: 8 GiB RAM is strongly recommended (got $((mem_kb/1024)) MiB)"
+  if (( mem_mib < 7600 )); then
+    echo "WARNING: an 8 GB RAM VM is strongly recommended (got ${mem_mib} MiB)"
   fi
   local disk_b
   disk_b=$(df -B1 / | awk 'NR==2 {print $4}')

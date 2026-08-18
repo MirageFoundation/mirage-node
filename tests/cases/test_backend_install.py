@@ -63,6 +63,7 @@ def test_install(backend: str) -> None:
     _test_mnemonic_word_count()
     _test_pinned_bootstrap_dependencies()
     _test_ubuntu_full_upgrade()
+    _test_provider_memory_overhead()
     _test_docker_context_excludes_private_key()
     _test_pubkey_fingerprint()
     _test_manifest_signatures()
@@ -215,6 +216,20 @@ def _test_ubuntu_full_upgrade() -> None:
         _fail("install.ubuntu.reboot_resume", "installer does not stop and resume safely after an Ubuntu upgrade")
         return
     _pass("install.ubuntu.full_upgrade")
+
+
+def _test_provider_memory_overhead() -> None:
+    install = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if "mem_mib < 3800" not in install:
+        _fail("install.memory.minimum", "installer does not accept normal overhead on a 4 GB cloud VM")
+        return
+    if "mem_mib < 7600" not in install:
+        _fail("install.memory.recommended", "8 GB recommendation does not account for provider overhead")
+        return
+    if "at least 3800 MiB visible after provider overhead" not in install:
+        _fail("install.memory.message", "memory rejection does not explain provider overhead")
+        return
+    _pass("install.memory.provider_overhead")
 
 
 def _test_docker_context_excludes_private_key() -> None:

@@ -12,6 +12,10 @@ Kernel and core-system updates can require a reboot. When that happens, the inst
 
 Ubuntu upgrades use deterministic package-configuration handling and automatic service restart decisions, so a pasted installer does not stall behind an unseen package prompt. Daily security updates and the node’s staggered weekly full-upgrade window remain enabled after installation.
 
+### Cloud-plan memory is measured honestly
+
+Cloud providers reserve a small amount of a VM’s advertised memory for the hypervisor and kernel, so a 4 GB plan can expose roughly 3.8–3.9 GiB inside Ubuntu. The installer now accepts that normal provider overhead while continuing to reject genuinely smaller plans, and its error reports both the plan requirement and the memory Ubuntu can actually see.
+
 ### No chain upgrade
 
 This release changes host preparation only. It does not change transactions, consensus state, validator keys or the application hash, so it requires no governance halt and mixed v1.36.4 and v1.36.5 validators cannot fork because of this update.

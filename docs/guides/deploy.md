@@ -6,7 +6,7 @@ Anyone with an Ubuntu 24.04 VM and an SSH key can run a validator. The installer
 
 1. An account on [mirage.talk](https://mirage.talk) with a username.
 2. **10,000,000 MIRAGE** on that account (5,000,000 will be self-delegated; 5,000,000 stays liquid; staking later keeps at least 1,000,000 liquid for fees).
-3. An Ubuntu 24.04 LTS VM on **amd64**, with at least 4 GiB RAM (8 GiB strongly recommended), 80 GiB free disk, and your SSH public key in `/root/.ssh/authorized_keys`. Released images are amd64 only for now, so the installer refuses arm64 rather than failing later at the image pull.
+3. An Ubuntu 24.04 LTS VM on **amd64**, sold as at least a 4 GB RAM plan (at least 3800 MiB visible inside Ubuntu; 8 GB strongly recommended), with 80 GiB free disk and your SSH public key in `/root/.ssh/authorized_keys`. Released images are amd64 only for now, so the installer refuses arm64 rather than failing later at the image pull.
 4. The **12-word** recovery phrase for that funded account.
 
 The installer imports that phrase into `keyring-backend test` on the host. Anyone who roots the box can take over the account. That is an accepted operator risk; see [`docs/security/open-items.md`](../security/open-items.md).
