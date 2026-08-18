@@ -66,6 +66,7 @@ def test_install(backend: str) -> None:
     _test_provider_memory_overhead()
     _test_no_swapfile_provisioned()
     _test_disk_floor_matches_live_nodes()
+    _test_agree_json_ignores_node_local_state()
     _test_docker_context_excludes_private_key()
     _test_pubkey_fingerprint()
     _test_manifest_signatures()
@@ -269,6 +270,70 @@ def _test_disk_floor_matches_live_nodes() -> None:
             _fail("install.disk.stale_floor", f"installer still demands an unreachable disk floor: {stale}")
             return
     _pass("install.disk.floor_matches_live_nodes")
+
+
+def _test_agree_json_ignores_node_local_state() -> None:
+    """The cross-endpoint check may only compare chain-derived fields.
+
+    get_profile also reports each node's own backend state, so comparing whole
+    documents rejected every real account: mirage.talk answered
+    new_inbox_items 119 where the second endpoint answered 0.
+    """
+    install = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if 'agree_json "$api" "/api/get_profile?address=${ADDRESS}" "username"' not in install:
+        _fail("install.agree_json.caller", "the profile preflight does not narrow the comparison to username")
+        return
+
+    def serve(body):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                raw = json.dumps(body).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, fmt, *args):
+                return
+
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return httpd
+
+    function = _shell_function(INSTALL_SH, "agree_json")
+    servers = [
+        serve({"username": "alice", "new_inbox_items": 119}),
+        serve({"username": "alice", "new_inbox_items": 0}),
+        serve({"username": "bob", "new_inbox_items": 0}),
+    ]
+
+    def call(hosts, keys):
+        urls = ",".join(f"http://127.0.0.1:{h.server_address[1]}" for h in hosts)
+        script = f"set -euo pipefail\n{function}\nagree_json {urls!r} /api/get_profile?address=x {keys!r}"
+        return _run(["bash", "-c", script], timeout=30)
+
+    try:
+        agreeing, differing_inbox, differing_username = servers
+        r = call([agreeing, differing_inbox], "username")
+        if r.returncode != 0:
+            _fail("install.agree_json.node_local", f"inbox counts still block the install: rc={r.returncode} {r.stderr}")
+            return
+        if json.loads(r.stdout).get("username") != "alice":
+            _fail("install.agree_json.body", f"the full first body is no longer returned: {r.stdout}")
+            return
+        r = call([agreeing, differing_inbox], "")
+        if r.returncode == 0:
+            _fail("install.agree_json.unprojected", "an unnarrowed comparison is no longer strict")
+            return
+        r = call([agreeing, differing_username], "username")
+        if r.returncode == 0 or "endpoints disagree" not in r.stderr:
+            _fail("install.agree_json.conflict", f"a contradicted username passed: rc={r.returncode} {r.stderr}")
+            return
+        _pass("install.agree_json.compares_chain_fields_only")
+    finally:
+        for httpd in servers:
+            httpd.shutdown()
 
 
 def _test_docker_context_excludes_private_key() -> None:

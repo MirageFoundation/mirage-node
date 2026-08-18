@@ -394,19 +394,35 @@ install_hosttools() {
   rm -rf "$staging"
 }
 
+# Read the same document from every endpoint and refuse to continue unless they
+# agree, so no single node can decide an install on its own. The optional third
+# argument narrows the comparison to specific top-level keys. Use it for any
+# response that also carries node-local operational state: the backend serves
+# per-node data (inbox counters and similar) out of its own database, which
+# cannot agree across hosts and says nothing about the chain. Comparing only the
+# keys we act on is deliberate -- a denylist would silently start matching each
+# new node-local field and break installs again.
 agree_json() {
-  python3 - "$1" "$2" <<'PY'
+  python3 - "$1" "$2" "${3-}" <<'PY'
 import json, sys, urllib.request
-urls, path = sys.argv[1].split(","), sys.argv[2]
+urls, path, keys = sys.argv[1].split(","), sys.argv[2], sys.argv[3]
+compare = [k for k in keys.split(",") if k]
 bodies = []
 for u in urls:
     req = urllib.request.Request(u.rstrip("/") + path, headers={"User-Agent": "mirage-install"})
     with urllib.request.urlopen(req, timeout=15) as resp:
         bodies.append(json.loads(resp.read().decode()))
-first = json.dumps(bodies[0], sort_keys=True)
+
+def compared(body):
+    # A key the endpoints both omit is still compared, as None against None, so
+    # an absent field stays the caller's decision instead of passing silently.
+    return body if not compare else {k: body.get(k) for k in compare}
+
+first = json.dumps(compared(bodies[0]), sort_keys=True)
 for b in bodies[1:]:
-    if json.dumps(b, sort_keys=True) != first:
-        sys.stderr.write("endpoints disagree on %s\n" % path)
+    if json.dumps(compared(b), sort_keys=True) != first:
+        detail = (" for " + ",".join(compare)) if compare else ""
+        sys.stderr.write("endpoints disagree on %s%s\n" % (path, detail))
         sys.exit(1)
 json.dump(bodies[0], sys.stdout)
 PY
@@ -435,7 +451,7 @@ preflight_account() {
     die "address $ADDRESS holds $((amount / 1000000)) MIRAGE, need $((activation / 1000000))"
   fi
   local profile
-  profile=$(agree_json "$api" "/api/get_profile?address=${ADDRESS}")
+  profile=$(agree_json "$api" "/api/get_profile?address=${ADDRESS}" "username")
   USERNAME=$(echo "$profile" | jq -r '.username // ""')
   if [[ -z "$USERNAME" ]]; then
     die "address $ADDRESS has no username; create an account and set a username on mirage.talk first"
