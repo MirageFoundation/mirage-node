@@ -95,6 +95,7 @@ scripts/*
 !scripts/migrate_pebbledb.py
 !scripts/submit_proposal.py
 !scripts/verify_upgrade.py
+!scripts/finalize_release_manifest.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py

@@ -6,6 +6,7 @@ import fcntl
 import http.server
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -67,6 +68,7 @@ def test_install(backend: str) -> None:
     _test_no_swapfile_provisioned()
     _test_disk_floor_matches_live_nodes()
     _test_agree_json_ignores_node_local_state()
+    _test_release_workflow_files_tracked()
     _test_docker_context_excludes_private_key()
     _test_pubkey_fingerprint()
     _test_manifest_signatures()
@@ -334,6 +336,30 @@ def _test_agree_json_ignores_node_local_state() -> None:
     finally:
         for httpd in servers:
             httpd.shutdown()
+
+
+def _test_release_workflow_files_tracked() -> None:
+    """Release CI runs from a fresh checkout, so it cannot rely on ignored files.
+
+    Every release tag from v1.36.4 to v1.36.7 failed the published-manifest job
+    because it imports scripts.finalize_release_manifest, which the scripts/*
+    ignore rule kept out of every clone while it sat in the working tree.
+    """
+    workflow = Path(REPO_ROOT, ".github", "workflows", "release.yml").read_text(encoding="utf-8")
+    needed = {f"{package}/{module}.py" for package, module in re.findall(r"from (scripts|deploy)\.(\w+) import", workflow)}
+    needed.update(re.findall(r"(?:python3|bash|sh) ((?:scripts|deploy)/[\w./-]+)", workflow))
+    if not needed:
+        _fail("install.release_ci.no_references", "found no workflow references to verify")
+        return
+    untracked = [
+        path
+        for path in sorted(needed)
+        if _run(["git", "-C", REPO_ROOT, "ls-files", "--error-unmatch", path]).returncode != 0
+    ]
+    if untracked:
+        _fail("install.release_ci.untracked", f"release CI needs files git does not track: {untracked}")
+        return
+    _pass(f"install.release_ci.tracks_all_{len(needed)}_referenced_files")
 
 
 def _test_docker_context_excludes_private_key() -> None:
