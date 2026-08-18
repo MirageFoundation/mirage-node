@@ -67,6 +67,8 @@ def test_install(backend: str) -> None:
     _test_mnemonic_paste_normalised()
     _test_setup_prompts()
     _test_prompt_answers_reach_env()
+    _test_external_address_rejects_injection()
+    _test_forensic_snapshot_refuses_wipe()
     _test_moniker_precedence()
     _test_frontend_env_no_foreign_node()
     _test_launch_wait()
@@ -86,7 +88,12 @@ def test_install(backend: str) -> None:
     _test_create_validator_gas_price()
     _test_create_validator_min_self_delegation()
     _test_updater_gates()
+    _test_releases_are_reachable_from_any_version()
     _test_hosttool_paths()
+    _test_updater_hosttools_on_activate_only()
+    _test_peer_pull_requires_peer_ahead()
+    _test_watermark_never_lowers()
+    _test_weekly_restart_skips_catching_up()
     _test_stake_floor_and_lock()
     _test_economics_single_source()
     _test_caddy_well_known()
@@ -508,11 +515,52 @@ def _test_prompt_answers_reach_env() -> None:
             return
         node_text = Path(node_env).read_text(encoding="utf-8")
         backend_text = Path(backend_env).read_text(encoding="utf-8")
-        if node_text != "MONIKER=chosen name\nWATCHDOG_AUTORECOVER=true\n":
+        if node_text != "MONIKER='chosen name'\nWATCHDOG_AUTORECOVER=true\n":
             _fail("install.env_write.node_env", f"node.env is {node_text!r}")
             return
         if backend_text != "MEDIA_UPLOADS_ENABLED=true\n":
             _fail("install.env_write.backend_env", f"backend.env is {backend_text!r}")
+            return
+        pwn = os.path.join(tmp, "pwned")
+        payload = os.path.join(tmp, "payload.env")
+        Path(payload).write_text("MONIKER=validator\n", encoding="utf-8")
+        payload_script = (
+            "set -euo pipefail\n"
+            + writer.replace("/root/.mirage/env/node.env", payload)
+            + f"\nwrite_env_key MONIKER 'x$(touch {pwn})'\n"
+        )
+        r = _run(["bash", "-c", payload_script])
+        if r.returncode != 0:
+            _fail("install.env_write.payload_runs", f"rc={r.returncode} err={(r.stderr or '')[-200:]}")
+            return
+        want = f"x$(touch {pwn})"
+        sourced = _run(["bash", "-ce", 'set -a; . "$1"; set +a; printf %s "$MONIKER"', "bash", payload])
+        if sourced.returncode != 0:
+            _fail("install.env_write.quoted_source", f"src_rc={sourced.returncode} err={sourced.stderr!r}")
+            return
+        if os.path.exists(pwn):
+            _fail("install.env_write.quoted_source_exec", "bash-sourcing the quoted MONIKER still executed")
+            return
+        if sourced.stdout != want:
+            _fail("install.env_write.quoted_literal", f"MONIKER became {sourced.stdout!r}")
+            return
+        loader = os.path.join(REPO_ROOT, "deploy", "load_env_exports.py")
+        loaded = _run(["bash", "-ce", 'eval "$(python3 "$1" "$2")"; printf %s "$MONIKER"', "bash", loader, payload])
+        if loaded.returncode != 0 or loaded.stdout != want or os.path.exists(pwn):
+            _fail(
+                "install.env_write.loader_literal",
+                f"rc={loaded.returncode} out={loaded.stdout!r} err={loaded.stderr!r} pwn={os.path.exists(pwn)}",
+            )
+            return
+        missing = _run(["python3", loader, os.path.join(tmp, "no-such.env")])
+        if missing.returncode == 0 or "does not exist" not in missing.stderr:
+            _fail("install.env_write.loader_missing", f"rc={missing.returncode} err={missing.stderr!r}")
+            return
+        bad_quote = os.path.join(tmp, "bad-quote.env")
+        Path(bad_quote).write_text("MONIKER='unterminated\n", encoding="utf-8")
+        quoted = _run(["python3", loader, bad_quote])
+        if quoted.returncode == 0 or "not parseable" not in quoted.stderr:
+            _fail("install.env_write.loader_bad_quote", f"rc={quoted.returncode} err={quoted.stderr!r}")
             return
         for path in (node_env, backend_env):
             mode = os.stat(path).st_mode & 0o777
@@ -520,6 +568,65 @@ def _test_prompt_answers_reach_env() -> None:
                 _fail("install.env_write.mode", f"{os.path.basename(path)} left at {oct(mode)}")
                 return
     _pass("install.env_write.answers_reach_their_own_files")
+
+
+def _test_external_address_rejects_injection() -> None:
+    fns = _install_functions_only()
+    bad = "tcp://1.2.3.4:26656; touch /tmp/pwned"
+    r = _run(["bash", "-c", fns + f'MIRAGE_EXTERNAL_ADDRESS={bad!r}\nexternal_address\n'])
+    if r.returncode == 0:
+        _fail("install.external_address.accepts_injection", r.stdout[-200:])
+        return
+    if "tcp://IPv4:port" not in r.stderr:
+        _fail("install.external_address.message", r.stderr[-200:])
+        return
+    ok = _run(["bash", "-c", fns + "MIRAGE_EXTERNAL_ADDRESS=tcp://203.0.113.9:26656\nexternal_address\n"])
+    if ok.returncode != 0 or ok.stdout.strip() != "tcp://203.0.113.9:26656":
+        _fail("install.external_address.valid", f"rc={ok.returncode} out={ok.stdout!r} err={ok.stderr[-200:]}")
+        return
+    _pass("install.external_address.rejects_injection")
+
+
+def _test_forensic_snapshot_refuses_wipe() -> None:
+    """mkdir failure in snapshot_diverged_state must not reach wipe_chain_dbs."""
+    recover = Path(os.path.join(REPO_ROOT, "scripts", "recover.sh")).read_text(encoding="utf-8")
+    if 'mkdir -p "$cap" || { log "WARNING:' in recover:
+        _fail("recover.forensic.mkdir_fail_open", "snapshot still returns 0 when mkdir fails")
+        return
+    if "refusing to wipe chain DBs" not in recover:
+        _fail("recover.forensic.refuse_wipe", "snapshot no longer dies before wipe")
+        return
+    with tempfile.TemporaryDirectory(prefix="forensic-") as tmp:
+        node_home = os.path.join(tmp, "node")
+        data = os.path.join(node_home, "data")
+        os.makedirs(os.path.join(data, "application.db"))
+        Path(os.path.join(data, "application.db", "x")).write_text("state", encoding="utf-8")
+        blocked = os.path.join(tmp, "blocked")
+        Path(blocked).write_text("not-a-directory\n", encoding="utf-8")
+        script = f"""
+set -euo pipefail
+NODE_HOME={node_home!r}
+FORENSIC_ROOT={blocked!r}
+LOCAL_DIVERGED_HEIGHT=1
+log() {{ printf '%s\\n' "$*" >&2; }}
+die() {{ log "ERROR: $*"; exit 1; }}
+prune_forensic_captures() {{ return 0; }}
+"""
+        # Pull the two functions from recover.sh by name.
+        for name in ("snapshot_diverged_state", "wipe_chain_dbs"):
+            script += _shell_function(os.path.join(REPO_ROOT, "scripts", "recover.sh"), name)
+        script += "wipe_chain_dbs\n"
+        r = _run(["bash", "-c", script])
+        if r.returncode == 0:
+            _fail("recover.forensic.wipe_ran", f"wipe succeeded without a snapshot: {r.stderr[-200:]}")
+            return
+        if "refusing to wipe" not in r.stderr:
+            _fail("recover.forensic.wipe_message", r.stderr[-300:])
+            return
+        if not os.path.isdir(os.path.join(data, "application.db")):
+            _fail("recover.forensic.db_deleted", "live application.db was removed after a failed snapshot")
+            return
+    _pass("recover.forensic.snapshot_failure_aborts_wipe")
 
 
 def _test_moniker_precedence() -> None:
@@ -1080,8 +1187,48 @@ def _test_create_validator_min_self_delegation() -> None:
     _pass("install.create_validator.min_self_delegation", min_self=min_self)
 
 
+def _test_releases_are_reachable_from_any_version() -> None:
+    """A node must be able to reach the current release from any older one.
+
+    min_prior_version made the updater refuse a release unless the node was on
+    the immediately preceding one, which CI filled in from tag history rather
+    than from any real requirement. A node two releases behind could never
+    comply: only the newest manifest is ever published, so the intermediate
+    release it was told to install first was not fetchable. Migrations do not
+    need the stepping stone either — the runner applies every migration the node
+    has not run yet.
+    """
+    # A published manifest that still carried the field would be rejected outright
+    # by the verifier below, which accepts no unknown fields, so what has to be
+    # checked here is the code that could reintroduce the requirement. The image
+    # ships whichever manifest existed when it was built, which for a published
+    # release is the previous one, so it is not the artifact to assert on.
+    watched = {
+        "deploy/hosttools/mirage-update": "the updater",
+        "deploy/release_verify.py": "the manifest verifier",
+        "release/manifest.schema.json": "the manifest schema",
+        ".github/workflows/release.yml": "release CI",
+    }
+    present = [
+        label
+        for path, label in watched.items()
+        if Path(REPO_ROOT, path).is_file() and "min_prior" in Path(REPO_ROOT, path).read_text(encoding="utf-8")
+    ]
+    if present:
+        _fail("install.updater.no_stepping_stone", f"a per-step version requirement is back in: {present}")
+        return
+
+    # Migrations are what a skipped release would actually have carried, and the
+    # runner selects them by what this node has not applied, not by version.
+    runner = Path(REPO_ROOT, "deploy", "migrations", "__init__.py").read_text(encoding="utf-8")
+    if "key not in completed" not in runner:
+        _fail("install.updater.migrations_pending", "migrations are no longer selected by what the node has not run")
+        return
+    _pass("install.updater.any_older_version_can_reach_the_current_release")
+
+
 def _test_updater_gates() -> None:
-    """The updater must not re-stage what is running, replay an old manifest, or skip a release."""
+    """The updater must not re-stage what is running or replay an old manifest."""
     update = Path(REPO_ROOT, "deploy", "hosttools", "mirage-update").read_text(encoding="utf-8")
     install = Path(INSTALL_SH).read_text(encoding="utf-8")
     if "last_release_id" not in install or "/var/lib/mirage/update" not in install:
@@ -1089,7 +1236,6 @@ def _test_updater_gates() -> None:
         return
     for needle, name in (
         ("generation < last_gen", "generation_rollback"),
-        ("min_prior_version", "min_prior"),
         ("min_release", "min_release"),
     ):
         if needle not in update:
@@ -1176,7 +1322,6 @@ def _test_updater_network_only_refresh() -> bool:
             "release_id": 7,
             "commit": "0" * 40,
             "image": "ghcr.io/miragefoundation/mirage-node@sha256:" + ("1" * 64),
-            "min_prior_version": "v1.36.1",
             "activation": "ordinary",
             "upgrade_name": "",
             "rollback_safe": True,
@@ -1216,7 +1361,6 @@ fetch_verify() {{
 }}
 json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
 install_network_manifest() {{ cp "$1" "$HOME/.mirage/env/network-manifest.json"; }}
-running_version() {{ echo {current_version}; }}
 docker() {{ echo "docker should not run for network-only refresh" >&2; return 99; }}
 install_hosttools_from_image() {{ echo "hosttools should not install" >&2; return 99; }}
 {functions}
@@ -1251,6 +1395,120 @@ def _test_hosttool_paths() -> None:
         _fail("install.hosttools.pubkey_anchor", "install.sh does not compare the image's pubkey to its own")
         return
     _pass("install.hosttools.paths")
+
+
+def _test_updater_hosttools_on_activate_only() -> None:
+    """Hourly --tick must not replace host tools; activation installs them after a healthy launch."""
+    tick = _shell_function(UPDATE_SH, "tick")
+    activate = _shell_function(UPDATE_SH, "activate_staged")
+    if "install_hosttools_from_image" in tick:
+        _fail("install.updater.tick_installs_hosttools", "tick() still installs host tools from a staged image")
+        return
+    idx_launch = activate.find('"$LAUNCH"')
+    idx_tools = activate.find("install_hosttools_from_image")
+    if idx_tools < 0:
+        _fail("install.updater.activate_installs_hosttools", "activate_staged() never installs host tools")
+        return
+    if idx_launch < 0 or idx_tools < idx_launch:
+        _fail(
+            "install.updater.hosttools_before_launch",
+            "host tools would install before the staged container is healthy",
+        )
+        return
+    _pass("install.updater.hosttools_on_activate_only")
+
+
+def _test_peer_pull_requires_peer_ahead() -> None:
+    """Peer-pull must refuse when local height is unknown or no peer is strictly ahead."""
+    recover = os.path.join(REPO_ROOT, "scripts", "recover.sh")
+    script = (
+        "set -euo pipefail\n"
+        "LOG_FILE=\n"
+        + _shell_function(recover, "log")
+        + _shell_function(recover, "die")
+        + _shell_function(recover, "peer_require_source_ahead")
+    )
+    same = _run(["bash", "-c", script + "LOCAL_DIVERGED_HEIGHT=100\npeer_require_source_ahead 192.0.2.2 100\n"])
+    if same.returncode == 0 or "strictly ahead" not in same.stderr:
+        _fail("recover.peer_pull.same_height", f"rc={same.returncode} err={same.stderr[-300:]}")
+        return
+    unknown = _run(["bash", "-c", script + "LOCAL_DIVERGED_HEIGHT=unknown\npeer_require_source_ahead 192.0.2.2 200\n"])
+    if unknown.returncode == 0 or "local height unknown" not in unknown.stderr:
+        _fail("recover.peer_pull.unknown_height", f"rc={unknown.returncode} err={unknown.stderr[-300:]}")
+        return
+    ahead = _run(["bash", "-c", script + "LOCAL_DIVERGED_HEIGHT=100\npeer_require_source_ahead 192.0.2.2 101\n"])
+    if ahead.returncode != 0:
+        _fail("recover.peer_pull.ahead_ok", f"rc={ahead.returncode} err={ahead.stderr[-300:]}")
+        return
+    _pass("recover.peer_pull.requires_peer_ahead")
+
+
+def _test_watermark_never_lowers() -> None:
+    """enable_validator_mode must not write a watermark below the one already on disk."""
+    enable = os.path.join(REPO_ROOT, "deploy", "enable_validator_mode.sh")
+    with tempfile.TemporaryDirectory(prefix="watermark-") as tmp:
+        home = os.path.join(tmp, "home")
+        node = os.path.join(home, ".mirage", "node")
+        data = os.path.join(node, "data")
+        os.makedirs(data, exist_ok=True)
+        pv = os.path.join(data, "priv_validator_state.json")
+        Path(pv).write_text('{"height": "1000", "round": 0, "step": 0}\n', encoding="utf-8")
+        bindir = os.path.join(tmp, "bin")
+        os.makedirs(bindir, exist_ok=True)
+        status = json.dumps(
+            {"result": {"sync_info": {"catching_up": False, "latest_block_height": "12"}}}
+        )
+        Path(os.path.join(bindir, "curl")).write_text(
+            f"#!/bin/bash\nprintf '%s\\n' '{status}'\n",
+            encoding="utf-8",
+        )
+        os.chmod(os.path.join(bindir, "curl"), 0o755)
+        env = {**os.environ, "HOME": home, "PATH": bindir + ":" + os.environ.get("PATH", "")}
+        r = _run(["bash", enable], env=env, timeout=20)
+        if r.returncode != 0:
+            _fail("install.watermark.lower_exit", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        kept = json.loads(Path(pv).read_text(encoding="utf-8"))
+        if str(kept.get("height")) != "1000":
+            _fail("install.watermark.lowered", f"height became {kept}")
+            return
+        if "refusing to lower" not in r.stdout:
+            _fail("install.watermark.lower_message", r.stdout[-300:])
+            return
+
+        Path(pv).write_text('{"height": "500", "round": 0, "step": 0}\n', encoding="utf-8")
+        catching = json.dumps(
+            {"result": {"sync_info": {"catching_up": True, "latest_block_height": "12"}}}
+        )
+        Path(os.path.join(bindir, "curl")).write_text(
+            f"#!/bin/bash\nprintf '%s\\n' '{catching}'\n",
+            encoding="utf-8",
+        )
+        r = _run(["bash", enable], env=env, timeout=20)
+        if r.returncode != 0:
+            _fail("install.watermark.catching_exit", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        kept = json.loads(Path(pv).read_text(encoding="utf-8"))
+        if str(kept.get("height")) != "500":
+            _fail("install.watermark.catching_overwrote", f"height became {kept}")
+            return
+        if "catching_up" not in r.stdout:
+            _fail("install.watermark.catching_message", r.stdout[-300:])
+            return
+    _pass("install.watermark.never_lowers")
+
+
+def _test_weekly_restart_skips_catching_up() -> None:
+    weekly = Path(REPO_ROOT, "deploy", "hosttools", "mirage-weekly-restart.sh").read_text(encoding="utf-8")
+    idx_catch = weekly.find("catching up")
+    idx_restart = weekly.find("docker restart")
+    if idx_catch < 0 or idx_restart < 0 or idx_catch > idx_restart:
+        _fail(
+            "install.weekly.catching_up",
+            "weekly restart does not skip catching_up before docker restart",
+        )
+        return
+    _pass("install.weekly.skips_catching_up")
 
 
 def _test_stake_floor_and_lock() -> None:

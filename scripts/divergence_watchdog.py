@@ -343,6 +343,18 @@ ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 TS_RE = re.compile(r"\b(\d{1,2}):(\d{2})(AM|PM)\b")
 
 
+def log_has_upgrade_halt(text: str) -> bool:
+    """True when recent logs contain the cosmos-sdk upgrade-halt sentence.
+
+    That halt stops miraged, so the watchdog's process-dead path would otherwise
+    restart, fail to advance, and escalate to a chain-DB wipe. It is a binary
+    swap, never a peer-pull.
+    """
+    if not text:
+        return False
+    return bool(UPGRADE_HALT_RE.search(ANSI_RE.sub("", text)))
+
+
 def log_window_has_pattern(text: str, patterns: tuple[str, ...], window_secs: int) -> str | None:
     """
     Scan recent log text and return the first matching pattern that appears
@@ -724,6 +736,7 @@ def decide_action(
     recovery_script: str = str(RECOVERY_SCRIPT),
     pull_mode: str = RECOVERY_MODE,
     destructive_disabled_reason: str = "WATCHDOG_AUTORECOVER off",
+    upgrade_halt: bool = False,
 ) -> Decision:
     """Map a fired trigger to a concrete action. PURE: every piece of
     side-effecting state (cool-down remainders, recent restart count, gate) is
@@ -734,9 +747,28 @@ def decide_action(
       stall + ah match   -> restart (ungated), unless recurrence threshold hit
       stall + ah mismatch-> peer-pull (gated)
       process_dead       -> restart (ungated, force past restart cool-down)
+      any trigger + halt -> alert (upgrade halt is a binary swap, not a wipe)
     """
     if trigger is None:
         return Decision("noop", [], "no trigger")
+
+    if upgrade_halt:
+        # The process is supposed to be stopped. Restarting it hits the halt
+        # again, fails to advance, and used to escalate to a chain-DB wipe.
+        return Decision(
+            "alert",
+            [],
+            f"{trigger} during upgrade halt; refusing restart/wipe (swap binaries)",
+            [
+                (
+                    "ALERT",
+                    {
+                        "kind": "upgrade-halt",
+                        "trigger": trigger,
+                    },
+                )
+            ],
+        )
 
     def peer_pull(reason: str, force: bool = False) -> Decision:
         if not autorecover:
@@ -854,11 +886,27 @@ def decide_escalation_after_restart(
     recovery_script: str = str(RECOVERY_SCRIPT),
     pull_mode: str = RECOVERY_MODE,
     destructive_disabled_reason: str = "WATCHDOG_AUTORECOVER off",
+    upgrade_halt: bool = False,
 ) -> Decision:
     """Called when a `restart` action returned non-zero (5 = chain did not
     advance; other = error). PURE. Decides whether to escalate to peer-pull."""
     if exit_code == 0:
         return Decision("noop", [], "restart succeeded")
+    if upgrade_halt:
+        return Decision(
+            "alert",
+            [],
+            f"restart exit {exit_code}; upgrade halt in logs; refusing peer-pull",
+            [
+                (
+                    "ALERT",
+                    {
+                        "kind": "upgrade-halt",
+                        "exit_code": exit_code,
+                    },
+                )
+            ],
+        )
     if not autorecover:
         return Decision(
             "alert",
@@ -1522,6 +1570,13 @@ def run(dry_run: bool) -> int:
                 time.sleep(POLL_SECONDS)
                 continue
 
+            upgrade_halt = False
+            halt_log = latest_log_file()
+            if halt_log:
+                upgrade_halt = log_has_upgrade_halt(tail_recent(halt_log))
+            if upgrade_halt:
+                emit("GATE", upgrade_halt=True, log=halt_log.name if halt_log else "")
+
             # ── Pure dispatch ───────────────────────────────────────────
             decision = decide_action(
                 trigger=trigger,
@@ -1534,6 +1589,7 @@ def run(dry_run: bool) -> int:
                 recent_restart_count=recent_restart_count(),
                 dry_run=dry_run,
                 destructive_disabled_reason=destructive_disabled_reason,
+                upgrade_halt=upgrade_halt,
             )
             emit(
                 "DISPATCH",
@@ -1583,8 +1639,9 @@ def run(dry_run: bool) -> int:
                     exit_code=code,
                     autorecover=destructive_recovery_ready,
                     pull_cooldown_remaining_s=cooldown_remaining_s(LOCK, COOLDOWN_SECONDS),
-                    force=(trigger == TRIGGER_PROCESS_DEAD),
+                    force=(trigger == TRIGGER_PROCESS_DEAD and not upgrade_halt),
                     destructive_disabled_reason=destructive_disabled_reason,
+                    upgrade_halt=upgrade_halt,
                 )
                 emit("DISPATCH", action=esc.action, reason=esc.reason, argv=json.dumps(esc.argv) if esc.argv else "[]")
                 for tag, kv in esc.emits:

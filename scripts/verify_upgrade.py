@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.37.0 installer setup-questions release."""
+"""Post-deploy verification for the v1.37.0 installer and recovery-hardening release."""
 
 from __future__ import annotations
 
@@ -47,6 +47,13 @@ def run(command: list[str]) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"{' '.join(command)} failed: {(result.stderr or result.stdout).strip()}")
     return result.stdout
+
+
+def _bash_function(text: str, name: str) -> str:
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line == f"{name}() {{")
+    end = next(i for i, line in enumerate(lines[start + 1 :], start + 1) if line == "}")
+    return "\n".join(lines[start : end + 1])
 
 
 def check_versions() -> None:
@@ -170,6 +177,8 @@ def check_installer_payload() -> None:
         ROOT / "deploy/hosttools/mirage-update",
         ROOT / "deploy/hosttools/mirage-enroll",
         ROOT / "deploy/hosttools/pubkey.pem",
+        ROOT / "deploy/load_env_exports.py",
+        ROOT / "shared/asn_layout.py",
     ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
@@ -188,151 +197,87 @@ def check_installer_payload() -> None:
         ok("updater refreshes host tools and enforces signed rollback policy")
     else:
         fail("updater host-tool refresh or rollback policy missing")
+    tick = _bash_function(update_text, "tick")
+    activate = _bash_function(update_text, "activate_staged")
+    if "install_hosttools_from_image" in tick:
+        fail("hourly tick still installs host tools from a staged image")
+    elif "install_hosttools_from_image" not in activate:
+        fail("activation no longer installs host tools after a healthy launch")
+    else:
+        ok("host tools install on activation, not on hourly tick")
+
+    entry = (ROOT / "deploy/entrypoint.sh").read_text(encoding="utf-8")
+    recover = (ROOT / "scripts/recover.sh").read_text(encoding="utf-8")
+    watchdog = (ROOT / "scripts/divergence_watchdog.py").read_text(encoding="utf-8")
+    indexer = (ROOT / "indexer/main.py").read_text(encoding="utf-8")
+    if "load_env_exports.py" not in entry:
+        fail("entrypoint no longer loads env files as literals")
+    else:
+        ok("entrypoint loads env files as literals")
+    if "peer_require_source_ahead" not in recover:
+        fail("peer-pull no longer requires a peer strictly ahead of local height")
+    else:
+        ok("peer-pull refuses unless a peer is strictly ahead")
+    if "during upgrade halt; refusing restart/wipe" not in watchdog:
+        fail("watchdog no longer refuses destructive recovery on upgrade halt")
+    else:
+        ok("watchdog treats upgrade halt as a binary swap")
+    if "tx.decode_failed" not in indexer or "DecodeError" not in indexer:
+        fail("indexer still aborts the block on an undecodable memo")
+    else:
+        ok("indexer records undecodable memos and continues")
 
 
-def bash(script: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["bash", "-c", script],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, **(env or {})},
-    )
+def check_no_release_is_unreachable() -> None:
+    """A node any number of releases behind must be able to install this one.
 
-
-def installer_functions() -> str:
-    """The installer's functions with its final main call removed."""
-    lines = (ROOT / "deploy/install.sh").read_text(encoding="utf-8").splitlines()
-    if lines[-1].strip() != 'main "$@"':
-        raise RuntimeError('install.sh no longer ends with main "$@"')
-    return "\n".join(lines[:-1]) + "\n"
-
-
-def check_setup_questions() -> None:
-    """v1.37.0 asks the operator for a name, a domain and an uploads policy.
-
-    Every question has to be answerable from the environment, or an unattended
-    install blocks forever on a prompt nobody is there to see.
+    min_prior_version let a release demand that the node already run the
+    immediately preceding one, a value CI derived from tag history rather than
+    from any real requirement. A node two releases behind could not comply,
+    because only the newest manifest is ever published: the intermediate release
+    it was told to install first could not be fetched.
     """
-    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-
-    if re.search(r"if ! state_at_least configured; then\n\s+prompt_settings\n\s+configure\n", install):
-        ok("the questions are asked once, immediately before the node is configured")
-    else:
-        fail("prompt_settings does not run exactly once before configure")
-
-    script = (
-        installer_functions()
-        + 'USERNAME=fallback-name\nPUBLIC_IP=203.0.113.7\n'
-        + 'prompt_settings >/dev/null\n'
-        + 'printf "%s|%s|%s" "$MONIKER_CHOICE" "$DOMAIN_ARG" "$MEDIA_UPLOADS"\n'
-    )
-    answered = bash(script, {"MIRAGE_MONIKER": "chosen-name", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": "yes"})
-    if answered.returncode == 0 and answered.stdout == "chosen-name||true":
-        ok("answers supplied by environment variables are taken without prompting")
-    else:
-        fail(f"env-answered setup returned rc={answered.returncode} out={answered.stdout!r}")
-
-    defaults = bash(script, {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": ""})
-    if defaults.returncode == 0 and defaults.stdout == "fallback-name||false":
-        ok("empty answers default to the account username, no domain and uploads off")
-    else:
-        fail(f"default setup returned rc={defaults.returncode} out={defaults.stdout!r}")
-
-    rejected = bash(script, {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": "maybe"})
-    if rejected.returncode != 0 and "ERROR" in rejected.stderr:
-        ok("an answer that is neither yes nor no stops the install by name")
-    else:
-        fail("the uploads question accepts an answer it cannot interpret")
-
-    # A domain that does not resolve is a warning, never an abort: getent exits 2
-    # for an unknown name and pipefail turned that into a bare failure.
-    unresolved = bash(
-        installer_functions() + 'PUBLIC_IP=203.0.113.7\nwarn_domain_dns nonexistent.invalid\n'
-    )
-    if unresolved.returncode == 0 and "does not resolve yet" in unresolved.stderr:
-        ok("a domain with no DNS record warns and continues")
-    else:
-        fail(f"unresolved domain returned rc={unresolved.returncode} err={unresolved.stderr[-160:]!r}")
-
-
-def check_answers_are_persisted() -> None:
-    """The answers have to reach the file whose reader looks for them."""
-    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-    required = (
-        'write_env_key MONIKER "$MONIKER_CHOICE"',
-        "write_env_key WATCHDOG_AUTORECOVER true",
-        'write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env',
-    )
-    missing = [line for line in required if line not in install]
-    if missing:
-        fail(f"configure does not persist: {missing}")
-    else:
-        ok("name, recovery policy and uploads policy are written to their own env files")
-
-    if 'write_env_key MONIKER "$USERNAME"' in install:
-        fail("configure still writes the username over the operator's chosen name")
-    else:
-        ok("the chosen name is no longer overwritten by the account username")
-
-    template = (ROOT / "deploy/templates/env/frontend.env").read_text(encoding="utf-8")
-    if re.search(r"^VITE_API_BASE=\s*$", template, re.MULTILINE):
-        ok("a fresh node's frontend config points at itself, not another operator's node")
-    else:
-        fail("the frontend template still ships a node URL")
-
-
-def check_moniker_precedence() -> None:
-    """A name the operator chose must survive a domain being set.
-
-    init.sh overwrote MONIKER with https://DOMAIN whenever a domain was present,
-    and that value is what create_validator.sh records on-chain at registration.
-    """
-    init_sh = (ROOT / "deploy/init.sh").read_text(encoding="utf-8")
-    if 'if [ -z "${MONIKER:-}" ] && [ -n "${DOMAIN:-}" ]; then' not in init_sh:
-        fail("init.sh no longer guards the domain-derived name behind an unset name")
-        return
-
-    lines = init_sh.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith('if [ -z "${MONIKER:-}" ]'))
-    end = next(i for i, line in enumerate(lines[start:], start) if line == 'MONIKER="${MONIKER:-validator}"')
-    snippet = "\n".join(lines[start : end + 1]) + '\nprintf %s "$MONIKER"\n'
-    for moniker, domain, expected in (
-        ("chosen", "example.com", "chosen"),
-        ("", "example.com", "https://example.com"),
-        ("", "", "validator"),
-    ):
-        result = bash(snippet, {"MONIKER": moniker, "DOMAIN": domain})
-        if result.returncode != 0 or result.stdout != expected:
-            fail(f"MONIKER={moniker!r} DOMAIN={domain!r} rendered {result.stdout!r}, expected {expected!r}")
+    for relative in ("deploy/hosttools/mirage-update", "deploy/release_verify.py", "release/manifest.schema.json"):
+        path = ROOT / relative
+        if "min_prior" in path.read_text(encoding="utf-8"):
+            fail(f"{relative} still carries a per-step version requirement")
             return
-    ok("an explicit name wins over the domain, which is only the unnamed default")
+    ok("neither the updater, the verifier nor the schema can demand an intermediate release")
 
-
-def check_harden_pin() -> None:
-    """install.sh changed this release, and a stale pin refuses every install."""
-    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-    pin = re.search(r'^EXPECTED_HARDEN_SHA256="([0-9a-f]{64})"$', install, re.MULTILINE)
-    actual = hashlib.sha256((ROOT / "deploy/harden_server.sh").read_bytes()).hexdigest()
-    if pin and pin.group(1) == actual:
-        ok("installer's pinned hardening hash matches the deployed script")
+    # This is what a skipped release would have carried, and it is applied by what
+    # the node has not run yet rather than by version distance.
+    runner = (ROOT / "deploy/migrations/__init__.py").read_text(encoding="utf-8")
+    if "key not in completed" in runner:
+        ok("deploy migrations are selected by what this node has not applied")
     else:
-        fail(f"pinned hardening hash is stale: pin={pin.group(1) if pin else None} actual={actual}")
+        fail("deploy migrations are no longer selected by what the node has not applied")
+
+
+def check_bootstrap_pins() -> None:
+    """install.sh hash-pins what it downloads, and a stale pin refuses every install."""
+    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    for variable, relative in (
+        ("EXPECTED_HARDEN_SHA256", "deploy/harden_server.sh"),
+        ("EXPECTED_VERIFY_SHA256", "deploy/release_verify.py"),
+    ):
+        pin = re.search(rf'^{variable}="([0-9a-f]{{64}})"$', install, re.MULTILINE)
+        actual = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
+        if pin and pin.group(1) == actual:
+            ok(f"{variable} matches the deployed {Path(relative).name}")
+        else:
+            fail(f"{variable} is stale: pin={pin.group(1) if pin else None} actual={actual}")
 
 
 def main() -> int:
-    print(f"verify_upgrade.py for {VERSION} (handler registered; no live chain plan)")
+    print(f"verify_upgrade.py for {VERSION} (patch release; no chain code, no handler, no plan)")
     checks = (
         check_versions,
         check_no_upgrade_plan,
         check_progress,
         check_manifests,
         check_installer_payload,
-        check_setup_questions,
-        check_answers_are_persisted,
-        check_moniker_precedence,
-        check_harden_pin,
+        check_no_release_is_unreachable,
+        check_bootstrap_pins,
     )
     for check in checks:
         try:

@@ -28,7 +28,7 @@ BOOTSTRAP_BASE="${MIRAGE_MANIFEST_MIRROR:-$GITHUB_RAW/deploy}"
 
 # Fingerprint of deploy/hosttools/pubkey.pem (raw ed25519 hex). Stable across releases.
 EXPECTED_PUBKEY_FINGERPRINT="679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8"
-EXPECTED_VERIFY_SHA256="9296945b68e466a526536c48cb1e68a6ecf07c9d705791e8b3a624a3c7d5df1f"
+EXPECTED_VERIFY_SHA256="bf96b421c5761f036be5ac8809ab3d86d637e88886586ad4e3e0c236909f44a8"
 EXPECTED_HARDEN_SHA256="3412205a921678d22df5448facd07b1d915f0d768a6ae350a1e5e678ebd6bb47"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -551,9 +551,31 @@ collision_guard() {
   fi
 }
 
+valid_ipv4() {
+  [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+valid_ipv6() {
+  [[ "$1" == *:* && "$1" =~ ^[0-9A-Fa-f:.]+$ ]]
+}
+
+valid_external_address() {
+  [[ "$1" =~ ^tcp://([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]+$ ]] \
+    || [[ "$1" =~ ^tcp://\[[0-9A-Fa-f:.]+\]:[0-9]+$ ]]
+}
+
 # Sets PUBLIC_IP / PUBLIC_IP6 in the caller, so it must not run in a subshell.
 detect_public_ip() {
-  PUBLIC_IP=$(curl -4 -fsS --max-time 5 https://api.ipify.org || true)
+  local raw
+  raw=$(curl -4 -fsS --max-time 5 https://api.ipify.org || true)
+  PUBLIC_IP=""
+  if [[ -n "$raw" ]]; then
+    if valid_ipv4 "$raw"; then
+      PUBLIC_IP="$raw"
+    else
+      echo "WARNING: IPv4 probe returned a non-address; ignoring it" >&2
+    fi
+  fi
   PUBLIC_IP6=""
   # Only probe v6 where the host actually has a global v6 address. Probing
   # regardless printed a connection failure on every v4-only host, which reads
@@ -561,15 +583,22 @@ detect_public_ip() {
   # and still cannot reach the probe is worth a warning, so that case is not
   # silenced.
   if [[ -n "$(ip -6 addr show scope global 2>/dev/null)" ]]; then
-    PUBLIC_IP6=$(curl -6 -fsS --max-time 5 https://api6.ipify.org || true)
-    if [[ -z "$PUBLIC_IP6" ]]; then
+    raw=$(curl -6 -fsS --max-time 5 https://api6.ipify.org || true)
+    if [[ -z "$raw" ]]; then
       echo "WARNING: host has a global IPv6 address but the IPv6 probe failed; continuing with IPv4"
+    elif valid_ipv6 "$raw"; then
+      PUBLIC_IP6="$raw"
+    else
+      echo "WARNING: IPv6 probe returned a non-address; ignoring it" >&2
     fi
   fi
 }
 
 external_address() {
   if [[ -n "${MIRAGE_EXTERNAL_ADDRESS:-}" ]]; then
+    if ! valid_external_address "$MIRAGE_EXTERNAL_ADDRESS"; then
+      die "MIRAGE_EXTERNAL_ADDRESS must be tcp://IPv4:port or tcp://[IPv6]:port (got '$MIRAGE_EXTERNAL_ADDRESS')"
+    fi
     echo "$MIRAGE_EXTERNAL_ADDRESS"
     return 0
   fi
@@ -727,14 +756,15 @@ configure() {
   write_env_key() {
     local key="$1" val="$2" file="${3:-/root/.mirage/env/node.env}"
     python3 - "$file" "$key" "$val" <<'PY'
-import os, re, sys
+import os, re, shlex, sys
 path, key, value = sys.argv[1:4]
 text = open(path, encoding="utf-8").read() if os.path.isfile(path) else ""
 pattern = re.compile(rf"^{re.escape(key)}=.*$", re.M)
 matches = pattern.findall(text)
 if len(matches) > 1:
     raise SystemExit(f"duplicate {key} entries in {path}")
-line = f"{key}={value}"
+# Quote so an accidental bash-source cannot run a spaced name or `$()`.
+line = f"{key}={shlex.quote(value)}"
 if matches:
     text = pattern.sub(lambda _: line, text, count=1)
 else:

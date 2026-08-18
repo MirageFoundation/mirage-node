@@ -93,6 +93,52 @@ def test_process_dead_restarts_with_force():
     assert d.argv == ["bash", SCRIPT, "restart", "--auto", "--force"]
 
 
+def test_process_dead_upgrade_halt_alerts_not_wipe():
+    d = _decide(
+        trigger=wd.TRIGGER_PROCESS_DEAD,
+        upgrade_halt=True,
+        restart_cooldown_remaining_s=0,
+        local_app_hash=None,
+        peer_app_hashes={},
+    )
+    assert d.action == "alert"
+    assert d.argv == []
+    assert any(tag == "ALERT" for tag, _ in d.emits)
+
+
+def test_stall_upgrade_halt_alerts_not_restart():
+    # RPC can stay up at the halt height. Matching app_hash would otherwise
+    # restart, fail to advance, and loop.
+    d = _decide(upgrade_halt=True)
+    assert d.action == "alert"
+    assert d.argv == []
+
+
+def test_log_pattern_upgrade_halt_alerts_not_wipe():
+    d = _decide(trigger=wd.TRIGGER_LOG_PATTERN, upgrade_halt=True, local_app_hash=None, peer_app_hashes={})
+    assert d.action == "alert"
+    assert d.argv == []
+
+
+def test_restart_exit_5_upgrade_halt_refuses_peer_pull():
+    d = wd.decide_escalation_after_restart(
+        exit_code=5,
+        autorecover=True,
+        pull_cooldown_remaining_s=0,
+        force=True,
+        upgrade_halt=True,
+    )
+    assert d.action == "alert"
+    assert d.argv == []
+    assert "upgrade halt" in d.reason
+
+
+def test_log_has_upgrade_halt():
+    text = 'ERR CONSENSUS FAILURE!!! err="failed; error UPGRADE \\"v1.27.0\\" NEEDED at height: 5: "'
+    assert wd.log_has_upgrade_halt(text) is True
+    assert wd.log_has_upgrade_halt("wrong Block.Header.AppHash") is False
+
+
 def test_recurrence_threshold_escalates_directly_to_peer_pull():
     d = _decide(recent_restart_count=wd.RESTART_ESCALATE_AFTER)
     assert d.action == "peer-pull"

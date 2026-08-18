@@ -442,6 +442,49 @@ def _test_indexer_attribution_guards() -> None:
         "print('OK' if failed_ok and unattributed_ok else ('BAD', idx.db.failed, idx.db.tags))\n",
     )
 
+    import base64
+    from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw
+    from indexer.main import Indexer
+
+    body_bytes = bytes([0x12, 0x03, 0xFF, 0xFE, 0xFD])
+    raw = TxRaw(body_bytes=body_bytes).SerializeToString()
+
+    class DB:
+        def __init__(self):
+            self.failed = []
+
+        def upsert_tx_index(self, *a):
+            self.failed.append(a)
+
+    idx = Indexer.__new__(Indexer)
+    idx.db = DB()
+    try:
+        idx._process_tx(0, base64.b64encode(raw).decode(), {"code": 0}, 10, 20)
+    except Exception as exc:
+        _fail("net_tags.undecodable_memo_does_not_abort", str(exc))
+        return
+    if len(idx.db.failed) != 1 or idx.db.failed[0][1] != "undecodable":
+        _fail("net_tags.undecodable_memo_does_not_abort", repr(idx.db.failed))
+        return
+    _pass("net_tags.undecodable_memo_does_not_abort")
+
+
+def _test_asn_layout_is_shared() -> None:
+    """Writer and reader must not redeclare the on-disk layout."""
+    layout = Path(_REPO, "shared", "asn_layout.py").read_text(encoding="utf-8")
+    if "MAGIC_V4 = b" not in layout or "CLASS_TO_CODE" not in layout:
+        _fail("net_tags.asn_layout.missing", "shared/asn_layout.py is not the layout definition")
+        return
+    for rel in ("web/backend/asn_db.py", "deploy/refresh_asn_db.py"):
+        body = Path(_REPO, rel).read_text(encoding="utf-8")
+        if "MAGIC_V4 = b" in body or "CLASS_TO_CODE = {" in body:
+            _fail("net_tags.asn_layout.duplicated", f"{rel} still declares the ASN layout")
+            return
+        if "from shared.asn_layout import" not in body:
+            _fail("net_tags.asn_layout.not_imported", f"{rel} does not import shared.asn_layout")
+            return
+    _pass("net_tags.asn_layout.single_definition")
+
 
 def _test_asn_binary_lookup() -> None:
     """Build a small dataset with the real writer and read it with the real reader.
@@ -669,6 +712,7 @@ def test_net_tags(backend: str) -> None:
     _test_tag_construction()
     _test_key_required_at_import()
     _test_tx_builder_emits_one_memo()
+    _test_asn_layout_is_shared()
     _test_asn_binary_lookup()
     _test_indexer_projection()
     _test_indexer_attribution_guards()

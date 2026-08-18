@@ -247,6 +247,21 @@ peer_discover_healthy() {
   done
 }
 
+peer_require_source_ahead() {
+  # Upgrade halt (and any other freeze at a shared height) has healthy peers
+  # at the same height as local. Wiping and pulling from them cannot advance
+  # the node and destroys the only copy of local state. Unknown local height
+  # is the same refusal: we cannot prove a peer is ahead.
+  local source_ip="$1" source_height="$2"
+  if ! [[ "${LOCAL_DIVERGED_HEIGHT}" =~ ^[0-9]+$ ]]; then
+    die "local height unknown (${LOCAL_DIVERGED_HEIGHT}); refusing peer-pull (need a peer strictly ahead of local)"
+  fi
+  if [ "$source_height" -le "$LOCAL_DIVERGED_HEIGHT" ]; then
+    die "no peer strictly ahead of local height ${LOCAL_DIVERGED_HEIGHT} (best peer ${source_ip} @ ${source_height}); refusing wipe"
+  fi
+  log "source peer $source_ip @ $source_height is strictly ahead of local ${LOCAL_DIVERGED_HEIGHT}"
+}
+
 peer_pick_min_height() {
   # NOTE: do NOT use `[ ... ] && X=Y` here. Under `set -euo pipefail`, when the
   # final iteration's test returns false, the for-loop's exit status is the
@@ -371,9 +386,9 @@ restore_priv_validator_state() {
   fi
 }
 
-# Best-effort capture of the local node's diverged height/app_hash. Must run
-# while the node RPC is still up (i.e. before stop_miraged_supervised). Values
-# land in the forensic manifest; failure here never blocks recovery.
+# Capture of the local node's diverged height/app_hash. Prefer live RPC while
+# the node is still up; if RPC is already down, read the signed watermark.
+# peer-pull refuses to wipe unless a peer is strictly ahead of this height.
 capture_local_divergence_context() {
   local status
   status="$(curl -s --max-time 3 http://localhost:26657/status 2>/dev/null || true)"
@@ -393,6 +408,20 @@ except Exception:
   fi
   : "${LOCAL_DIVERGED_HEIGHT:=unknown}"
   : "${LOCAL_DIVERGED_APP_HASH:=unknown}"
+  if ! [[ "${LOCAL_DIVERGED_HEIGHT}" =~ ^[0-9]+$ ]]; then
+    # RPC is already down (process-dead). The signed watermark is the height
+    # this node last voted; a peer at or behind it is not ahead.
+    local pv="${NODE_HOME}/data/priv_validator_state.json" watermark=""
+    if [ -f "$pv" ]; then
+      watermark="$(python3 -c 'import json,sys
+try:
+    print(int(json.load(open(sys.argv[1]))["height"]))
+except Exception:
+    print("unknown")' "$pv")"
+    fi
+    LOCAL_DIVERGED_HEIGHT="${watermark:-unknown}"
+    log "RPC height unavailable; using priv_validator_state watermark ${LOCAL_DIVERGED_HEIGHT}"
+  fi
 }
 
 # Keep only the most recent $FORENSIC_KEEP forensic captures so repeated
@@ -427,7 +456,7 @@ snapshot_diverged_state() {
   cap="$root/${ts}-h${LOCAL_DIVERGED_HEIGHT:-unknown}"
 
   prune_forensic_captures
-  mkdir -p "$cap" || { log "WARNING: could not create forensic dir $cap; skipping snapshot"; return 0; }
+  mkdir -p "$cap" || die "could not create forensic dir $cap; refusing to wipe chain DBs"
 
   for d in application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db; do
     [ -e "$data_dir/$d" ] || continue
@@ -438,7 +467,7 @@ snapshot_diverged_state() {
       # the original below.
       moved=$((moved + 1))
     else
-      log "WARNING: failed to preserve $d into forensic capture"
+      die "failed to preserve $d into forensic capture; refusing to wipe chain DBs"
     fi
   done
   # priv_validator_state.json is small but useful (signed watermark at the
@@ -638,9 +667,9 @@ state_sync_cleanup_on_abort() {
     log "state-sync aborted (rc=$rc); rolling back env to STATESYNC_ENABLE=false"
     sed -i 's|^STATESYNC_ENABLE=.*|STATESYNC_ENABLE=false|' "$ENV_FILE" 2>/dev/null || true
     # shellcheck disable=SC1090
-    ( set -a; . "$ENV_FILE" 2>/dev/null; set +a; \
-      python3 "$ROOT_DIR/deploy/render_template.py" \
-        "$ROOT_DIR/deploy/templates/node/config.toml" \
+    ( eval "$(python3 "${ROOT_DIR:-/opt/mirage}/deploy/load_env_exports.py" "$ENV_FILE")" && \
+      python3 "${ROOT_DIR:-/opt/mirage}/deploy/render_template.py" \
+        "${ROOT_DIR:-/opt/mirage}/deploy/templates/node/config.toml" \
         "$NODE_HOME/config/config.toml" 2>/dev/null ) || true
     if [ "${LOCAL_STOPPED:-0}" -eq 1 ]; then
       log "  attempting best-effort miraged restart"
@@ -782,6 +811,7 @@ cmd_peer_pull() {
   done
   [ -n "$source_ip" ] || die "could not pick a source peer"
   log "selected source peer: $source_ip @ height $source_height"
+  peer_require_source_ahead "$source_ip" "$source_height"
   TRUST_HEIGHT="$source_height"
 
   # Dry-run is intentionally permissive: it does not require RECOVERY_KEY to
@@ -1120,10 +1150,9 @@ p.write_text(t)
 PY
 
   log "re-rendering $NODE_HOME/config/config.toml from template ..."
-  # shellcheck disable=SC1090
-  ( set -a; . "$ENV_FILE"; set +a; \
-    python3 "$ROOT_DIR/deploy/render_template.py" \
-      "$ROOT_DIR/deploy/templates/node/config.toml" \
+  ( eval "$(python3 "${ROOT_DIR:-/opt/mirage}/deploy/load_env_exports.py" "$ENV_FILE")" && \
+    python3 "${ROOT_DIR:-/opt/mirage}/deploy/render_template.py" \
+      "${ROOT_DIR:-/opt/mirage}/deploy/templates/node/config.toml" \
       "$NODE_HOME/config/config.toml" )
 
   prepare_supervisor_log_marker

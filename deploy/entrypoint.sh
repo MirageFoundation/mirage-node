@@ -44,11 +44,14 @@ fi
 ENV_DIR="${HOME}/.mirage/env"
 export ENV_DIR
 load_env_files() {
+  # Values are literals. Do not bash-source: a spaced moniker or `$()` in
+  # node.env would otherwise run as root with the keyring mounted.
+  local loader="$ROOT_DIR/deploy/load_env_exports.py"
+  local envfile exports
   for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env"; do
     if [ -f "$envfile" ]; then
-      set -a
-      . "$envfile"
-      set +a
+      exports="$(python3 "$loader" "$envfile")" || exit 1
+      eval "$exports"
     fi
   done
 }

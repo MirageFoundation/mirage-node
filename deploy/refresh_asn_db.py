@@ -37,25 +37,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from shared.asn_class import classify_org  # noqa: E402
+from shared.asn_layout import (  # noqa: E402
+    CLASS_TO_CODE,
+    FORMAT_VERSION,
+    HEADER_STRUCT,
+    MAGIC_V4,
+    MAGIC_V6,
+    V4_RECORD,
+    V6_RECORD,
+)
 
 DEFAULT_URL = "https://iptoasn.com/data/ip2asn-combined.tsv.gz"
 DOWNLOAD_TIMEOUT_S = 120
-
-MAGIC_V4 = b"MIRASNV4"
-MAGIC_V6 = b"MIRASNV6"
-FORMAT_VERSION = 1
-
-HEADER_STRUCT = struct.Struct("!8sHIH")
-V4_RECORD = struct.Struct("!IIB")
-V6_RECORD = struct.Struct("!QQB")
-
-CLASS_TO_CODE = {
-    "unknown": 0,
-    "isp": 1,
-    "hosting": 2,
-    "vpn": 3,
-    "cellular": 4,
-}
 
 # A truncated download must never be allowed to replace a good dataset. The real
 # IPv4 table has hundreds of thousands of ranges, so anything near these floors

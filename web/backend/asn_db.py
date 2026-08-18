@@ -32,29 +32,18 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from shared.asn_layout import (
+    CLASS_CODES,
+    FORMAT_VERSION,
+    HEADER_SIZE,
+    HEADER_STRUCT,
+    MAGIC_V4,
+    MAGIC_V6,
+    V4_RECORD,
+    V6_RECORD,
+)
+
 _log = logging.getLogger("asn_db")
-
-MAGIC_V4 = b"MIRASNV4"
-MAGIC_V6 = b"MIRASNV6"
-FORMAT_VERSION = 1
-
-# magic(8) + format version(2) + record count(4) + reserved(2)
-HEADER_STRUCT = struct.Struct("!8sHIH")
-HEADER_SIZE = HEADER_STRUCT.size
-
-# start, end, class byte
-V4_RECORD = struct.Struct("!IIB")
-V6_RECORD = struct.Struct("!QQB")
-
-# Wire codes for the class byte. Kept numeric so records stay fixed-width.
-CLASS_CODES = {
-    0: "unknown",
-    1: "isp",
-    2: "hosting",
-    3: "vpn",
-    4: "cellular",
-}
-CLASS_TO_CODE = {name: code for code, name in CLASS_CODES.items()}
 
 STALE_WARN_DAYS = 7
 STALE_ERROR_DAYS = 30

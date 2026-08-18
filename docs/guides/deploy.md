@@ -67,9 +67,15 @@ Wallet features that need a secure origin wait until this step.
 mirage-status
 mirage-update             # activate a staged ordinary release
 mirage-update --rollback  # only when the signed release permits rollback
+
+# Only when this node's own tooling is too old to accept the current manifest:
+# it rejects every release and cannot update its way out. The digest comes from
+# release/manifest.json, and an image whose signing key differs from this host's
+# trust anchor is refused.
+mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:...
 ```
 
-The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Governance-halt releases also stage, but the host tool refuses to activate them manually; use the governed upgrade procedure at the announced halt. A staged release is refused if this node is too far behind (`min_prior_version`), if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
+The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Host tools on the machine are replaced from that image only when you activate, not when the hourly check stages it. Governance-halt releases also stage, but the host tool refuses to activate them manually; use the governed upgrade procedure at the announced halt. A staged release is refused if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Being several releases behind is not a reason for refusal: the new image applies every deploy migration the node has not run yet, so a node that missed updates catches up in one step. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
 
 ## What the installer will refuse
 

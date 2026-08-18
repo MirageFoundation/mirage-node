@@ -53,6 +53,7 @@ from indexer.settings import (
 )
 from shared.config import get_config
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxRaw, TxBody
+from google.protobuf.message import DecodeError
 
 logger = logging.getLogger(__name__)
 
@@ -452,9 +453,23 @@ class Indexer:
         tx_hash = hashlib.sha256(raw_tx_bytes).hexdigest().lower()
 
         tx_raw = TxRaw()
-        tx_raw.ParseFromString(raw_tx_bytes)
         tx_body = TxBody()
-        tx_body.ParseFromString(tx_raw.body_bytes)
+        try:
+            tx_raw.ParseFromString(raw_tx_bytes)
+            tx_body.ParseFromString(tx_raw.body_bytes)
+        except (DecodeError, UnicodeDecodeError) as exc:
+            # Go does not UTF-8-validate protobuf string fields. Python does, so
+            # a memo the chain accepted can still fail here. Aborting the block
+            # then exiting would wedge every indexer on one undecodable tx.
+            logger.error(
+                "tx.decode_failed height=%s idx=%s txhash=%s err=%s",
+                height,
+                idx,
+                tx_hash,
+                exc,
+            )
+            self.db.upsert_tx_index(tx_hash, "undecodable", -1, str(exc), height, ts)
+            return
 
         from indexer.message_processor import type_url_to_tx_type
 

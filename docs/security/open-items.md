@@ -1,12 +1,9 @@
 # Security Open Items — Cross-Component Register
 
-**As of:** 2026-08-17, at the `v1.36.2` tag. Pinned to the tag rather than a commit hash, which went stale the moment the release was amended.
+**As of:** 2026-08-18, at `v1.37.0`.
 
-**No Critical or High is open in any component.** The last three — the blockchain
-C-1, H-1 and H-2 — shipped in `v1.36.0` on 2026-08-16, which is also what made
-that release consensus-breaking. The four High findings from the 2026-08-17
-network-tag review were fixed before `v1.36.1` shipped; its Medium and Low tail is
-open and recorded below.
+**No Critical is open.** Two Highs from the 2026-08-18 installer/recovery sweep were **fixed in `v1.37.0`**, not accepted as risk. Five further leftovers from that sweep shipped in the same tag (host tools on activate, upgrade-halt wipe, watermark, NT-5, UTF-8 memo). Prior Critical/High from the 2026-08-14 reviews remain closed; the four network-tag Highs remain closed. The remaining network-tag tail is accepted except **NT-4**, which stays deferred until growth is observed.
+
 **Purpose:** one place to find every security item that is still open across components, so that an accepted risk or a deferred plan item cannot quietly become forgotten work. Every entry needs either a scheduled action or a recorded decision.
 
 Component detail lives in the retests, which stay authoritative for their own findings:
@@ -19,12 +16,34 @@ Component detail lives in the retests, which stay authoritative for their own fi
 - [indexer full review 2026-08-14](2026-08-14/indexer-review.md) — all severities, `indexer/` only (2 High, 3 Medium, 4 Low, 1 Informational). **All dispositioned on 2026-08-14: nine fixed and shipped in `v1.36.0`, M-1 accepted as risk.** Still authoritative for the reasoning behind each
 - [frontend full review 2026-08-14](2026-08-14/frontend-review.md) — all severities, `web/frontend/` only (1 High, 2 Medium, 2 Low, 1 Informational). **All dispositioned on 2026-08-14: everything fixed and shipped in `v1.36.0` except the CSP media-host breadth and the two `react-router` advisories, both accepted as risk.** **Authoritative for the frontend items below**, and it corrects two closure-map errors in the 2026-08-09 frontend retest
 - [backend full review 2026-08-14](2026-08-14/backend-review.md) — all severities, `web/backend/` only (1 Critical, 3 High, 5 Medium, 2 Low). **All dispositioned: ten fixed and shipped in `v1.36.0`, M-5 accepted as risk on 2026-08-14, and the `EXPO_ACCESS_TOKEN` sub-threshold item accepted as risk on 2026-08-16. Nothing from this review is open.** **Authoritative for the backend items below**, and it supersedes the 2026-08-07 backend retest as the current statement of backend posture
-- **network-tag review 2026-08-17** — all severities, the `v1.36.1` feature only (4 High, 5 Medium, ~15 Low/nit) across `shared/nettag.py`, `web/backend/{net_tag,asn_db,tx}.py`, `deploy/refresh_asn_db.py`, the indexer projection and the `net_tags` schema. **All four High fixed before `v1.36.1` shipped and live as of `v1.36.2`; the Medium and Low tail is open** — see the section below, which is authoritative for it. No standalone review file: the findings are recorded here
+- **network-tag review 2026-08-17** — all severities, the `v1.36.1` feature only (4 High, 5 Medium, ~15 Low/nit) across `shared/nettag.py`, `web/backend/{net_tag,asn_db,tx}.py`, `deploy/refresh_asn_db.py`, the indexer projection and the `net_tags` schema. **All four High fixed before `v1.36.1` shipped and live as of `v1.36.2`.** On 2026-08-18 the tail was dispositioned: NT-5 and the UTF-8 memo halt shipped in `v1.37.0`; NT-1/2/3/6/7 accepted; NT-4 deferred until growth is observed. No standalone review file: the findings are recorded here
 - [blockchain full review 2026-08-14](2026-08-14/blockchain-review.md) — all severities, `blockchain/` only (1 Critical, 2 High, 5 Medium, 9 Low, 10 Informational). **All dispositioned on 2026-08-16: 25 fixed and shipped in `v1.36.0`, M-3 accepted as risk, I-7 and I-8 closed as not-a-defect. Nothing from this review is open.** **Authoritative for the blockchain items below**, and it supersedes the 2026-08-07 blockchain retest as the current statement of chain posture
+- [installer / signed-bootstrap sweep 2026-08-18](2026-08-18/installer-review.md) — Critical/High only, the post-`v1.36.2` surface (`deploy/install.sh`, manifests, host updater, enroll, auto-recovery) plus a regression check of every previously closed Critical/High. **0 Critical, 2 High, both fixed in `v1.37.0`: H-1 env-file source, H-2 forensic fail-open.** Leftovers from that pass were all dispositioned the same day: five fixed in `v1.37.0`, the rest accepted or kept deferred. Authoritative for the installer items in the table below.
 
 ---
 
-## Critical / High — all closed
+## Critical / High — two fixed in `v1.37.0`
+
+**Two High from the 2026-08-18 sweep.** Operator chose fix on 2026-08-18 rather than accept. They shipped in `v1.37.0`.
+
+| ID | Component | Item | Status |
+| :--- | :--- | :--- | :--- |
+| **H-1 (install)** | Deploy | `write_env_key` wrote an unquoted `MONIKER=` / `EXTERNAL_ADDRESS=` line; `entrypoint.sh` bash-sourced `node.env` as root after the seed and consensus key were on disk. A tested-valid spaced name (`Cool Node`) was `command not found` and aborted the container; `$()` or a semicolon was RCE. | **Fixed, shipped in `v1.37.0`.** Env files are parsed as literals (`deploy/load_env_exports.py`); `write_env_key` quotes with `shlex.quote`; `MIRAGE_EXTERNAL_ADDRESS` and ipify bodies must look like addresses. |
+| **H-2 (recover)** | Deploy | `snapshot_diverged_state` returned 0 if `mkdir` of the forensic dir failed, and per-dir `mv`/`cp` failure was warn-only. `wipe_chain_dbs` then `rm -rf`d the live chain DBs. | **Fixed, shipped in `v1.37.0`.** Snapshot `mkdir`/`mv`/`cp` failure `die`s, so wipe never runs. |
+
+The leftover items from that sweep that the operator chose to **fix**:
+
+| Item | Status |
+| :--- | :--- |
+| Host tools installed from a staged image on hourly `--tick`, before operator activation | **Fixed, shipped in `v1.37.0`.** `--tick` pulls and stages only; `activate_staged` installs host tools after the new container is healthy. |
+| Process-dead → peer-pull around an upgrade halt (`WATCHDOG_AUTORECOVER` + recovery key) | **Fixed, shipped in `v1.37.0`.** Upgrade-halt in recent logs alerts and refuses restart/wipe. `recover.sh` peer-pull dies unless a peer is strictly ahead of a known local height. |
+| `enable_validator_mode` overwrites `priv_validator_state.json` to head+5 on every start | **Fixed, shipped in `v1.37.0`.** Never lowers an existing watermark; skips the write while `catching_up`. Weekly restart also skips `catching_up`. |
+| NT-5 ASN layout declared twice | **Fixed, shipped in `v1.37.0`.** Layout and class map live in `shared/asn_layout.py`. |
+| Invalid UTF-8 memo can abort the indexer | **Fixed, shipped in `v1.37.0`.** `TxBody`/`TxRaw` decode failures are logged and indexed as `undecodable`; the block continues. |
+
+The closed history from `v1.36.0` follows.
+
+### Closed history — `v1.36.0` and earlier
 
 **Two Critical and eight High**, from four separate full reviews on 2026-08-14.
 **All ten are now fixed and shipped in `v1.36.0`.** The rows are kept so the
@@ -224,25 +243,26 @@ schema. **No Critical or High is open.** The four High findings were fixed befor
   for a `code` column to tell validated rows from unvalidated ones.
 
 The `bank_send_body_bytes(memo=...)` duplicate-field-2 footgun was closed by
-deleting the unused parameter. What follows is the Medium and Low tail, none of
-which is currently breaking anything.
+deleting the unused parameter. The Medium and Low tail was dispositioned on
+2026-08-18: NT-5 and the adjacent UTF-8 memo halt were **fixed in `v1.37.0`**; NT-1,
+NT-2, NT-3, NT-6 and NT-7 were **accepted as risk**; NT-4 stays **deferred**
+until table growth is observed.
 
-| ID | Item | Why it matters | Trigger |
-| :--- | :--- | :--- | :--- |
-| **NT-1** | Loopback and private addresses produce one shared tag instead of no tag | `parse_client_ip` accepts any syntactically valid address, so every request that reaches Gunicorn without passing Caddy's `CF-Connecting-IP` falls back to `127.0.0.1` and carries an identical tag — which any agent reads as "these accounts are on the same network". Reachable today: both suites run in-container against `127.0.0.1`, so every test transaction shares one tag, as does any future internal caller or health probe. The existing test uses `203.0.113.9` and cannot catch it | **The most actionable of these.** Return `None` for `is_loopback`, `is_private`, `is_link_local` and `is_reserved`; omitting the memo is strictly better than publishing a false cluster. Also neutralises the nested-`test_request_context` case as a side effect |
-| **NT-2** | `MEMO_MAX_BYTES = 256` hardcodes a governance-mutable chain parameter | The comment names `max_memo_characters`, which is the `x/auth` SDK default and is settable by `MsgUpdateParams`. Nothing reads the live value. A proposal lowering it below the memo size (~101 bytes today) would fail every relayed transaction at `ValidateMemoDecorator` while the backend kept building over-long memos | Conflicts with the `AGENTS.md` rule that chain parameters must be queryable and never hardcoded in the backend. Read it from the indexer DB at startup the way `tx_size_cost_per_byte` already is; at minimum assert it in `verify_upgrade.py` so a future release fails loudly |
-| **NT-3** | The `net_tags` index set does not match the documented query shape | `idx_net_tags_epoch` has one distinct value per week, so the planner seqscans anyway while the index still costs an insert per tagged transaction — and it is now pinned by `verify_upgrade.py` and the net-tag tests. There is no `namespace` index at all, though `docs/agents/network-tags.md` says tags compare only when `n`, `e` and `f` all match, making `(namespace, epoch, family, tag)` the canonical agent query | Next time the table is touched, or the first time an agent reports slow tag lookups. Replace the `epoch` index with `(namespace, epoch, tag)`; consider `(LOWER(relayer), created_at DESC)`. `idx_net_tags_tag` and `idx_net_tags_created_at` are both justified as they stand |
-| **NT-4** | `net_tags` has no retention policy | Never pruned, and deliberately so — the docstring is right that `tx_index`'s `COUNT(*)`-then-`DELETE NOT IN` pattern would be catastrophic here. But "never" currently has no numbers attached: ~450 bytes all-in per row means one tagged tx/sec sustained is ~31M rows and ~14 GB a year, growing linearly forever | The argument the docstring does not make is the one that settles it: because the epoch is an HMAC input, tags are unlinkable across weeks, so rows older than a handful of epochs cannot participate in any clustering query. Write the window down as an epoch count (~12) and delete on `created_at`, or partition monthly so it becomes a `DROP TABLE` |
-| **NT-5** | The ASN binary record layout is declared twice with no shared definition | `MAGIC_V4`/`MAGIC_V6`, `FORMAT_VERSION`, the struct formats and the class-code map appear independently in `web/backend/asn_db.py` and `deploy/refresh_asn_db.py`. They match exactly today — I checked — but `FORMAT_VERSION` cannot catch a divergence: reordering `CLASS_TO_CODE` in the refresher alone yields a structurally valid file in which every address is confidently misclassified, and nothing detects it | Next change to either file. Move the layout and code map into `shared/`, which both sides already import for `asn_class` and `nettag` |
-| **NT-6** | No forward secrecy: a key leak retroactively deanonymizes the entire tag history | Using the epoch as an HMAC input rather than rotating the key is a sound tradeoff and the docstring is honest about compromise, but the consequence deserves stating for operators: because the key never rotates, whoever obtains it can enumerate the full IPv4 space against **every past epoch**, not just future ones | Document a rotation procedure (bump the `nettag:v1` domain to `v2`) even if rotation is never routine, and treat `NET_TAG_HMAC_KEY` as a long-lived secret accordingly |
-| **NT-7** | Low/nit cluster in the parser and the ASN builder | The 256-byte budget bounds the *whole* memo, so the moment any co-tenant adds a second top-level key a valid `nettag` object starts returning `STATUS_INVALID` — which contradicts the namespacing the format exists for. The deep-nesting hostile test never reaches `json.loads` (it exits at the byte guard), so it asserts nothing about nesting and would go uncovered if that budget is ever raised. `_B64URL_RE` uses `$`, which admits a trailing newline (harmless — the canonical re-encode catches it). `relayer` mixes `NULL` and `''` conventions though the code can only ever write `''`. The live class test reads through `COALESCE(net_class,'')` and so cannot detect an absent-vs-unknown collapse. `_open_table` validates size, magic, version and count but never that records are sorted, so a shuffled file misclassifies silently instead of being rejected. `_disjoint` drops a conflicting range whole rather than trimming, losing the non-overlapping tail — routine for IPv6 after the `/64` collapse. The startup ASN refresh is synchronous, so a hanging `iptoasn.com` delays *validator* start by up to 120s | Fold into the next release that touches these files. Individually cosmetic; listed together so none is lost |
+| ID | Item | Disposition |
+| :--- | :--- | :--- |
+| **NT-1** | Loopback and private addresses produce one shared tag instead of no tag | **Accepted as risk 2026-08-18; do not re-report.** |
+| **NT-2** | `MEMO_MAX_BYTES = 256` hardcodes a governance-mutable chain parameter | **Accepted as risk 2026-08-18; do not re-report.** |
+| **NT-3** | The `net_tags` index set does not match the documented query shape | **Accepted as risk 2026-08-18; do not re-report.** |
+| **NT-4** | `net_tags` has no retention policy | **Deferred.** Epoch-unlinkable rows grow forever (~14 GB/year at 1 tagged tx/s). Trigger: observed table growth that needs a window. |
+| **NT-5** | The ASN binary record layout is declared twice with no shared definition | **Fixed, shipped in `v1.37.0`.** `shared/asn_layout.py` is the only definition. |
+| **NT-6** | No HMAC key rotation / no forward secrecy | **Accepted as risk 2026-08-18; do not re-report.** Epoch is an HMAC input by design; the key is not supposed to rotate. |
+| **NT-7** | Low/nit cluster in the parser and the ASN builder | **Accepted as risk 2026-08-18; do not re-report.** |
 
-**Adjacent and pre-existing, worth confirming independently:** a memo containing
-invalid UTF-8 would fail `TxBody.ParseFromString` before `parse_memo` is ever
-reached, taking the same block-abort-then-exit path as the fixed NT crash-loop.
-Go's tx decoding does not validate UTF-8 in string fields the way Python's
-protobuf does. This predates `v1.36.1` and is not introduced by the tag feature,
-but it sits squarely inside the threat model this feature reasons about.
+**Adjacent UTF-8 memo halt:** a memo containing invalid UTF-8 failed
+`TxBody.ParseFromString` and took the block-abort-then-exit path. Go does not
+UTF-8-validate string fields the way Python protobuf does. **Fixed, shipped in
+`v1.37.0`:** decode failures are logged and stored as `undecodable`; the
+indexer does not `sys.exit`.
 
 **The parser itself is sound and should not be "simplified".** `bool` is rejected
 for both `v` and `f` (the check most implementations miss), non-canonical base64
@@ -258,12 +278,9 @@ load-bearing for that last property and must not be removed as an optimisation.
 
 ## Deferred from the 2026-08-13 sweep
 
-| Item | Why deferred | Trigger |
-| :--- | :--- | :--- |
-| Default-deny `DOCKER-USER` firewall rule | The structural version of the H-3 fix: it makes *any* stray `docker run -p` non-public instead of relying on port lists staying correct. Changes packet filtering on live validators, so it needs its own change window rather than riding a source fix. | Next infrastructure window, or the next time a container's port set changes |
-| Pair-level idempotency for invite rewards + missing `QUESTS_ENABLED` check | The `is_new_user` gate already makes the H-5 replay unreachable, so this is thoroughness rather than closure. `pending_rewards` records no `(referrer, referee)` pair, which is why referrer-side replay could not be distinguished from legitimate multi-recruit during the investigation. | Before referral rewards are switched back on, or the next time invite accounting needs auditing |
-| End-to-end reindex test over a self-delete block | C-1 is covered by chain-side unit tests, but the actual wedge was an indexer projection failure. A replay test needs local docker and the raised PoW limit. | Next local-testnet test pass |
-| Reconciling the ~20k MIRAGE over-issued in April | Recorded so the number is not lost; reversing it is a product decision, not a security fix. | Operator decision |
+The four items that used to sit here were **accepted as risk 2026-08-18**. See the accepted-decisions table. Nothing from that sweep remains deferred.
+
+**NT-4** (`net_tags` has no retention policy) is the only deferred leftover from the 2026-08-17 network-tag review. Trigger: observed table growth.
 
 ---
 
@@ -302,6 +319,17 @@ load-bearing for that last property and must not be removed as an optimisation.
 | Deploy H-4 (2026-08-13) | Backup archive left mode `0644` in `/tmp` | Operator's own backups, on single-tenant hosts with key-only root SSH. Accepted as operator risk. One-line fix recorded in the review if ever revisited. |
 | Indexer (2026-08-13) | Unknown message types are skipped, not fatal | Halting on an unknown type takes the whole platform down *and* makes the block permanently unprojectable, for what is really a deploy-skew mistake. A skipped message means an incomplete index for that height, resolved by upgrading and replaying; the skip is logged at error level with type, height and tx hash. |
 | Deploy (installer, 2026-08-17) | Operator 12-word seed stored in `keyring-backend test` on the validator host | **Accepted as risk 2026-08-17; do not re-report.** The one-command installer imports an existing funded personal account so the node can pay relay gas and self-delegate. The keyring is plaintext on disk. Root on the box is full identity takeover. Alternative designs (a generated operator seed, a split fee-payer, an encrypted keyring) were rejected for this installer because they add a funding step or a password after the piped command. Operators who do not accept this should not run `install.sh`. Revisit only if a hardware-backed host keyring ships. |
+| Deploy (2026-08-18) | Release manifests never expire; git history still has valid signatures for still-supported images | **Accepted as risk 2026-08-18; do not re-report.** Existing nodes refuse `release_id < last_release_id`. Greenfield rollback needs controlling what a current `install.sh` fetches, which is already TOFU of that script. |
+| Deploy (2026-08-18) | `mirage-update` marks a failed activation as `active` | **Accepted as risk 2026-08-18; do not re-report.** Availability only: the previous image is left running if rollback works; if not, the node is already down. No fund movement. |
+| Network tags NT-1 (2026-08-17) | Loopback/private addresses share one tag | **Accepted as risk 2026-08-18; do not re-report.** |
+| Network tags NT-2 (2026-08-17) | `MEMO_MAX_BYTES = 256` is hardcoded | **Accepted as risk 2026-08-18; do not re-report.** |
+| Network tags NT-3 (2026-08-17) | `net_tags` indexes do not match the documented query shape | **Accepted as risk 2026-08-18; do not re-report.** |
+| Network tags NT-6 (2026-08-17) | HMAC key never rotates | **Accepted as risk 2026-08-18; do not re-report.** Epoch is an HMAC input by design; that is the rotation mechanism. |
+| Network tags NT-7 (2026-08-17) | Parser/ASN builder low/nit cluster | **Accepted as risk 2026-08-18; do not re-report.** |
+| Deploy (2026-08-13) | Default-deny `DOCKER-USER` firewall rule | **Accepted as risk 2026-08-18; do not re-report.** The port-list fix for H-3 shipped; default-deny needs its own infrastructure window and was declined. |
+| Backend (2026-08-13) | Pair-level idempotency for invite rewards | **Accepted as risk 2026-08-18; do not re-report.** The `is_new_user` gate already makes the H-5 replay unreachable. |
+| Indexer (2026-08-13) | End-to-end reindex test over a self-delete block | **Accepted as risk 2026-08-18; do not re-report.** C-1 is covered by chain-side unit tests. |
+| Product (2026-08-13) | ~20k MIRAGE over-issued in April | **Accepted as risk 2026-08-18; do not re-report.** Reversing it is a product decision, not a security fix. |
 
 ---
 
@@ -312,6 +340,8 @@ load-bearing for that last property and must not be removed as an optimisation.
 **I-1 — separate public query load from validating processes (ops project).** Still the single highest-value operational prevention, and still unverified because fleet hosts were not contacted. Scope: move indexer, backend, and public query load off validating processes, or document equivalent RPC, cgroup, and resource isolation. Trigger: the next infrastructure or capacity window, or any new divergence investigation. Acceptance: a read-only fleet inventory showing validator processes isolated from public query workloads, followed by 30 days with no load-correlated divergence. Never change production without separate explicit approval.
 
 **Indexer — a safe non-empty `--height` replay/rebuild tool.** The most valuable of the deferred indexer tooling, because divergence recovery currently requires a trusted `pg_dump` whose checkpoint happens to match the recovered chain. Trigger: the next divergence, or the next time an operator needs to rebuild a height range.
+
+**NT-4 — `net_tags` retention.** Never pruned. Trigger: observed table growth that needs a window. Do not use `tx_index`'s `COUNT(*)`-then-`DELETE NOT IN` pattern.
 
 ### The rest
 

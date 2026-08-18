@@ -187,7 +187,6 @@ def require_release_policy(manifest: dict) -> None:
         "release_id",
         "commit",
         "image",
-        "min_prior_version",
         "activation",
         "upgrade_name",
         "rollback_safe",
@@ -207,10 +206,6 @@ def require_release_policy(manifest: dict) -> None:
         die(f"release manifest has invalid commit: {manifest['commit']!r}")
     if not re.fullmatch(r"ghcr\.io/miragefoundation/mirage-node@sha256:[0-9a-f]{64}", manifest["image"]):
         die(f"release manifest image must be digest-pinned, got {manifest['image']!r}")
-    if not isinstance(manifest["min_prior_version"], str) or not re.fullmatch(
-        r"v\d+\.\d+\.\d+", manifest["min_prior_version"]
-    ):
-        die(f"release manifest has invalid min_prior_version: {manifest['min_prior_version']!r}")
     if manifest["activation"] not in ("ordinary", "upgrade-halt"):
         die(f"release manifest activation must be ordinary or upgrade-halt, got {manifest['activation']!r}")
     if not isinstance(manifest["upgrade_name"], str):

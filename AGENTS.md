@@ -261,6 +261,17 @@ const formatTopicStatus = useCallback((topic) => {
 }, [getInfo, formatStatusForPosition]);
 ```
 
+### Release Publishing — LOCAL, NOT CI
+
+- **The normal release path is local.** Build and push the image with the existing
+  local GHCR login, generate the candidate manifest, sign it with
+  `.release_signing.pem`, commit/push the signed manifest, run
+  `scripts/test_upgrade.sh`, then use `/prod-release`.
+- `.github/workflows/release.yml` is optional. **Never dispatch or wait for the
+  candidate workflow unless the operator explicitly asks for CI.**
+- CI availability or GHCR permissions are not a release gate and must not delay
+  a requested release. The mandatory gate is the local upgrade rehearsal below.
+
 ### Upgrades — ALWAYS `scripts/test_upgrade.sh`, NEVER A MANUAL EQUIVALENT
 
 **Every single upgrade must be validated by `scripts/test_upgrade.sh`. No exceptions.**

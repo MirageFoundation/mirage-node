@@ -31,20 +31,6 @@ fetch_verify() {
   "$VERIFY" --manifest "$dest" --signature "${dest}.sig" --pubkey "$PUBKEY"
 }
 
-running_version() {
-  local value
-  if ! value=$(docker exec mirage cat /opt/mirage/VERSION); then
-    echo "ERROR: cannot read /opt/mirage/VERSION from the running container" >&2
-    return 1
-  fi
-  value=$(echo "$value" | tr -d '[:space:]')
-  if [[ ! "$value" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "ERROR: running container reports invalid VERSION '$value'" >&2
-    return 1
-  fi
-  echo "$value"
-}
-
 # Exit 0 when $1 >= $2, both vX.Y.Z.
 version_at_least() {
   python3 - "$1" "$2" <<'PY'
@@ -126,9 +112,13 @@ activate_staged() {
     echo "ERROR: node is catching up; refusing activation" >&2
     exit 1
   fi
-  # The running container is the version we are upgrading from, so this is the
-  # place where min_prior_version can actually be checked.
-  local manifest min_prior have_version manifest_image
+  # A release is not required to be reached one version at a time. Deploy
+  # migrations are applied by discovering everything this node has not run yet,
+  # so a node that missed several releases applies all of their migrations on the
+  # first boot of the new image. Demanding an intermediate release would strand
+  # such a node permanently: only the newest manifest is ever published, so the
+  # release it was told to install first cannot be fetched.
+  local manifest manifest_image
   manifest="$HOME/.mirage/env/release-manifest.json"
   if [[ ! -f "$manifest" ]]; then
     echo "ERROR: staged release manifest missing: $manifest" >&2
@@ -137,14 +127,6 @@ activate_staged() {
   manifest_image=$(json_field "$manifest" image)
   if [[ "$manifest_image" != "$staged" ]]; then
     echo "ERROR: staged image $staged does not match release manifest $manifest_image" >&2
-    exit 1
-  fi
-  min_prior=$(json_field "$manifest" min_prior_version)
-  if ! have_version=$(running_version); then
-    exit 1
-  fi
-  if ! version_at_least "$have_version" "$min_prior"; then
-    echo "ERROR: this node runs $have_version; the staged release requires at least $min_prior" >&2
     exit 1
   fi
   current=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("active") or "")' "$STATE_FILE")
@@ -178,6 +160,8 @@ os.replace(tmp, path)
 PY
     exit 1
   fi
+  echo "installing host tools from $staged after successful activation"
+  install_hosttools_from_image "$staged"
   python3 - "$STATE_FILE" "$staged" <<'PY'
 import json, os, sys
 path, staged = sys.argv[1], sys.argv[2]
@@ -272,7 +256,6 @@ tick() {
   image=$(json_field "$tmp/manifest.json" image)
   release_id=$(json_field "$tmp/manifest.json" release_id)
   version=$(json_field "$tmp/manifest.json" version)
-  min_prior=$(json_field "$tmp/manifest.json" min_prior_version)
   min_release=$(json_field "$tmp/network.json" min_release)
   generation=$(json_field "$tmp/network.json" generation)
   activation=$(json_field "$tmp/manifest.json" activation)
@@ -336,20 +319,12 @@ PY
     echo "no newer release (last_release_id=$last_id)"
     exit 0
   fi
-  if ! have_version=$(running_version); then
-    exit 1
-  fi
-  if ! version_at_least "$have_version" "$min_prior"; then
-    echo "ERROR: this node runs $have_version but $version requires at least $min_prior; upgrade through the intermediate release first" >&2
-    exit 1
-  fi
   docker pull "$image"
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
   if [[ "$digest" != "$image" && "$digest" != *"${image#*@}"* ]]; then
     echo "ERROR: pulled RepoDigest $digest does not match manifest $image" >&2
     exit 1
   fi
-  install_hosttools_from_image "$image"
   python3 - "$STATE_FILE" "$image" "$release_id" "$generation" "$activation" "$rollback_safe" "$consensus_breaking" <<'PY'
 import json, os, sys
 path, image, rid, gen, activation, rollback_safe, consensus_breaking = sys.argv[1:8]
@@ -373,7 +348,7 @@ PY
   mv "$HOME/.mirage/env/release-manifest.json.sig.tmp" "$HOME/.mirage/env/release-manifest.json.sig"
   install -m 0644 "$tmp/manifest.json" "$HOME/.mirage/well-known/manifest.json"
   install -m 0644 "$tmp/manifest.json.sig" "$HOME/.mirage/well-known/manifest.json.sig"
-  echo "staged $image activation=$activation"
+  echo "staged $image activation=$activation (host tools install on activation)"
   if [[ "$activation" == "upgrade-halt" ]]; then
     echo "governance-linked release staged; manual activation is disabled"
   fi
@@ -420,9 +395,31 @@ PY
   echo "rolled back to $previous"
 }
 
+# Host tools verify each manifest with the copy of the verifier already on this
+# machine, so a node whose verifier predates a change to the manifest format
+# rejects every new release and cannot update its way out. This takes the tools
+# from an image the operator names, which is the one step that breaks that loop.
+refresh_hosttools() {
+  local image="$1"
+  if [[ ! "$image" =~ ^ghcr\.io/miragefoundation/mirage-node@sha256:[0-9a-f]{64}$ ]]; then
+    echo "ERROR: --image must be a digest-pinned ghcr.io/miragefoundation/mirage-node reference" >&2
+    exit 2
+  fi
+  docker pull "$image"
+  install_hosttools_from_image "$image"
+  echo "host tools refreshed from $image"
+}
+
 case "${1:-}" in
   --tick) tick ;;
   --rollback) rollback ;;
+  --refresh-hosttools)
+    if [[ "${2:-}" != "--image" || -z "${3:-}" ]]; then
+      echo "usage: mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:..." >&2
+      exit 2
+    fi
+    refresh_hosttools "$3"
+    ;;
   "") activate_staged ;;
-  *) echo "usage: mirage-update [--tick|--rollback]" >&2; exit 2 ;;
+  *) echo "usage: mirage-update [--tick|--rollback|--refresh-hosttools --image IMAGE]" >&2; exit 2 ;;
 esac
