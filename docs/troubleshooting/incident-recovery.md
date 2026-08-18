@@ -42,7 +42,9 @@ done
 
 ## 2. Apphash divergence (node stuck behind peers)
 
-**Background**: this class of incident on the Mirage fleet has always been traced back to host-level memory pressure on an underprovisioned validator (4 GB RAM, no swap) causing a silent IAVL cache corruption — the committed state is correct on disk, but an in-memory read during `BeginBlock` returns a stale value, which produces a different apphash for that one height on that one node. `miraged rollback` cannot fix this; restore-from-peer can.
+**Background**: the observable shape of this incident is that one node computed a different app hash for a single height while its peers agreed. The committed state on disk is correct, so `miraged rollback` cannot fix it; restore-from-peer can.
+
+**Do not chase memory.** The original "host memory pressure on an underprovisioned 4 GB / no-swap validator corrupted the IAVL cache" explanation was **refuted** by the [2026-06-16 postmortem](postmortems/2026-06-16-mirage-talk-divergence.md): every host was provisioned identically and already had swap, the divergence happened while the box was idle (CPU 17.5 %, memory 45 %), the container has no memory limit, and `oom_kill` was 0 fleet-wide. The real trigger was a node-local, concurrency-exposed read-consistency fault — present precisely because that one node also serves local query traffic — and the IAVL `PRUNE_HOLE` mechanism behind it was root-caused and fixed in **v1.29.4 / v1.29.5**. Adding RAM or swap is a no-op here; go straight to the recovery below.
 
 **Canonical recovery for validator-only hosts** (`mirage.vote`, `<val3>`, `<val4>`): restore a fresh backup from a healthy peer using `scripts/backup_restore.py`.
 

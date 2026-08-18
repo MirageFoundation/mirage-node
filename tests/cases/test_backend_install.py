@@ -64,6 +64,8 @@ def test_install(backend: str) -> None:
     _test_pinned_bootstrap_dependencies()
     _test_ubuntu_full_upgrade()
     _test_provider_memory_overhead()
+    _test_no_swapfile_provisioned()
+    _test_disk_floor_matches_live_nodes()
     _test_docker_context_excludes_private_key()
     _test_pubkey_fingerprint()
     _test_manifest_signatures()
@@ -223,13 +225,50 @@ def _test_provider_memory_overhead() -> None:
     if "mem_mib < 3800" not in install:
         _fail("install.memory.minimum", "installer does not accept normal overhead on a 4 GB cloud VM")
         return
-    if "mem_mib < 7600" not in install:
-        _fail("install.memory.recommended", "8 GB recommendation does not account for provider overhead")
+    if "mem_mib < 7600" in install:
+        _fail("install.memory.recommended", "installer still warns for 8 GB, which no live validator uses")
         return
     if "at least 3800 MiB visible after provider overhead" not in install:
         _fail("install.memory.message", "memory rejection does not explain provider overhead")
         return
     _pass("install.memory.provider_overhead")
+
+
+def _test_no_swapfile_provisioned() -> None:
+    """v1.36.6: the swapfile was measured to absorb nothing and is no longer created.
+
+    It was originally justified by a memory-pressure theory of the 2026-06-16
+    divergence that the postmortem refuted.
+    """
+    harden = Path(REPO_ROOT, "deploy", "harden_server.sh").read_text(encoding="utf-8")
+    for stale in ("fallocate -l 2G", "mkswap", "swapon /swapfile", "none swap sw"):
+        if stale in harden:
+            _fail("install.swap.still_created", f"hardening still provisions swap: {stale}")
+            return
+    # set -euo pipefail is active, and `swapon --show` exits non-zero with no swap.
+    if "swapon --show" in harden:
+        _fail("install.swap.verification", "verification runs swapon --show on a swapless host")
+        return
+    if "vm.swappiness = 10" not in harden:
+        _fail("install.swap.swappiness", "hosts that still carry an old /swapfile lost their swappiness bias")
+        return
+    _pass("install.swap.not_provisioned")
+
+
+def _test_disk_floor_matches_live_nodes() -> None:
+    """A validator's whole footprint is ~15 GiB, so the floor must fit a 25 GB disk."""
+    install = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if "disk_gib < 20" not in install:
+        _fail("install.disk.floor", "disk floor does not match the ~15 GiB a live validator occupies")
+        return
+    if "disk_gib < 40" not in install:
+        _fail("install.disk.headroom", "installer does not warn about growth headroom")
+        return
+    for stale in ("80 * 1024 * 1024 * 1024", "at least 80 GiB free"):
+        if stale in install:
+            _fail("install.disk.stale_floor", f"installer still demands an unreachable disk floor: {stale}")
+            return
+    _pass("install.disk.floor_matches_live_nodes")
 
 
 def _test_docker_context_excludes_private_key() -> None:

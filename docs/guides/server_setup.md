@@ -24,13 +24,17 @@ Skip nothing. Each step here addresses a real incident or a real near-miss in pr
 | OS          | Ubuntu 24.04 LTS                                       |
 | Arch        | x86_64                                                 |
 | vCPUs       | 2 minimum, 4 recommended                               |
-| RAM         | 4 GB minimum, **8 GB strongly recommended**            |
-| Swap        | **2 GB minimum (mandatory)**                           |
-| Disk        | 80 GB SSD minimum (chain grows ~10 GB/year)            |
+| RAM         | 4 GB minimum (3800 MiB visible after provider overhead) |
+| Swap        | none (removed in v1.36.6 — it absorbed no pressure)    |
+| Disk        | 25 GB SSD minimum, 40 GB+ recommended                  |
 | Timezone    | `Etc/UTC`                                              |
 | Kernel      | 6.8+ (Ubuntu 24.04 default)                            |
 
-A DigitalOcean **`s-2vcpu-4gb-amd`** droplet works for testing. For production, use **`s-4vcpu-8gb-amd`** or larger — 4 GB RAM with no swap has caused an AppHash divergence in production (silent IAVL cache corruption under memory pressure).
+A DigitalOcean **`s-2vcpu-4gb-amd`** droplet is what the live validators run, and `sar` history says it is not close to its limits. Over nine days on the production node: peak memory use **38.4 %**, `MemAvailable` never below **1.9 GiB**, swap holding **16–48 MiB** of cold pages at a paging rate of ~**0.0 pages/sec**, and zero OOM kills. 4 GB is measured, not aspirational.
+
+> **The old "4 GB with no swap caused an AppHash divergence" claim was wrong and has been removed.** The [2026-06-16 postmortem](../troubleshooting/postmortems/2026-06-16-mirage-talk-divergence.md) refuted the memory hypothesis with direct evidence: all four hosts were provisioned identically *and all already had swap*, the node diverged while the box was **idle** (CPU 17.5 %, memory 45 %), the container has no memory limit, and `oom_kill` was 0 everywhere. The real trigger was a node-local, concurrency-exposed read-consistency fault, and the IAVL `PRUNE_HOLE` family behind it was root-caused and fixed in **v1.29.4 / v1.29.5**. Adding RAM or swap never had anything to do with it.
+
+Disk is dominated by the container image (~2.2 GiB), Postgres (~2 GiB), pruned chain data (~1 GiB, roughly 8 days of blocks retained) and logs (~1 GiB), for ~15 GiB used in total including Ubuntu. Chain data itself is flat because of pruning; growth comes from the indexer (~2.5 MB/day of per-block difficulty history) and logs (~100 MB/day), so a 25 GB disk needs log cleanup within months while 40 GB+ does not.
 
 ---
 
@@ -44,21 +48,13 @@ reboot   # if a new kernel was installed
 
 ---
 
-## 2. Swap — 2 GB, mandatory
+## 2. Memory sysctls — no swapfile
 
-**Without swap, a transient memory spike on a busy validator can cause silent in-memory cache corruption** (page eviction races inside Go's runtime / IAVL `nodeCache`) without triggering an OOM kill. The kernel has no soft-fail buffer; the process either survives or dies, and "mostly survives" is exactly how AppHash divergence sneaks in.
+**We do not create a swapfile.** It existed only to support the refuted memory theory above, and measurement showed it was carrying nothing: under 50 MiB in use at ~0 pages/sec while memory peaked at 38% and `MemAvailable` never fell below 1.9 GiB. A swapfile that absorbs no pressure is 2 GiB of disk and one more thing to explain.
+
+`vm.swappiness` is still set, because hosts hardened before **v1.36.6** kept the `/swapfile` this script used to create, and on those it must stay biased against swapping. Removing an active swapfile is not automated: if you want it gone on an existing host, do it deliberately with `swapoff /swapfile`, drop the `/etc/fstab` line, then `rm /swapfile` — and only while the node is healthy.
 
 ```bash
-# Create a 2 GB swapfile (idempotent — skips if already exists)
-if [ ! -f /swapfile ]; then
-  fallocate -l 2G /swapfile
-  chmod 600 /swapfile
-  mkswap /swapfile
-  swapon /swapfile
-  echo '/swapfile none swap sw 0 0' >> /etc/fstab
-fi
-
-# Tune for a server (avoid swapping unless we really have to)
 cat > /etc/sysctl.d/99-mirage-swap.conf <<'EOF'
 vm.swappiness = 10
 vm.vfs_cache_pressure = 50
@@ -66,11 +62,10 @@ EOF
 sysctl --system
 
 # Verify
-swapon --show
 free -h
 ```
 
-You should see one entry under `swapon --show` and `Swap: 2.0Gi` in `free -h`. If both are empty, fix it before continuing.
+`free -h` should show ~3.8Gi total. A `Swap: 0B` row is expected and correct on a fresh host.
 
 ---
 
@@ -318,8 +313,7 @@ du -sh /root/.mirage/* 2>/dev/null | sort -h | tail -10
 After running everything above, the host should pass every line:
 
 ```bash
-free -h | grep -E 'Mem|Swap'                        # Swap row shows 2.0Gi
-swapon --show                                        # one line, /swapfile, 2G
+free -h | grep -E 'Mem|Swap'                        # ~3.8Gi total; Swap 0B is expected
 sshd -T | grep -E 'permitroot|passwordauth'          # prohibit-password / no
 ufw status | grep -E '22|80|443|26656|26657'         # five lines, all ALLOW
 systemctl is-active fail2ban unattended-upgrades docker   # active x3

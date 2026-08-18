@@ -27,7 +27,7 @@ BOOTSTRAP_BASE="${MIRAGE_MANIFEST_MIRROR:-$GITHUB_RAW/deploy}"
 # Fingerprint of deploy/hosttools/pubkey.pem (raw ed25519 hex). Stable across releases.
 EXPECTED_PUBKEY_FINGERPRINT="679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8"
 EXPECTED_VERIFY_SHA256="9296945b68e466a526536c48cb1e68a6ecf07c9d705791e8b3a624a3c7d5df1f"
-EXPECTED_HARDEN_SHA256="cd0735071e8a996f1be0350d1d565b30aa264c92beb5b645ef760ded4352f0f2"
+EXPECTED_HARDEN_SHA256="3412205a921678d22df5448facd07b1d915f0d768a6ae350a1e5e678ebd6bb47"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -118,19 +118,26 @@ preflight_os() {
       die "container virtualization ($(systemd-detect-virt)) is not supported; need KVM/Xen/Hyper-V/VMware/bare metal"
     fi
   fi
+  # Thresholds below are measured against the running validators, not guessed. Both
+  # sit on a 4 GB / 2 vCPU plan that reports 3915 MiB, with the node at ~1.3 GiB
+  # RSS, 47 MiB of 2 GiB swap touched, no OOM kill and no stall in memory pressure.
   local mem_kb mem_mib
   mem_kb=$(awk '/MemTotal:/ {print $2}' /proc/meminfo)
   mem_mib=$((mem_kb / 1024))
   if (( mem_mib < 3800 )); then
     die "need a 4 GB RAM VM with at least 3800 MiB visible after provider overhead (got ${mem_mib} MiB)"
   fi
-  if (( mem_mib < 7600 )); then
-    echo "WARNING: an 8 GB RAM VM is strongly recommended (got ${mem_mib} MiB)"
-  fi
-  local disk_b
+  # A live validator occupies ~15 GiB in total: 2.2 GiB image, ~1 GiB of pruned
+  # chain data (~8 days retained), ~2 GiB Postgres and ~1 GiB logs, on top of
+  # Ubuntu. Logs and the indexer add a few GiB a month, hence the headroom warning.
+  local disk_b disk_gib
   disk_b=$(df -B1 / | awk 'NR==2 {print $4}')
-  if (( disk_b < 80 * 1024 * 1024 * 1024 )); then
-    die "need at least 80 GiB free on / (got $((disk_b/1024/1024/1024)) GiB)"
+  disk_gib=$((disk_b / 1024 / 1024 / 1024))
+  if (( disk_gib < 20 )); then
+    die "need at least 20 GiB free on / (got ${disk_gib} GiB)"
+  fi
+  if (( disk_gib < 40 )); then
+    echo "WARNING: 40 GiB free is recommended; logs and the indexer grow a few GiB per month (got ${disk_gib} GiB)"
   fi
   if [[ ! -s /root/.ssh/authorized_keys ]] || ! ssh-keygen -l -f /root/.ssh/authorized_keys >/dev/null 2>&1; then
     die "no valid SSH public key in /root/.ssh/authorized_keys; aborting before disabling password auth"

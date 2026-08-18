@@ -219,24 +219,18 @@ run 'apt-get -qq -y install \
     htop iotop dstat jq'
 
 # -----------------------------------------------------------------------------
-# Step 2 — 2 GiB swap
+# Step 2 — sysctl (memory + network + inotify)
 # -----------------------------------------------------------------------------
-say "Swap (2 GiB)"
-if [[ ! -f /swapfile ]]; then
-    run 'fallocate -l 2G /swapfile'
-    run 'chmod 600 /swapfile'
-    run 'mkswap /swapfile >/dev/null'
-    run 'swapon /swapfile'
-    grep -q '^/swapfile' /etc/fstab || run "echo '/swapfile none swap sw 0 0' >> /etc/fstab"
-else
-    note "/swapfile already exists"
-    swapon --show | grep -q '^/swapfile' || run 'swapon /swapfile' || true
-fi
-
-# -----------------------------------------------------------------------------
-# Step 3 — sysctl (swap + network + inotify)
-# -----------------------------------------------------------------------------
-say "sysctl (swap + network + inotify)"
+# No swapfile. It was originally added on the theory that memory pressure caused
+# the 2026-06-16 AppHash divergence; the postmortem refuted that (the node
+# diverged while idle, on a host that already had swap, with zero OOM kills) and
+# the real IAVL prune-hole cause was fixed in v1.29.4/v1.29.5. Nine days of sar
+# history across the fleet then showed swap holding under 50 MiB at ~0 pages/sec
+# while memory peaked at 38%, so it was carrying no load.
+#
+# vm.swappiness stays because existing hosts keep the /swapfile this script used
+# to create; it must remain biased against swapping there.
+say "sysctl (memory + network + inotify)"
 write_file /etc/sysctl.d/99-mirage-swap.conf 'vm.swappiness = 10
 vm.vfs_cache_pressure = 50
 '
@@ -256,7 +250,7 @@ fs.inotify.max_user_instances = 512
 run 'sysctl --system >/dev/null'
 
 # -----------------------------------------------------------------------------
-# Step 4 — ulimits (nofile 131072)
+# Step 3 — ulimits (nofile 131072)
 # -----------------------------------------------------------------------------
 say "ulimits (nofile 131072)"
 write_file /etc/security/limits.d/99-mirage.conf '*       soft    nofile  131072
@@ -266,7 +260,7 @@ root    hard    nofile  131072
 '
 
 # -----------------------------------------------------------------------------
-# Step 5 — SSH hardening
+# Step 4 — SSH hardening
 #
 # NOTE: sshd_config.d/*.conf files are applied in alphabetical order and the
 # FIRST occurrence of a directive wins. Ubuntu cloud-init ships
@@ -306,7 +300,7 @@ if (( ! DRY_RUN )); then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 6 — fail2ban
+# Step 5 — fail2ban
 # -----------------------------------------------------------------------------
 say "fail2ban"
 write_file /etc/fail2ban/jail.local '[DEFAULT]
@@ -322,7 +316,7 @@ run 'systemctl enable --now fail2ban >/dev/null 2>&1 || systemctl enable --now f
 run 'systemctl restart fail2ban'
 
 # -----------------------------------------------------------------------------
-# Step 7 — unattended security upgrades (daily, NO reboot)
+# Step 6 — unattended security upgrades (daily, NO reboot)
 #
 # Security patches apply daily via unattended-upgrades. Reboots are NOT done
 # here — they happen in the per-host weekly slot configured in Step 11.5
@@ -342,14 +336,14 @@ fi
 run 'systemctl enable --now unattended-upgrades >/dev/null 2>&1 || systemctl enable --now unattended-upgrades'
 
 # -----------------------------------------------------------------------------
-# Step 8 — timezone / NTP
+# Step 7 — timezone / NTP
 # -----------------------------------------------------------------------------
 say "Timezone / NTP"
 run 'timedatectl set-timezone Etc/UTC'
 run 'timedatectl set-ntp true'
 
 # -----------------------------------------------------------------------------
-# Step 9 — UFW
+# Step 8 — UFW
 # -----------------------------------------------------------------------------
 say "UFW"
 run 'ufw default deny incoming  >/dev/null'
@@ -363,7 +357,7 @@ run "ufw allow 26657/tcp comment 'CometBFT RPC'             >/dev/null"
 run 'ufw --force enable >/dev/null'
 
 # -----------------------------------------------------------------------------
-# Step 10 — Docker engine + daemon.json
+# Step 9 — Docker engine + daemon.json
 #
 # On a host running Ubuntu's docker.io, this removes it and installs the
 # official docker-ce + docker-compose-plugin stack. On a host already running
@@ -426,7 +420,7 @@ write_file /etc/docker/daemon.json '{
 ' DAEMON_JSON_CHANGED
 
 # -----------------------------------------------------------------------------
-# Step 11 — Weekly container restart timer
+# Step 10 — Weekly container restart timer
 #
 # Two other things bounce these containers on a schedule, and this timer has to
 # stay clear of both: the off-site backup, which stops each container while it
@@ -492,7 +486,7 @@ run 'systemctl daemon-reload'
 run 'systemctl enable --now mirage-weekly-restart.timer >/dev/null'
 
 # -----------------------------------------------------------------------------
-# Step 11.5 — Weekly full OS upgrade + reboot (per-host day, with pre-flight)
+# Step 10.5 — Weekly full OS upgrade + reboot (per-host day, with pre-flight)
 #
 # Drops the daily kernel-auto-reboot model (which would fire fleet-wide at the
 # same time when Ubuntu ships a kernel) in favor of a per-host weekly slot.
@@ -595,7 +589,7 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# Step 12 — docker restart (only when something that requires it changed and
+# Step 11 — docker restart (only when something that requires it changed and
 # the user didn't opt out)
 # -----------------------------------------------------------------------------
 if (( RESTART_DOCKER )) && (( DAEMON_JSON_CHANGED )) && (( DOCKER_ENGINE_TOUCHED == 0 )); then
@@ -615,11 +609,10 @@ elif (( DAEMON_JSON_CHANGED )) && (( RESTART_DOCKER == 0 )); then
 fi
 
 # -----------------------------------------------------------------------------
-# Step 13 — verification
+# Step 12 — verification
 # -----------------------------------------------------------------------------
 say "Verification"
 echo "--- free -h ---";                   free -h | grep -E 'Mem|Swap'
-echo "--- swapon ---";                    swapon --show
 echo "--- sshd (effective) ---";          sshd -T 2>/dev/null | grep -E '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication|permitemptypasswords|x11forwarding|maxauthtries|logingracetime|clientaliveinterval|clientalivecountmax) '
 echo "--- ufw ---";                       ufw status | sed -n '1,12p'
 echo "--- services ---";                  for svc in ssh fail2ban unattended-upgrades docker; do
@@ -632,7 +625,7 @@ echo "--- auto-reboot ---";               grep -E '^[^/]*Unattended-Upgrade::Aut
 echo "--- container ---";                 docker inspect mirage --format '    {{.State.Status}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}}' 2>/dev/null || echo "    (no mirage container)"
 
 # -----------------------------------------------------------------------------
-# Step 14 — reboot if kernel update is pending
+# Step 13 — reboot if kernel update is pending
 # -----------------------------------------------------------------------------
 if [[ -f /var/run/reboot-required ]]; then
     if (( REBOOT_IF_NEEDED )); then

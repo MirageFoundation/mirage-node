@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.36.5 Ubuntu full-upgrade installer release."""
+"""Post-deploy verification for the v1.36.6 measured host-requirements release."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -16,7 +17,7 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.36.5"
+VERSION = "v1.36.6"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 passed = 0
@@ -151,7 +152,7 @@ def check_manifests() -> None:
     elif not re.fullmatch(r"ghcr\.io/miragefoundation/mirage-node@sha256:[0-9a-f]{64}", release["image"]):
         fail(f"release image is not digest-pinned: {release['image']!r}")
     elif release["activation"] != "ordinary" or release["consensus_breaking"]:
-        fail("v1.36.4 release manifest must be ordinary and non-consensus-breaking")
+        fail(f"{VERSION} release manifest must be ordinary and non-consensus-breaking")
     else:
         ok("release manifest is ordinary, non-consensus-breaking and digest-pinned")
 
@@ -185,17 +186,37 @@ def check_installer_payload() -> None:
         fail("updater host-tool refresh or rollback policy missing")
 
 
-def check_transaction_policy() -> None:
-    create_validator = (ROOT / "deploy/create_validator.sh").read_text(encoding="utf-8")
-    stake = (ROOT / "scripts/stake.py").read_text(encoding="utf-8")
-    if "--unordered --timeout-duration 2m" in create_validator:
-        ok("validator registration uses an unordered transaction")
+def check_host_requirements() -> None:
+    """v1.36.6 reset the preflight thresholds to what the fleet measurably uses."""
+    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    harden = (ROOT / "deploy/harden_server.sh").read_text(encoding="utf-8")
+
+    if "80 GiB free" in install or "80 * 1024 * 1024 * 1024" in install:
+        fail("installer still demands 80 GiB free, which no supported disk can satisfy")
+    elif "disk_gib < 20" in install and "disk_gib < 40" in install:
+        ok("disk preflight is a 20 GiB floor with a 40 GiB headroom warning")
     else:
-        fail("validator registration is not unordered")
-    if '"--unordered"' in stake and '"--timeout-duration"' in stake:
-        ok("additional self-delegation uses an unordered transaction")
+        fail("disk preflight thresholds are not the measured ones")
+
+    if "mem_mib < 3800" in install and "mem_mib < 7600" not in install:
+        ok("memory preflight accepts a 4 GB plan and no longer recommends 8 GB")
     else:
-        fail("additional self-delegation is not unordered")
+        fail("memory preflight thresholds are not the measured ones")
+
+    swap_markers = [m for m in ("fallocate -l 2G", "mkswap", "swapon /swapfile") if m in harden]
+    if swap_markers:
+        fail(f"hardening still provisions a swapfile: {swap_markers}")
+    elif "swapon --show" in harden:
+        fail("hardening runs swapon --show under set -e on a swapless host")
+    else:
+        ok("hardening provisions no swapfile")
+
+    pin = re.search(r'^EXPECTED_HARDEN_SHA256="([0-9a-f]{64})"$', install, re.MULTILINE)
+    actual = hashlib.sha256((ROOT / "deploy/harden_server.sh").read_bytes()).hexdigest()
+    if pin and pin.group(1) == actual:
+        ok("installer's pinned hardening hash matches the deployed script")
+    else:
+        fail(f"pinned hardening hash is stale: pin={pin.group(1) if pin else None} actual={actual}")
 
 
 def main() -> int:
@@ -206,7 +227,7 @@ def main() -> int:
         check_progress,
         check_manifests,
         check_installer_payload,
-        check_transaction_policy,
+        check_host_requirements,
     )
     for check in checks:
         try:
