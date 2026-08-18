@@ -77,13 +77,15 @@ else
   MAX_OUTBOUND_PEERS="${MAX_OUTBOUND_PEERS:-10}"
 fi
 
-# MONIKER: derived from DOMAIN if set, otherwise fallback to "validator"
-# DOMAIN is only set after HTTPS is configured via setup_letsencrypt.py
-if [ -n "${DOMAIN:-}" ]; then
+# MONIKER names this node to its peers, and create_validator.sh records it
+# on-chain at registration. The installer asks the operator for it, so a domain
+# must not overwrite that answer. The site URL is only the default for a node
+# that was never given a name, which is how the public nodes came to be called
+# after their sites.
+if [ -z "${MONIKER:-}" ] && [ -n "${DOMAIN:-}" ]; then
   MONIKER="https://${DOMAIN}"
-else
-  MONIKER="${MONIKER:-validator}"
 fi
+MONIKER="${MONIKER:-validator}"
 
 if [ -z "${RETENTION_BLOCKS:-}" ]; then
   echo "ERROR: RETENTION_BLOCKS not set in node.env" >&2

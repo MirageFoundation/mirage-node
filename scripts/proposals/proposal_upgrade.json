@@ -1,12 +1,12 @@
 {
-    "title": "Release v1.36.8 (installer startup robustness)",
-    "summary": "NOT SUBMITTED FOR v1.36.8. This release stops the installer and updater from treating a slow start as a failed one, normalises pasted recovery phrases, and removes a misleading IPv6 probe error. It changes no consensus state and no transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
+    "title": "Release v1.37.0 (installer setup questions)",
+    "summary": "NOT SUBMITTED ON THE LIVE CHAIN FOR v1.37.0. This release asks the operator for a validator name, a domain and an uploads policy during install, and stops a domain from overwriting a chosen name. Every change is in the host installer and in startup config rendering: no consensus state, no transaction execution, no query semantics. A v1.37.0 upgrade handler is registered, as earlier minor releases did, so scripts/test_upgrade.sh can rehearse the real halt-and-swap path against this plan name locally. Because nodes on v1.36.8 and v1.37.0 compute identical results from identical blocks, no halt is proposed on the live chain.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.36.8",
+                "name": "v1.37.0",
                 "height": "T+50",
                 "info": ""
             }

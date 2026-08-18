@@ -10,6 +10,8 @@ set -euo pipefail
 STATE_DIR=/var/lib/mirage/install
 STATE_FILE="$STATE_DIR/state"
 DOMAIN_ARG=""
+MONIKER_CHOICE=""
+MEDIA_UPLOADS=""
 MNEMONIC=""
 IMAGE=""
 USERNAME=""
@@ -38,14 +40,22 @@ parse_args() {
       --domain=*) DOMAIN_ARG="${1#*=}"; shift ;;
       -h|--help)
         echo "usage: install.sh [--domain example.com]"
+        echo
+        echo "The installer asks for a validator name, a domain and whether to accept"
+        echo "media uploads. Set MIRAGE_MONIKER, MIRAGE_DOMAIN or MIRAGE_MEDIA_UPLOADS"
+        echo "to answer any of them up front; an empty value is a valid answer."
         exit 0
         ;;
       *) die "unknown flag: $1" ;;
     esac
   done
-  if [[ -n "$DOMAIN_ARG" && ! "$DOMAIN_ARG" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$ ]]; then
+  if [[ -n "$DOMAIN_ARG" ]] && ! valid_hostname "$DOMAIN_ARG"; then
     die "--domain must be a hostname like example.com (got '$DOMAIN_ARG')"
   fi
+}
+
+valid_hostname() {
+  [[ "$1" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$ ]]
 }
 
 require_root() {
@@ -574,6 +584,133 @@ external_address() {
   die "could not detect a public address for P2P external_address"
 }
 
+# Everything the operator has to decide is asked in one block, before the
+# install spends time on anything slow, so no question interrupts a state sync.
+# Every answer also takes an environment variable, which is what makes an
+# unattended run possible: a variable that is set is never asked about, and an
+# empty value is a real answer rather than a missing one.
+prompt_settings() {
+  prompt_moniker
+  prompt_domain
+  prompt_media_uploads
+}
+
+trim() {
+  local s="$1"
+  s="${s#"${s%%[![:space:]]*}"}"
+  printf '%s' "${s%"${s##*[![:space:]]}"}"
+}
+
+# In `curl ... | bash` stdin is the script itself, so an answer has to be read
+# from the controlling terminal. require_tty has already proven stdout is that
+# same terminal, which is why the questions themselves are ordinary output.
+ask() {
+  local answer
+  read -r -p "$1" answer </dev/tty
+  trim "$answer"
+}
+
+# This name is what other operators see in the validator list, and it is written
+# on-chain at registration, where changing it costs a transaction. The account's
+# username is the obvious default but not obviously the right answer.
+prompt_moniker() {
+  local raw
+  for _ in 1 2 3; do
+    if [[ -n "${MIRAGE_MONIKER+x}" ]]; then
+      raw=$(trim "$MIRAGE_MONIKER")
+    else
+      printf '%s\n' \
+        "Your validator's public name, shown in the validator list and to peers."
+      raw=$(ask "Validator name [$USERNAME]: ")
+    fi
+    [[ -n "$raw" ]] || raw="$USERNAME"
+    if [[ "$raw" =~ ^[[:print:]]{1,70}$ ]]; then
+      MONIKER_CHOICE="$raw"
+      echo "==> Validator name $MONIKER_CHOICE"
+      return 0
+    fi
+    echo "WARNING: a validator name must be 1-70 printable characters" >&2
+    if [[ -n "${MIRAGE_MONIKER+x}" ]]; then
+      die "MIRAGE_MONIKER is not a usable validator name"
+    fi
+  done
+  die "no usable validator name after 3 attempts"
+}
+
+prompt_domain() {
+  local raw
+  if [[ -n "$DOMAIN_ARG" ]]; then
+    warn_domain_dns "$DOMAIN_ARG"
+    return 0
+  fi
+  for _ in 1 2 3; do
+    if [[ -n "${MIRAGE_DOMAIN+x}" ]]; then
+      raw=$(trim "$MIRAGE_DOMAIN")
+    else
+      printf '%s\n' \
+        "A domain gives this node HTTPS and a public web address. Point its DNS A" \
+        "record at this host first. Leave it empty to run on the IP; you can add one" \
+        "later with: mirage-domain example.com"
+      raw=$(ask "Domain (empty for none): ")
+    fi
+    if [[ -z "$raw" ]]; then
+      echo "==> No domain; this node will serve on its IP"
+      return 0
+    fi
+    if valid_hostname "$raw"; then
+      DOMAIN_ARG="$raw"
+      warn_domain_dns "$raw"
+      return 0
+    fi
+    echo "WARNING: a domain looks like example.com" >&2
+    if [[ -n "${MIRAGE_DOMAIN+x}" ]]; then
+      die "MIRAGE_DOMAIN is not a hostname"
+    fi
+  done
+  die "no usable domain after 3 attempts"
+}
+
+# HTTPS is configured at startup and a failure there is deliberately non-fatal,
+# so a domain whose DNS is not live yet costs a certificate rather than the
+# install. Saying that here beats letting the operator discover a plain-HTTP node.
+warn_domain_dns() {
+  local domain="$1" resolved="" hosts
+  # A name that does not resolve is one of the answers this function reports on,
+  # so getent's "key not found" exit is handled rather than allowed to end the
+  # install: under pipefail it would otherwise abort with no explanation at all.
+  if hosts=$(getent ahostsv4 "$domain" 2>/dev/null); then
+    resolved=$(printf '%s\n' "$hosts" | awk '{print $1; exit}')
+  fi
+  if [[ -z "$resolved" ]]; then
+    echo "WARNING: $domain does not resolve yet; HTTPS is retried on every restart, or run 'mirage-domain $domain' once DNS is live" >&2
+  elif [[ -n "$PUBLIC_IP" && "$resolved" != "$PUBLIC_IP" ]]; then
+    echo "WARNING: $domain resolves to $resolved, not this host ($PUBLIC_IP); HTTPS will fail until DNS points here" >&2
+  else
+    echo "==> Domain $domain resolves to this host; HTTPS will be requested on startup"
+  fi
+}
+
+# Uploads are only accepted where a scanning edge fronts the node, which is why
+# every node without one keeps them off. The question makes that a decision
+# instead of a default nobody reads.
+prompt_media_uploads() {
+  local raw
+  if [[ -n "${MIRAGE_MEDIA_UPLOADS+x}" ]]; then
+    raw=$(trim "$MIRAGE_MEDIA_UPLOADS")
+  else
+    printf '%s\n' \
+      "Media uploads keep users' images and video on this node's disk, and nothing" \
+      "scans them unless you put a scanning edge in front of this node."
+    raw=$(ask "Accept media uploads on this node? [y/N]: ")
+  fi
+  case "${raw,,}" in
+    ''|n|no|false) MEDIA_UPLOADS=false ;;
+    y|yes|true) MEDIA_UPLOADS=true ;;
+    *) die "answer the media uploads question with yes or no (got '${raw:0:20}')" ;;
+  esac
+  echo "==> Media uploads: $MEDIA_UPLOADS"
+}
+
 configure() {
   mkdir -p /root/.mirage/env /root/.mirage/node/config /root/.caddy
   docker run --rm -v /root/.mirage:/root/.mirage --entrypoint /bin/bash "$IMAGE" -lc \
@@ -588,7 +725,7 @@ configure() {
   peers=$(jq -r '.persistent_peers | join(",")' "$MANIFEST_DIR/network.json")
   ext=$(external_address)
   write_env_key() {
-    local key="$1" val="$2" file=/root/.mirage/env/node.env
+    local key="$1" val="$2" file="${3:-/root/.mirage/env/node.env}"
     python3 - "$file" "$key" "$val" <<'PY'
 import os, re, sys
 path, key, value = sys.argv[1:4]
@@ -611,11 +748,17 @@ PY
   }
   write_env_key BOOTSTRAP_RPC "$rpc"
   write_env_key PERSISTENT_PEERS "$peers"
-  write_env_key MONIKER "$USERNAME"
+  write_env_key MONIKER "$MONIKER_CHOICE"
   write_env_key EXTERNAL_ADDRESS "$ext"
   if [[ -n "$DOMAIN_ARG" ]]; then
     write_env_key DOMAIN "$DOMAIN_ARG"
   fi
+  # A single operator is not watching at 04:00, and a diverged node that waits
+  # for a human is down for as long as the human takes. Recovery snapshots the
+  # diverged state before it touches anything, so the forensics survive either
+  # way; this only decides whether the node waits to be told.
+  write_env_key WATCHDOG_AUTORECOVER true
+  write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env
   cp "$MANIFEST_DIR/network.json" /root/.mirage/env/network-manifest.json
   cp "$MANIFEST_DIR/network.json.sig" /root/.mirage/env/network-manifest.json.sig
   cp "$MANIFEST_DIR/manifest.json" /root/.mirage/env/release-manifest.json
@@ -813,6 +956,7 @@ main() {
   detect_public_ip
 
   if ! state_at_least configured; then
+    prompt_settings
     configure
     advance_state configured
   fi

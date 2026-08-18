@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.36.8 installer-robustness release."""
+"""Post-deploy verification for the v1.37.0 installer setup-questions release."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.36.8"
+VERSION = "v1.37.0"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 passed = 0
@@ -142,6 +142,10 @@ def check_manifests() -> None:
             f"network policy generation/min_release={network['generation']}/{network['min_release']}, "
             "expected 2/v1.36.4"
         )
+    if network["min_release"] != VERSION:
+        ok(f"min_release stays at {network['min_release']}: {VERSION} adds no requirement older nodes fail")
+    else:
+        fail(f"min_release was raised to {VERSION} without a chain-level reason to exclude older nodes")
     if len(network["persistent_peers"]) == 4:
         ok("signed network policy contains all four persistent peers")
     else:
@@ -186,61 +190,129 @@ def check_installer_payload() -> None:
         fail("updater host-tool refresh or rollback policy missing")
 
 
-def check_startup_waits() -> None:
-    """v1.36.8 stopped treating a slow start as a failed one.
+def bash(script: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "-c", script],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, **(env or {})},
+    )
 
-    A flat 120s deadline failed a real first boot, and the same deadline in the
-    updater would have rolled back a healthy release whose migration ran long.
+
+def installer_functions() -> str:
+    """The installer's functions with its final main call removed."""
+    lines = (ROOT / "deploy/install.sh").read_text(encoding="utf-8").splitlines()
+    if lines[-1].strip() != 'main "$@"':
+        raise RuntimeError('install.sh no longer ends with main "$@"')
+    return "\n".join(lines[:-1]) + "\n"
+
+
+def check_setup_questions() -> None:
+    """v1.37.0 asks the operator for a name, a domain and an uploads policy.
+
+    Every question has to be answerable from the environment, or an unattended
+    install blocks forever on a prompt nobody is there to see.
     """
     install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-    updater = (ROOT / "deploy/hosttools/mirage-update").read_text(encoding="utf-8")
-    validator = (ROOT / "deploy/create_validator.sh").read_text(encoding="utf-8")
 
-    for name, text in (("installer", install), ("updater", updater)):
-        if "budget=900" not in text:
-            fail(f"{name} startup wait is not the padded 900s budget")
-        elif "RestartCount" not in text or "State.Restarting" not in text:
-            fail(f"{name} startup wait cannot tell a crash from a slow boot")
-        else:
-            ok(f"{name} waits 900s for startup and ends early on a crash")
-
-    if "RPC did not become ready in 120s" in install or "seq 1 120" in updater:
-        fail("a 120s startup deadline is still present")
+    if re.search(r"if ! state_at_least configured; then\n\s+prompt_settings\n\s+configure\n", install):
+        ok("the questions are asked once, immediately before the node is configured")
     else:
-        ok("no 120s startup deadline remains on the install or activation path")
+        fail("prompt_settings does not run exactly once before configure")
 
-    if "running_pinned_image" in install:
-        ok("resuming an install does not recreate a container already serving the pinned image")
+    script = (
+        installer_functions()
+        + 'USERNAME=fallback-name\nPUBLIC_IP=203.0.113.7\n'
+        + 'prompt_settings >/dev/null\n'
+        + 'printf "%s|%s|%s" "$MONIKER_CHOICE" "$DOMAIN_ARG" "$MEDIA_UPLOADS"\n'
+    )
+    answered = bash(script, {"MIRAGE_MONIKER": "chosen-name", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": "yes"})
+    if answered.returncode == 0 and answered.stdout == "chosen-name||true":
+        ok("answers supplied by environment variables are taken without prompting")
     else:
-        fail("installer still recreates a running container when resuming")
+        fail(f"env-answered setup returned rc={answered.returncode} out={answered.stdout!r}")
 
-    window = re.search(r"--timeout-duration (\d+)m", validator)
-    timeout = re.search(r"^REGISTRATION_TIMEOUT=(\d+)$", validator, re.MULTILINE)
-    if window and timeout and int(timeout.group(1)) > int(window.group(1)) * 60:
-        ok(f"registration waits {timeout.group(1)}s, outlasting the {window.group(1)}m tx validity window")
+    defaults = bash(script, {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": ""})
+    if defaults.returncode == 0 and defaults.stdout == "fallback-name||false":
+        ok("empty answers default to the account username, no domain and uploads off")
     else:
-        fail("registration wait does not outlast the validity window of its own transaction")
+        fail(f"default setup returned rc={defaults.returncode} out={defaults.stdout!r}")
+
+    rejected = bash(script, {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": "maybe"})
+    if rejected.returncode != 0 and "ERROR" in rejected.stderr:
+        ok("an answer that is neither yes nor no stops the install by name")
+    else:
+        fail("the uploads question accepts an answer it cannot interpret")
+
+    # A domain that does not resolve is a warning, never an abort: getent exits 2
+    # for an unknown name and pipefail turned that into a bare failure.
+    unresolved = bash(
+        installer_functions() + 'PUBLIC_IP=203.0.113.7\nwarn_domain_dns nonexistent.invalid\n'
+    )
+    if unresolved.returncode == 0 and "does not resolve yet" in unresolved.stderr:
+        ok("a domain with no DNS record warns and continues")
+    else:
+        fail(f"unresolved domain returned rc={unresolved.returncode} err={unresolved.stderr[-160:]!r}")
 
 
-def check_mnemonic_and_probes() -> None:
-    """v1.36.8 normalised pasted phrases and stopped the bogus IPv6 error."""
+def check_answers_are_persisted() -> None:
+    """The answers have to reach the file whose reader looks for them."""
     install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
-
-    if r"${raw,,}" in install and r"\xc2\xa0" in install and r"\e[200~" in install:
-        ok("pasted phrases are normalised for case, no-break spaces and paste markers")
+    required = (
+        'write_env_key MONIKER "$MONIKER_CHOICE"',
+        "write_env_key WATCHDOG_AUTORECOVER true",
+        'write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env',
+    )
+    missing = [line for line in required if line not in install]
+    if missing:
+        fail(f"configure does not persist: {missing}")
     else:
-        fail("pasted phrases are not normalised")
+        ok("name, recovery policy and uploads policy are written to their own env files")
 
-    if "space between each word" in install:
-        ok("the phrase prompt states the required format")
+    if 'write_env_key MONIKER "$USERNAME"' in install:
+        fail("configure still writes the username over the operator's chosen name")
     else:
-        fail("the phrase prompt does not state that words need spaces between them")
+        ok("the chosen name is no longer overwritten by the account username")
 
-    if "ip -6 addr show scope global" in install:
-        ok("IPv6 is probed only on hosts that have a global IPv6 address")
+    template = (ROOT / "deploy/templates/env/frontend.env").read_text(encoding="utf-8")
+    if re.search(r"^VITE_API_BASE=\s*$", template, re.MULTILINE):
+        ok("a fresh node's frontend config points at itself, not another operator's node")
     else:
-        fail("installer still probes IPv6 on hosts that cannot use it")
+        fail("the frontend template still ships a node URL")
 
+
+def check_moniker_precedence() -> None:
+    """A name the operator chose must survive a domain being set.
+
+    init.sh overwrote MONIKER with https://DOMAIN whenever a domain was present,
+    and that value is what create_validator.sh records on-chain at registration.
+    """
+    init_sh = (ROOT / "deploy/init.sh").read_text(encoding="utf-8")
+    if 'if [ -z "${MONIKER:-}" ] && [ -n "${DOMAIN:-}" ]; then' not in init_sh:
+        fail("init.sh no longer guards the domain-derived name behind an unset name")
+        return
+
+    lines = init_sh.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith('if [ -z "${MONIKER:-}" ]'))
+    end = next(i for i, line in enumerate(lines[start:], start) if line == 'MONIKER="${MONIKER:-validator}"')
+    snippet = "\n".join(lines[start : end + 1]) + '\nprintf %s "$MONIKER"\n'
+    for moniker, domain, expected in (
+        ("chosen", "example.com", "chosen"),
+        ("", "example.com", "https://example.com"),
+        ("", "", "validator"),
+    ):
+        result = bash(snippet, {"MONIKER": moniker, "DOMAIN": domain})
+        if result.returncode != 0 or result.stdout != expected:
+            fail(f"MONIKER={moniker!r} DOMAIN={domain!r} rendered {result.stdout!r}, expected {expected!r}")
+            return
+    ok("an explicit name wins over the domain, which is only the unnamed default")
+
+
+def check_harden_pin() -> None:
+    """install.sh changed this release, and a stale pin refuses every install."""
+    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
     pin = re.search(r'^EXPECTED_HARDEN_SHA256="([0-9a-f]{64})"$', install, re.MULTILINE)
     actual = hashlib.sha256((ROOT / "deploy/harden_server.sh").read_bytes()).hexdigest()
     if pin and pin.group(1) == actual:
@@ -250,15 +322,17 @@ def check_mnemonic_and_probes() -> None:
 
 
 def main() -> int:
-    print(f"verify_upgrade.py for {VERSION} (ordinary release; no chain upgrade)")
+    print(f"verify_upgrade.py for {VERSION} (handler registered; no live chain plan)")
     checks = (
         check_versions,
         check_no_upgrade_plan,
         check_progress,
         check_manifests,
         check_installer_payload,
-        check_startup_waits,
-        check_mnemonic_and_probes,
+        check_setup_questions,
+        check_answers_are_persisted,
+        check_moniker_precedence,
+        check_harden_pin,
     )
     for check in checks:
         try:

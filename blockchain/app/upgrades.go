@@ -2347,6 +2347,34 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// v1.37.0: the one-command installer asks the operator for a validator name,
+	// a domain and an uploads policy, and a node's chosen name now survives a
+	// domain being set. Every one of those changes lives in the host installer and
+	// in startup config rendering. No chain code is touched: no state, params,
+	// store keys or app hash, and nothing about how a node answers a query.
+	//
+	// So this handler has nothing to migrate, and unlike v1.35.0 and v1.36.0 there
+	// is no cross-node semantic to synchronise either — a fleet running mixed
+	// binaries computes identical results from identical blocks. It is registered
+	// only so the release can be scheduled the way earlier minor releases were, if
+	// operators ever want one synchronised binary swap. No plan is being submitted
+	// for it, and none is needed.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.37.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.37.0 (installer setup questions; no state migration)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.37.0: RunMigrations failed: %w", err)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.37.0 complete")
+			return toVM, nil
+		},
+	)
+
 	// Register the store loaders for the upgrades that physically delete stores.
 	// These must run before app.Load() (called later in App.New) so the deleted
 	// stores are dropped while loading the multistore at the upgrade height.

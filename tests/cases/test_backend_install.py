@@ -24,6 +24,8 @@ NETWORK_JSON = os.path.join(REPO_ROOT, "release", "network.json")
 STAKE_PY = os.path.join(REPO_ROOT, "scripts", "stake.py")
 VERSION_FILE = os.path.join(REPO_ROOT, "VERSION")
 EXPECTED_FP = "679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8"
+# Imported or executed by .github/workflows/release.yml.
+RELEASE_CI_FILES = ("deploy/release_verify.py", "scripts/finalize_release_manifest.py")
 
 
 def _install_functions_only() -> str:
@@ -63,6 +65,10 @@ def test_install(backend: str) -> None:
     _test_install_non_tty()
     _test_mnemonic_word_count()
     _test_mnemonic_paste_normalised()
+    _test_setup_prompts()
+    _test_prompt_answers_reach_env()
+    _test_moniker_precedence()
+    _test_frontend_env_no_foreign_node()
     _test_launch_wait()
     _test_activation_and_registration_waits()
     _test_pinned_bootstrap_dependencies()
@@ -384,6 +390,200 @@ def _test_mnemonic_paste_normalised() -> None:
     _pass(f"install.mnemonic.normalises_{len(variants)}_paste_shapes")
 
 
+def _test_setup_prompts() -> None:
+    """The install-time questions must answer themselves from the environment.
+
+    Every prompt takes a variable so an unattended run never blocks, and a
+    variable that is set but empty is a real answer: it is how an operator says
+    "no domain" without being asked.
+    """
+    functions = _install_functions_only()
+    script = (
+        functions
+        + '\nUSERNAME=alice\nPUBLIC_IP=203.0.113.7\n'
+        + 'prompt_settings >/dev/null\n'
+        + 'printf "%s|%s|%s" "$MONIKER_CHOICE" "$DOMAIN_ARG" "$MEDIA_UPLOADS"\n'
+    )
+
+    def run_env(**env) -> subprocess.CompletedProcess:
+        return _run(["bash", "-c", script], env={**os.environ, **env})
+
+    # Only a domain can reach DNS, and a test must not depend on resolving one,
+    # so the accepted-domain cases use a name that cannot resolve anywhere.
+    cases = {
+        "defaults": (
+            {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": ""},
+            "alice||false",
+        ),
+        "all_answered": (
+            {
+                "MIRAGE_MONIKER": "my-validator",
+                "MIRAGE_DOMAIN": "node.invalid",
+                "MIRAGE_MEDIA_UPLOADS": "yes",
+            },
+            "my-validator|node.invalid|true",
+        ),
+        "whitespace_trimmed": (
+            {"MIRAGE_MONIKER": "  spaced name  ", "MIRAGE_DOMAIN": " node.invalid ", "MIRAGE_MEDIA_UPLOADS": " no "},
+            "spaced name|node.invalid|false",
+        ),
+    }
+    for name, (env, expected) in cases.items():
+        r = run_env(**env)
+        if r.returncode != 0:
+            _fail(f"install.prompts.{name}", f"rc={r.returncode} err={(r.stderr or '')[-200:]}")
+            return
+        if r.stdout != expected:
+            _fail(f"install.prompts.{name}", f"got {r.stdout!r}, expected {expected!r}")
+            return
+
+    rejected = {
+        "name_too_long": {"MIRAGE_MONIKER": "x" * 71, "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": ""},
+        "name_with_control_char": {"MIRAGE_MONIKER": "bad\tname", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": ""},
+        "domain_not_hostname": {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "http://x.example", "MIRAGE_MEDIA_UPLOADS": ""},
+        "media_not_yes_or_no": {"MIRAGE_MONIKER": "", "MIRAGE_DOMAIN": "", "MIRAGE_MEDIA_UPLOADS": "maybe"},
+    }
+    for name, env in rejected.items():
+        r = run_env(**env)
+        if r.returncode == 0:
+            _fail(f"install.prompts.{name}", f"accepted a bad answer: {r.stdout!r}")
+            return
+        if "ERROR" not in (r.stderr or ""):
+            _fail(f"install.prompts.{name}", f"failed without naming the problem: {(r.stderr or '')[-200:]}")
+            return
+
+    # A name is asked for before anything slow runs, and never again on a resume.
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if not re.search(r"if ! state_at_least configured; then\n\s+prompt_settings\n\s+configure\n", body):
+        _fail("install.prompts.placement", "prompts do not run once, immediately before configure")
+        return
+    _pass(f"install.prompts.answerable_from_env_{len(cases) + len(rejected)}_cases")
+
+
+def _test_prompt_answers_reach_env() -> None:
+    """The answers have to land in the file the reader of each key looks at.
+
+    MEDIA_UPLOADS_ENABLED is read from backend.env while everything else the
+    installer writes lives in node.env, so a writer hardwired to one file would
+    silently drop the answer.
+    """
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    expected = {
+        "MONIKER": ('write_env_key MONIKER "$MONIKER_CHOICE"', "node.env"),
+        "WATCHDOG_AUTORECOVER": ("write_env_key WATCHDOG_AUTORECOVER true", "node.env"),
+        "MEDIA_UPLOADS_ENABLED": (
+            'write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env',
+            "backend.env",
+        ),
+    }
+    for key, (line, _dest) in expected.items():
+        if line not in body:
+            _fail(f"install.env_write.{key}", f"configure does not write {key} as expected")
+            return
+    if 'write_env_key MONIKER "$USERNAME"' in body:
+        _fail("install.env_write.moniker_ignored", "configure still writes the username over the operator's answer")
+        return
+
+    # Exercise the writer itself: it must honour an explicit destination, keep
+    # the file at 0600, and replace a key in place rather than duplicating it.
+    lines = body.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "write_env_key() {")
+    end = next(i for i, line in enumerate(lines[start + 1 :], start + 1) if line.strip() == "}")
+    writer = "\n".join(line[2:] if line.startswith("  ") else line for line in lines[start : end + 1])
+    with tempfile.TemporaryDirectory(prefix="env-write-") as tmp:
+        node_env = os.path.join(tmp, "node.env")
+        backend_env = os.path.join(tmp, "backend.env")
+        Path(node_env).write_text("MONIKER=validator\nWATCHDOG_AUTORECOVER=false\n", encoding="utf-8")
+        Path(backend_env).write_text("MEDIA_UPLOADS_ENABLED=false\n", encoding="utf-8")
+        script = (
+            "set -euo pipefail\n"
+            + writer.replace("/root/.mirage/env/node.env", node_env)
+            + f'\nwrite_env_key MONIKER "chosen name"\n'
+            + "write_env_key WATCHDOG_AUTORECOVER true\n"
+            + f'write_env_key MEDIA_UPLOADS_ENABLED true {backend_env}\n'
+        )
+        r = _run(["bash", "-c", script])
+        if r.returncode != 0:
+            _fail("install.env_write.runs", f"rc={r.returncode} err={(r.stderr or '')[-200:]}")
+            return
+        node_text = Path(node_env).read_text(encoding="utf-8")
+        backend_text = Path(backend_env).read_text(encoding="utf-8")
+        if node_text != "MONIKER=chosen name\nWATCHDOG_AUTORECOVER=true\n":
+            _fail("install.env_write.node_env", f"node.env is {node_text!r}")
+            return
+        if backend_text != "MEDIA_UPLOADS_ENABLED=true\n":
+            _fail("install.env_write.backend_env", f"backend.env is {backend_text!r}")
+            return
+        for path in (node_env, backend_env):
+            mode = os.stat(path).st_mode & 0o777
+            if mode != 0o600:
+                _fail("install.env_write.mode", f"{os.path.basename(path)} left at {oct(mode)}")
+                return
+    _pass("install.env_write.answers_reach_their_own_files")
+
+
+def _test_moniker_precedence() -> None:
+    """A chosen name must survive a domain being set.
+
+    init.sh used to overwrite MONIKER with https://DOMAIN whenever a domain was
+    configured, which silently discarded the name the installer asks for and
+    then registers on-chain. The site URL is now only the unnamed default, so
+    the existing public nodes keep the name they already render.
+    """
+    init_sh = os.path.join(REPO_ROOT, "deploy", "init.sh")
+    lines = Path(init_sh).read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.startswith('if [ -z "${MONIKER:-}" ]'))
+        end = next(i for i, line in enumerate(lines[start:], start) if line == 'MONIKER="${MONIKER:-validator}"')
+    except StopIteration:
+        _fail("install.moniker.block", "init.sh no longer derives MONIKER in a recognisable block")
+        return
+    snippet = "\n".join(lines[start : end + 1]) + '\nprintf %s "$MONIKER"\n'
+    cases = {
+        ("chosen", "example.com"): "chosen",
+        ("", "example.com"): "https://example.com",
+        ("", ""): "validator",
+        ("mirage-node", "mirage.talk"): "mirage-node",
+    }
+    for (moniker, domain), expected in cases.items():
+        r = _run(["bash", "-c", snippet], env={**os.environ, "MONIKER": moniker, "DOMAIN": domain})
+        if r.returncode != 0:
+            _fail("install.moniker.runs", f"rc={r.returncode} err={(r.stderr or '')[-200:]}")
+            return
+        if r.stdout != expected:
+            _fail(
+                f"install.moniker.{moniker or 'unset'}_{domain or 'no_domain'}",
+                f"got {r.stdout!r}, expected {expected!r}",
+            )
+            return
+    _pass(f"install.moniker.operator_choice_wins_{len(cases)}_cases")
+
+
+def _test_frontend_env_no_foreign_node() -> None:
+    """A fresh operator's config must not point at somebody else's node.
+
+    The bundle is built with VITE_API_BASE=/api, so a URL in the template never
+    took effect; it only told an operator their node talks to another one.
+    """
+    template = os.path.join(REPO_ROOT, "deploy", "templates", "env", "frontend.env")
+    values = dict(
+        line.split("=", 1)
+        for line in Path(template).read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    )
+    if "VITE_API_BASE" not in values:
+        _fail("install.frontend_env.present", "VITE_API_BASE is gone from the template")
+        return
+    if values["VITE_API_BASE"].strip():
+        _fail("install.frontend_env.foreign_node", f"template ships VITE_API_BASE={values['VITE_API_BASE']!r}")
+        return
+    dockerfile = Path(os.path.join(REPO_ROOT, "deploy", "Dockerfile")).read_text(encoding="utf-8")
+    if "VITE_API_BASE=/api" not in dockerfile:
+        _fail("install.frontend_env.build_arg", "the image no longer builds the bundle against /api")
+        return
+    _pass("install.frontend_env.defaults_to_this_node")
+
+
 def _test_launch_wait() -> None:
     """The startup wait must outlast a first boot but end the moment it crashes.
 
@@ -536,22 +736,36 @@ def _test_release_workflow_files_tracked() -> None:
     Every release tag from v1.36.4 to v1.36.7 failed the published-manifest job
     because it imports scripts.finalize_release_manifest, which the scripts/*
     ignore rule kept out of every clone while it sat in the working tree.
+
+    The runtime image ships neither the workflow nor git metadata, so the list of
+    files is named here. In the image their presence is the evidence, since a
+    CI-built image is built from a checkout. On a checkout the workflow is re-read
+    to prove the list has not drifted and that git tracks every entry.
     """
-    workflow = Path(REPO_ROOT, ".github", "workflows", "release.yml").read_text(encoding="utf-8")
-    needed = {f"{package}/{module}.py" for package, module in re.findall(r"from (scripts|deploy)\.(\w+) import", workflow)}
-    needed.update(re.findall(r"(?:python3|bash|sh) ((?:scripts|deploy)/[\w./-]+)", workflow))
-    if not needed:
-        _fail("install.release_ci.no_references", "found no workflow references to verify")
+    missing = [path for path in RELEASE_CI_FILES if not Path(REPO_ROOT, path).is_file()]
+    if missing:
+        _fail("install.release_ci.missing", f"release CI needs files this build does not carry: {missing}")
         return
-    untracked = [
-        path
-        for path in sorted(needed)
-        if _run(["git", "-C", REPO_ROOT, "ls-files", "--error-unmatch", path]).returncode != 0
-    ]
-    if untracked:
-        _fail("install.release_ci.untracked", f"release CI needs files git does not track: {untracked}")
-        return
-    _pass(f"install.release_ci.tracks_all_{len(needed)}_referenced_files")
+    workflow_path = Path(REPO_ROOT, ".github", "workflows", "release.yml")
+    if workflow_path.is_file() and Path(REPO_ROOT, ".git").exists():
+        workflow = workflow_path.read_text(encoding="utf-8")
+        referenced = {f"{package}/{module}.py" for package, module in re.findall(r"from (scripts|deploy)\.(\w+) import", workflow)}
+        referenced.update(re.findall(r"(?:python3|bash|sh) ((?:scripts|deploy)/[\w./-]+)", workflow))
+        if referenced != set(RELEASE_CI_FILES):
+            _fail(
+                "install.release_ci.drift",
+                f"workflow references {sorted(referenced)}, this test checks {sorted(RELEASE_CI_FILES)}",
+            )
+            return
+        untracked = [
+            path
+            for path in RELEASE_CI_FILES
+            if _run(["git", "-C", REPO_ROOT, "ls-files", "--error-unmatch", path]).returncode != 0
+        ]
+        if untracked:
+            _fail("install.release_ci.untracked", f"release CI needs files git does not track: {untracked}")
+            return
+    _pass(f"install.release_ci.carries_all_{len(RELEASE_CI_FILES)}_referenced_files")
 
 
 def _test_docker_context_excludes_private_key() -> None:
