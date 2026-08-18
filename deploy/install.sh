@@ -275,22 +275,37 @@ install_verify_helper() {
 
 set_mnemonic() {
   local raw="$1"
+  # Normalise what terminals and password managers add to a pasted phrase.
+  # Every step here is bash parameter expansion: piping through tr or xargs
+  # would put the seed in a process argv, where anyone with /proc access can
+  # read it. Runs of plain whitespace need no help; read -a collapses those.
+  raw="${raw//$'\e[200~'/}"                  # bracketed-paste markers; read does not strip them
+  raw="${raw//$'\e[201~'/}"
+  raw="${raw//$'\xc2\xa0'/ }"                # no-break space, indistinguishable from a space
+  raw="${raw//$'\xe2\x80\xaf'/ }"            # narrow no-break space
+  raw="${raw//$'\xe3\x80\x80'/ }"            # ideographic space
+  raw="${raw//$'\xe2\x80\x8b'/}"             # zero-width space
+  raw="${raw//$'\xef\xbb\xbf'/}"             # byte-order mark
+  raw="${raw//[$'\001'-$'\037'$'\177']/ }"   # carriage returns, stray escapes, other controls
+  raw="${raw,,}"                             # the BIP-39 English words are all lowercase
   local -a words
-  # Split in bash. Piping through xargs would put the seed in a process argv,
-  # where anyone with /proc access can read it.
   read -r -a words <<<"$raw"
   MNEMONIC="${words[*]}"
   if (( ${#words[@]} != 12 )); then
-    die "mnemonic must be exactly 12 words (got ${#words[@]})"
+    die "recovery phrase must be 12 words on one line, separated by spaces (got ${#words[@]})"
   fi
 }
 
 prompt_mnemonic() {
   local raw
-  read -r -s -p "Enter 12-word mnemonic: " raw </dev/tty
+  printf '%s\n' \
+    "Paste your 12-word recovery phrase on ONE line, with a space between each word." \
+    "It stays hidden while you paste, and extra spacing is cleaned up for you." >/dev/tty
+  read -r -s -p "Recovery phrase: " raw </dev/tty
   echo >/dev/tty
   set_mnemonic "$raw"
   unset raw
+  echo "==> Read a 12-word phrase" >/dev/tty
 }
 
 validate_mnemonic_wordlist() {
@@ -529,7 +544,18 @@ collision_guard() {
 # Sets PUBLIC_IP / PUBLIC_IP6 in the caller, so it must not run in a subshell.
 detect_public_ip() {
   PUBLIC_IP=$(curl -4 -fsS --max-time 5 https://api.ipify.org || true)
-  PUBLIC_IP6=$(curl -6 -fsS --max-time 5 https://api6.ipify.org || true)
+  PUBLIC_IP6=""
+  # Only probe v6 where the host actually has a global v6 address. Probing
+  # regardless printed a connection failure on every v4-only host, which reads
+  # as a broken install when the address is optional. A host that does have v6
+  # and still cannot reach the probe is worth a warning, so that case is not
+  # silenced.
+  if [[ -n "$(ip -6 addr show scope global 2>/dev/null)" ]]; then
+    PUBLIC_IP6=$(curl -6 -fsS --max-time 5 https://api6.ipify.org || true)
+    if [[ -z "$PUBLIC_IP6" ]]; then
+      echo "WARNING: host has a global IPv6 address but the IPv6 probe failed; continuing with IPv4"
+    fi
+  fi
 }
 
 external_address() {
@@ -629,17 +655,60 @@ identity() {
   echo "==> Validator account and consensus key imported"
 }
 
-launch() {
-  /usr/local/bin/mirage-launch --image "$IMAGE" --moniker "$USERNAME"
-  local i
-  for i in $(seq 1 120); do
+running_pinned_image() {
+  [[ "$(docker inspect -f '{{.State.Running}}' mirage 2>/dev/null || true)" == true ]] || return 1
+  local want
+  want=$(docker inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || true)
+  [[ -n "$want" && "$(docker inspect -f '{{.Image}}' mirage 2>/dev/null || true)" == "$want" ]]
+}
+
+startup_failed() {
+  echo "ERROR: $1" >&2
+  echo "--- last 20 lines of container output ---" >&2
+  docker logs --tail 20 mirage >&2 2>&1 || true
+  die "the node did not come up; follow it with 'docker logs -f mirage', then re-run this installer to finish"
+}
+
+# A restart of the running validators reaches RPC in about 35 seconds. A first
+# boot also creates the Postgres cluster inside the volume, applies every
+# migration to empty databases and state-syncs the chain, so the budget is an
+# order of magnitude above the warm path rather than a guess. A crashed or
+# crash-looping container ends the wait immediately, so the deadline is only
+# ever spent on a node that is still making progress.
+wait_for_rpc() {
+  local budget=900 elapsed=0 restarts_before restarts_now
+  restarts_before=$(docker inspect -f '{{.RestartCount}}' mirage 2>/dev/null || echo 0)
+  while (( elapsed < budget )); do
     if curl -sf --max-time 2 http://127.0.0.1:26657/status >/dev/null; then
-      echo "✓ RPC is up"
+      echo "✓ RPC is up after ${elapsed}s"
       return 0
     fi
-    sleep 1
+    if [[ "$(docker inspect -f '{{.State.Running}}' mirage 2>/dev/null || true)" != true \
+       && "$(docker inspect -f '{{.State.Restarting}}' mirage 2>/dev/null || true)" != true ]]; then
+      startup_failed "the mirage container is no longer running"
+    fi
+    restarts_now=$(docker inspect -f '{{.RestartCount}}' mirage 2>/dev/null || echo "$restarts_before")
+    if (( restarts_now > restarts_before )); then
+      startup_failed "the mirage container is restarting in a loop"
+    fi
+    if (( elapsed > 0 && elapsed % 30 == 0 )); then
+      echo "    still starting (${elapsed}s of ${budget}s): $(docker logs --tail 1 mirage 2>&1 | tr -d '\r' | cut -c1-100)"
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
   done
-  die "container started but RPC did not become ready in 120s"
+  startup_failed "RPC did not become ready in ${budget}s"
+}
+
+launch() {
+  # Resuming an install must not restart a node that is already up on the
+  # pinned image; recreating it would throw away an in-progress state sync.
+  if running_pinned_image; then
+    echo "==> mirage is already running the pinned image; not recreating it"
+  else
+    /usr/local/bin/mirage-launch --image "$IMAGE" --moniker "$USERNAME"
+  fi
+  wait_for_rpc
 }
 
 # Without this the first updater tick has no baseline: it would re-stage the

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.36.7 profile-preflight release."""
+"""Post-deploy verification for the v1.36.8 installer-robustness release."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.36.7"
+VERSION = "v1.36.8"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 passed = 0
@@ -186,36 +186,60 @@ def check_installer_payload() -> None:
         fail("updater host-tool refresh or rollback policy missing")
 
 
-def check_profile_preflight() -> None:
-    """v1.36.7 narrowed the cross-endpoint profile check to chain-derived fields.
+def check_startup_waits() -> None:
+    """v1.36.8 stopped treating a slow start as a failed one.
 
-    Comparing whole get_profile documents rejected every funded account, because
-    the response also reports each node's own inbox state.
+    A flat 120s deadline failed a real first boot, and the same deadline in the
+    updater would have rolled back a healthy release whose migration ran long.
     """
     install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+    updater = (ROOT / "deploy/hosttools/mirage-update").read_text(encoding="utf-8")
+    validator = (ROOT / "deploy/create_validator.sh").read_text(encoding="utf-8")
 
-    if 'agree_json "$api" "/api/get_profile?address=${ADDRESS}" "username"' in install:
-        ok("profile preflight compares only the username it acts on")
-    else:
-        fail("profile preflight does not narrow the cross-endpoint comparison to username")
+    for name, text in (("installer", install), ("updater", updater)):
+        if "budget=900" not in text:
+            fail(f"{name} startup wait is not the padded 900s budget")
+        elif "RestartCount" not in text or "State.Restarting" not in text:
+            fail(f"{name} startup wait cannot tell a crash from a slow boot")
+        else:
+            ok(f"{name} waits 900s for startup and ends early on a crash")
 
-    if 'compare = [k for k in keys.split(",") if k]' in install and "body if not compare" in install:
-        ok("agree_json accepts a key list and compares whole documents without one")
+    if "RPC did not become ready in 120s" in install or "seq 1 120" in updater:
+        fail("a 120s startup deadline is still present")
     else:
-        fail("agree_json does not support narrowing the compared keys")
+        ok("no 120s startup deadline remains on the install or activation path")
 
-    calls = [line.strip() for line in install.splitlines() if re.search(r'=\$\(agree_json "', line)]
-    narrowed = [line for line in calls if line.endswith('"username")')]
-    if len(calls) == 3 and len(narrowed) == 1:
-        ok("only the profile query is narrowed; the two chain queries stay byte-strict")
+    if "running_pinned_image" in install:
+        ok("resuming an install does not recreate a container already serving the pinned image")
     else:
-        fail(f"unexpected set of cross-endpoint comparisons: {calls}")
+        fail("installer still recreates a running container when resuming")
 
-    suite = (ROOT / "tests/cases/test_backend_install.py").read_text(encoding="utf-8")
-    if "_test_agree_json_ignores_node_local_state" in suite:
-        ok("deployed suite pins the narrowing against regression")
+    window = re.search(r"--timeout-duration (\d+)m", validator)
+    timeout = re.search(r"^REGISTRATION_TIMEOUT=(\d+)$", validator, re.MULTILINE)
+    if window and timeout and int(timeout.group(1)) > int(window.group(1)) * 60:
+        ok(f"registration waits {timeout.group(1)}s, outlasting the {window.group(1)}m tx validity window")
     else:
-        fail("deployed suite carries no regression test for the profile preflight")
+        fail("registration wait does not outlast the validity window of its own transaction")
+
+
+def check_mnemonic_and_probes() -> None:
+    """v1.36.8 normalised pasted phrases and stopped the bogus IPv6 error."""
+    install = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
+
+    if r"${raw,,}" in install and r"\xc2\xa0" in install and r"\e[200~" in install:
+        ok("pasted phrases are normalised for case, no-break spaces and paste markers")
+    else:
+        fail("pasted phrases are not normalised")
+
+    if "space between each word" in install:
+        ok("the phrase prompt states the required format")
+    else:
+        fail("the phrase prompt does not state that words need spaces between them")
+
+    if "ip -6 addr show scope global" in install:
+        ok("IPv6 is probed only on hosts that have a global IPv6 address")
+    else:
+        fail("installer still probes IPv6 on hosts that cannot use it")
 
     pin = re.search(r'^EXPECTED_HARDEN_SHA256="([0-9a-f]{64})"$', install, re.MULTILINE)
     actual = hashlib.sha256((ROOT / "deploy/harden_server.sh").read_bytes()).hexdigest()
@@ -233,7 +257,8 @@ def main() -> int:
         check_progress,
         check_manifests,
         check_installer_payload,
-        check_profile_preflight,
+        check_startup_waits,
+        check_mnemonic_and_probes,
     )
     for check in checks:
         try:

@@ -1,12 +1,12 @@
 {
-    "title": "Release v1.36.7 (installer profile preflight)",
-    "summary": "NOT SUBMITTED FOR v1.36.7. This release stops the installer from comparing per-node backend state across public endpoints, which rejected every funded account before it could enroll. It changes no consensus state and no transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
+    "title": "Release v1.36.8 (installer startup robustness)",
+    "summary": "NOT SUBMITTED FOR v1.36.8. This release stops the installer and updater from treating a slow start as a failed one, normalises pasted recovery phrases, and removes a misleading IPv6 probe error. It changes no consensus state and no transaction execution. It therefore registers no chain upgrade handler and must not schedule a software-upgrade halt. scripts/test_upgrade.sh reads the plan name below, confirms that no matching handler exists, and requires --no-chain-upgrade so the complete deployment and test rehearsal still runs without proposing a halt.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.36.7",
+                "name": "v1.36.8",
                 "height": "T+50",
                 "info": ""
             }

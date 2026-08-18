@@ -62,6 +62,9 @@ def test_install(backend: str) -> None:
     _test_install_sh_truncation_safe()
     _test_install_non_tty()
     _test_mnemonic_word_count()
+    _test_mnemonic_paste_normalised()
+    _test_launch_wait()
+    _test_activation_and_registration_waits()
     _test_pinned_bootstrap_dependencies()
     _test_ubuntu_full_upgrade()
     _test_provider_memory_overhead()
@@ -336,6 +339,195 @@ def _test_agree_json_ignores_node_local_state() -> None:
     finally:
         for httpd in servers:
             httpd.shutdown()
+
+
+def _test_mnemonic_paste_normalised() -> None:
+    """A pasted phrase must survive what terminals and password managers add.
+
+    A no-break space counted as one word and a bracketed-paste marker attached
+    itself to the first and last word, so a correct phrase was rejected.
+    """
+    functions = _install_functions_only()
+    phrase = " ".join(["abandon"] * 11 + ["about"])
+    script = functions + '\nset_mnemonic "$1"\nprintf %s "$MNEMONIC"\n'
+    variants = {
+        "double_spaces": phrase.replace(" ", "   "),
+        "leading_trailing": f"   {phrase}  ",
+        "tabs": phrase.replace(" ", "\t"),
+        "no_break_space": phrase.replace(" ", "\u00a0"),
+        "narrow_no_break_space": phrase.replace(" ", "\u202f"),
+        "ideographic_space": phrase.replace(" ", "\u3000"),
+        "zero_width_space": phrase.replace(" ", " \u200b"),
+        "byte_order_mark": f"\ufeff{phrase}",
+        "bracketed_paste": f"\x1b[200~{phrase}\x1b[201~",
+        "trailing_carriage_return": f"{phrase}\r",
+        "capitalised": phrase.title(),
+    }
+    for name, raw in variants.items():
+        r = _run(["bash", "-c", script, "_", raw])
+        if r.returncode != 0:
+            _fail(f"install.mnemonic.paste.{name}", f"rejected a correct phrase: {(r.stderr or r.stdout)[-200:]}")
+            return
+        if r.stdout != phrase:
+            _fail(f"install.mnemonic.paste.{name}", f"normalised to {r.stdout!r}, expected {phrase!r}")
+            return
+
+    # Normalising whitespace must not turn a wrong word count into a right one.
+    for raw, count in ((phrase.replace(" ", "\u00a0", 1) + "\u00a0extra", 13), ("\u00a0".join(["abandon"] * 11), 11)):
+        r = _run(["bash", "-c", script, "_", raw])
+        if r.returncode == 0 or "12 words" not in (r.stderr or "") + (r.stdout or ""):
+            _fail("install.mnemonic.paste.count", f"accepted a {count}-word phrase after normalising")
+            return
+    if "separated by spaces" not in Path(INSTALL_SH).read_text(encoding="utf-8"):
+        _fail("install.mnemonic.paste.guidance", "the phrase prompt does not say the words need spaces between them")
+        return
+    _pass(f"install.mnemonic.normalises_{len(variants)}_paste_shapes")
+
+
+def _test_launch_wait() -> None:
+    """The startup wait must outlast a first boot but end the moment it crashes.
+
+    A flat 120s deadline failed a real install: restarts reach RPC in ~35s, but
+    a first boot also creates the Postgres cluster and migrates empty databases.
+    """
+    functions = _install_functions_only()
+    with tempfile.TemporaryDirectory(prefix="launch-wait-") as tmp:
+        launch_stub = os.path.join(tmp, "mirage-launch")
+        launched = os.path.join(tmp, "launched")
+        Path(launch_stub).write_text(f'#!/bin/bash\necho called >> {launched}\n', encoding="utf-8")
+        os.chmod(launch_stub, 0o755)
+        polls = os.path.join(tmp, "polls")
+
+        def script(running: str, restarting: str, restarts: str, container_image: str, rpc_after: int) -> str:
+            return (
+                functions.replace("/usr/local/bin/mirage-launch", launch_stub)
+                + f"""
+IMAGE=pinned-image
+USERNAME=alice
+sleep() {{ :; }}
+curl() {{
+  local n=0
+  [[ -f {polls!r} ]] && n=$(<{polls!r})
+  n=$((n + 1)); echo "$n" > {polls!r}
+  (( n > {rpc_after} ))
+}}
+docker() {{
+  case "$*" in
+    *"{{{{.State.Running}}}}"*) echo {running} ;;
+    *"{{{{.State.Restarting}}}}"*) echo {restarting} ;;
+    *"{{{{.RestartCount}}}}"*) {restarts} ;;
+    *"{{{{.Id}}}}"*) echo sha256:pinned ;;
+    *"{{{{.Image}}}}"*) echo {container_image} ;;
+    logs*) echo "stub: applying deploy migrations" ;;
+    *) echo "unexpected docker $*" >&2; return 1 ;;
+  esac
+}}
+launch
+"""
+            )
+
+        # A node already up on the pinned image must not be recreated.
+        r = _run(["bash", "-c", script("true", "false", "echo 0", "sha256:pinned", 2)])
+        out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode != 0 or "already running the pinned image" not in out or "RPC is up" not in out:
+            _fail("install.launch.resume", f"rc={r.returncode} out={out[-300:]}")
+            return
+        if os.path.exists(launched):
+            _fail("install.launch.resume_recreated", "recreated a container that was already serving")
+            return
+
+        # A different image must be launched, then waited for.
+        Path(polls).unlink(missing_ok=True)
+        r = _run(["bash", "-c", script("true", "false", "echo 0", "sha256:other", 1)])
+        if r.returncode != 0 or not os.path.exists(launched):
+            _fail("install.launch.starts_container", f"rc={r.returncode} err={(r.stderr or '')[-300:]}")
+            return
+
+        # A container that died must fail immediately, showing its own output.
+        Path(polls).unlink(missing_ok=True)
+        r = _run(["bash", "-c", script("false", "false", "echo 0", "sha256:pinned", 10**9)])
+        err = r.stderr or ""
+        if r.returncode == 0 or "no longer running" not in err or "applying deploy migrations" not in err:
+            _fail("install.launch.dead_container", f"rc={r.returncode} err={err[-300:]}")
+            return
+
+        # A crash loop must be named as one rather than waiting out the deadline.
+        Path(polls).unlink(missing_ok=True)
+        counter = os.path.join(tmp, "restarts")
+        Path(counter).write_text("0", encoding="utf-8")
+        bump = f'n=$(<{counter!r}); echo $((n + 1)) > {counter!r}; echo "$n"'
+        r = _run(["bash", "-c", script("true", "false", bump, "sha256:pinned", 10**9)])
+        if r.returncode == 0 or "restarting in a loop" not in (r.stderr or ""):
+            _fail("install.launch.crash_loop", f"rc={r.returncode} err={(r.stderr or '')[-300:]}")
+            return
+
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if "budget=900" not in body:
+        _fail("install.launch.budget", "the startup budget is not the measured-and-padded 900s")
+        return
+    if "RPC did not become ready in 120s" in body:
+        _fail("install.launch.stale_budget", "the 120s deadline that failed a real first boot is still present")
+        return
+    _pass("install.launch.waits_for_first_boot_and_fails_fast_on_crash")
+
+
+def _test_activation_and_registration_waits() -> None:
+    """Slow must not be mistaken for broken on the updater and enrollment paths.
+
+    The updater rolls a release back when this wait expires, so a migration that
+    outlasts it would revert a healthy release; create_validator declared
+    failure before the 2m validity window of its own unordered transaction.
+    """
+    wait = _shell_function(UPDATE_SH, "wait_for_rpc")
+    if "budget=900" not in wait or "RestartCount" not in wait:
+        _fail("install.activation.budget", "updater wait is not the padded, crash-aware one")
+        return
+
+    def run_wait(running: str, restarts: str, rpc_after: int) -> subprocess.CompletedProcess:
+        return _run(
+            [
+                "bash",
+                "-c",
+                f"""set -uo pipefail
+sleep() {{ :; }}
+n=0
+curl() {{ n=$((n + 1)); (( n > {rpc_after} )); }}
+docker() {{
+  case "$*" in
+    *"{{{{.State.Running}}}}"*) echo {running} ;;
+    *"{{{{.State.Restarting}}}}"*) echo false ;;
+    *"{{{{.RestartCount}}}}"*) {restarts} ;;
+    *) return 1 ;;
+  esac
+}}
+{wait}
+wait_for_rpc
+""",
+            ]
+        )
+
+    r = run_wait("true", "echo 0", 3)
+    if r.returncode != 0 or "RPC ready" not in (r.stdout or ""):
+        _fail("install.activation.slow_start", f"a slow but healthy start was failed: {r.stdout} {r.stderr}")
+        return
+    r = run_wait("false", "echo 0", 10**9)
+    if r.returncode == 0 or "no longer running" not in (r.stderr or ""):
+        _fail("install.activation.dead", f"a dead container was not detected: rc={r.returncode} {r.stderr}")
+        return
+
+    validator = Path(REPO_ROOT, "deploy", "create_validator.sh").read_text(encoding="utf-8")
+    window = re.search(r"--timeout-duration (\d+)m", validator)
+    timeout = re.search(r"^REGISTRATION_TIMEOUT=(\d+)$", validator, re.MULTILINE)
+    if not window or not timeout:
+        _fail("install.registration.literals", "cannot read the tx validity window or the registration wait")
+        return
+    if int(timeout.group(1)) <= int(window.group(1)) * 60:
+        _fail(
+            "install.registration.window",
+            f"registration wait {timeout.group(1)}s does not outlast the {window.group(1)}m tx window",
+        )
+        return
+    _pass("install.waits.outlast_migrations_and_tx_window")
 
 
 def _test_release_workflow_files_tracked() -> None:

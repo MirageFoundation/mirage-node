@@ -58,15 +58,36 @@ sys.exit(0 if have >= want else 1)
 PY
 }
 
+# Restarts of the running validators reach RPC in about 35s, but an activation
+# carrying a deploy migration takes longer, and calling slow "unhealthy" would
+# roll back a release that was fine. Budget generously, and let a crashed or
+# crash-looping container end the wait early so a real failure still rolls back
+# promptly instead of sitting out the deadline.
 wait_for_rpc() {
-  local attempt
-  for attempt in $(seq 1 120); do
+  local budget=900 elapsed=0 restarts_before restarts_now
+  restarts_before=$(docker inspect -f '{{.RestartCount}}' mirage 2>/dev/null || echo 0)
+  while (( elapsed < budget )); do
     if curl -fsS --max-time 2 http://127.0.0.1:26657/status >/dev/null; then
-      echo "RPC ready after ${attempt}s"
+      echo "RPC ready after ${elapsed}s"
       return 0
     fi
-    sleep 1
+    if [[ "$(docker inspect -f '{{.State.Running}}' mirage 2>/dev/null || true)" != true \
+       && "$(docker inspect -f '{{.State.Restarting}}' mirage 2>/dev/null || true)" != true ]]; then
+      echo "ERROR: the mirage container is no longer running" >&2
+      return 1
+    fi
+    restarts_now=$(docker inspect -f '{{.RestartCount}}' mirage 2>/dev/null || echo "$restarts_before")
+    if (( restarts_now > restarts_before )); then
+      echo "ERROR: the mirage container is restarting in a loop" >&2
+      return 1
+    fi
+    if (( elapsed > 0 && elapsed % 60 == 0 )); then
+      echo "still starting (${elapsed}s of ${budget}s)"
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
   done
+  echo "ERROR: RPC did not become ready in ${budget}s" >&2
   return 1
 }
 

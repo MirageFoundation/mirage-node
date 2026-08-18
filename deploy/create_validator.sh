@@ -220,7 +220,12 @@ fi
 
 TXHASH=$(jq -r '.txhash // ""' "$TX_OUT")
 
-for i in $(seq 1 60); do
+# The broadcast above is unordered with a 2m validity window, so at ~3.5s per
+# block the transaction can legitimately be included long after 60s. Waiting
+# less than that window reported failure for validators that then registered a
+# few blocks later, so the wait outlasts the window the tx itself allows.
+REGISTRATION_TIMEOUT=180
+for i in $(seq 1 "$REGISTRATION_TIMEOUT"); do
   if ! ONCHAIN_PUB=$(registered_pubkey); then
     die_state "ERROR: validator query failed while waiting for registration"
   fi
@@ -229,7 +234,10 @@ for i in $(seq 1 60); do
     emit registered
     exit 0
   fi
+  if (( i % 30 == 0 )); then
+    echo "still waiting for registration (${i}s of ${REGISTRATION_TIMEOUT}s, txhash=${TXHASH:-unknown})"
+  fi
   sleep 1
 done
 
-die_state "ERROR: Validator not visible in validator set after 60 seconds (txhash=${TXHASH:-unknown})"
+die_state "ERROR: Validator not visible in validator set after ${REGISTRATION_TIMEOUT} seconds (txhash=${TXHASH:-unknown})"
