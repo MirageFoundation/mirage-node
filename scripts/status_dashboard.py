@@ -8,6 +8,7 @@ statuses in a card/tile layout.
 Services monitored:
   - CometBFT (blockchain node)
   - Validator (if configured)
+  - Earnings (validator payer balance changes)
   - Backend API (includes PostgreSQL sub-check)
   - Indexer
   - Endpoints (Caddy + public chain RPC/REST/gRPC)
@@ -175,6 +176,10 @@ NODE_LAST_BLOCK_WARN_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_WARN_SECS
 NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SECS", "60"))
 
 MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
+EARNINGS_DAY_SECS = 24 * 60 * 60
+EARNINGS_WINDOW_SECS = 30 * EARNINGS_DAY_SECS
+EARNINGS_CACHE_SECS = 60
+_EARNINGS_HISTORY_CACHE: dict = {"rows": None, "expires": 0.0}
 
 
 def debug_log(msg: str) -> None:
@@ -397,6 +402,20 @@ def format_mirage(amount: float) -> str:
             text = f"{value:,.1f}" if value < 100 else f"{value:,.0f}"
             return f"{text.removesuffix('.0')}{unit}"
     return f"{amount:,.0f}"
+
+
+def format_mirage_delta(amount_umirage: int) -> str:
+    """Format an earnings delta with useful precision inside a card."""
+    amount = abs(int(amount_umirage)) / 1_000_000
+    if amount >= 1_000_000:
+        return format_mirage(amount)
+    if amount >= 1_000:
+        return f"{amount:,.0f}"
+    if amount >= 100:
+        return f"{amount:,.1f}".rstrip("0").rstrip(".")
+    if amount >= 1:
+        return f"{amount:,.2f}".rstrip("0").rstrip(".")
+    return f"{amount:.6f}".rstrip("0").rstrip(".") or "0"
 
 
 def center_text(text: str, width: int) -> str:
@@ -1390,6 +1409,106 @@ def _query_balance_rest(address: str) -> Optional[int]:
     except Exception as e:
         debug_log(f"balance query failed for {address[:20]}: {e}")
     return None
+
+
+def summarize_earnings_history(rows: list[tuple], now: int) -> dict:
+    """Sum sampled validator payer balance increases and decreases."""
+    cutoff_24h = now - EARNINGS_DAY_SECS
+    cutoff_30d = now - EARNINGS_WINDOW_SECS
+    earned_24h = 0
+    spent_24h = 0
+    earned_30d = 0
+
+    for previous, current in zip(rows, rows[1:]):
+        current_ts = int(current[1])
+        delta = int(current[2]) - int(previous[2])
+        if current_ts >= cutoff_30d and delta > 0:
+            earned_30d += delta
+        if current_ts >= cutoff_24h:
+            if delta > 0:
+                earned_24h += delta
+            elif delta < 0:
+                spent_24h += -delta
+
+    in_window = [int(row[1]) for row in rows if int(row[1]) >= cutoff_30d]
+    coverage_secs = 0
+    if len(in_window) >= 2:
+        coverage_secs = max(0, min(now, in_window[-1]) - in_window[0])
+
+    return {
+        "earned_24h": earned_24h,
+        "spent_24h": spent_24h,
+        "net_24h": earned_24h - spent_24h,
+        "earned_30d": earned_30d,
+        "coverage_secs": coverage_secs,
+        "sample_count": len(in_window),
+    }
+
+
+def check_earnings() -> ServiceStatus:
+    """Summarize validator payer inflows and outflows from indexer samples."""
+    if psycopg is None:
+        return ServiceStatus(
+            name="Earnings", status=Status.ERROR, message="psycopg missing", details={"sample_count": 0}
+        )
+
+    db_url = os.environ.get("INDEXER_DB_RO_URL", "").strip()
+    if not db_url:
+        debug_log("earnings: INDEXER_DB_RO_URL missing")
+        return ServiceStatus(
+            name="Earnings", status=Status.ERROR, message="DB URL missing", details={"sample_count": 0}
+        )
+
+    now = int(time.time())
+    cutoff_30d = now - EARNINGS_WINDOW_SECS
+    rows = _EARNINGS_HISTORY_CACHE["rows"]
+    if rows is None or time.monotonic() >= _EARNINGS_HISTORY_CACHE["expires"]:
+        try:
+            with psycopg.connect(db_url, connect_timeout=3) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT height, created_at, node_balance
+                        FROM supply_history
+                        WHERE node_balance IS NOT NULL AND created_at >= %s
+                        ORDER BY height ASC
+                        """,
+                        (cutoff_30d,),
+                    )
+                    rows = cur.fetchall()
+        except Exception as e:
+            debug_log(f"earnings: supply_history query failed: {e}")
+            return ServiceStatus(
+                name="Earnings",
+                status=Status.ERROR,
+                message="History unavailable",
+                details={"error": str(e)[:40], "sample_count": 0},
+            )
+        _EARNINGS_HISTORY_CACHE["rows"] = rows
+        _EARNINGS_HISTORY_CACHE["expires"] = time.monotonic() + EARNINGS_CACHE_SECS
+
+    details = summarize_earnings_history(rows, now)
+    samples = details["sample_count"]
+    if samples < 2:
+        debug_log(f"earnings: collecting history samples={samples}")
+        return ServiceStatus(name="Earnings", status=Status.OK, message="Collecting history", details=details)
+
+    coverage = details["coverage_secs"]
+    if coverage >= EARNINGS_WINDOW_SECS - (2 * 60 * 60):
+        message = "30d tracked"
+    elif coverage >= EARNINGS_DAY_SECS:
+        message = f"Collecting · {coverage // EARNINGS_DAY_SECS}d"
+    elif coverage >= 60 * 60:
+        message = f"Collecting · {coverage // (60 * 60)}h"
+    else:
+        message = f"Collecting · {max(1, coverage // 60)}m"
+
+    debug_log(
+        "earnings: "
+        f"samples={samples} coverage={coverage}s earned_24h={details['earned_24h']} "
+        f"spent_24h={details['spent_24h']} earned_30d={details['earned_30d']}"
+    )
+    return ServiceStatus(name="Earnings", status=Status.OK, message=message, details=details)
 
 
 def check_rewards() -> ServiceStatus:
@@ -2427,6 +2546,33 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         else:
             lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} OFF")
 
+    elif status.name == "Earnings":
+        if details.get("sample_count", 0) >= 2:
+            earned_24h = int(details["earned_24h"])
+            spent_24h = int(details["spent_24h"])
+            net_24h = int(details["net_24h"])
+            earned_30d = int(details["earned_30d"])
+            net_color = Colors.BRIGHT_GREEN if net_24h >= 0 else Colors.BRIGHT_RED
+            net_sign = "+" if net_24h >= 0 else "-"
+            lines.append(
+                f"{bullet}{Colors.DIM}Earned 24h:{Colors.RESET} "
+                f"{Colors.BRIGHT_GREEN}+{format_mirage_delta(earned_24h)} MIRAGE{Colors.RESET}"
+            )
+            lines.append(
+                f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET} "
+                f"{Colors.BRIGHT_RED}-{format_mirage_delta(spent_24h)} MIRAGE{Colors.RESET}"
+            )
+            lines.append(
+                f"{bullet}{Colors.DIM}Net 24h:{Colors.RESET} "
+                f"{net_color}{net_sign}{format_mirage_delta(net_24h)} MIRAGE{Colors.RESET}"
+            )
+            lines.append(
+                f"{bullet}{Colors.DIM}Earned 30d:{Colors.RESET} "
+                f"{Colors.BRIGHT_GREEN}+{format_mirage_delta(earned_30d)} MIRAGE{Colors.RESET}"
+            )
+        else:
+            lines.append(f"{bullet}{Colors.DIM}Waiting for balance samples{Colors.RESET}")
+
     elif status.name == "Endpoints":
         endpoints = details.get("endpoints", {})
         for name, info in endpoints.items():
@@ -2527,6 +2673,7 @@ def collect_statuses() -> list[ServiceStatus]:
         check_node(),
         check_retention(),
         check_validator(),
+        check_earnings(),
         check_backend(),
         check_rewards(),
         check_indexer(),
@@ -2541,7 +2688,8 @@ def display_statuses(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
+        or s.name
+        in ("CometBFT", "Retention", "Earnings", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
 
@@ -2584,6 +2732,18 @@ def render_compact_dashboard(
             extra.append(f"lag={status.details['lag']}")
         if extra:
             output.append(truncate(f"    {Colors.DIM}{' '.join(str(x) for x in extra)}{Colors.RESET}", width))
+        if status.name == "Earnings" and status.details.get("sample_count", 0) >= 2:
+            earned_24h = int(status.details["earned_24h"])
+            spent_24h = int(status.details["spent_24h"])
+            earned_30d = int(status.details["earned_30d"])
+            output.append(
+                truncate(
+                    f"    24h  +{format_mirage_delta(earned_24h)} earned  "
+                    f"-{format_mirage_delta(spent_24h)} spent",
+                    width,
+                )
+            )
+            output.append(truncate(f"    30d  +{format_mirage_delta(earned_30d)} earned", width))
     trailer = render_trailer(width, f"Ctrl+C exits  refresh {refresh_secs}s", center=False)
     # Keep the compact view inside the terminal height.
     body_rows = max(8, height - len(trailer))
@@ -2657,6 +2817,10 @@ def render_dashboard(refresh_secs: int, pin_bottom: bool = False) -> list[str]:
     trailer = render_trailer(
         term_width, f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}", center=True
     )
+    if sum(1 for line in output if line) + len(trailer) > term_height:
+        return render_compact_dashboard(
+            statuses, term_width, term_height, refresh_secs, chain_height, pin_bottom=pin_bottom
+        )
     # A frame taller than the terminal scrolls, which breaks in-place repainting
     # and brings the flicker back.
     body_rows = term_height - len(trailer)

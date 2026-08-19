@@ -88,6 +88,7 @@ def test_install(backend: str) -> None:
     _test_backup_restore_contracts()
     _test_status_compact_layout()
     _test_card_amounts_fit()
+    _test_earnings_card()
     _test_retention_building_up()
     _test_maintenance_gate_tracks_progress()
     _test_completed_installer_updates()
@@ -3015,6 +3016,63 @@ def _test_card_amounts_fit() -> None:
             _fail("install.status.card_floor", f"{status.name} card should not spell out the floor: {plain}")
             return
     _pass("install.status.card_amounts_fit")
+
+
+def _test_earnings_card() -> None:
+    """Sampled payer balance deltas produce honest 24h and 30d totals."""
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    now = 3_000_000
+    day = 24 * 60 * 60
+    rows = [
+        (2, now - (29 * day), 150_000_000),
+        (3, now - (25 * 60 * 60), 120_000_000),
+        (4, now - (23 * 60 * 60), 140_000_000),
+        (5, now - (1 * 60 * 60), 130_000_000),
+    ]
+    details = dash.summarize_earnings_history(rows, now)
+    expected = {
+        "earned_24h": 20_000_000,
+        "spent_24h": 10_000_000,
+        "net_24h": 10_000_000,
+        "earned_30d": 20_000_000,
+        "sample_count": 4,
+    }
+    for key, value in expected.items():
+        if details.get(key) != value:
+            _fail("install.status.earnings_math", f"{key}={details.get(key)!r}, expected {value!r}")
+            return
+
+    for amount, expected_text in (
+        (0, "0"),
+        (1, "0.000001"),
+        (12_345, "0.012345"),
+        (1_234_567, "1.23"),
+        (123_456_789, "123.5"),
+        (1_234_000_000, "1,234"),
+    ):
+        got = dash.format_mirage_delta(amount)
+        if got != expected_text:
+            _fail("install.status.earnings_precision", f"{amount} rendered as {got!r}, expected {expected_text!r}")
+            return
+
+    earnings = dash.ServiceStatus("Earnings", dash.Status.OK, "Collecting · 28d", details)
+    card = dash.draw_card(earnings.name, earnings.status, dash.format_card_content(earnings))
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", row) for row in card]
+    rendered = "\n".join(plain)
+    for label in ("Earned 24h:", "Spent 24h:", "Net 24h:", "Earned 30d:"):
+        if label not in rendered:
+            _fail("install.status.earnings_content", f"missing {label!r}: {rendered}")
+            return
+    if any(".." in row for row in plain):
+        _fail("install.status.earnings_fit", f"earnings card cuts content: {plain}")
+        return
+    compact = "\n".join(dash.render_compact_dashboard([earnings], 80, 24, 1))
+    if "24h  +20 earned  -10 spent" not in compact or "30d  +20 earned" not in compact:
+        _fail("install.status.earnings_compact", compact)
+        return
+    _pass("install.status.earnings_card")
 
 
 def _test_retention_building_up() -> None:
