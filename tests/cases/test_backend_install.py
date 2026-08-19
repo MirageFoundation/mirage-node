@@ -1925,7 +1925,10 @@ def _test_updater_network_only_refresh() -> bool:
             json.dumps({"last_release_id": 7, "last_network_generation": 1}),
             encoding="utf-8",
         )
-        functions = "".join(_shell_function(UPDATE_SH, name) for name in ("version_at_least", "canonical_hash", "tick"))
+        functions = "".join(
+            _shell_function(UPDATE_SH, name)
+            for name in ("version_at_least", "canonical_hash", "arm_governed_upgrade", "maybe_arm_staged_upgrade", "tick")
+        )
         script = f"""set -euo pipefail
 HOME={home!r}
 tmp={work!r}
@@ -2640,7 +2643,7 @@ apply_replacement_watermark
 
 
 def _test_governed_upgrade_prepare() -> None:
-    """Prepare refuses a missing/mismatched plan; activation requires the Cosmos marker, not an RPC outage."""
+    """The hourly tick arms governed upgrades itself; activation trusts the Cosmos marker, not signing."""
     updater = Path(UPDATE_SH).read_text(encoding="utf-8")
     wrapper = Path(os.path.join(REPO_ROOT, "deploy", "run_miraged_supervised.sh")).read_text(encoding="utf-8")
     timer = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd", "mirage-upgrade-activate.timer")).read_text(
@@ -2663,9 +2666,12 @@ def _test_governed_upgrade_prepare() -> None:
         return
 
     prepare = _shell_function(UPDATE_SH, "prepare")
+    arm = _shell_function(UPDATE_SH, "arm_governed_upgrade")
+    maybe_arm = _shell_function(UPDATE_SH, "maybe_arm_staged_upgrade")
     activate = _shell_function(UPDATE_SH, "activate_if_halted")
 
-    def _prepare_script(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> str:
+    def _arm_harness(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> tuple[str, str]:
+        """Build a shell preamble whose stubbed tick installs the release manifest."""
         home = os.path.join(tmp, "home")
         work = os.path.join(tmp, "work")
         os.makedirs(os.path.join(home, ".mirage", "env"), exist_ok=True)
@@ -2682,7 +2688,8 @@ def _test_governed_upgrade_prepare() -> None:
             ),
             encoding="utf-8",
         )
-        return f"""set -euo pipefail
+        installed = os.path.join(home, ".mirage", "env", "release-manifest.json")
+        preamble = f"""set -euo pipefail
 HOME={home!r}
 tmp={work!r}
 MANIFEST_URL=release
@@ -2691,39 +2698,72 @@ STATE_DIR={os.path.join(tmp, "state")!r}
 mkdir -p "$STATE_DIR"
 fetch_verify() {{ cp {release!r} "$2"; }}
 json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
-tick() {{ :; }}
+tick() {{ cp {release!r} {installed!r}; }}
 systemctl() {{ :; }}
 curl() {{
   printf '%s\\n' {plan!r}
   return 0
 }}
 query_local_rest() {{ curl "$@"; }}
+{arm}
+{maybe_arm}
 {prepare}
-prepare
 """
+        return preamble, os.path.join(home, ".mirage", "upgrade", "prepared.json")
 
     with tempfile.TemporaryDirectory(prefix="prepare-ordinary-") as tmp:
-        r = _run(["bash", "-c", _prepare_script(tmp, "ordinary", '{"plan":{"name":"v-test","height":"10"}}')])
+        preamble, _ = _arm_harness(tmp, "ordinary", '{"plan":{"name":"v-test","height":"10"}}')
+        r = _run(["bash", "-c", preamble + "prepare\n"])
         if r.returncode == 0 or "upgrade-halt" not in (r.stderr or ""):
             _fail("install.upgrade.prepare_ordinary", f"rc={r.returncode} err={r.stderr}")
             return
 
     with tempfile.TemporaryDirectory(prefix="prepare-noplan-") as tmp:
-        r = _run(["bash", "-c", _prepare_script(tmp, "upgrade-halt", '{"plan":null}')])
-        if r.returncode == 0 or "before the proposal is passed" not in (r.stderr or ""):
+        preamble, prepared_path = _arm_harness(tmp, "upgrade-halt", '{"plan":null}')
+        r = _run(["bash", "-c", preamble + "prepare\n"])
+        if r.returncode == 0 or "cannot arm the governed upgrade yet" not in (r.stderr or ""):
             _fail("install.upgrade.prepare_before_proposal", f"rc={r.returncode} err={r.stderr}")
+            return
+        if os.path.exists(prepared_path):
+            _fail("install.upgrade.prepare_armed_without_plan", "armed activation before the proposal passed")
+            return
+        # The same missing plan must leave the hourly tick healthy, or a published
+        # upgrade release would fail the timer every hour until governance votes.
+        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        if r.returncode != 0 or "arms itself once the plan is on chain" not in (r.stdout or ""):
+            _fail("install.upgrade.tick_survives_no_plan", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
 
     with tempfile.TemporaryDirectory(prefix="prepare-mismatch-") as tmp:
-        r = _run(
-            [
-                "bash",
-                "-c",
-                _prepare_script(tmp, "upgrade-halt", '{"plan":{"name":"other","height":"99"}}', "v-test"),
-            ]
-        )
+        preamble, _ = _arm_harness(tmp, "upgrade-halt", '{"plan":{"name":"other","height":"99"}}', "v-test")
+        r = _run(["bash", "-c", preamble + "prepare\n"])
         if r.returncode == 0 or "does not match" not in (r.stderr or ""):
             _fail("install.upgrade.prepare_mismatch", f"rc={r.returncode} err={r.stderr}")
+            return
+
+    # The whole point of the hourly tick arming: an operator who never runs a
+    # command still crosses the halt.
+    with tempfile.TemporaryDirectory(prefix="tick-arms-") as tmp:
+        preamble, prepared_path = _arm_harness(tmp, "upgrade-halt", '{"plan":{"name":"v-test","height":"4242"}}')
+        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        if r.returncode != 0 or not os.path.isfile(prepared_path):
+            _fail("install.upgrade.tick_arms", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        armed = json.loads(Path(prepared_path).read_text(encoding="utf-8"))
+        if armed.get("upgrade_name") != "v-test" or armed.get("plan_height") != 4242:
+            _fail("install.upgrade.tick_arms_payload", armed)
+            return
+        # Re-arming every hour must be a no-op, not a rewrite storm.
+        again = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        if again.returncode != 0 or "already armed" not in (again.stdout or ""):
+            _fail("install.upgrade.tick_arm_idempotent", f"rc={again.returncode} out={again.stdout}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="tick-ordinary-") as tmp:
+        preamble, prepared_path = _arm_harness(tmp, "ordinary", '{"plan":{"name":"v-test","height":"10"}}', "")
+        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        if r.returncode != 0 or os.path.exists(prepared_path):
+            _fail("install.upgrade.tick_ordinary_not_armed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
 
     with tempfile.TemporaryDirectory(prefix="activate-") as tmp:
@@ -2795,14 +2835,41 @@ activate_if_halted
             json.dumps({"name": "v-test", "height": 50}),
             encoding="utf-8",
         )
+        # A jailed or unregistered node never signs the halt block. The marker is
+        # the authoritative proof it reached the halt, so it must still activate
+        # instead of being stranded on the pre-upgrade binary forever.
         Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
-            json.dumps({"height": "49", "round": 0, "step": 0}) + "\n",
+            json.dumps({"height": "0", "round": 0, "step": 0}) + "\n",
             encoding="utf-8",
         )
         r = _run(["bash", "-c", base])
-        if r.returncode == 0 or "last committed height" not in (r.stderr or "") or os.path.exists(launch_log):
-            _fail("install.upgrade.activate_height", f"rc={r.returncode} err={r.stderr}")
+        if r.returncode != 0 or not os.path.isfile(launch_log) or "did not sign the halt block" not in (r.stdout or ""):
+            _fail("install.upgrade.activate_never_signed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
+        Path(launch_log).unlink()
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"upgrade_name": "v-test", "plan_height": 50, "image": "img@sha256:" + ("c" * 64)}),
+            encoding="utf-8",
+        )
+
+        # Signing already past the halt means the marker is stale and the swap
+        # happened; that must go quiet rather than fail every 30s forever.
+        Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
+            json.dumps({"height": "51", "round": 0, "step": 0}) + "\n",
+            encoding="utf-8",
+        )
+        r = _run(["bash", "-c", base])
+        if r.returncode != 0 or os.path.exists(launch_log):
+            _fail("install.upgrade.activate_stale_marker", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        if os.path.exists(os.path.join(home, ".mirage", "upgrade", "prepared.json")):
+            _fail("install.upgrade.stale_prepared_cleared", "stale prepared.json survived a passed halt")
+            return
+
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"upgrade_name": "v-test", "plan_height": 50, "image": "img@sha256:" + ("c" * 64)}),
+            encoding="utf-8",
+        )
         Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
             json.dumps({"height": "50", "round": 0, "step": 0}) + "\n",
             encoding="utf-8",
@@ -2815,6 +2882,11 @@ activate_if_halted
         if os.path.isfile(os.path.join(state_dir, "activating")):
             _fail("install.upgrade.activating_cleared", "activating marker left behind after success")
             return
+        # Cosmos leaves upgrade-info.json in place, so a surviving prepared.json
+        # would make the activation timer re-match this halt every 30s forever.
+        if os.path.exists(os.path.join(home, ".mirage", "upgrade", "prepared.json")):
+            _fail("install.upgrade.prepared_cleared", "prepared.json survived a successful activation")
+            return
         state = json.loads(Path(state_dir, "state.json").read_text(encoding="utf-8"))
         if state.get("active_rollback_safe") is not False or state.get("active_consensus_breaking") is not True:
             _fail("install.upgrade.rollback_flags", state)
@@ -2826,6 +2898,10 @@ activate_if_halted
         Path(launcher).write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
         os.chmod(launcher, 0o755)
         Path(launch_log).unlink()
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"upgrade_name": "v-test", "plan_height": 50, "image": "img@sha256:" + ("c" * 64)}),
+            encoding="utf-8",
+        )
         r = _run(["bash", "-c", base])
         if r.returncode == 0 or os.path.isfile(os.path.join(state_dir, "activating")):
             _fail(

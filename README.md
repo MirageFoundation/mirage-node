@@ -48,6 +48,120 @@ Nodes are the backbone of the network, and the protocol rewards them directly.
 
 ---
 
+## Run a Node
+
+A node is one Docker container holding the whole stack: the `miraged`
+validator, PostgreSQL, the indexer, the backend API, the React frontend and
+Caddy. You install it with one command and it runs itself from there — it syncs,
+registers itself as a validator, and updates itself.
+
+### What you need
+
+A **[mirage.talk](https://mirage.talk) account with a username and 10,000,000
+MIRAGE on it**, plus that account's 12-word recovery phrase. The node signs
+blocks with this account, so the stake has to be there before you start.
+
+A **server**: Ubuntu 24.04 LTS, amd64, 2 vCPU and 4 GB RAM (at least 3800 MiB
+visible inside Ubuntu), 20 GB free disk — though you want 40 GB. It has to be a
+real VM; LXC containers and arm64 are refused. On
+[DigitalOcean](https://cloud.digitalocean.com/droplets/new) that is the
+`s-2vcpu-4gb-amd` plan with your SSH key on root, which is what the live
+validators run.
+
+### Install
+
+SSH in as root and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
+```
+
+It asks for your recovery phrase, then three questions you can answer by
+pressing Enter: node name (defaults to your username), domain (none), and media
+uploads (off). If Ubuntu needs a reboot first, run the same command again when
+it comes back. Re-running the installer on a finished node just updates it.
+
+The phrase is the only secret you type. It is used locally to derive the signing
+key and is never transmitted.
+
+### After the install
+
+The node state-syncs to the current chain height, which takes a while, then
+**registers itself as a validator automatically**. Never run
+`create-validator` by hand.
+
+Watch it happen:
+
+```bash
+mirage-status
+```
+
+That is a live dashboard: sync progress, services, peers, disk, retention,
+endpoints, and an earnings card showing what the node earned and spent over the
+last 24 hours and 30 days. `Ctrl+C` exits. Until the backend is healthy the
+site serves a maintenance page, which lifts on its own once sync finishes.
+
+### Serve it on a domain
+
+Point an A record (and AAAA if you have IPv6) at the server, then:
+
+```bash
+mirage-domain --set example.com
+```
+
+That gets a certificate and switches to HTTPS. Until then the node is reachable
+at `http://<server-ip>`, which works fine for browsing but not for the wallet
+features that browsers only allow on a secure origin.
+
+### Everyday commands
+
+```bash
+mirage-status                  # live dashboard (--once for a snapshot, --json for scripts)
+mirage-logs                    # follow service logs
+mirage-update                  # apply the newest signed release
+mirage-update --status         # what is active, staged and prepared
+mirage-backup                  # online backup — copy the archive off the server
+mirage-restore BACKUP          # restore from an archive
+mirage-domain --set DOMAIN     # serve a domain over HTTPS
+mirage-restart                 # whole-container restart, refused when unsafe
+```
+
+### Updates
+
+Your node checks hourly for a release signed by the Mirage signing key and
+pre-pulls it. Nothing unsigned is ever installed.
+
+**Ordinary releases** wait for you, because activating one restarts the node:
+
+```bash
+mirage-update
+```
+
+Being several releases behind is fine — one update applies everything it missed.
+
+**Blockchain upgrades need no command.** When governance schedules one, your node
+pulls the new image while the old one keeps signing, and arms itself to switch at
+the exact halt height. The chain stops, your node swaps to the new binary, and
+blocks resume. Leave it alone and it works.
+
+### Backups
+
+Chain data comes back from the network on its own, but your posts, indexer state
+and backend data do not. `mirage-backup` archives them without taking the
+validator offline. **The archive is secret operational material — keep a copy
+off the server.**
+
+### Verifying and getting help
+
+Releases are signed with key fingerprint
+`679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8`
+(see [SECURITY.md](SECURITY.md)).
+
+Full detail is in the [Deployment Guide](docs/guides/deploy.md). For anything
+else, ask in the [Mirage Portal on Telegram](https://t.me/+5SILWcCke8tmODlh).
+
+---
+
 ## Key Features
 
 ### Zero Friction Entry (Free Tier)
@@ -110,21 +224,8 @@ You don't need to install anything. Just visit a public node:
 
 ### For Node Operators
 
-You need a [mirage.talk](https://mirage.talk) account with a username, **10,000,000 MIRAGE** on it, and that account's 12-word recovery phrase.
-
-**1. Get a droplet.** On [DigitalOcean](https://cloud.digitalocean.com/droplets/new) create an Ubuntu **24.04 LTS** droplet, **amd64**, **2 vCPU / 4 GB RAM**, **40 GB** disk, with your SSH key on root. The plan the live validators use is `s-2vcpu-4gb-amd`. Any other host is fine if it is a real VM (not LXC) and matches the spec below.
-
-**Minimum spec:** Ubuntu 24.04 LTS, amd64, 4 GB RAM / 2 vCPU (at least 3800 MiB visible inside Ubuntu), 20 GB free disk (40 GB is what you actually want). Arm64 is refused.
-
-**2. Install.** SSH in as root and run:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
-```
-
-Paste the recovery phrase when asked. Press Enter three times if you want the defaults (your username as the node name, no domain, uploads off). If Ubuntu needs a reboot, run the same command again after it comes back.
-
-More detail: [Deployment Guide](docs/guides/deploy.md). Signing key fingerprint: `679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8` ([SECURITY.md](SECURITY.md)). Help: [Mirage Portal on Telegram](https://t.me/+5SILWcCke8tmODlh).
+See [Run a Node](#run-a-node) above: one command on an Ubuntu 24.04 server, and
+an account holding 10,000,000 MIRAGE.
 
 ### For Developers
 - **Backend**: Python (Flask), Go (Mirage chain)

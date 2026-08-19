@@ -18,9 +18,12 @@ show_help() {
 Usage: mirage-update [--prepare | --status | --rollback]
 
   (no args)     check, verify, stage, and activate an ordinary release
-  --prepare     verify and pre-pull the governed upgrade, then arm halt activation
+  --prepare     arm a governed upgrade now instead of waiting for the hourly tick
   --status      show active/staged/prepared state without mutation
   --rollback    restore the previous image when the signed policy permits it
+
+Governed blockchain upgrades need no command: the hourly check pre-pulls the
+release and arms halt activation once the proposal is on chain.
 
 EOF
 }
@@ -316,6 +319,87 @@ install_hosttools_from_image() {
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
 }
 
+# Record that this node intends to cross a specific governed halt onto a specific
+# image, and start the timer that performs the swap. Arming commits nothing: the
+# halt marker, the plan name, the halt height and the image digest are all
+# re-verified by activate_if_halted before the container is recreated.
+#
+# Returns 1, with the reason on stdout, when the on-chain plan is not readable
+# yet. That is the ordinary state between publishing an upgrade release and the
+# proposal passing, so the caller decides whether to retry later or fail.
+arm_governed_upgrade() {
+  local manifest="$1" upgrade_name image release_id prepared plan plan_name plan_h
+  upgrade_name=$(json_field "$manifest" upgrade_name)
+  if [[ -z "$upgrade_name" ]]; then
+    echo "ERROR: upgrade-halt manifest is missing upgrade_name" >&2
+    exit 1
+  fi
+  image=$(json_field "$manifest" image)
+  release_id=$(json_field "$manifest" release_id)
+  if ! plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
+    echo "local REST is unavailable; cannot match the on-chain upgrade plan yet"
+    return 1
+  fi
+  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
+  if [[ -z "$plan_name" || "$plan_h" -le 0 ]]; then
+    echo "no on-chain upgrade plan yet; not arming before the proposal passes"
+    return 1
+  fi
+  if [[ "$plan_name" != "$upgrade_name" ]]; then
+    echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
+    exit 1
+  fi
+  prepared="$HOME/.mirage/upgrade/prepared.json"
+  if [[ -f "$prepared" ]] \
+    && [[ "$(json_field "$prepared" upgrade_name)" == "$upgrade_name" ]] \
+    && [[ "$(json_field "$prepared" image)" == "$image" ]] \
+    && [[ "$(json_field "$prepared" plan_height)" == "$plan_h" ]]; then
+    echo "governed upgrade $upgrade_name at height $plan_h is already armed"
+    return 0
+  fi
+  mkdir -p "$HOME/.mirage/upgrade"
+  python3 - "$prepared" "$STATE_DIR/prepared.json" "$upgrade_name" "$plan_h" "$image" "$release_id" <<'PY'
+import json, os, sys, time
+dest, dest2, name, height, image, rid = sys.argv[1:7]
+payload = {
+    "upgrade_name": name,
+    "plan_name": name,
+    "plan_height": int(height),
+    "image": image,
+    "release_id": int(rid),
+    "prepared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+text = json.dumps(payload, indent=2) + "\n"
+for path in (dest, dest2):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    open(tmp, "w").write(text)
+    os.replace(tmp, path)
+PY
+  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
+  echo "armed $upgrade_name at height $plan_h; activation is automatic at the governed halt"
+  return 0
+}
+
+# A governed upgrade must not depend on an operator being awake to type a
+# command. Every tick tries to arm, so the ordering of "release published" and
+# "proposal passed" stops mattering: whichever happens second, the next tick
+# arms the node. Without this a validator reaches the halt unarmed, stops there,
+# and stays down until a human logs in.
+maybe_arm_staged_upgrade() {
+  local manifest="$HOME/.mirage/env/release-manifest.json"
+  if [[ ! -f "$manifest" ]]; then
+    return 0
+  fi
+  if [[ "$(json_field "$manifest" activation)" != "upgrade-halt" ]]; then
+    return 0
+  fi
+  if ! arm_governed_upgrade "$manifest"; then
+    echo "governance-linked release staged; it arms itself once the plan is on chain"
+  fi
+}
+
 tick() {
   mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known"
   fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
@@ -384,6 +468,7 @@ PY
       fi
     fi
     echo "no newer release (last_release_id=$last_id)"
+    maybe_arm_staged_upgrade
     return 0
   fi
   docker pull "$image"
@@ -418,6 +503,7 @@ PY
   echo "staged $image activation=$activation (host tools install on activation)"
   if [[ "$activation" == "upgrade-halt" ]]; then
     echo "governance-linked release staged; manual activation is disabled"
+    maybe_arm_staged_upgrade
   fi
 }
 
@@ -528,57 +614,22 @@ PY
   fi
 }
 
+# The hourly tick arms governed upgrades on its own, so this exists only to arm
+# one immediately instead of waiting up to an hour, and to fail loudly with the
+# reason when it cannot.
 prepare() {
   mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known" "$HOME/.mirage/upgrade"
   fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
-  fetch_verify "$NETWORK_URL" "$tmp/network.json"
   activation=$(json_field "$tmp/manifest.json" activation)
   if [[ "$activation" != "upgrade-halt" ]]; then
     echo "ERROR: --prepare requires activation=upgrade-halt (got '$activation')" >&2
     exit 1
   fi
-  upgrade_name=$(json_field "$tmp/manifest.json" upgrade_name)
-  if [[ -z "$upgrade_name" ]]; then
-    echo "ERROR: release manifest is missing upgrade_name" >&2
-    exit 1
-  fi
-  plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
-    echo "ERROR: local REST is unavailable; cannot match the on-chain upgrade plan" >&2
-    exit 1
-  }
-  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
-  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
-  if [[ -z "$plan_name" || "$plan_h" -le 0 ]]; then
-    echo "ERROR: no on-chain upgrade plan is set; refuse to prepare before the proposal is passed" >&2
-    exit 1
-  fi
-  if [[ "$plan_name" != "$upgrade_name" ]]; then
-    echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
-    exit 1
-  fi
   tick
-  image=$(json_field "$tmp/manifest.json" image)
-  release_id=$(json_field "$tmp/manifest.json" release_id)
-  python3 - "$HOME/.mirage/upgrade/prepared.json" "$STATE_DIR/prepared.json" "$upgrade_name" "$plan_h" "$image" "$release_id" <<'PY'
-import json, os, sys, time
-dest, dest2, name, height, image, rid = sys.argv[1:7]
-payload = {
-    "upgrade_name": name,
-    "plan_name": name,
-    "plan_height": int(height),
-    "image": image,
-    "release_id": int(rid),
-    "prepared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-text = json.dumps(payload, indent=2) + "\n"
-for path in (dest, dest2):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    open(tmp, "w").write(text)
-    os.replace(tmp, path)
-PY
-  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
-  echo "Prepared $upgrade_name at height $plan_h"
+  if ! arm_governed_upgrade "$HOME/.mirage/env/release-manifest.json"; then
+    echo "ERROR: cannot arm the governed upgrade yet; refusing to report it as prepared" >&2
+    exit 1
+  fi
   echo "The release is ready and will activate automatically at the governed halt."
 }
 
@@ -611,9 +662,19 @@ PY
   fi
   local signed_height
   signed_height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["height"]))' "$pv")
+  # The chain writes the halt marker when it stops at the upgrade height, so the
+  # marker checked above is already proof that this node reached the halt. The
+  # signed height is a weaker second witness that only exists for a validator in
+  # the active set: a jailed or not-yet-registered node never signs that block,
+  # so demanding equality strands exactly the nodes that need the swap most.
+  # Refuse only when signing is past the halt, which means the marker is stale.
+  if (( signed_height > height )); then
+    echo "halt $height is behind signed height $signed_height; clearing the stale prepared upgrade"
+    rm -f "$prepared" "$STATE_DIR/prepared.json"
+    exit 0
+  fi
   if (( signed_height != height )); then
-    echo "ERROR: last committed height $signed_height does not match prepared halt $height" >&2
-    exit 1
+    echo "this node did not sign the halt block (signed height $signed_height); the halt marker at $height is authoritative"
   fi
   local digest want_sha
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image") || {
@@ -671,7 +732,11 @@ tmp = path + ".tmp"
 open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
 os.replace(tmp, path)
 PY
-  rm -f "$HOME/.mirage/upgrade/halt-detected.txt" "$STATE_DIR/activating"
+  # The chain leaves upgrade-info.json in place after the upgrade, so leaving
+  # prepared.json behind would make the 30s activation timer re-match this halt
+  # and fail every tick forever.
+  rm -f "$HOME/.mirage/upgrade/halt-detected.txt" "$STATE_DIR/activating" \
+    "$prepared" "$STATE_DIR/prepared.json"
   echo "activated prepared upgrade $name; chain is at height $now_h"
 }
 
