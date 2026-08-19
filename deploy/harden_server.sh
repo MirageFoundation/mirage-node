@@ -295,8 +295,21 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 '
 if (( ! DRY_RUN )); then
+    # sshd -t aborts with "Missing privilege separation directory" when /run/sshd
+    # is absent. Current Ubuntu 24.04 images socket-activate SSH, so ssh.service
+    # is inactive and systemd has removed its RuntimeDirectory.
+    install -d -m 0755 /run/sshd
     sshd -t
-    systemctl reload ssh
+    # Socket activation means each connection gets its own ssh@.service, so there
+    # is no long-running unit to reload; the listener has to be restarted instead.
+    if systemctl is-active --quiet ssh.service; then
+        systemctl reload ssh.service
+    elif systemctl is-active --quiet ssh.socket; then
+        systemctl restart ssh.socket
+    else
+        echo "ERROR: neither ssh.service nor ssh.socket is active; refusing to leave SSH unconfigured" >&2
+        exit 1
+    fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -615,7 +628,9 @@ say "Verification"
 echo "--- free -h ---";                   free -h | grep -E 'Mem|Swap'
 echo "--- sshd (effective) ---";          sshd -T 2>/dev/null | grep -E '^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication|challengeresponseauthentication|permitemptypasswords|x11forwarding|maxauthtries|logingracetime|clientaliveinterval|clientalivecountmax) '
 echo "--- ufw ---";                       ufw status | sed -n '1,12p'
-echo "--- services ---";                  for svc in ssh fail2ban unattended-upgrades docker; do
+ssh_unit=ssh.service
+systemctl is-active --quiet ssh.service || ssh_unit=ssh.socket
+echo "--- services ---";                  for svc in "$ssh_unit" fail2ban unattended-upgrades docker; do
                                                printf "    %-22s %s/%s\n" "$svc" "$(systemctl is-active $svc 2>/dev/null)" "$(systemctl is-enabled $svc 2>/dev/null)"
                                           done
 echo "--- sysctl ---";                    sysctl vm.swappiness net.core.somaxconn net.ipv4.tcp_max_syn_backlog net.ipv4.ip_local_port_range fs.inotify.max_user_watches | sed 's/^/    /'

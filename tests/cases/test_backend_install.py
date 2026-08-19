@@ -74,6 +74,7 @@ def test_install(backend: str) -> None:
     _test_launch_wait()
     _test_activation_and_registration_waits()
     _test_pinned_bootstrap_dependencies()
+    _test_sshd_validation_survives_socket_activation()
     _test_ubuntu_full_upgrade()
     _test_provider_memory_overhead()
     _test_no_swapfile_provisioned()
@@ -220,6 +221,27 @@ def _test_pinned_bootstrap_dependencies() -> None:
             _fail("install.bootstrap.pin_stale", f"{relative}: pin={match.group(1)} actual={actual}")
             return
     _pass("install.bootstrap.dependencies_pinned")
+
+
+def _test_sshd_validation_survives_socket_activation() -> None:
+    harden = Path(REPO_ROOT, "deploy", "harden_server.sh").read_text(encoding="utf-8")
+    step = harden.partition("# Step 4")[2].partition("# Step 5")[0]
+    code = [line.strip() for line in step.splitlines() if not line.lstrip().startswith("#")]
+    mkdir_at = next((i for i, line in enumerate(code) if line == "install -d -m 0755 /run/sshd"), None)
+    test_at = next((i for i, line in enumerate(code) if line == "sshd -t"), None)
+    if mkdir_at is None:
+        _fail(
+            "install.sshd.privsep_dir",
+            "sshd -t runs without /run/sshd, which fatals on a socket-activated host",
+        )
+        return
+    if test_at is None or mkdir_at > test_at:
+        _fail("install.sshd.privsep_order", "/run/sshd is created after sshd -t has already run")
+        return
+    if "ssh.socket" not in step:
+        _fail("install.sshd.reload_target", "reload assumes a long-running ssh.service")
+        return
+    _pass("install.sshd.socket_activation")
 
 
 def _test_ubuntu_full_upgrade() -> None:
