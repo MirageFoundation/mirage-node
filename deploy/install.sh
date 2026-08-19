@@ -1162,9 +1162,14 @@ print_next_steps() {
   echo "Address:   ${ADDRESS}"
   echo "Sync:      ${sync}"
   echo
-  echo "HTTPS: point A/AAAA at this IP, then:  mirage-domain --set your.domain"
-  echo "Backup:    mirage-backup     (then copy the archive off this server)"
-  echo "Restore:   mirage-restore FILE"
+  echo "Commands:"
+  echo "  mirage-status               watch this node live"
+  echo "  mirage-domain --set DOMAIN  serve a domain over HTTPS (point A/AAAA here first)"
+  echo "  mirage-logs [SERVICE]       read the logs"
+  echo "  mirage-update               apply the newest signed release"
+  echo "  mirage-backup               archive this node (copy the archive off this server)"
+  echo "  mirage-restore BACKUP       restore from an archive"
+  echo
   echo "This node will register itself once synced. Do not run create-validator by hand."
   echo "=============================================="
   echo

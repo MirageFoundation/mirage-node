@@ -1103,6 +1103,24 @@ print_next_steps
         _fail("install.supervisor.operator_guidance", f"rc={result.returncode} output={output!r}")
         return
 
+    # The closing summary is the only place an operator is told how to drive the
+    # node, so every tool they need on day one has to appear there.
+    missing = [
+        command
+        for command in (
+            "mirage-status",
+            "mirage-domain --set",
+            "mirage-logs",
+            "mirage-update",
+            "mirage-backup",
+            "mirage-restore",
+        )
+        if command not in output
+    ]
+    if "Commands:" not in output or missing:
+        _fail("install.supervisor.command_summary", f"closing summary omits {missing or 'the Commands block'}")
+        return
+
     if 'if [[ "$confirm" != "replace" ]]; then' not in installer:
         _fail("install.supervisor.replace_token", "replacement must require typing exactly replace")
         return
