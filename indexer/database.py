@@ -558,7 +558,8 @@ class DatabaseManager:
                         height BIGINT PRIMARY KEY,
                         total_supply BIGINT NOT NULL,
                         created_at BIGINT NOT NULL,
-                        node_balance BIGINT
+                        node_balance BIGINT,
+                        node_staked BIGINT
                     )
                     """
                 )
@@ -2576,29 +2577,37 @@ class DatabaseManager:
                 rows = cur.fetchall()
                 return [{"height": r[0], "difficulty": r[1], "msg_count": r[2], "timestamp": r[3]} for r in rows]
 
-    def upsert_supply(self, height: int, total_supply: int, created_at: int, node_balance: int | None = None) -> None:
-        """Record total supply (and optionally node balance) at a given block height."""
+    def upsert_supply(
+        self,
+        height: int,
+        total_supply: int,
+        created_at: int,
+        node_balance: int | None = None,
+        node_staked: int | None = None,
+    ) -> None:
+        """Record total supply and validator liquid/staked balances."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO supply_history(height, total_supply, created_at, node_balance)
-                    VALUES(%s, %s, %s, %s)
+                    INSERT INTO supply_history(height, total_supply, created_at, node_balance, node_staked)
+                    VALUES(%s, %s, %s, %s, %s)
                     ON CONFLICT (height) DO UPDATE SET
                         total_supply = EXCLUDED.total_supply,
                         created_at = EXCLUDED.created_at,
-                        node_balance = COALESCE(EXCLUDED.node_balance, supply_history.node_balance)
+                        node_balance = COALESCE(EXCLUDED.node_balance, supply_history.node_balance),
+                        node_staked = COALESCE(EXCLUDED.node_staked, supply_history.node_staked)
                     """,
-                    (int(height), int(total_supply), int(created_at), node_balance),
+                    (int(height), int(total_supply), int(created_at), node_balance, node_staked),
                 )
 
     def get_supply_history(self, since_ts: int) -> list[dict]:
-        """Get supply history since a timestamp. Returns list of {height, total_supply, timestamp, node_balance}."""
+        """Get supply history since a timestamp."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT height, total_supply, created_at, node_balance
+                    SELECT height, total_supply, created_at, node_balance, node_staked
                     FROM supply_history
                     WHERE created_at >= %s
                     ORDER BY height ASC
@@ -2606,7 +2615,16 @@ class DatabaseManager:
                     (int(since_ts),),
                 )
                 rows = cur.fetchall()
-                return [{"height": r[0], "total_supply": r[1], "timestamp": r[2], "node_balance": r[3]} for r in rows]
+                return [
+                    {
+                        "height": r[0],
+                        "total_supply": r[1],
+                        "timestamp": r[2],
+                        "node_balance": r[3],
+                        "node_staked": r[4],
+                    }
+                    for r in rows
+                ]
 
     # ========== Balance Methods ==========
 

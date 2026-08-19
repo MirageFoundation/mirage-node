@@ -33,6 +33,8 @@ CORE_TYPE_URL_PREFIX = "/mirage.core.v1."
 PROFILES_PAGE_LIMIT = 100
 PROFILES_PAGE_TIMEOUT = 30
 PROFILES_SYNC_DEADLINE = 120.0
+STAKING_PAGE_LIMIT = 100
+STAKING_MAX_PAGES = 100
 
 # Delay between block_results polls when waiting for the expected tx count.
 BLOCK_RESULTS_RETRY_DELAY = 0.25
@@ -552,6 +554,59 @@ class ChainClient:
             raise RuntimeError(f"Failed to query umirage balance for {address}: {e}") from e
         logger.debug("get_balance address=%s balance=%d", address, balance)
         return balance
+
+    def get_staked_balance(self, address: str) -> int:
+        """Get delegated plus unbonding umirage for a delegator via gRPC."""
+        if not address:
+            raise RuntimeError("get_staked_balance requires a non-empty address")
+
+        from cosmpy.protos.cosmos.base.query.v1beta1.pagination_pb2 import PageRequest
+        from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
+        from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
+
+        try:
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = staking_query_pb2_grpc.QueryStub(channel)
+                total = 0
+                next_key = b""
+                for _ in range(STAKING_MAX_PAGES):
+                    req = staking_query_pb2.QueryDelegatorDelegationsRequest(
+                        delegator_addr=str(address),
+                        pagination=PageRequest(key=next_key, limit=STAKING_PAGE_LIMIT),
+                    )
+                    resp = stub.DelegatorDelegations(req, timeout=GRPC_TIMEOUT)
+                    for delegation in resp.delegation_responses:
+                        if delegation.balance.denom != "umirage":
+                            raise RuntimeError(f"unexpected staking denom {delegation.balance.denom!r}")
+                        total += int(delegation.balance.amount or "0")
+                    next_key = bytes(resp.pagination.next_key)
+                    if not next_key:
+                        break
+                else:
+                    raise RuntimeError(f"delegations exceeded {STAKING_MAX_PAGES} pages")
+
+                next_key = b""
+                for _ in range(STAKING_MAX_PAGES):
+                    req = staking_query_pb2.QueryDelegatorUnbondingDelegationsRequest(
+                        delegator_addr=str(address),
+                        pagination=PageRequest(key=next_key, limit=STAKING_PAGE_LIMIT),
+                    )
+                    resp = stub.DelegatorUnbondingDelegations(req, timeout=GRPC_TIMEOUT)
+                    total += sum(
+                        int(entry.balance or "0")
+                        for unbonding in resp.unbonding_responses
+                        for entry in unbonding.entries
+                    )
+                    next_key = bytes(resp.pagination.next_key)
+                    if not next_key:
+                        break
+                else:
+                    raise RuntimeError(f"unbonding delegations exceeded {STAKING_MAX_PAGES} pages")
+        except Exception as e:
+            raise RuntimeError(f"Failed to query staked umirage for {address}: {e}") from e
+
+        logger.debug("get_staked_balance address=%s balance=%d", address, total)
+        return total
 
     def get_balances_batch(self, addresses: list[str], timeout: float | None = None) -> dict[str, int]:
         """

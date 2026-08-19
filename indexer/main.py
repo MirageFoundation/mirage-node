@@ -640,7 +640,16 @@ class Indexer:
             try:
                 supply = self.chain.get_total_supply()
                 node_balance = self.chain.get_balance(self._validator_address) if self._validator_address else None
-                self.db.upsert_supply(height, supply, now, node_balance=node_balance)
+                node_staked = (
+                    self.chain.get_staked_balance(self._validator_address) if self._validator_address else None
+                )
+                self.db.upsert_supply(
+                    height,
+                    supply,
+                    now,
+                    node_balance=node_balance,
+                    node_staked=node_staked,
+                )
                 self.db.set_chain_stat("total_supply", supply, now)
             except Exception as e:
                 logger.warning("Telemetry: supply sample failed at height %s: %s", height, e)

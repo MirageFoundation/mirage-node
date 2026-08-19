@@ -88,6 +88,7 @@ def test_install(backend: str) -> None:
     _test_backup_restore_contracts()
     _test_status_compact_layout()
     _test_card_amounts_fit()
+    _test_staked_balance_history()
     _test_earnings_card()
     _test_retention_building_up()
     _test_maintenance_gate_tracks_progress()
@@ -3024,19 +3025,20 @@ def _test_earnings_card() -> None:
     import status_dashboard as dash
 
     now = 3_000_000
-    day = 24 * 60 * 60
+    liquid = 10_000_000_000_000
+    staked = 5_000_000_000_000
     rows = [
-        (2, now - (29 * day), 150_000_000),
-        (3, now - (25 * 60 * 60), 120_000_000),
-        (4, now - (23 * 60 * 60), 140_000_000),
-        (5, now - (1 * 60 * 60), 130_000_000),
+        (1, now - (25 * 60 * 60), liquid, 0),
+        (2, now - (23 * 60 * 60), liquid - staked, staked),
+        (3, now - (12 * 60 * 60), liquid - staked + 33_400_000, staked),
+        (4, now - (1 * 60 * 60), liquid - staked + 32_900_000, staked),
     ]
     details = dash.summarize_earnings_history(rows, now)
     expected = {
-        "earned_24h": 20_000_000,
-        "spent_24h": 10_000_000,
-        "net_24h": 10_000_000,
-        "earned_30d": 20_000_000,
+        "earned_24h": 33_400_000,
+        "staked_24h": staked,
+        "spent_24h": 500_000,
+        "earned_30d": 33_400_000,
         "sample_count": 4,
     }
     for key, value in expected.items():
@@ -3057,22 +3059,72 @@ def _test_earnings_card() -> None:
             _fail("install.status.earnings_precision", f"{amount} rendered as {got!r}, expected {expected_text!r}")
             return
 
-    earnings = dash.ServiceStatus("Earnings", dash.Status.OK, "Collecting · 28d", details)
+    earnings = dash.ServiceStatus("Earnings", dash.Status.OK, "Collecting · 23h", details)
     card = dash.draw_card(earnings.name, earnings.status, dash.format_card_content(earnings))
     plain = [re.sub(r"\x1b\[[0-9;]*m", "", row) for row in card]
     rendered = "\n".join(plain)
-    for label in ("Earned 24h:", "Spent 24h:", "Net 24h:", "Earned 30d:"):
+    for label in ("Earned 24h:", "Staked 24h:", "Spent 24h:", "Earned 30d:"):
         if label not in rendered:
             _fail("install.status.earnings_content", f"missing {label!r}: {rendered}")
             return
+    if "Staked 24h: +5mm MIRAGE" not in rendered or "Spent 24h: -0.5 MIRAGE" not in rendered:
+        _fail("install.status.stake_not_spent", rendered)
+        return
     if any(".." in row for row in plain):
         _fail("install.status.earnings_fit", f"earnings card cuts content: {plain}")
         return
     compact = "\n".join(dash.render_compact_dashboard([earnings], 80, 24, 1))
-    if "24h  +20 earned  -10 spent" not in compact or "30d  +20 earned" not in compact:
+    if (
+        "24h  +33.4 earned  -0.5 spent" not in compact
+        or "24h  +5mm staked  30d +33.4 earned" not in compact
+    ):
         _fail("install.status.earnings_compact", compact)
         return
     _pass("install.status.earnings_card")
+
+
+def _test_staked_balance_history() -> None:
+    """Staking and unbonding balances are sampled with liquid balance."""
+    from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
+    from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
+    from indexer.chain_client import ChainClient
+    from indexer.migrations.v1_37_0_add_node_staked_history import MIGRATION_KEY
+
+    delegated = staking_query_pb2.QueryDelegatorDelegationsResponse()
+    delegation = delegated.delegation_responses.add()
+    delegation.balance.denom = "umirage"
+    delegation.balance.amount = "5000000000000"
+    unbonding = staking_query_pb2.QueryDelegatorUnbondingDelegationsResponse()
+    unbonding_entry = unbonding.unbonding_responses.add().entries.add()
+    unbonding_entry.balance = "250000000"
+
+    stub = mock.Mock()
+    stub.DelegatorDelegations.return_value = delegated
+    stub.DelegatorUnbondingDelegations.return_value = unbonding
+    channel = mock.MagicMock()
+    with (
+        mock.patch("indexer.chain_client.grpc.insecure_channel", return_value=channel),
+        mock.patch.object(staking_query_pb2_grpc, "QueryStub", return_value=stub),
+    ):
+        got = ChainClient("http://127.0.0.1:26657").get_staked_balance(
+            "mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a"
+        )
+    if got != 5_000_250_000_000:
+        _fail("install.status.staked_query", f"delegated + unbonding returned {got}")
+        return
+
+    database_source = Path(os.path.join(REPO_ROOT, "indexer", "database.py")).read_text(encoding="utf-8")
+    main_source = Path(os.path.join(REPO_ROOT, "indexer", "main.py")).read_text(encoding="utf-8")
+    if "node_staked BIGINT" not in database_source or "node_staked = COALESCE" not in database_source:
+        _fail("install.status.staked_schema", "supply_history does not persist node_staked")
+        return
+    if "get_staked_balance(self._validator_address)" not in main_source:
+        _fail("install.status.staked_sampling", "indexer telemetry does not sample validator stake")
+        return
+    if MIGRATION_KEY != "v1.37.0_add_node_staked_history":
+        _fail("install.status.staked_migration", MIGRATION_KEY)
+        return
+    _pass("install.status.staked_balance_history")
 
 
 def _test_retention_building_up() -> None:

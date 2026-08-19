@@ -1412,23 +1412,27 @@ def _query_balance_rest(address: str) -> Optional[int]:
 
 
 def summarize_earnings_history(rows: list[tuple], now: int) -> dict:
-    """Sum sampled validator payer balance increases and decreases."""
+    """Classify sampled validator asset changes without counting stake as spent."""
     cutoff_24h = now - EARNINGS_DAY_SECS
     cutoff_30d = now - EARNINGS_WINDOW_SECS
     earned_24h = 0
+    staked_24h = 0
     spent_24h = 0
     earned_30d = 0
 
     for previous, current in zip(rows, rows[1:]):
         current_ts = int(current[1])
-        delta = int(current[2]) - int(previous[2])
-        if current_ts >= cutoff_30d and delta > 0:
-            earned_30d += delta
+        asset_delta = (int(current[2]) + int(current[3])) - (int(previous[2]) + int(previous[3]))
+        staked_delta = int(current[3]) - int(previous[3])
+        if current_ts >= cutoff_30d and asset_delta > 0:
+            earned_30d += asset_delta
         if current_ts >= cutoff_24h:
-            if delta > 0:
-                earned_24h += delta
-            elif delta < 0:
-                spent_24h += -delta
+            if asset_delta > 0:
+                earned_24h += asset_delta
+            elif asset_delta < 0:
+                spent_24h += -asset_delta
+            if staked_delta > 0:
+                staked_24h += staked_delta
 
     in_window = [int(row[1]) for row in rows if int(row[1]) >= cutoff_30d]
     coverage_secs = 0
@@ -1437,8 +1441,8 @@ def summarize_earnings_history(rows: list[tuple], now: int) -> dict:
 
     return {
         "earned_24h": earned_24h,
+        "staked_24h": staked_24h,
         "spent_24h": spent_24h,
-        "net_24h": earned_24h - spent_24h,
         "earned_30d": earned_30d,
         "coverage_secs": coverage_secs,
         "sample_count": len(in_window),
@@ -1446,7 +1450,7 @@ def summarize_earnings_history(rows: list[tuple], now: int) -> dict:
 
 
 def check_earnings() -> ServiceStatus:
-    """Summarize validator payer inflows and outflows from indexer samples."""
+    """Summarize validator payer earnings, staking, and spending."""
     if psycopg is None:
         return ServiceStatus(
             name="Earnings", status=Status.ERROR, message="psycopg missing", details={"sample_count": 0}
@@ -1468,9 +1472,11 @@ def check_earnings() -> ServiceStatus:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT height, created_at, node_balance
+                        SELECT height, created_at, node_balance, node_staked
                         FROM supply_history
-                        WHERE node_balance IS NOT NULL AND created_at >= %s
+                        WHERE node_balance IS NOT NULL
+                          AND node_staked IS NOT NULL
+                          AND created_at >= %s
                         ORDER BY height ASC
                         """,
                         (cutoff_30d,),
@@ -1506,7 +1512,8 @@ def check_earnings() -> ServiceStatus:
     debug_log(
         "earnings: "
         f"samples={samples} coverage={coverage}s earned_24h={details['earned_24h']} "
-        f"spent_24h={details['spent_24h']} earned_30d={details['earned_30d']}"
+        f"staked_24h={details['staked_24h']} spent_24h={details['spent_24h']} "
+        f"earned_30d={details['earned_30d']}"
     )
     return ServiceStatus(name="Earnings", status=Status.OK, message=message, details=details)
 
@@ -2549,22 +2556,20 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Earnings":
         if details.get("sample_count", 0) >= 2:
             earned_24h = int(details["earned_24h"])
+            staked_24h = int(details["staked_24h"])
             spent_24h = int(details["spent_24h"])
-            net_24h = int(details["net_24h"])
             earned_30d = int(details["earned_30d"])
-            net_color = Colors.BRIGHT_GREEN if net_24h >= 0 else Colors.BRIGHT_RED
-            net_sign = "+" if net_24h >= 0 else "-"
             lines.append(
                 f"{bullet}{Colors.DIM}Earned 24h:{Colors.RESET} "
                 f"{Colors.BRIGHT_GREEN}+{format_mirage_delta(earned_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(
-                f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET} "
-                f"{Colors.BRIGHT_RED}-{format_mirage_delta(spent_24h)} MIRAGE{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Staked 24h:{Colors.RESET} "
+                f"{Colors.BRIGHT_CYAN}+{format_mirage_delta(staked_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(
-                f"{bullet}{Colors.DIM}Net 24h:{Colors.RESET} "
-                f"{net_color}{net_sign}{format_mirage_delta(net_24h)} MIRAGE{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET} "
+                f"{Colors.BRIGHT_RED}-{format_mirage_delta(spent_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(
                 f"{bullet}{Colors.DIM}Earned 30d:{Colors.RESET} "
@@ -2734,6 +2739,7 @@ def render_compact_dashboard(
             output.append(truncate(f"    {Colors.DIM}{' '.join(str(x) for x in extra)}{Colors.RESET}", width))
         if status.name == "Earnings" and status.details.get("sample_count", 0) >= 2:
             earned_24h = int(status.details["earned_24h"])
+            staked_24h = int(status.details["staked_24h"])
             spent_24h = int(status.details["spent_24h"])
             earned_30d = int(status.details["earned_30d"])
             output.append(
@@ -2743,7 +2749,13 @@ def render_compact_dashboard(
                     width,
                 )
             )
-            output.append(truncate(f"    30d  +{format_mirage_delta(earned_30d)} earned", width))
+            output.append(
+                truncate(
+                    f"    24h  +{format_mirage_delta(staked_24h)} staked  "
+                    f"30d +{format_mirage_delta(earned_30d)} earned",
+                    width,
+                )
+            )
     trailer = render_trailer(width, f"Ctrl+C exits  refresh {refresh_secs}s", center=False)
     # Keep the compact view inside the terminal height.
     body_rows = max(8, height - len(trailer))
