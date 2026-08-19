@@ -12,13 +12,15 @@ State sync is not optional here. Genesis carries initial_height 2096156 while
 nodes retain RETENTION_BLOCKS (~7 days) of blocks, so no peer can serve the
 several million blocks a block-syncing node would ask for.
 
-Writes genesis.json and prints STATESYNC_* KEY=VALUE lines on stdout for the
-caller to parse (init.sh validates each key and never evals them). Any
-verification or schema failure exits non-zero without touching genesis.json.
+Writes genesis.json unless --trust-only is used, then prints STATESYNC_*
+KEY=VALUE lines on stdout for the caller to parse (init.sh validates each key
+and never evals them). Any verification or schema failure exits non-zero
+without touching genesis.json.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -160,7 +162,7 @@ def derive_trust(endpoints: list[str]) -> tuple[int, str]:
     return trust_height, distinct.pop()
 
 
-def main() -> None:
+def main(trust_only: bool = False) -> None:
     endpoints = [e.strip() for e in os.environ.get("BOOTSTRAP_RPC", "").split(",") if e.strip()]
     chain_id = os.environ.get("CHAIN_ID", "")
     node_home = os.environ.get("NODE_HOME", "")
@@ -177,7 +179,8 @@ def main() -> None:
     if not node_home:
         fail("NODE_HOME is not set")
 
-    install_genesis(endpoints[0], chain_id, os.path.join(node_home, "config", "genesis.json"))
+    if not trust_only:
+        install_genesis(endpoints[0], chain_id, os.path.join(node_home, "config", "genesis.json"))
     trust_height, trust_hash = derive_trust(endpoints)
     print(f"==> State sync trust height {trust_height} hash {trust_hash}", file=sys.stderr)
 
@@ -188,4 +191,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--trust-only",
+        action="store_true",
+        help="derive fresh state-sync trust without replacing genesis.json",
+    )
+    main(parser.parse_args().trust_only)

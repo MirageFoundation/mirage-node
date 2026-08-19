@@ -224,7 +224,7 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 echo "==> Starting tmux session '$SESSION'..."
-tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n caddy
+tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n status
 
 # Apply bundled tmux config
 TMUX_TEMPLATE="$ROOT_DIR/deploy/templates/tmux/tmux.conf"
@@ -237,6 +237,7 @@ fi
 touch /etc/caddy/.maintenance
 
 # Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
+tmux new-window -t "$SESSION" -n caddy -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee >(cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\")" C-m
 
 # PostgreSQL (start early)
@@ -527,12 +528,10 @@ if [ "${SKIP_PEERS:-0}" = "1" ]; then
   export MAX_OUTBOUND_PEERS="0"
 fi
 
-# Re-render node configs in case migrations updated env values.
+# Re-run initialization so post-migration env values are rendered without
+# discarding dynamically derived state-sync trust on a joining node.
 echo "==> Re-rendering node config from updated env..."
-mkdir -p "$NODE_HOME/config"
-python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/config.toml" "$NODE_HOME/config/config.toml"
-python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/app.toml" "$NODE_HOME/config/app.toml"
-python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/node/client.toml" "$NODE_HOME/config/client.toml"
+bash "$ROOT_DIR/deploy/init.sh"
 
 # Sync env vars into the tmux session BEFORE the service windows
 # (node/indexer/backend) are created below. The session was created earlier (so
@@ -623,6 +622,27 @@ if [ "$RPC_READY" -eq 0 ]; then
   exit 1
 fi
 
+# Once state sync installs a non-zero height, future restarts no longer need
+# remote trust derivation. This watcher is bounded so a stalled join surfaces in
+# the deploy log rather than leaving an immortal polling process.
+if [ "${SKIP_PEERS:-0}" != "1" ] && [ ! -f "$DATA_DIR/.state_sync_complete" ]; then
+  (
+    for _ in $(seq 1 8640); do
+      if STATUS_JSON="$(curl -fsS --max-time 3 http://127.0.0.1:26657/status)" &&
+         HEIGHT="$(printf '%s' "$STATUS_JSON" | python3 -c 'import json, sys; print(int(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"]))')" &&
+         [ "$HEIGHT" -gt 0 ]; then
+        touch "$DATA_DIR/.state_sync_complete.tmp"
+        mv "$DATA_DIR/.state_sync_complete.tmp" "$DATA_DIR/.state_sync_complete"
+        echo "✓ State sync installed block height $HEIGHT"
+        exit 0
+      fi
+      sleep 10
+    done
+    echo "ERROR: state sync did not install a non-zero height within 24 hours" >&2
+    exit 1
+  ) &
+fi
+
 # Enable validator mode if priv_validator_key.json exists
 if [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
   echo "==> Enabling validator mode..."
@@ -671,8 +691,7 @@ echo "✓ Maintenance mode disabled"
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
-# Unified Status Dashboard (last window)
-tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
+# Unified Status Dashboard (first window)
 tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
 
 # Divergence watchdog — recovery daemon. AUTO_DIVERGENCE_RECOVERY=true is now the
@@ -711,6 +730,10 @@ if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
 else
   echo "==> Stuck-node alert pager disabled (ALERT_WEBHOOK_URL unset)"
 fi
+
+tmux set-hook -t "$SESSION" client-attached \
+  "run-shell 'if [ -s /tmp/mirage-status-dashboard.pid ]; then kill -USR1 \$(cat /tmp/mirage-status-dashboard.pid); fi'"
+tmux select-window -t "$SESSION:status"
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 

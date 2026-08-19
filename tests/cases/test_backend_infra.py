@@ -1677,8 +1677,10 @@ def test_node_join_bootstrap(backend: str):
     """
     import hashlib as _hashlib
     import importlib.util
+    import io
     import json as _json
     import tempfile
+    from contextlib import redirect_stdout
 
     repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     module_path = os.path.join(repo_root, "deploy", "bootstrap_join.py")
@@ -1772,6 +1774,27 @@ def test_node_join_bootstrap(backend: str):
         else:
             _fail("node_join.derives_trust_below_head", f"height={height} hash={thash}")
 
+        # A pre-sync restart already has the verified genesis. It must refresh
+        # trust without replacing that file, because the trust height ages while
+        # an amended image or interrupted install is being retried.
+        with open(target, "w", encoding="utf-8") as f:
+            f.write("PRESERVED")
+        os.environ.update(
+            BOOTSTRAP_RPC="http://a,http://b",
+            CHAIN_ID="mirage-1",
+            NODE_HOME=tmpdir,
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            bj.main(trust_only=True)
+        if open(target, encoding="utf-8").read() == "PRESERVED" and "STATESYNC_ENABLE=true" in output.getvalue():
+            _pass("node_join.restart_refreshes_trust_only")
+        else:
+            _fail(
+                "node_join.restart_refreshes_trust_only",
+                f"genesis={open(target, encoding='utf-8').read()!r} output={output.getvalue()!r}",
+            )
+
         # H-2: the trust hash lands in a shell variable on the joining node, so
         # a bootstrap peer that answers with a command instead of a hash must be
         # refused here. Both endpoints agree on the payload, so agreement alone
@@ -1805,6 +1828,19 @@ def test_node_join_bootstrap(backend: str):
         _pass("node_join.local_testnet_exempt")
     else:
         _fail("node_join.local_testnet_exempt", "init.sh no longer gates the join bootstrap on SKIP_PEERS")
+
+    entrypoint_src = open(os.path.join(repo_root, "deploy", "entrypoint.sh"), encoding="utf-8").read()
+    if (
+        'bash "$ROOT_DIR/deploy/init.sh"' in entrypoint_src
+        and ".state_sync_complete" in entrypoint_src
+        and "--trust-only" in init_src
+    ):
+        _pass("node_join.final_render_preserves_statesync")
+    else:
+        _fail(
+            "node_join.final_render_preserves_statesync",
+            "the post-migration render can disable state sync or pre-sync restarts cannot refresh trust",
+        )
 
     # H-2: init.sh runs as root, in the same window the operator pipes in a
     # mnemonic, on output it just fetched from a remote node. eval there is

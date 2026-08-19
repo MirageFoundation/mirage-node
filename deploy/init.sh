@@ -7,6 +7,7 @@ NODE_HOME="$DATA_DIR/node"
 BIN="$ROOT_DIR/blockchain/bin/miraged"
 CHAIN_ID="mirage-1"
 MARKER="$DATA_DIR/.initialized"
+STATE_SYNC_COMPLETE="$DATA_DIR/.state_sync_complete"
 
 echo "==> Init: NODE_HOME=$NODE_HOME"
 
@@ -47,15 +48,40 @@ if [ ! -f "$NODE_HOME/config/genesis.json" ]; then
   $BIN init "validator" --chain-id "$CHAIN_ID" --home "$NODE_HOME"
 fi
 
+# A signed consensus height proves this is an existing validator, not a joining
+# node. New nodes get a persistent completion marker as soon as state sync
+# installs a non-zero height (entrypoint.sh owns that bounded watcher).
+if [ -f "$NODE_HOME/data/priv_validator_state.json" ] && [ ! -f "$STATE_SYNC_COMPLETE" ]; then
+  SIGNED_HEIGHT="$(python3 - "$NODE_HOME/data/priv_validator_state.json" <<'PY'
+import json
+import sys
+
+height = json.load(open(sys.argv[1], encoding="utf-8"))["height"]
+if not isinstance(height, str) or not height.isdigit():
+    raise SystemExit("priv_validator_state.json height must be a decimal string")
+print(height)
+PY
+)"
+  if [ "$SIGNED_HEIGHT" -gt 0 ]; then
+    touch "$STATE_SYNC_COMPLETE"
+  fi
+fi
+
 # The genesis `miraged init` just wrote describes a new single-validator chain,
-# never mirage-1. A joining node must replace it with the real one before it
-# can peer with anything. SKIP_PEERS=1 is the local testnet, which builds its
-# own genesis in reset_local_testnet.py and must not reach for the network.
+# never mirage-1. A joining node must replace it with the real one and derive
+# fresh state-sync trust before every pre-sync restart. SKIP_PEERS=1 is the local
+# testnet, which builds its own genesis and must not reach for the network.
 BOOTSTRAP_STATESYNC=""
-if [ "$FIRST_RUN" = "1" ] && [ "${SKIP_PEERS:-0}" != "1" ]; then
-  echo "==> Joining $CHAIN_ID: fetching network genesis and deriving state-sync trust..."
+if [ "${SKIP_PEERS:-0}" != "1" ] && [ ! -f "$STATE_SYNC_COMPLETE" ]; then
+  if [ "$FIRST_RUN" = "1" ]; then
+    echo "==> Joining $CHAIN_ID: fetching network genesis and deriving state-sync trust..."
+    BOOTSTRAP_ARGS=()
+  else
+    echo "==> Joining $CHAIN_ID: refreshing state-sync trust..."
+    BOOTSTRAP_ARGS=(--trust-only)
+  fi
   BOOTSTRAP_STATESYNC="$(NODE_HOME="$NODE_HOME" CHAIN_ID="$CHAIN_ID" \
-    python3 "$ROOT_DIR/deploy/bootstrap_join.py")"
+    python3 "$ROOT_DIR/deploy/bootstrap_join.py" "${BOOTSTRAP_ARGS[@]}")"
 fi
 
 # Peer configuration (from node.env)

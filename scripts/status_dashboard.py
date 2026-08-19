@@ -14,17 +14,20 @@ Services monitored:
   - System (disk, ~/.mirage usage, memory, CPU)
 """
 
+import argparse
 import json
 import os
 import re
+import signal
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 import time
-import argparse
-import socket
-from datetime import datetime, timedelta, timezone
+import tomllib
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -37,6 +40,8 @@ import requests
 
 # Add parent directory for shared imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from deploy.bootstrap_join import TRUST_LOOKBACK
 
 
 class Status(Enum):
@@ -564,6 +569,17 @@ def check_node() -> ServiceStatus:
         height = sync_info.get("latest_block_height", "?")
         catching_up = sync_info.get("catching_up", True)
         chain_id = node_info.get("network", "?")
+        state_sync_target = None
+        state_sync_starting = False
+        try:
+            with (Path.home() / ".mirage" / "node" / "config" / "config.toml").open("rb") as config_file:
+                state_sync = tomllib.load(config_file)["statesync"]
+            if state_sync["enable"] and (catching_up or int(height) == 0):
+                state_sync_target = int(state_sync["trust_height"]) + TRUST_LOOKBACK
+                state_sync_starting = int(height) == 0
+        except (FileNotFoundError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
+            debug_log(f"node: state-sync config unavailable: {e}")
+        syncing = catching_up or state_sync_starting
 
         # RPC health probe (CometBFT /health should return 200 when healthy)
         rpc_health_ok = None
@@ -613,7 +629,8 @@ def check_node() -> ServiceStatus:
 
         details = {
             "height": height,
-            "syncing": catching_up,
+            "syncing": syncing,
+            "sync_target": state_sync_target,
             "peers": peers,
             "validators_total": validators_total,
             "chain_id": chain_id,
@@ -626,13 +643,13 @@ def check_node() -> ServiceStatus:
         status = Status.OK
         message = "Running"
 
-        if catching_up:
+        if syncing:
             status = Status.WARN
-            message = "Syncing"
+            message = "State sync starting" if state_sync_starting else "Syncing"
 
         # Even if CometBFT reports catching_up=false, a stale last block is still unhealthy
         # — unless the chain is halted for a software upgrade, which is expected.
-        if block_age_secs is not None:
+        if block_age_secs is not None and not syncing:
             if block_age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
                 # Before marking ERROR, check if the chain is halted for an upgrade.
                 # During a coordinated upgrade, all validators stop at the upgrade
@@ -678,7 +695,7 @@ def check_node() -> ServiceStatus:
 
         debug_log(
             "node: "
-            f"height={height} catching_up={catching_up} peers={peers} "
+            f"height={height} catching_up={catching_up} state_sync_starting={state_sync_starting} peers={peers} "
             f"block_age_secs={block_age_secs} rpc_health_ok={rpc_health_ok} rpc_health_ms={rpc_health_ms} "
             f"status={status.value} message={message}"
         )
@@ -2222,7 +2239,15 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     bullet = f"{Colors.DIM}-{Colors.RESET} "
 
     if status.name == "CometBFT":
-        if details.get("height"):
+        if details.get("sync_target") is not None:
+            height = int(details["height"])
+            target = int(details["sync_target"])
+            percent = min(100.0, height * 100 / target)
+            lines.append(
+                f"{bullet}{Colors.DIM}Sync:{Colors.RESET} "
+                f"{height:,} / ~{target:,} ({percent:.1f}%)"
+            )
+        elif "height" in details:
             try:
                 h = int(details["height"])
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {h:,}")
@@ -2623,6 +2648,19 @@ def main():
 
     active_interval = max(1, int(args.interval))
     idle_interval = max(1, int(args.idle_interval))
+    refresh_requested = threading.Event()
+    dashboard_pid_path: Path | None = None
+
+    if os.environ.get("TMUX") and not args.once:
+        dashboard_pid_path = Path(
+            os.environ.get("MIRAGE_STATUS_DASHBOARD_PID", "/tmp/mirage-status-dashboard.pid")
+        )
+        dashboard_pid_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+        def request_refresh(_signum, _frame):
+            refresh_requested.set()
+
+        signal.signal(signal.SIGUSR1, request_refresh)
 
     # Track last render time for idle mode
     last_render_time = 0
@@ -2640,7 +2678,8 @@ def main():
 
                 if args.once:
                     return
-                time.sleep(active_interval)
+                refresh_requested.wait(active_interval)
+                refresh_requested.clear()
             else:
                 # Not visible (detached or different window)
                 # Only render if idle_interval has passed since last render
@@ -2656,13 +2695,18 @@ def main():
                 if args.once:
                     return
 
-                # Sleep in shorter chunks to detect visibility changes quickly
-                # Check every 2 seconds if we became visible
-                time.sleep(2)
+                refresh_requested.wait(2)
+                refresh_requested.clear()
 
     except KeyboardInterrupt:
         print("\n")
-        sys.exit(0)
+    finally:
+        if dashboard_pid_path is not None:
+            try:
+                if dashboard_pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                    dashboard_pid_path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 if __name__ == "__main__":

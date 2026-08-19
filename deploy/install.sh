@@ -43,9 +43,8 @@ parse_args() {
       -h|--help)
         echo "usage: install.sh [--domain example.com]"
         echo
-        echo "The installer asks for a validator name, a domain and whether to accept"
-        echo "media uploads. Set MIRAGE_MONIKER, MIRAGE_DOMAIN or MIRAGE_MEDIA_UPLOADS"
-        echo "to answer any of them up front; an empty value is a valid answer."
+        echo "The installer asks only for the recovery phrase. Validator name, domain"
+        echo "and media uploads use safe defaults or MIRAGE_* environment variables."
         exit 0
         ;;
       *) die "unknown flag: $1" ;;
@@ -971,16 +970,49 @@ install_timers() {
   systemctl enable --now mirage-update.timer
 }
 
+sync_summary() {
+  docker exec -i mirage python3 - <<'PY'
+import json
+import sys
+import tomllib
+import urllib.request
+
+sys.path.insert(0, "/opt/mirage")
+from deploy.bootstrap_join import TRUST_LOOKBACK
+
+with urllib.request.urlopen("http://127.0.0.1:26657/status", timeout=5) as response:
+    sync = json.load(response)["result"]["sync_info"]
+with open("/root/.mirage/node/config/config.toml", "rb") as config_file:
+    state_sync = tomllib.load(config_file)["statesync"]
+
+height = int(sync["latest_block_height"])
+catching_up = sync["catching_up"]
+if height == 0 and state_sync["enable"]:
+    target = int(state_sync["trust_height"]) + TRUST_LOOKBACK
+    print(f"waiting for state-sync snapshot near block {target:,} (0%)")
+elif catching_up:
+    print(f"catching up from block {height:,}")
+else:
+    print(f"at block {height:,}")
+PY
+}
+
 print_next_steps() {
+  local sync
+  sync="$(sync_summary)"
   echo
   echo "=============================================="
   echo "Mirage node is installing/syncing."
   echo "HTTP:      http://${PUBLIC_IP:-YOUR_IP}"
   echo "Username:  ${USERNAME}"
   echo "Address:   ${ADDRESS}"
+  echo "Sync:      ${sync}"
   echo
   echo "HTTPS: point A/AAAA at this IP, then:  mirage-domain your.domain"
-  echo "Status:  mirage-status"
+  echo "Status:    mirage-status"
+  echo "Tmux:      Everything runs in tmux; open it with:"
+  echo "           docker exec -it mirage tmux attach -t mirage"
+  echo "           Status opens first and refreshes immediately; Ctrl+PageDown cycles logs."
   echo "This node will register itself once synced. Do not run create-validator by hand."
   echo "=============================================="
 }

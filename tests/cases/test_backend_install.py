@@ -75,6 +75,7 @@ def test_install(backend: str) -> None:
     _test_moniker_precedence()
     _test_frontend_env_no_foreign_node()
     _test_launch_wait()
+    _test_tmux_status_first()
     _test_resume_refreshes_amended_release()
     _test_partial_chain_reset_preserves_state()
     _test_activation_and_registration_waits()
@@ -938,6 +939,51 @@ launch
         _fail("install.launch.node_log", "startup failure still hides the supervised miraged error")
         return
     _pass("install.launch.waits_for_first_boot_and_fails_fast_on_crash")
+
+
+def _test_tmux_status_first() -> None:
+    """The operator lands on a freshly rendered status dashboard when attaching."""
+    entrypoint = Path(os.path.join(REPO_ROOT, "deploy", "entrypoint.sh")).read_text(encoding="utf-8")
+    installer = Path(INSTALL_SH).read_text(encoding="utf-8")
+    required = (
+        'tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n status',
+        'tmux select-window -t "$SESSION:status"',
+        "client-attached",
+        "mirage-status-dashboard.pid",
+    )
+    missing = [text for text in required if text not in entrypoint]
+    if missing:
+        _fail("install.tmux.status_first", f"missing status-first tmux setup: {missing}")
+        return
+    if entrypoint.index("-n status") > entrypoint.index("-n caddy"):
+        _fail("install.tmux.status_order", "status is not the first tmux window")
+        return
+    if "from deploy.bootstrap_join import TRUST_LOOKBACK" not in installer:
+        _fail("install.tmux.sync_target", "installer sync target can drift from bootstrap trust derivation")
+        return
+
+    script = (
+        _install_functions_only()
+        + """
+sync_summary() { echo 'waiting for state-sync snapshot near block 2,100,000 (0%)'; }
+PUBLIC_IP=203.0.113.7
+USERNAME=Amsterdam-Node
+ADDRESS=mirage1test
+print_next_steps
+"""
+    )
+    result = _run(["bash", "-c", script])
+    output = result.stdout or ""
+    if (
+        result.returncode != 0
+        or "Sync:      waiting for state-sync snapshot" not in output
+        or "Everything runs in tmux" not in output
+        or "docker exec -it mirage tmux attach -t mirage" not in output
+        or "Status opens first and refreshes immediately" not in output
+    ):
+        _fail("install.tmux.operator_guidance", f"rc={result.returncode} output={output!r}")
+        return
+    _pass("install.tmux.status_first")
 
 
 def _test_resume_refreshes_amended_release() -> None:
