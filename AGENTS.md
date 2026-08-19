@@ -265,16 +265,25 @@ const formatTopicStatus = useCallback((topic) => {
 
 - **The normal release path is local.** Build and push the image with the existing
   local GHCR login, generate the candidate manifest, sign it with
-  `.release_signing.pem`, commit/push the signed manifest, run
-  `scripts/test_upgrade.sh`, then use `/prod-release`.
+  `.release_signing.pem`, commit/push the signed manifest, run the tests relevant
+  to the changed components, then use `/prod-release`.
+- **Ordinary software releases are not blockchain upgrades.** Deploy scripts,
+  host tools, installers, frontend and backend changes do not require
+  `scripts/test_upgrade.sh` unless the release also contains a real blockchain
+  upgrade as defined below.
 - `.github/workflows/release.yml` is optional. **Never dispatch or wait for the
   candidate workflow unless the operator explicitly asks for CI.**
 - CI availability or GHCR permissions are not a release gate and must not delay
-  a requested release. The mandatory gate is the local upgrade rehearsal below.
+  a requested release.
 
-### Upgrades — ALWAYS `scripts/test_upgrade.sh`, NEVER A MANUAL EQUIVALENT
+### Blockchain Upgrades — ALWAYS `scripts/test_upgrade.sh`, NEVER A MANUAL EQUIVALENT
 
-**Every single upgrade must be validated by `scripts/test_upgrade.sh`. No exceptions.**
+A **blockchain upgrade** is a release that changes chain consensus/state-transition
+behavior and is activated through a governance software-upgrade plan and halt.
+Only those releases use this section. Do not run the rehearsal merely because an
+ordinary image is being published.
+
+**Every blockchain upgrade must be validated by `scripts/test_upgrade.sh`. No exceptions.**
 
 ```bash
 scripts/test_upgrade.sh          # run the pipeline, launch the panes
