@@ -141,7 +141,7 @@ func TestRunMiragedSupervisedScriptPresent(t *testing.T) {
 
 // TestRunIndexerSupervisedScriptPresent pins the indexer supervisor the same
 // way. Before 2026-08-11 the indexer ran as a bare `python3 indexer/main.py`
-// in its tmux window, so one fatal exception (a post that broke urlsplit)
+// in its own process window, so one fatal exception (a post that broke urlsplit)
 // stopped indexing on every node until an operator restarted it by hand.
 // Reverting entrypoint.sh to the bare invocation restores that outage mode.
 func TestRunIndexerSupervisedScriptPresent(t *testing.T) {

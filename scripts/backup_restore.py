@@ -449,9 +449,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     run_ssh(
         conn,
         """
-        docker exec mirage tmux send-keys -t mirage:node C-c 2>/dev/null || true
-        docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true
-        docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true
+        docker exec mirage supervisorctl -c /etc/supervisor/supervisord.conf stop node indexer backend 2>/dev/null || true
         sleep 5
         docker exec mirage pkill -f miraged 2>/dev/null || true
         docker exec mirage pkill -f gunicorn 2>/dev/null || true

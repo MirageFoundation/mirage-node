@@ -31,7 +31,7 @@ The Mirage deployment system packages all components into a single Docker contai
 - **PostgreSQL** - Two databases: `mirage_indexer` (indexer) and `mirage_backend` (backend-owned data)
 - **Caddy** - Reverse proxy with automatic HTTPS
 
-**Key Design Principle:** One container per node. All services are managed via tmux windows for easy operator access. Persistent data lives in `~/.mirage` on the host (volume-mounted).
+**Key Design Principle:** One container per node. Supervisor is PID 1 and restarts services. Operators watch the node with `mirage-status`. Persistent data lives in `~/.mirage` on the host (volume-mounted).
 
 ---
 
@@ -44,7 +44,7 @@ Traditional microservices would split each component into separate containers. M
 1. **Simplicity** - Single container to deploy, update, monitor
 2. **Tight Coupling** - Components depend on each other's availability
 3. **Resource Efficiency** - Shared memory, no inter-container networking overhead
-4. **Operator Experience** - tmux provides unified access to all services
+4. **Operator Experience** - `mirage-status` is the live interface; Supervisor runs the services
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -313,16 +313,11 @@ bash "$ROOT_DIR/deploy/init.sh"
 # 6. Render Caddyfile template
 python3 render_template.py templates/caddy/Caddyfile /etc/caddy/Caddyfile
 
-# 7. Start tmux session
-tmux new-session -d -s mirage
+# 7. Stop bootstrap PostgreSQL and exec supervisord as PID 1
+exec supervisord -n -c /etc/supervisor/supervisord.conf
 
-# 8. Start services in order:
-#    Caddy → PostgreSQL → (wait for pg_isready)
-#    → Migrate DB/role names if needed (mirage → mirage_indexer, etc.)
-#    → Ensure both DBs exist (mirage_indexer + mirage_backend) + mirage_indexer_ro role
-#    → Initialize backend schema (init_backend_schema)
-#    → Run deploy migrations
-#    → Node → Indexer → Backend
+# 8. Supervisor starts services in order:
+#    postgres → caddy → node → indexer → backend
 ```
 
 ### Service Dependencies
@@ -379,32 +374,26 @@ trap cleanup SIGTERM SIGINT
 
 ## Service Orchestration
 
-### tmux Windows
+### Supervisor programs
 
-All services run in a tmux session named `mirage`:
+PID 1 is `supervisord`. Programs live in `/etc/supervisor/conf.d/`:
 
-```bash
-tmux new-session -d -s mirage -n caddy
-tmux new-window -t mirage -n postgres
-tmux new-window -t mirage -n node
-tmux new-window -t mirage -n indexer
-tmux new-window -t mirage -n backend
-tmux new-window -t mirage -n status
-```
-
-Operators can attach and switch windows:
+- `postgres`, `caddy`, `node`, `indexer`, `backend`
+- `enable-validator`, `state-sync-marker`, `maintenance-gate`, `cleanup`
+- optional `watchdog` and `stuck-alert`
 
 ```bash
-# Attach to session
-ssh -t user@host 'docker exec -it mirage tmux attach -t mirage'
-
-# Inside tmux:
-# Ctrl-b 0  → caddy window
-# Ctrl-b 1  → postgres window
-# Ctrl-b 2  → node window
-# Ctrl-b n  → next window
-# Ctrl-b p  → previous window
+mirage-status
+docker exec mirage supervisorctl -c /etc/supervisor/supervisord.conf status
+docker logs -f mirage
+mirage-logs node
 ```
+
+Persistent logs are under `~/.mirage/logs/{node,indexer,backend,caddy,postgres,supervisor,deploy}/`.
+
+### Backup and restore
+
+`mirage-backup` takes an online logical snapshot (PostgreSQL dumps, config, keyring, optional media) without stopping miraged. `mirage-restore` verifies the archive, snapshots current local data, then restores indexer/backend state while the validator keeps signing. Chain databases and `priv_validator_state.json` are never backed up or restored. A seed-only replacement rebuilds a fresh validator with no local history; a backup is how you keep posts and backend state. Archives are secret operational material — copy them off the server.
 
 ### Log Rotation
 
@@ -596,7 +585,7 @@ This script applies validator-specific configurations:
 
 ### Status Dashboard
 
-A unified status dashboard runs in the `status` tmux window:
+A unified status dashboard is `mirage-status` (live by default, `--once` and `--json` for scripts):
 
 ```python
 # scripts/status_dashboard.py
@@ -656,27 +645,25 @@ deploy/deploy.sh root@mirage.vote --update
 ### Viewing Logs
 
 ```bash
-# Attach to tmux (interactive)
-ssh -t root@mirage.vote 'docker exec -it mirage tmux attach -t mirage'
+# Live dashboard
+ssh root@mirage.vote mirage-status
 
 # Quick log check
 ssh root@mirage.vote 'docker logs --tail 100 mirage'
 
 # Specific component
-ssh root@mirage.vote 'docker exec mirage tail -f ~/.mirage/logs/indexer/indexer-*.log'
+ssh root@mirage.vote mirage-logs indexer --once
 ```
 
 ### Restarting a Service
 
 ```bash
 # Restart entire container
-ssh root@mirage.vote 'docker restart mirage'
+ssh root@mirage.vote mirage-restart
 
-# Restart specific service (inside tmux)
-# 1. Attach to tmux
-# 2. Navigate to service window (Ctrl-b <number>)
-# 3. Kill current process (Ctrl-c)
-# 4. Start again (up arrow, enter)
+# Restart a specific service
+ssh root@mirage.vote 'docker exec mirage supervisorctl -c /etc/supervisor/supervisord.conf restart indexer'
+```
 ```
 
 ### Checking Validator Status

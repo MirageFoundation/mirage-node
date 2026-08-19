@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import fcntl
 import http.server
+import io
 import json
 import os
 import re
 import subprocess
+import sys
+import tarfile
 import tempfile
 import threading
+from contextlib import redirect_stdout
 from pathlib import Path
 
-from tests.common import _fail, _pass
+from tests.common import _fail, _pass, _INSIDE_CONTAINER
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 INSTALL_SH = os.path.join(REPO_ROOT, "deploy", "install.sh")
@@ -75,7 +79,12 @@ def test_install(backend: str) -> None:
     _test_moniker_precedence()
     _test_frontend_env_no_foreign_node()
     _test_launch_wait()
-    _test_tmux_status_first()
+    _test_supervisor_runtime()
+    _test_public_cli_help()
+    _test_validator_replacement()
+    _test_governed_upgrade_prepare()
+    _test_backup_restore_contracts()
+    _test_status_compact_layout()
     _test_completed_installer_updates()
     _test_resume_refreshes_amended_release()
     _test_partial_chain_reset_preserves_state()
@@ -418,7 +427,9 @@ def _test_agree_json_ignores_node_local_state() -> None:
         agreeing, differing_inbox, differing_username = servers
         r = call([agreeing, differing_inbox], "username")
         if r.returncode != 0:
-            _fail("install.agree_json.node_local", f"inbox counts still block the install: rc={r.returncode} {r.stderr}")
+            _fail(
+                "install.agree_json.node_local", f"inbox counts still block the install: rc={r.returncode} {r.stderr}"
+            )
             return
         if json.loads(r.stdout).get("username") != "alice":
             _fail("install.agree_json.body", f"the full first body is no longer returned: {r.stdout}")
@@ -484,13 +495,19 @@ def _test_recovery_phrase_is_the_only_question() -> None:
     """An install asks for the phrase and nothing else, and says what it decided."""
     body = Path(INSTALL_SH).read_text(encoding="utf-8")
     reads = re.findall(r"^.*read .*/dev/tty.*$", body, re.M)
-    if len(reads) != 1 or "Recovery phrase" not in reads[0]:
+    if len(reads) != 2:
         _fail("install.prompts.only_the_phrase", f"unexpected interactive reads: {reads}")
+        return
+    if not any("Recovery phrase" in r for r in reads):
+        _fail("install.prompts.only_the_phrase", f"missing recovery-phrase read: {reads}")
+        return
+    if not any("read -r confirm" in r for r in reads):
+        _fail("install.prompts.only_the_phrase", f"missing replacement confirmation read: {reads}")
         return
 
     # No MIRAGE_* variables: the defaults path must not block and must report.
     env = {k: v for k, v in os.environ.items() if not k.startswith("MIRAGE_")}
-    script = _install_functions_only() + '\nUSERNAME=Anon-FuckWard\nPUBLIC_IP=203.0.113.7\nchoose_settings\n'
+    script = _install_functions_only() + "\nUSERNAME=Anon-FuckWard\nPUBLIC_IP=203.0.113.7\nchoose_settings\n"
     r = _run(["bash", "-c", script], env=env, stdin=subprocess.DEVNULL)
     if r.returncode != 0:
         _fail("install.prompts.defaults_run", f"rc={r.returncode} err={(r.stderr or '')[-300:]}")
@@ -503,7 +520,7 @@ def _test_recovery_phrase_is_the_only_question() -> None:
         "\n"
         "\n"
         "No domain for now; this node will serve on its IP. You can set it up later using "
-        "`mirage-domain example.com`, which will enable SSL (https) for you and bind the domain.\n"
+        "`mirage-domain --set example.com`, which will enable SSL (https) for you and bind the domain.\n"
     )
     if r.stdout != expected:
         _fail("install.prompts.default_report", f"got {r.stdout!r}")
@@ -528,11 +545,7 @@ def _test_balance_reads_in_mirage() -> None:
     # The denom still appears in the REST query and the manifest field name; what
     # must not appear is a umirage figure in something the operator reads.
     body = Path(INSTALL_SH).read_text(encoding="utf-8")
-    printed = [
-        line
-        for line in body.splitlines()
-        if re.match(r"\s*(echo|printf|die)\b", line) and "umirage" in line
-    ]
+    printed = [line for line in body.splitlines() if re.match(r"\s*(echo|printf|die)\b", line) and "umirage" in line]
     if printed:
         _fail("install.balance.raw_denom", f"raw umirage shown to the operator: {printed}")
         return
@@ -541,11 +554,14 @@ def _test_balance_reads_in_mirage() -> None:
 
 def _test_miraged_banner_hidden_but_errors_kept() -> None:
     """The registration banner must not reach the transcript, and errors still must."""
-    script = _install_functions_only() + """
+    script = (
+        _install_functions_only()
+        + """
 quiet_run bash -c 'echo "core/types: registered msg interfaces" >&2; echo ok'
 echo "rc=$?"
 quiet_run bash -c 'echo "the real failure" >&2; exit 3' || echo "rc=$?"
 """
+    )
     r = _run(["bash", "-c", script])
     if "core/types" in r.stderr:
         _fail("install.banner.suppressed", "the miraged banner still reaches stderr on success")
@@ -569,8 +585,8 @@ def _test_setup_prompts() -> None:
     functions = _install_functions_only()
     script = (
         functions
-        + '\nUSERNAME=alice\nPUBLIC_IP=203.0.113.7\n'
-        + 'choose_settings >/dev/null\n'
+        + "\nUSERNAME=alice\nPUBLIC_IP=203.0.113.7\n"
+        + "choose_settings >/dev/null\n"
         + 'printf "%s|%s|%s" "$MONIKER_CHOICE" "$DOMAIN_ARG" "$MEDIA_UPLOADS"\n'
     )
 
@@ -669,7 +685,7 @@ def _test_prompt_answers_reach_env() -> None:
             + writer.replace("/root/.mirage/env/node.env", node_env)
             + f'\nwrite_env_key MONIKER "chosen name"\n'
             + "write_env_key WATCHDOG_AUTORECOVER true\n"
-            + f'write_env_key MEDIA_UPLOADS_ENABLED true {backend_env}\n'
+            + f"write_env_key MEDIA_UPLOADS_ENABLED true {backend_env}\n"
         )
         r = _run(["bash", "-c", script])
         if r.returncode != 0:
@@ -735,7 +751,7 @@ def _test_prompt_answers_reach_env() -> None:
 def _test_external_address_rejects_injection() -> None:
     fns = _install_functions_only()
     bad = "tcp://1.2.3.4:26656; touch /tmp/pwned"
-    r = _run(["bash", "-c", fns + f'MIRAGE_EXTERNAL_ADDRESS={bad!r}\nexternal_address\n'])
+    r = _run(["bash", "-c", fns + f"MIRAGE_EXTERNAL_ADDRESS={bad!r}\nexternal_address\n"])
     if r.returncode == 0:
         _fail("install.external_address.accepts_injection", r.stdout[-200:])
         return
@@ -863,7 +879,7 @@ def _test_launch_wait() -> None:
     with tempfile.TemporaryDirectory(prefix="launch-wait-") as tmp:
         launch_stub = os.path.join(tmp, "mirage-launch")
         launched = os.path.join(tmp, "launched")
-        Path(launch_stub).write_text(f'#!/bin/bash\necho called >> {launched}\n', encoding="utf-8")
+        Path(launch_stub).write_text(f"#!/bin/bash\necho called >> {launched}\n", encoding="utf-8")
         os.chmod(launch_stub, 0o755)
         polls = os.path.join(tmp, "polls")
 
@@ -943,28 +959,53 @@ launch
     _pass("install.launch.waits_for_first_boot_and_fails_fast_on_crash")
 
 
-def _test_tmux_status_first() -> None:
-    """The operator lands on a freshly rendered status dashboard when attaching."""
+def _test_supervisor_runtime() -> None:
+    """PID 1 is Supervisor; mirage-status is the operator interface."""
     entrypoint = Path(os.path.join(REPO_ROOT, "deploy", "entrypoint.sh")).read_text(encoding="utf-8")
+    dockerfile = Path(os.path.join(REPO_ROOT, "deploy", "Dockerfile")).read_text(encoding="utf-8")
     installer = Path(INSTALL_SH).read_text(encoding="utf-8")
-    required = (
-        'tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n status',
-        'tmux new-window -d -t "$SESSION" -n caddy',
-        'tmux new-window -d -t "$SESSION" -n node',
-        'tmux new-window -d -t "$SESSION" -n backend',
-        "client-attached",
-        "mirage-status-dashboard.pid",
-    )
-    missing = [text for text in required if text not in entrypoint]
-    if missing:
-        _fail("install.tmux.status_first", f"missing status-first tmux setup: {missing}")
+    dashboard = Path(os.path.join(REPO_ROOT, "scripts", "status_dashboard.py")).read_text(encoding="utf-8")
+    status_tool = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-status")).read_text(encoding="utf-8")
+    if "tmux" in entrypoint:
+        _fail("install.supervisor.entrypoint_tmux", "entrypoint.sh still contains tmux")
         return
-    dashboard_start = entrypoint.index('scripts/status_dashboard.py" C-m')
-    if entrypoint.index("-n status") > entrypoint.index("-n caddy") or dashboard_start > entrypoint.index("-n caddy"):
-        _fail("install.tmux.status_order", "status is not live before service startup")
+    if "exec supervisord -n" not in entrypoint:
+        _fail("install.supervisor.pid1", "entrypoint.sh must exec supervisord as PID 1")
+        return
+    if "run_miraged_supervised.sh" not in entrypoint or "run_indexer_supervised.sh" not in entrypoint:
+        _fail("install.supervisor.wrappers", "entrypoint must still name the supervised wrappers")
+        return
+    if "python3 indexer/main.py" in entrypoint:
+        _fail("install.supervisor.unsupervised_indexer", "entrypoint must not launch the indexer unsupervised")
+        return
+    if "supervisor \\" not in dockerfile:
+        _fail("install.supervisor.image_pkg", "Dockerfile must install supervisor")
+        return
+    runtime = (
+        dockerfile[dockerfile.find("Install runtime dependencies") :]
+        if "Install runtime dependencies" in dockerfile
+        else dockerfile
+    )
+    if "tmux" in runtime:
+        _fail("install.supervisor.image_tmux", "runtime image still installs tmux")
+        return
+    if "HEALTHCHECK" not in dockerfile:
+        _fail("install.supervisor.healthcheck", "Dockerfile must define a HEALTHCHECK")
+        return
+    if "get_tmux_visibility_state" in dashboard or "SIGUSR1" in dashboard:
+        _fail("install.supervisor.dashboard_tmux", "status dashboard still has tmux/SIGUSR1 behavior")
+        return
+    if "render_compact_dashboard" not in dashboard or "term_width < 100" not in dashboard:
+        _fail("install.supervisor.compact", "dashboard must compact-render 80x24 terminals")
+        return
+    if "docker exec -it" not in status_tool or "--interval" not in status_tool:
+        _fail("install.supervisor.status_tty", "mirage-status must allocate a TTY for live mode")
         return
     if "from deploy.bootstrap_join import TRUST_LOOKBACK" not in installer:
-        _fail("install.tmux.sync_target", "installer sync target can drift from bootstrap trust derivation")
+        _fail("install.supervisor.sync_target", "installer sync target can drift from bootstrap trust derivation")
+        return
+    if "Type exactly 'replace'" not in installer or "apply_replacement_watermark" not in installer:
+        _fail("install.supervisor.replace", "installer is missing the seed-only replacement path")
         return
 
     script = (
@@ -982,13 +1023,90 @@ print_next_steps
     if (
         result.returncode != 0
         or "Sync:      waiting for state-sync snapshot" not in output
-        or "Everything runs in tmux" not in output
-        or "docker exec -it mirage tmux attach -t mirage" not in output
-        or "Status opens first and refreshes immediately" not in output
+        or "Watch live status (Ctrl+C exits):" not in output
+        or output.rstrip().splitlines()[-1].strip() != "mirage-status"
+        or "tmux" in output.lower()
     ):
-        _fail("install.tmux.operator_guidance", f"rc={result.returncode} output={output!r}")
+        _fail("install.supervisor.operator_guidance", f"rc={result.returncode} output={output!r}")
         return
-    _pass("install.tmux.status_first")
+
+    if 'if [[ "$confirm" != "replace" ]]; then' not in installer:
+        _fail("install.supervisor.replace_token", "replacement must require typing exactly replace")
+        return
+    _pass("install.supervisor.runtime")
+
+
+def _test_public_cli_help() -> None:
+    """Public host tools document -h/--help and reject unknown arguments."""
+    tools = {
+        "mirage-status": ["--once", "--json", "--interval"],
+        "mirage-update": ["--prepare", "--status", "--rollback"],
+        "mirage-backup": ["--output", "--stdout", "--with-media"],
+        "mirage-restore": ["--check"],
+        "mirage-domain": ["--set", "--status", "--remove"],
+        "mirage-logs": ["--lines", "--once"],
+        "mirage-restart": [],
+    }
+    for name, flags in tools.items():
+        path = os.path.join(REPO_ROOT, "deploy", "hosttools", name)
+        body = Path(path).read_text(encoding="utf-8")
+        if "-h|--help" not in body and "-h|--help)" not in body:
+            _fail(f"install.cli.{name}.help", f"{name} does not handle -h/--help")
+            return
+        for flag in flags:
+            if flag not in body:
+                _fail(f"install.cli.{name}.{flag}", f"{name} missing {flag}")
+                return
+        if name == "mirage-update":
+            if "unknown argument" not in body:
+                _fail(f"install.cli.{name}.unknown", f"{name} does not reject unknown arguments")
+                return
+            help_r = _run(["bash", path, "--help"])
+            if help_r.returncode != 0 or "Usage: mirage-update" not in (help_r.stdout or ""):
+                _fail(
+                    "install.cli.mirage-update.help_before_lock",
+                    f"rc={help_r.returncode} out={help_r.stdout} err={help_r.stderr}",
+                )
+                return
+            unknown_r = _run(["bash", path, "--not-a-real-flag"])
+            if unknown_r.returncode != 2:
+                _fail("install.cli.mirage-update.unknown_rc", f"rc={unknown_r.returncode} err={unknown_r.stderr}")
+                return
+            continue
+        result = _run(["bash", path, "--not-a-real-flag"])
+        if result.returncode == 0:
+            _fail(f"install.cli.{name}.unknown", f"{name} accepted an unknown flag")
+            return
+    restore = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-restore")).read_text(encoding="utf-8")
+    if "Type exactly 'restore'" not in restore:
+        _fail("install.cli.restore.confirm", "mirage-restore must require typing restore")
+        return
+    domain = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-domain")).read_text(encoding="utf-8")
+    if "Type exactly 'remove'" not in domain:
+        _fail("install.cli.domain.remove", "mirage-domain --remove must require typing remove")
+        return
+    conflict = _run(
+        ["bash", os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-domain"), "--set", "example.com", "--status"]
+    )
+    if conflict.returncode != 2 or "cannot be combined" not in (conflict.stderr or ""):
+        _fail("install.cli.domain.conflict", f"rc={conflict.returncode} err={conflict.stderr}")
+        return
+    backup = Path(os.path.join(REPO_ROOT, "deploy", "online_backup.py")).read_text(encoding="utf-8")
+    restore_py = Path(os.path.join(REPO_ROOT, "deploy", "online_restore.py")).read_text(encoding="utf-8")
+    if "priv_validator_state.json" not in backup or "priv_validator_state.json" not in restore_py:
+        _fail("install.cli.backup.signer", "backup/restore must name and exclude signer state")
+        return
+    if "FORBIDDEN_NAMES" not in restore_py:
+        _fail("install.cli.restore.forbidden", "restore must refuse chain DB paths")
+        return
+    updater = Path(UPDATE_SH).read_text(encoding="utf-8")
+    if "--prepare" not in updater or "activate_if_halted" not in updater:
+        _fail("install.cli.update.prepare", "mirage-update is missing governed-upgrade prepare/activate")
+        return
+    if "upgrade-info.json" not in updater:
+        _fail("install.cli.update.marker", "activation must require the Cosmos upgrade marker")
+        return
+    _pass("install.cli.public_contract")
 
 
 def _test_completed_installer_updates() -> None:
@@ -1067,7 +1185,7 @@ def _test_resume_refreshes_amended_release() -> None:
             f"use_pinned_manifests() {{ MANIFEST_DIR={pinned!r}; }}\n"
             f"fetch_manifests() {{ MANIFEST_DIR={fetched!r}; }}\n"
             "verify_manifests() { :; }\npin_manifests() { echo pinned; }\n"
-            "die() { echo \"ERROR: $*\" >&2; exit 1; }\n"
+            'die() { echo "ERROR: $*" >&2; exit 1; }\n'
             + function
             + '\nrefresh_manifests_for_resume\nprintf "%s|%s" "$RESUME_IMAGE_CHANGED" "$PREVIOUS_IMAGE"\n'
         )
@@ -1104,10 +1222,8 @@ def _test_partial_chain_reset_preserves_state() -> None:
         script = (
             "set -euo pipefail\n"
             "PREVIOUS_IMAGE=old-image\nIMAGE=new-image\n"
-            "die() { echo \"ERROR: $*\" >&2; exit 1; }\n"
-            "docker() { :; }\n"
-            + function
-            + "\nreset_partial_chain_init\n"
+            'die() { echo "ERROR: $*" >&2; exit 1; }\n'
+            "docker() { :; }\n" + function + "\nreset_partial_chain_init\n"
         )
         r = _run(["bash", "-c", script])
         captures = list(Path(root, ".failed_install_forensics").glob("*"))
@@ -1209,7 +1325,9 @@ def _test_release_workflow_files_tracked() -> None:
     workflow_path = Path(REPO_ROOT, ".github", "workflows", "release.yml")
     if workflow_path.is_file() and Path(REPO_ROOT, ".git").exists():
         workflow = workflow_path.read_text(encoding="utf-8")
-        referenced = {f"{package}/{module}.py" for package, module in re.findall(r"from (scripts|deploy)\.(\w+) import", workflow)}
+        referenced = {
+            f"{package}/{module}.py" for package, module in re.findall(r"from (scripts|deploy)\.(\w+) import", workflow)
+        }
         referenced.update(re.findall(r"(?:python3|bash|sh) ((?:scripts|deploy)/[\w./-]+)", workflow))
         if referenced != set(RELEASE_CI_FILES):
             _fail(
@@ -1229,11 +1347,17 @@ def _test_release_workflow_files_tracked() -> None:
 
 
 def _test_docker_context_excludes_private_key() -> None:
+    dockerignore = Path(REPO_ROOT, ".dockerignore").read_text(encoding="utf-8")
     forbidden = (".release_signing.pem", ".env", ".envrc", "release-manifest.candidate.json")
-    present = [name for name in forbidden if Path(REPO_ROOT, name).exists()]
-    if present:
-        _fail("install.image.secrets", f"sensitive build-context files present in runtime image: {present}")
+    missing = [name for name in forbidden if name not in dockerignore]
+    if missing:
+        _fail("install.image.secrets", f"sensitive files are not excluded from the image build context: {missing}")
         return
+    if _INSIDE_CONTAINER:
+        present = [name for name in forbidden if Path(REPO_ROOT, name).exists()]
+        if present:
+            _fail("install.image.secrets", f"sensitive build-context files present in runtime image: {present}")
+            return
     if not Path(PUBKEY).is_file():
         _fail("install.image.pubkey", "runtime image is missing the public trust anchor")
         return
@@ -1439,6 +1563,9 @@ agree_json() {{
     printf '%s\\n' '{{"validators":[],"pagination":{{"next_key":"NEXT+/="}}}}'
   fi
 }}
+confirm_validator_replacement() {{
+  die "this seed's consensus key is already a validator ($2) on another host"
+}}
 {function}
 collision_guard
 """
@@ -1628,7 +1755,7 @@ def _test_updater_halt_and_rollback() -> bool:
         state = os.path.join(tmp, "state.json")
         launch_log = os.path.join(tmp, "launch.log")
         launcher = os.path.join(tmp, "launch")
-        Path(launcher).write_text(f"#!/bin/sh\necho \"$*\" >> {launch_log}\n", encoding="utf-8")
+        Path(launcher).write_text(f'#!/bin/sh\necho "$*" >> {launch_log}\n', encoding="utf-8")
         os.chmod(launcher, 0o755)
         base = {
             "active": "current",
@@ -1652,9 +1779,7 @@ def _test_updater_halt_and_rollback() -> bool:
 
         rollback_script = (
             "set -euo pipefail\n"
-            f'STATE_FILE="{state}"\nLAUNCH="{launcher}"\n'
-            + _shell_function(UPDATE_SH, "rollback")
-            + "rollback\n"
+            f'STATE_FILE="{state}"\nLAUNCH="{launcher}"\n' + _shell_function(UPDATE_SH, "rollback") + "rollback\n"
         )
         r = _run(["bash", "-c", rollback_script])
         if r.returncode == 0 or "does not permit rollback" not in r.stderr or os.path.exists(launch_log):
@@ -1698,10 +1823,7 @@ def _test_updater_network_only_refresh() -> bool:
             json.dumps({"last_release_id": 7, "last_network_generation": 1}),
             encoding="utf-8",
         )
-        functions = "".join(
-            _shell_function(UPDATE_SH, name)
-            for name in ("version_at_least", "canonical_hash", "tick")
-        )
+        functions = "".join(_shell_function(UPDATE_SH, name) for name in ("version_at_least", "canonical_hash", "tick"))
         script = f"""set -euo pipefail
 HOME={home!r}
 tmp={work!r}
@@ -1724,9 +1846,7 @@ tick
             _fail("install.updater.network_only", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return False
         state = json.loads(Path(state_path).read_text(encoding="utf-8"))
-        installed = json.loads(
-            Path(home, ".mirage", "env", "network-manifest.json").read_text(encoding="utf-8")
-        )
+        installed = json.loads(Path(home, ".mirage", "env", "network-manifest.json").read_text(encoding="utf-8"))
         if state.get("last_network_generation") != 2 or installed.get("generation") != 2:
             _fail("install.updater.network_only_state", f"state={state} network={installed.get('generation')}")
             return False
@@ -1855,13 +1975,9 @@ activate_staged
 def _test_peer_pull_requires_peer_ahead() -> None:
     """Peer-pull must refuse when local height is unknown or no peer is strictly ahead."""
     recover = os.path.join(REPO_ROOT, "scripts", "recover.sh")
-    script = (
-        "set -euo pipefail\n"
-        "LOG_FILE=\n"
-        + _shell_function(recover, "log")
-        + _shell_function(recover, "die")
-        + _shell_function(recover, "peer_require_source_ahead")
-    )
+    script = "set -euo pipefail\n" "LOG_FILE=\n" + _shell_function(recover, "log") + _shell_function(
+        recover, "die"
+    ) + _shell_function(recover, "peer_require_source_ahead")
     same = _run(["bash", "-c", script + "LOCAL_DIVERGED_HEIGHT=100\npeer_require_source_ahead 192.0.2.2 100\n"])
     if same.returncode == 0 or "strictly ahead" not in same.stderr:
         _fail("recover.peer_pull.same_height", f"rc={same.returncode} err={same.stderr[-300:]}")
@@ -1889,9 +2005,7 @@ def _test_watermark_never_lowers() -> None:
         Path(pv).write_text('{"height": "1000", "round": 0, "step": 0}\n', encoding="utf-8")
         bindir = os.path.join(tmp, "bin")
         os.makedirs(bindir, exist_ok=True)
-        status = json.dumps(
-            {"result": {"sync_info": {"catching_up": False, "latest_block_height": "12"}}}
-        )
+        status = json.dumps({"result": {"sync_info": {"catching_up": False, "latest_block_height": "12"}}})
         Path(os.path.join(bindir, "curl")).write_text(
             f"#!/bin/bash\nprintf '%s\\n' '{status}'\n",
             encoding="utf-8",
@@ -1911,9 +2025,7 @@ def _test_watermark_never_lowers() -> None:
             return
 
         Path(pv).write_text('{"height": "500", "round": 0, "step": 0}\n', encoding="utf-8")
-        catching = json.dumps(
-            {"result": {"sync_info": {"catching_up": True, "latest_block_height": "12"}}}
-        )
+        catching = json.dumps({"result": {"sync_info": {"catching_up": True, "latest_block_height": "12"}}})
         Path(os.path.join(bindir, "curl")).write_text(
             f"#!/bin/bash\nprintf '%s\\n' '{catching}'\n",
             encoding="utf-8",
@@ -2051,3 +2163,514 @@ def _test_repodigest_pin() -> None:
         _fail("install.repodigest", "installer/updater must refuse a RepoDigest mismatch")
         return
     _pass("install.repodigest_pin")
+
+
+def _replacement_confirm_script(tmp: str, answer: str, rpc_status: str | None = None) -> str:
+    answer_path = os.path.join(tmp, "answer")
+    Path(answer_path).write_text(answer, encoding="utf-8")
+    manifest_dir = os.path.join(tmp, "manifests")
+    os.makedirs(manifest_dir, exist_ok=True)
+    replacement = os.path.join(tmp, "replacement.json")
+    function = _shell_function(INSTALL_SH, "confirm_validator_replacement")
+    function = function.replace("[[ ! -t 1 ]] || ! : </dev/tty 2>/dev/null", "false")
+    function = function.replace("read -r confirm </dev/tty", f"read -r confirm < {answer_path!r}")
+    curl_body = (
+        rpc_status or '{"result":{"node_info":{"network":"mirage-1"},"sync_info":{"latest_block_height":"1000"}}}'
+    )
+    return f"""set -euo pipefail
+REPLACEMENT_FILE={replacement!r}
+MANIFEST_DIR={manifest_dir!r}
+die() {{ echo "ERROR: $*" >&2; exit 1; }}
+curl() {{
+  printf '%s\\n' {curl_body!r}
+  return 0
+}}
+{function}
+confirm_validator_replacement TARGETPUB miragevaloper1existing
+"""
+
+
+def _test_validator_replacement() -> None:
+    """Seed-only replacement requires an exact token, live RPC heights, and a monotonic watermark."""
+    installer = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if "MIRAGE_REPLACE" in installer or "confirm_validator_replacement" not in installer:
+        _fail("install.replace.env_bypass", "replacement must not be bypassable by environment")
+        return
+    collision = _shell_function(INSTALL_SH, "collision_guard")
+    if 'local_pub" == "$pub"' not in collision or "reinstall is idempotent" not in collision:
+        _fail("install.replace.same_host", "same-host reinstall must skip the replace prompt")
+        return
+    init = Path(os.path.join(REPO_ROOT, "deploy", "init.sh")).read_text(encoding="utf-8")
+    if "Restored consensus watermark" not in init or "refusing to lower" not in init:
+        _fail("install.replace.init_watermark", "init.sh must not let miraged init lower a replacement watermark")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="replace-refuse-") as tmp:
+        Path(os.path.join(tmp, "manifests", "network.json")).parent.mkdir(parents=True)
+        Path(os.path.join(tmp, "manifests", "network.json")).write_text(
+            json.dumps({"rpc": ["http://127.0.0.1:26657", "http://127.0.0.1:26658"]}),
+            encoding="utf-8",
+        )
+        for answer, label in (("", "blank"), ("Replace", "case"), ("yes", "other"), ("", "eof")):
+            script = _replacement_confirm_script(tmp, answer)
+            if label == "eof":
+                Path(os.path.join(tmp, "answer")).write_text("", encoding="utf-8")
+            r = _run(["bash", "-c", script])
+            replacement = os.path.join(tmp, "replacement.json")
+            if r.returncode == 0 or os.path.isfile(replacement) or "replacement not confirmed" not in (r.stderr or ""):
+                _fail(
+                    f"install.replace.refuse_{label}",
+                    f"rc={r.returncode} err={r.stderr} exists={os.path.isfile(replacement)}",
+                )
+                return
+
+    with tempfile.TemporaryDirectory(prefix="replace-ok-") as tmp:
+        Path(os.path.join(tmp, "manifests")).mkdir()
+        Path(os.path.join(tmp, "manifests", "network.json")).write_text(
+            json.dumps({"rpc": ["http://one.example", "http://two.example"]}),
+            encoding="utf-8",
+        )
+        script = _replacement_confirm_script(
+            tmp,
+            "replace",
+            '{"result":{"node_info":{"network":"mirage-1"},"sync_info":{"latest_block_height":"4242"}}}',
+        )
+        r = _run(["bash", "-c", script])
+        replacement = os.path.join(tmp, "replacement.json")
+        if r.returncode != 0 or not os.path.isfile(replacement):
+            _fail("install.replace.confirm", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        state = json.loads(Path(replacement).read_text(encoding="utf-8"))
+        if state.get("watermark") != 4252 or state.get("consensus_pubkey") != "TARGETPUB":
+            _fail("install.replace.watermark", f"state={state}")
+            return
+        r2 = _run(["bash", "-c", script])
+        if r2.returncode != 0 or "already confirmed" not in (r2.stdout or ""):
+            _fail("install.replace.resume", f"rc={r2.returncode} out={r2.stdout} err={r2.stderr}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="replace-rpc-") as tmp:
+        Path(os.path.join(tmp, "manifests")).mkdir()
+        Path(os.path.join(tmp, "manifests", "network.json")).write_text(
+            json.dumps({"rpc": ["http://one.example", "http://two.example"]}),
+            encoding="utf-8",
+        )
+        script = _replacement_confirm_script(
+            tmp,
+            "replace",
+            '{"result":{"node_info":{"network":"not-mirage"},"sync_info":{"latest_block_height":"9"}}}',
+        )
+        r = _run(["bash", "-c", script])
+        if r.returncode == 0 or "expected mirage-1" not in (r.stderr or ""):
+            _fail("install.replace.chain_id", f"rc={r.returncode} err={r.stderr}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="replace-apply-") as tmp:
+        dest_root = os.path.join(tmp, "host")
+        data = os.path.join(dest_root, "node", "data")
+        os.makedirs(data, exist_ok=True)
+        os.makedirs(os.path.join(dest_root, "node", "config"), exist_ok=True)
+        Path(os.path.join(dest_root, "node", "config", "node_key.json")).write_text("old-p2p\n", encoding="utf-8")
+        os.makedirs(os.path.join(data, "application.db"), exist_ok=True)
+        Path(os.path.join(data, "application.db", "CURRENT")).write_text("x\n", encoding="utf-8")
+        replacement = os.path.join(tmp, "replacement.json")
+        Path(replacement).write_text(
+            json.dumps({"watermark": 9000, "consensus_pubkey": "P"}),
+            encoding="utf-8",
+        )
+        function = _shell_function(INSTALL_SH, "apply_replacement_watermark").replace("/root/.mirage", dest_root)
+        script = f"""set -euo pipefail
+REPLACEMENT_FILE={replacement!r}
+die() {{ echo "ERROR: $*" >&2; exit 1; }}
+{function}
+apply_replacement_watermark
+"""
+        r = _run(["bash", "-c", script])
+        pv = os.path.join(data, "priv_validator_state.json")
+        if r.returncode != 0 or not os.path.isfile(pv):
+            _fail("install.replace.apply", f"rc={r.returncode} err={r.stderr}")
+            return
+        written = json.loads(Path(pv).read_text(encoding="utf-8"))
+        if str(written.get("height")) != "9000":
+            _fail("install.replace.apply_height", written)
+            return
+        if os.path.exists(os.path.join(dest_root, "node", "config", "node_key.json")):
+            _fail("install.replace.fresh_p2p", "replacement left the old P2P identity on disk")
+            return
+        if os.path.exists(os.path.join(data, "application.db")):
+            _fail("install.replace.empty_chain_db", "replacement left chain databases on disk")
+            return
+        Path(pv).write_text(json.dumps({"height": "12000", "round": 0, "step": 0}) + "\n", encoding="utf-8")
+        r = _run(["bash", "-c", script])
+        kept = json.loads(Path(pv).read_text(encoding="utf-8"))
+        if r.returncode != 0 or str(kept.get("height")) != "12000":
+            _fail("install.replace.apply_monotonic", f"rc={r.returncode} kept={kept} err={r.stderr}")
+            return
+        if "will not lower" not in (r.stdout or ""):
+            _fail("install.replace.apply_message", r.stdout)
+            return
+    _pass("install.replace.confirmation_and_watermark")
+
+
+def _test_governed_upgrade_prepare() -> None:
+    """Prepare refuses a missing/mismatched plan; activation requires the Cosmos marker, not an RPC outage."""
+    updater = Path(UPDATE_SH).read_text(encoding="utf-8")
+    wrapper = Path(os.path.join(REPO_ROOT, "deploy", "run_miraged_supervised.sh")).read_text(encoding="utf-8")
+    timer = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd", "mirage-upgrade-activate.timer")).read_text(
+        encoding="utf-8"
+    )
+    service = Path(
+        os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd", "mirage-upgrade-activate.service")
+    ).read_text(encoding="utf-8")
+    if "OnUnitActiveSec=30s" not in timer or "--activate-if-halted" not in service:
+        _fail("install.upgrade.timer", "activation timer is missing or does not invoke --activate-if-halted")
+        return
+    if "hold_for_governed_upgrade" not in wrapper or "no prepared.json staged" not in wrapper:
+        _fail("install.upgrade.hold", "node wrapper must hold at the halt without burning restart budget")
+        return
+    if "autorestart=unexpected does not relaunch" not in wrapper:
+        _fail("install.upgrade.budget_exit", "node wrapper must exit 0 when the hourly restart budget is exhausted")
+        return
+    if 'UPGRADE ".+" NEEDED at height:' not in wrapper:
+        _fail("install.upgrade.halt_line", "node wrapper does not recognise the Cosmos upgrade halt line")
+        return
+
+    prepare = _shell_function(UPDATE_SH, "prepare")
+    activate = _shell_function(UPDATE_SH, "activate_if_halted")
+
+    def _prepare_script(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> str:
+        home = os.path.join(tmp, "home")
+        work = os.path.join(tmp, "work")
+        os.makedirs(os.path.join(home, ".mirage", "env"), exist_ok=True)
+        os.makedirs(work, exist_ok=True)
+        release = os.path.join(tmp, "release.json")
+        Path(release).write_text(
+            json.dumps(
+                {
+                    "activation": activation,
+                    "upgrade_name": upgrade_name,
+                    "image": "ghcr.io/miragefoundation/mirage-node@sha256:" + ("b" * 64),
+                    "release_id": 9,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return f"""set -euo pipefail
+HOME={home!r}
+tmp={work!r}
+MANIFEST_URL=release
+NETWORK_URL=network
+STATE_DIR={os.path.join(tmp, "state")!r}
+mkdir -p "$STATE_DIR"
+fetch_verify() {{ cp {release!r} "$2"; }}
+json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
+tick() {{ :; }}
+systemctl() {{ :; }}
+curl() {{
+  printf '%s\\n' {plan!r}
+  return 0
+}}
+{prepare}
+prepare
+"""
+
+    with tempfile.TemporaryDirectory(prefix="prepare-ordinary-") as tmp:
+        r = _run(["bash", "-c", _prepare_script(tmp, "ordinary", '{"plan":{"name":"v-test","height":"10"}}')])
+        if r.returncode == 0 or "upgrade-halt" not in (r.stderr or ""):
+            _fail("install.upgrade.prepare_ordinary", f"rc={r.returncode} err={r.stderr}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="prepare-noplan-") as tmp:
+        r = _run(["bash", "-c", _prepare_script(tmp, "upgrade-halt", '{"plan":null}')])
+        if r.returncode == 0 or "before the proposal is passed" not in (r.stderr or ""):
+            _fail("install.upgrade.prepare_before_proposal", f"rc={r.returncode} err={r.stderr}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="prepare-mismatch-") as tmp:
+        r = _run(
+            [
+                "bash",
+                "-c",
+                _prepare_script(tmp, "upgrade-halt", '{"plan":{"name":"other","height":"99"}}', "v-test"),
+            ]
+        )
+        if r.returncode == 0 or "does not match" not in (r.stderr or ""):
+            _fail("install.upgrade.prepare_mismatch", f"rc={r.returncode} err={r.stderr}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="activate-") as tmp:
+        home = os.path.join(tmp, "home")
+        state_dir = os.path.join(tmp, "state")
+        launch_log = os.path.join(tmp, "launch.log")
+        launcher = os.path.join(tmp, "launch")
+        os.makedirs(os.path.join(home, ".mirage", "upgrade"), exist_ok=True)
+        os.makedirs(os.path.join(home, ".mirage", "node", "data"), exist_ok=True)
+        os.makedirs(state_dir, exist_ok=True)
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps(
+                {
+                    "upgrade_name": "v-test",
+                    "plan_height": 50,
+                    "image": "img@sha256:" + ("c" * 64),
+                }
+            ),
+            encoding="utf-8",
+        )
+        Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
+            json.dumps({"height": "50", "round": 0, "step": 0}) + "\n",
+            encoding="utf-8",
+        )
+        Path(launcher).write_text(f"#!/bin/sh\necho launched >> {launch_log}\n", encoding="utf-8")
+        os.chmod(launcher, 0o755)
+        digest = "img@sha256:" + ("c" * 64)
+        base = f"""set -euo pipefail
+HOME={home!r}
+STATE_DIR={state_dir!r}
+STATE_FILE={os.path.join(state_dir, "state.json")!r}
+LAUNCH={launcher!r}
+wait_for_rpc() {{ return 0; }}
+install_hosttools_from_image() {{ :; }}
+docker() {{
+  if [[ "$*" == *"image inspect"* ]]; then
+    printf '%s\\n' {digest!r}
+    return 0
+  fi
+  echo "unexpected docker $*" >&2
+  return 99
+}}
+curl() {{
+  if [[ "$*" == *current_plan* ]]; then printf '%s\\n' '{{"plan":null}}'; return 0; fi
+  printf '%s\\n' '{{"result":{{"sync_info":{{"latest_block_height":"80"}}}}}}'
+}}
+{activate}
+activate_if_halted
+"""
+        r = _run(["bash", "-c", base])
+        if r.returncode != 0 or os.path.exists(launch_log):
+            _fail(
+                "install.upgrade.activate_without_marker",
+                f"rc={r.returncode} err={r.stderr} log={os.path.exists(launch_log)}",
+            )
+            return
+
+        Path(os.path.join(home, ".mirage", "node", "data", "upgrade-info.json")).write_text(
+            json.dumps({"name": "forged", "height": 50}),
+            encoding="utf-8",
+        )
+        r = _run(["bash", "-c", base])
+        if r.returncode != 0 or os.path.exists(launch_log):
+            _fail("install.upgrade.activate_forged_marker", f"rc={r.returncode} err={r.stderr}")
+            return
+
+        Path(os.path.join(home, ".mirage", "node", "data", "upgrade-info.json")).write_text(
+            json.dumps({"name": "v-test", "height": 50}),
+            encoding="utf-8",
+        )
+        Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
+            json.dumps({"height": "49", "round": 0, "step": 0}) + "\n",
+            encoding="utf-8",
+        )
+        r = _run(["bash", "-c", base])
+        if r.returncode == 0 or "last committed height" not in (r.stderr or "") or os.path.exists(launch_log):
+            _fail("install.upgrade.activate_height", f"rc={r.returncode} err={r.stderr}")
+            return
+        Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
+            json.dumps({"height": "50", "round": 0, "step": 0}) + "\n",
+            encoding="utf-8",
+        )
+        Path(os.path.join(state_dir, "activating")).write_text("stale\n", encoding="utf-8")
+        r = _run(["bash", "-c", base])
+        if r.returncode != 0 or not os.path.isfile(launch_log):
+            _fail("install.upgrade.activate_retry_stale", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        if os.path.isfile(os.path.join(state_dir, "activating")):
+            _fail("install.upgrade.activating_cleared", "activating marker left behind after success")
+            return
+        state = json.loads(Path(state_dir, "state.json").read_text(encoding="utf-8"))
+        if state.get("active_rollback_safe") is not False or state.get("active_consensus_breaking") is not True:
+            _fail("install.upgrade.rollback_flags", state)
+            return
+        launched = Path(launch_log).read_text(encoding="utf-8").splitlines()
+        if launched != ["launched"]:
+            _fail("install.upgrade.activate_count", launched)
+            return
+        Path(launcher).write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        os.chmod(launcher, 0o755)
+        Path(launch_log).unlink()
+        r = _run(["bash", "-c", base])
+        if r.returncode == 0 or os.path.isfile(os.path.join(state_dir, "activating")):
+            _fail(
+                "install.upgrade.activate_failure_clears",
+                f"rc={r.returncode} activating={os.path.isfile(os.path.join(state_dir, 'activating'))} err={r.stderr}",
+            )
+            return
+
+    recover = Path(os.path.join(REPO_ROOT, "scripts", "recover.sh")).read_text(encoding="utf-8")
+    if "tmux send-keys" in recover or "pause_app_services" not in recover:
+        _fail("install.upgrade.recover_tmux", "recover.sh still uses tmux or lost app-service pause")
+        return
+    rehearsal = Path(os.path.join(REPO_ROOT, "scripts", "test_upgrade.sh")).read_text(encoding="utf-8")
+    if "tmux" in rehearsal:
+        _fail("install.upgrade.rehearsal_tmux", "test_upgrade.sh still references tmux")
+        return
+    _pass("install.upgrade.prepare_and_activate")
+
+
+def _write_zst_archive(dest: str, members: dict[str, bytes]) -> None:
+    raw = dest + ".tar"
+    with tarfile.open(raw, "w") as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    r = _run(["zstd", "-q", "-f", raw, "-o", dest])
+    os.unlink(raw)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr or "zstd failed")
+    os.chmod(dest, 0o600)
+
+
+def _test_backup_restore_contracts() -> None:
+    """Backup archives exclude signer state; restore refuses traversal, truncation, and shared locks."""
+    backup_py = Path(os.path.join(REPO_ROOT, "deploy", "online_backup.py")).read_text(encoding="utf-8")
+    restore_host = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-restore")).read_text(encoding="utf-8")
+    restore_py = Path(os.path.join(REPO_ROOT, "deploy", "online_restore.py")).read_text(encoding="utf-8")
+    if restore_host.find("online_backup.py") < 0 or restore_host.find("online_backup.py") > restore_host.find(
+        "online_restore.py --yes"
+    ):
+        _fail("install.backup.prerestore", "mirage-restore must snapshot before mutating")
+        return
+    if 'svctl("stop", "indexer", "backend")' not in restore_py:
+        _fail("install.backup.stop_scope", "restore must stop only indexer and backend")
+        return
+    if "application.db" not in restore_py or "priv_validator_state.json" not in backup_py:
+        _fail("install.backup.excludes", "backup/restore must name chain DBs and signer state")
+        return
+
+    sys.path.insert(0, REPO_ROOT)
+    from deploy import online_backup, online_restore
+
+    with tempfile.TemporaryDirectory(prefix="backup-lock-") as tmp:
+        lock = Path(tmp, "backup.lock")
+        online_backup.LOCK_PATH = lock
+        online_restore.LOCK_PATH = lock
+        fd = online_backup.acquire_lock()
+        try:
+            try:
+                online_restore.acquire_lock()
+                _fail("install.backup.lock", "restore acquired the backup lock concurrently")
+                return
+            except online_restore.RestoreError as e:
+                if "already running" not in str(e):
+                    _fail("install.backup.lock_message", str(e))
+                    return
+        finally:
+            os.close(fd)
+
+    with tempfile.TemporaryDirectory(prefix="backup-extract-") as tmp:
+        archive = os.path.join(tmp, "bad.tar.zst")
+        _write_zst_archive(archive, {"../etc/passwd": b"nope"})
+        dest = Path(tmp, "out")
+        dest.mkdir()
+        try:
+            online_restore.extract_archive(Path(archive), dest)
+            _fail("install.backup.traversal", "path traversal was accepted")
+            return
+        except online_restore.RestoreError as e:
+            if "path traversal" not in str(e):
+                _fail("install.backup.traversal_message", str(e))
+                return
+
+        _write_zst_archive(archive, {"node/data/priv_validator_state.json": b"{}"})
+        dest2 = Path(tmp, "out2")
+        dest2.mkdir()
+        try:
+            online_restore.extract_archive(Path(archive), dest2)
+            _fail("install.backup.signer_in_archive", "signer state in an archive was accepted")
+            return
+        except online_restore.RestoreError as e:
+            if "forbidden" not in str(e):
+                _fail("install.backup.signer_message", str(e))
+                return
+
+        os.chmod(archive, 0o644)
+        dest3 = Path(tmp, "out3")
+        dest3.mkdir()
+        try:
+            online_restore.extract_archive(Path(archive), dest3)
+            _fail("install.backup.mode", "mode 0644 archive was accepted")
+            return
+        except online_restore.RestoreError as e:
+            if "0600" not in str(e):
+                _fail("install.backup.mode_message", str(e))
+                return
+
+        manifest = {
+            "schema": "mirage-backup-v1",
+            "release_id": "1",
+            "image": "img@sha256:" + ("a" * 64),
+            "contents": [
+                {"path": "dumps/indexer.dump", "sha256": "0" * 64, "bytes": 4},
+                {"path": "dumps/backend.dump", "sha256": "0" * 64, "bytes": 4},
+            ],
+        }
+        root = Path(tmp, "root")
+        (root / "dumps").mkdir(parents=True)
+        (root / "dumps" / "indexer.dump").write_bytes(b"data")
+        (root / "dumps" / "backend.dump").write_bytes(b"data")
+        (root / "MANIFEST.json").write_text(json.dumps(manifest), encoding="utf-8")
+        try:
+            online_restore.verify_extracted(root)
+            _fail("install.backup.hash", "hash mismatch was accepted")
+            return
+        except online_restore.RestoreError as e:
+            if "hash mismatch" not in str(e):
+                _fail("install.backup.hash_message", str(e))
+                return
+
+    host_backup = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-backup")).read_text(encoding="utf-8")
+    if "--output and --stdout cannot be combined" not in host_backup:
+        _fail("install.backup.mutex", "mirage-backup must reject --output with --stdout")
+        return
+    if "os.replace" not in host_backup or "${host_out}.sha256" not in host_backup:
+        _fail("install.backup.host_atomic", "host --output must atomically publish archive and sha256")
+        return
+    _pass("install.backup.restore_safety")
+
+
+def _test_status_compact_layout() -> None:
+    """80x24 terminals use the compact renderer; live mode restores the alternate screen."""
+    dashboard = Path(os.path.join(REPO_ROOT, "scripts", "status_dashboard.py")).read_text(encoding="utf-8")
+    status_tool = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-status")).read_text(encoding="utf-8")
+    if "\\033[?1049h" not in dashboard or "sys.exit(130)" not in dashboard:
+        _fail("install.status.altscreen", "interactive dashboard must use the alternate screen and exit 130 on Ctrl+C")
+        return
+    if "SIGWINCH" not in dashboard:
+        _fail("install.status.resize", "dashboard must refresh on SIGWINCH")
+        return
+    if "docker exec -it" not in status_tool or "--once" not in status_tool:
+        _fail("install.status.host_tty", "mirage-status must allocate a TTY only for live mode")
+        return
+
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    fake = [
+        dash.ServiceStatus(
+            "CometBFT", dash.Status.OK, "height 12", {"height": 12, "peers": 3, "supervisor_state": "RUNNING"}
+        ),
+        dash.ServiceStatus("Backend", dash.Status.ERROR, "down", {"supervisor_state": "FATAL"}),
+        dash.ServiceStatus("Indexer", dash.Status.WARN, "lag", {"lag": 4, "supervisor_state": "RUNNING"}),
+    ]
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        dash.render_compact_dashboard(fake, 80, 24, 1)
+    text = buf.getvalue()
+    if "Ctrl+C exits" not in text or "[FATAL]" not in text or "MIRAGE" not in text:
+        _fail("install.status.compact_content", text)
+        return
+    visible_lines = [line for line in text.splitlines() if line]
+    if len(visible_lines) > 24:
+        _fail("install.status.compact_height", f"{len(visible_lines)} lines for a 24-row terminal")
+        return
+    _pass("install.status.compact_80x24")

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check once per half-minute whether a prepared Mirage upgrade should activate
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

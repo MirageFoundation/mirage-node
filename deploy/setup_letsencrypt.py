@@ -220,15 +220,21 @@ www.{domain} {{
         return 1
     print("    ✓ Caddyfile valid")
     
-    # Reload Caddy
+    # Reload Caddy when it is already running. Bootstrap writes the Caddyfile
+    # before Supervisor starts Caddy, so a missing admin socket is expected.
     print()
     print("==> Reloading Caddy...")
     result = run(["caddy", "reload", "--config", str(caddyfile), "--adapter", "caddyfile"], check=False)
     if result.returncode != 0:
-        print(f"ERROR: Failed to reload Caddy:")
-        print(result.stderr)
-        return 1
-    print("    ✓ Caddy reloaded")
+        err = (result.stderr or "") + (result.stdout or "")
+        if "connection refused" in err.lower() or "connect" in err.lower():
+            print("    Caddy is not running yet; config will apply on the next start")
+        else:
+            print("ERROR: Failed to reload Caddy:")
+            print(result.stderr)
+            return 1
+    else:
+        print("    ✓ Caddy reloaded")
     
     # Persist domain to node.env
     node_env = Path.home() / ".mirage" / "env" / "node.env"

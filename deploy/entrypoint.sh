@@ -25,7 +25,6 @@ cleanup() {
 trap cleanup SIGTERM SIGINT
 
 ROOT_DIR="/opt/mirage"
-SESSION="mirage"
 export PYTHONPATH="/opt/mirage"
 
 # Prefer IPv4 in name resolution. These nodes have no working IPv6 egress, but
@@ -122,7 +121,7 @@ if ! [[ "$LOG_RETENTION_DAYS" =~ ^[0-9]+$ ]] || [ "$LOG_RETENTION_DAYS" -le 0 ];
 fi
 
 # Create centralized log directory structure
-mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy}
+mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy,supervisor}
 
 # Clean up old log files on startup
 find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
@@ -130,8 +129,11 @@ find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/
 # Export variables needed by init.sh and render_template.py
 export MONIKER CHAIN_ID LOGS_DIR
 
-# Start logging entrypoint to deploy log (date-based)
+# Start logging entrypoint to deploy log (date-based). Keep the original
+# stdout/stderr so they can be restored before exec supervisord; otherwise the
+# process-substitution tee remains a child of PID 1.
 DEPLOY_LOG="$LOGS_DIR/deploy/entrypoint-$(date -u +%Y-%m-%d).log"
+exec 3>&1 4>&2
 exec > >(tee -a "$DEPLOY_LOG") 2>&1
 
 echo "=== Mirage Startup $(date -Iseconds) ==="
@@ -218,30 +220,8 @@ python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" || echo "WARN: refresh_edge_ips.p
 echo "==> Refreshing IP-to-network-class dataset..."
 python3 "$ROOT_DIR/deploy/refresh_asn_db.py" || echo "WARN: refresh_asn_db.py failed; network class may be stale or absent"
 
-# Kill any existing tmux session
-if tmux has-session -t "$SESSION" 2>/dev/null; then
-  tmux kill-session -t "$SESSION" 2>/dev/null
-fi
-
-echo "==> Starting tmux session '$SESSION'..."
-tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n status
-
-# Apply bundled tmux config
-TMUX_TEMPLATE="$ROOT_DIR/deploy/templates/tmux/tmux.conf"
-if [ -f "$TMUX_TEMPLATE" ]; then
-  cp "$TMUX_TEMPLATE" /etc/tmux.conf
-  tmux source-file /etc/tmux.conf 2>/dev/null
-fi
-tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
-tmux set-hook -t "$SESSION" client-attached \
-  "run-shell 'if [ -s /tmp/mirage-status-dashboard.pid ]; then kill -USR1 \$(cat /tmp/mirage-status-dashboard.pid); fi'"
-
 # Enable maintenance mode while services start up
 touch /etc/caddy/.maintenance
-
-# Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
-tmux new-window -d -t "$SESSION" -n caddy -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee >(cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\")" C-m
 
 # PostgreSQL (start early)
 # Data lives directly on persistent volume at ~/.mirage/postgres
@@ -295,8 +275,8 @@ if ! grep -q "^logging_collector" "$PG_CONF"; then
   echo "logging_collector = on" >> "$PG_CONF"
 fi
 
-tmux new-window -d -t "$SESSION" -n postgres -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:postgres" "pg_ctlcluster 16 main start && sleep 2 && tail -f $PG_LOG_DIR/postgres-\$(date -u +%Y-%m-%d).log" C-m
+echo "==> Starting PostgreSQL for bootstrap migrations..."
+pg_ctlcluster 16 main start
 
 # Wait for PostgreSQL readiness (hard fail) using a valid role
 echo '==> Waiting for PostgreSQL to become available...'
@@ -536,27 +516,8 @@ fi
 echo "==> Re-rendering node config from updated env..."
 bash "$ROOT_DIR/deploy/init.sh"
 
-# Sync env vars into the tmux session BEFORE the service windows
-# (node/indexer/backend) are created below. The session was created earlier (so
-# Caddy/Postgres could come up for ACME + schema init), which means it captured
-# the create-time env from docker --env-file — i.e. PRE-migration values. Without
-# re-syncing, any value a migration changed (MEDIA_UPLOADS_ENABLED, video caps,
-# quests, open-browsing, AUTO_ENABLED_AGENTS, …) would be silently ignored until a
-# second deploy, leaving e.g. uploads enabled on a node that should fail closed.
-# Always-required infra vars first (these may be generated, not file-backed):
-for _evar in INDEXER_DB_URL INDEXER_DB_RO_URL BACKEND_DB_URL CLIENT_HASH_SALT; do
-  if [ -n "${!_evar:-}" ]; then
-    tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
-  fi
-done
-# Then EVERY var defined in the env files, using the current (post-migration,
-# post-reload) shell value so migration changes and DB/role URL rewrites both
-# reach the service windows on the first deploy.
-for _evar in $(grep -hoE '^[A-Za-z_][A-Za-z0-9_]*=' "${ENV_DIR}"/*.env 2>/dev/null | sed 's/=$//' | sort -u); do
-  if [ -n "${!_evar:-}" ]; then
-    tmux set-environment -t "$SESSION" "$_evar" "${!_evar}" 2>/dev/null || true
-  fi
-done
+# Post-migration env is already exported in this process. Supervisor children
+# inherit it when we exec, so there is no separate environment-sync step.
 
 # Auto-configure HTTPS if domain is set (from node.env)
 # Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)
@@ -566,7 +527,6 @@ if [ -n "${DOMAIN:-}" ]; then
   else
     echo "==> Domain configured: $DOMAIN"
     echo "==> Configuring HTTPS automatically..."
-    sleep 2  # Give Caddy a moment to start
     HTTPS_ARGS="--domain=$DOMAIN"
     if [ "${SKIP_HTTPS_IP_CHECK:-}" = "true" ]; then
       HTTPS_ARGS="$HTTPS_ARGS --skip-ip-check"
@@ -589,197 +549,38 @@ if [ -x "$COMPACT_BIN" ] && [ -d "$NODE_HOME/data" ]; then
   fi
 fi
 
-# Node (second)
-tmux new-window -d -t "$SESSION" -n node -c "$ROOT_DIR"
-# Node home is always ~/.mirage/node (hardcoded)
-# SKIP_UPGRADES: comma-separated list of upgrade names to skip (for dev/UAT when upgrades weren't triggered via governance)
-NODE_START_CMD="BIN=\"$BIN\" NODE_HOME=\"$NODE_HOME\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_miraged_supervised.sh\""
-if [ -n "${SKIP_UPGRADES:-}" ]; then
-  for upgrade in $(echo "$SKIP_UPGRADES" | tr ',' ' '); do
-    NODE_START_CMD="$NODE_START_CMD --unsafe-skip-upgrades $upgrade"
-  done
-  echo "==> Skipping upgrades: $SKIP_UPGRADES"
-fi
-tmux send-keys -t "$SESSION:node" "$NODE_START_CMD" C-m
 
-# Wait for node RPC to be ready before starting dependent services
-echo "==> Waiting for node RPC to become available..."
-RPC_READY=0
-for i in $(seq 1 120); do
-  if curl -sf http://127.0.0.1:26657/status >/dev/null 2>&1; then
-    RPC_READY=1
-    echo "✓ Node RPC is ready"
+# Bootstrap PostgreSQL must release 5432 before Supervisor starts it in the
+# foreground. Fast shutdown is enough: migrations already committed.
+echo "==> Stopping bootstrap PostgreSQL so Supervisor can take it over..."
+pg_ctlcluster 16 main stop -m fast
+for _ in $(seq 1 30); do
+  if ! pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1; then
     break
   fi
   sleep 1
 done
-
-if [ "$RPC_READY" -eq 0 ]; then
-  if [ "${SKIP_PEERS:-}" = "1" ]; then
-    echo "WARNING: Node RPC not ready after 120s (local mode - keeping container alive)" >&2
-    # Local testnet: external scripts manage services via tmux, so don't exit
-    # (exiting triggers container restart which destroys the tmux session)
-    while true; do sleep 60; done
-  fi
-  echo "ERROR: Node RPC not ready after 120s" >&2
+if pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1; then
+  echo "ERROR: PostgreSQL still accepting connections after bootstrap stop" >&2
   exit 1
 fi
+echo "✓ Bootstrap PostgreSQL stopped"
 
-# Once state sync installs a non-zero height, future restarts no longer need
-# remote trust derivation. This watcher is bounded so a stalled join surfaces in
-# the deploy log rather than leaving an immortal polling process.
-if [ "${SKIP_PEERS:-0}" != "1" ] && [ ! -f "$DATA_DIR/.state_sync_complete" ]; then
-  (
-    for _ in $(seq 1 8640); do
-      if STATUS_JSON="$(curl -fsS --max-time 3 http://127.0.0.1:26657/status)" &&
-         HEIGHT="$(printf '%s' "$STATUS_JSON" | python3 -c 'import json, sys; print(int(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"]))')" &&
-         [ "$HEIGHT" -gt 0 ]; then
-        touch "$DATA_DIR/.state_sync_complete.tmp"
-        mv "$DATA_DIR/.state_sync_complete.tmp" "$DATA_DIR/.state_sync_complete"
-        echo "✓ State sync installed block height $HEIGHT"
-        exit 0
-      fi
-      sleep 10
-    done
-    echo "ERROR: state sync did not install a non-zero height within 24 hours" >&2
-    exit 1
-  ) &
+mkdir -p /etc/supervisor/conf.d "$LOGS_DIR/supervisor"
+install -m 0644 "$ROOT_DIR/deploy/templates/supervisor/supervisord.conf" /etc/supervisor/supervisord.conf
+# Services are launched by supervisord using:
+#   $ROOT_DIR/deploy/run_miraged_supervised.sh
+#   $ROOT_DIR/deploy/run_indexer_supervised.sh
+echo "==> Writing Supervisor program configuration..."
+bash "$ROOT_DIR/deploy/write_supervisor_programs.sh"
+if [ -n "${SKIP_UPGRADES:-}" ]; then
+  echo "==> Skipping upgrades: $SKIP_UPGRADES"
 fi
 
-# Enable validator mode if priv_validator_key.json exists
-if [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
-  echo "==> Enabling validator mode..."
-  bash "$ROOT_DIR/deploy/enable_validator_mode.sh"
-fi
-
-# Indexer (third) - uses wrapper script that waits for RPC
-tmux new-window -d -t "$SESSION" -n indexer -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:indexer" "ROOT_DIR=\"$ROOT_DIR\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_indexer_supervised.sh\"" C-m
-
-# Backend (fourth)
-tmux new-window -d -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
-tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
-
-# Keep maintenance mode active until Gunicorn and its dependencies are healthy.
-# The budget must cover a coordinated chain upgrade: the backend resolves the
-# validator account at startup, and past the halt height that query fails until
-# 2/3+ of voting power is back on the new binary. Exiting earlier would restart
-# the container in a loop for the whole rollout.
-BACKEND_WAIT_SECONDS="${CHAIN_STARTUP_GRACE_SECONDS:-1800}"
-echo "==> Waiting for backend to become available (up to ${BACKEND_WAIT_SECONDS}s)..."
-BACKEND_READY=0
-BACKEND_WAITED=0
-while [ "$BACKEND_WAITED" -lt "$BACKEND_WAIT_SECONDS" ]; do
-  if curl -sf --max-time 1 http://127.0.0.1:5000/api/get_node_config >/dev/null 2>&1; then
-    BACKEND_READY=1
-    echo "✓ Backend is ready after ${BACKEND_WAITED}s"
-    break
-  fi
-  sleep 5
-  BACKEND_WAITED=$((BACKEND_WAITED + 5))
-  if [ $((BACKEND_WAITED % 60)) -eq 0 ]; then
-    echo "    backend still starting (${BACKEND_WAITED}s elapsed; maintenance mode held)"
-  fi
-done
-
-if [ "$BACKEND_READY" -eq 0 ]; then
-  echo "ERROR: Backend not ready after ${BACKEND_WAIT_SECONDS}s" >&2
-  exit 1
-fi
-
-rm -f /etc/caddy/.maintenance
-echo "✓ Maintenance mode disabled"
-
-# Referral accrual daemon (fifth) - DISABLED FOR NOW
-# tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
-# tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
-
-# Divergence watchdog — recovery daemon. AUTO_DIVERGENCE_RECOVERY=true is now the
-# default on every host: the watchdog's first-line action is a NON-DESTRUCTIVE
-# restart (recover.sh restart), so running it everywhere is safe and lets a
-# stuck/crashed node self-heal. DESTRUCTIVE peer-pull stays gated by
-# WATCHDOG_AUTORECOVER (mirage.talk only). The watchdog writes a dense daily
-# forensic log to $LOGS_DIR/watchdog/ in addition to the tmux pane. See node.env
-# for the full two-tier policy.
-if [ "${AUTO_DIVERGENCE_RECOVERY:-false}" = "true" ]; then
-  WD_AUTOREC="${WATCHDOG_AUTORECOVER:-false}"
-  WD_DRY="${DIVERGENCE_DRY_RUN:-false}"
-  echo "==> Starting divergence watchdog (autorecover=${WD_AUTOREC}, dry_run=${WD_DRY})"
-  tmux new-window -d -t "$SESSION" -n watchdog -c "$ROOT_DIR"
-  WATCHDOG_CMD="WATCHDOG_AUTORECOVER=${WD_AUTOREC} DRY_RUN=${WD_DRY} PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/divergence_watchdog.py"
-  tmux send-keys -t "$SESSION:watchdog" \
-    "$WATCHDOG_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/divergence_watchdog-%Y-%m-%d.log\")" C-m
-else
-  echo "==> Divergence watchdog disabled (AUTO_DIVERGENCE_RECOVERY=false on this host)"
-fi
-
-# Independent stuck-node liveness pager (postmortem AI#6). Runs in its OWN tmux
-# window — a separate process from the watchdog — so a wedged or kill -STOP'd
-# watchdog can never silence it. It pages ALERT_WEBHOOK_URL when the local height
-# is frozen, or /status is unreachable, for STUCK_ALERT_SECONDS — regardless of
-# any divergence log marker. This closes the 2026-06-16 gap where the node sat
-# catching_up=true with a frozen height for ~95 min, emitting nothing the
-# watchdog keys on, and nobody was paged. No-op without a webhook, so only start
-# it when one is configured. It NEVER recovers anything (detection only).
-if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-  echo "==> Starting stuck-node alert pager (independent of watchdog)"
-  tmux new-window -d -t "$SESSION" -n stuck-alert -c "$ROOT_DIR"
-  STUCK_CMD="PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/stuck_node_alert.py"
-  tmux send-keys -t "$SESSION:stuck-alert" \
-    "$STUCK_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/stuck_node_alert-%Y-%m-%d.log\")" C-m
-else
-  echo "==> Stuck-node alert pager disabled (ALERT_WEBHOOK_URL unset)"
-fi
-
-echo "✓ Started. Attach via: tmux attach -t $SESSION"
-
-# Keep container alive + periodic cleanup (WAL segments, old logs)
-CLEANUP_INTERVAL=86400
-SECONDS_SINCE_CLEANUP=$CLEANUP_INTERVAL
-# Per-node offset so the daily pass does not land on every validator at once.
-# The schedule is otherwise anchored to container start, and a rolling deploy
-# starts all nodes minutes apart — so without this all four clean within the
-# same few-minute window every day, forever. Decorrelating identical periodic
-# work across validators is the 2026-07-13 lockstep lesson (see
-# docs/troubleshooting/divergence-recovery.md §0.3.3). Precautionary here rather
-# than a fix for an observed stall: this loop runs in the entrypoint shell, not
-# inside miraged, so it cannot block Commit the way synchronous pruning did. But
-# it does delete files and can hot-reload Caddy, and spreading it is free.
-# Re-rolled per start (and logged) instead of derived from node identity: the
-# only stable per-node values in here are key material, and a bad draw cannot
-# persist past the next restart.
-CLEANUP_JITTER=$((RANDOM % 21600))  # spread across a 6h window
-CLEANUP_JITTER_APPLIED=0
-echo "==> Daily cleanup offset: ${CLEANUP_JITTER}s after the first pass (anti-lockstep)"
-while true; do
-    sleep 1
-    SECONDS_SINCE_CLEANUP=$((SECONDS_SINCE_CLEANUP + 1))
-    if [ "$SECONDS_SINCE_CLEANUP" -ge "$CLEANUP_INTERVAL" ]; then
-        SECONDS_SINCE_CLEANUP=0
-        # Apply the offset once, after the immediate start-up pass, so every
-        # later pass stays 24h apart but shifted off the other nodes' schedules.
-        if [ "$CLEANUP_JITTER_APPLIED" -eq 0 ]; then
-            CLEANUP_JITTER_APPLIED=1
-            SECONDS_SINCE_CLEANUP=$((-CLEANUP_JITTER))
-        fi
-        find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
-        find "$LOGS_DIR" -name "*.log" -type f -mtime +"$LOG_RETENTION_DAYS" -delete 2>/dev/null || true
-        # Refresh the edge trusted-proxy ranges. Bunny rotates its ~1000 edge IPs
-        # over time; without this, {client_ip} would degrade for traffic arriving
-        # via new Bunny edges (rate limiting/logging would see the edge, not the
-        # user). No-op for EDGE_PROVIDER=cloudflare (the plugin self-updates; this
-        # just rewrites an unchanged snippet). Hot-reloads Caddy only on a change.
-        python3 "$ROOT_DIR/deploy/refresh_edge_ips.py" \
-            2>&1 | tee -a "$LOGS_DIR/deploy/refresh-edge-ips-$(date -u +%Y-%m-%d).log" || true
-        # Refresh the IP-to-network-class dataset. ASN allocations drift, so a
-        # dataset left alone slowly misclassifies; asn_db logs its age and
-        # escalates past 30 days if these passes stop succeeding.
-        python3 "$ROOT_DIR/deploy/refresh_asn_db.py" \
-            2>&1 | tee -a "$LOGS_DIR/deploy/refresh-asn-db-$(date -u +%Y-%m-%d).log" || true
-        # Image GC: delete unused Cloudflare Images (off by default)
-        if [ "${IMAGE_GC_ENABLED:-false}" = "true" ]; then
-            python3 "$ROOT_DIR/scripts/image_gc.py" --days 7 --limit 100 \
-                2>&1 | tee -a "$LOGS_DIR/deploy/image-gc-$(date -u +%Y-%m-%d).log" || true
-        fi
-    fi
-done
+echo "✓ Bootstrap complete; handing off to supervisord as PID 1"
+echo "  Watch live status from the host: mirage-status"
+trap - SIGTERM SIGINT
+# Close the bootstrap tee so it is not inherited as a child of PID 1.
+exec 1>&3 2>&4
+exec 3>&- 4>&-
+exec supervisord -n -c /etc/supervisor/supervisord.conf

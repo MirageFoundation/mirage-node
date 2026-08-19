@@ -9,6 +9,7 @@ set -euo pipefail
 
 STATE_DIR=/var/lib/mirage/install
 STATE_FILE="$STATE_DIR/state"
+REPLACEMENT_FILE="$STATE_DIR/replacement.json"
 UPDATE_STATE_FILE=/var/lib/mirage/update/state.json
 DOMAIN_ARG=""
 MONIKER_CHOICE=""
@@ -432,7 +433,7 @@ install_hosttools() {
     die "image pubkey $image_fp does not match the installer's $host_fp"
   fi
   local tool
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
     if [[ ! -f "$staging/$tool" ]]; then
       die "image missing host tool $tool"
     fi
@@ -442,7 +443,7 @@ install_hosttools() {
   install -m 0755 "$staging/mirage-weekly-restart.sh" /usr/local/sbin/mirage-weekly-restart.sh
   install -m 0644 "$staging/release_verify.py" /usr/local/share/mirage/release_verify.py
   mkdir -p /etc/systemd/system
-  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer; do
+  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
     install -m 0644 "$staging/systemd/$tool" "/etc/systemd/system/$tool"
   done
   rm -rf "$staging"
@@ -601,8 +602,121 @@ collision_guard() {
       echo "==> Consensus key already on this host and registered ($match); reinstall is idempotent"
       return 0
     fi
-    die "this seed's consensus key is already a validator ($match) on another host; migrate with scripts/backup_restore.py --migrate"
+    confirm_validator_replacement "$pub" "$match"
   fi
+}
+
+confirm_validator_replacement() {
+  local pub="$1" match="$2"
+  if [[ -f "$REPLACEMENT_FILE" ]]; then
+    local saved
+    saved=$(jq -r '.consensus_pubkey // empty' "$REPLACEMENT_FILE")
+    if [[ "$saved" == "$pub" ]]; then
+      echo "==> Replacement already confirmed for $match; resuming"
+      return 0
+    fi
+    die "replacement state is for a different consensus key; delete $REPLACEMENT_FILE to start over"
+  fi
+  cat <<EOF
+This seed's consensus key is already a validator ($match).
+Replacement is only for a host whose previous machine is permanently gone.
+The old VM must never be started again: two live signers with this key will
+tombstone the validator.
+
+This host will get a new P2P identity and empty local databases. Indexer,
+backend, and media history on the old machine are discarded. After install
+you may restore local data with mirage-restore from an off-server backup.
+
+Type exactly 'replace' to continue, or anything else to abort.
+EOF
+  local confirm=""
+  if [[ ! -t 1 ]] || ! : </dev/tty 2>/dev/null; then
+    die "replacement confirmation requires a controlling TTY"
+  fi
+  printf "Type exactly 'replace' to continue: "
+  read -r confirm </dev/tty || true
+  if [[ "$confirm" != "replace" ]]; then
+    die "replacement not confirmed; nothing was written"
+  fi
+  local rpcs rpc_n i rpc body chain height max_h=0 usable=0
+  rpc_n=$(jq -r '.rpc | length' "$MANIFEST_DIR/network.json")
+  if [[ "$rpc_n" -lt 2 ]]; then
+    die "network manifest needs at least two rpc URLs for replacement height checks"
+  fi
+  for i in $(seq 0 $((rpc_n - 1))); do
+    rpc=$(jq -r --argjson i "$i" '.rpc[$i]' "$MANIFEST_DIR/network.json")
+    body=$(curl -fsS --max-time 15 "${rpc%/}/status") || die "replacement RPC $rpc is unreachable"
+    chain=$(echo "$body" | jq -r '.result.node_info.network // empty')
+    height=$(echo "$body" | jq -r '.result.sync_info.latest_block_height // empty')
+    if [[ "$chain" != "mirage-1" ]]; then
+      die "replacement RPC $rpc returned chain_id '$chain', expected mirage-1"
+    fi
+    if [[ ! "$height" =~ ^[1-9][0-9]*$ ]]; then
+      die "replacement RPC $rpc returned unusable height '$height'"
+    fi
+    echo "==> RPC $rpc height $height"
+    if (( height > max_h )); then
+      max_h=$height
+    fi
+    usable=$((usable + 1))
+  done
+  if (( usable < 2 )); then
+    die "need at least two signed-network RPC endpoints with usable heights"
+  fi
+  local watermark=$((max_h + 10))
+  python3 - "$REPLACEMENT_FILE" "$pub" "$match" "$watermark" "$max_h" <<'PY'
+import json, os, sys
+path, pub, match, watermark, observed = sys.argv[1:6]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+state = {
+    "consensus_pubkey": pub,
+    "operator_address": match,
+    "watermark": int(watermark),
+    "observed_height": int(observed),
+    "confirmed": True,
+    }
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+  echo "==> Replacement confirmed. Consensus watermark will be $watermark (above observed $max_h)"
+}
+
+apply_replacement_watermark() {
+  [[ -f "$REPLACEMENT_FILE" ]] || return 0
+  local watermark dest
+  watermark=$(jq -r '.watermark' "$REPLACEMENT_FILE")
+  if [[ ! "$watermark" =~ ^[1-9][0-9]*$ ]]; then
+    die "replacement watermark is missing or invalid"
+  fi
+  dest=/root/.mirage/node/data/priv_validator_state.json
+  mkdir -p /root/.mirage/node/data /root/.mirage/node/config
+  if [[ -f "$dest" ]]; then
+    local existing
+    existing=$(jq -r '.height' "$dest")
+    if [[ "$existing" =~ ^[0-9]+$ ]] && (( existing >= watermark )); then
+      echo "==> Keeping existing watermark $existing (will not lower to $watermark)"
+      return 0
+    fi
+  fi
+  echo "==> Discarding leftover P2P identity, chain databases, and media on this host"
+  rm -f /root/.mirage/node/config/node_key.json
+  local dbdir
+  for dbdir in application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db; do
+    rm -rf "/root/.mirage/node/data/$dbdir"
+  done
+  rm -rf /root/.mirage/media
+  python3 - "$dest" "$watermark" <<'PY'
+import json, os, sys
+path, height = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+state = {"height": str(int(height)), "round": 0, "step": 0, "signature": None, "signbytes": None}
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+PY
+  echo "==> Wrote replacement consensus watermark $watermark before miraged can start"
 }
 
 valid_ipv4() {
@@ -710,7 +824,7 @@ choose_domain() {
   fi
   if [[ -z "$raw" ]]; then
     printf '\n\n%s\n' \
-      "No domain for now; this node will serve on its IP. You can set it up later using \`mirage-domain example.com\`, which will enable SSL (https) for you and bind the domain."
+      "No domain for now; this node will serve on its IP. You can set it up later using \`mirage-domain --set example.com\`, which will enable SSL (https) for you and bind the domain."
     return 0
   fi
   if ! valid_hostname "$raw"; then
@@ -732,7 +846,7 @@ warn_domain_dns() {
     resolved=$(printf '%s\n' "$hosts" | awk '{print $1; exit}')
   fi
   if [[ -z "$resolved" ]]; then
-    echo "WARNING: $domain does not resolve yet; HTTPS is retried on every restart, or run 'mirage-domain $domain' once DNS is live" >&2
+    echo "WARNING: $domain does not resolve yet; HTTPS is retried on every restart, or run 'mirage-domain --set $domain' once DNS is live" >&2
   elif [[ -n "$PUBLIC_IP" && "$resolved" != "$PUBLIC_IP" ]]; then
     echo "WARNING: $domain resolves to $resolved, not this host ($PUBLIC_IP); HTTPS will fail until DNS points here" >&2
   else
@@ -822,6 +936,7 @@ identity() {
   if [[ $has_key -eq 1 && $has_account -eq 1 ]]; then
     echo "==> Identity already present; not rewriting keys"
     unset MNEMONIC
+    apply_replacement_watermark
     return 0
   fi
   if [[ $has_key -ne $has_account ]]; then
@@ -842,6 +957,7 @@ identity() {
   chmod 600 "$keyfile"
   unset MNEMONIC
   echo "==> Validator account and consensus key imported"
+  apply_replacement_watermark
 }
 
 running_pinned_image() {
@@ -969,6 +1085,7 @@ install_timers() {
   systemctl daemon-reload
   systemctl enable --now mirage-enroll.timer
   systemctl enable --now mirage-update.timer
+  systemctl enable --now mirage-upgrade-activate.timer
 }
 
 sync_summary() {
@@ -1007,10 +1124,16 @@ update_completed_install() {
     "$UPDATE_STATE_FILE")"
   if [[ -z "$staged" ]]; then
     echo "==> Mirage is already up to date"
+    echo
+    echo "Watch live status (Ctrl+C exits):"
+    echo "  mirage-status"
     return 0
   fi
   "$updater" --refresh-hosttools --image "$staged"
   "$updater"
+  echo
+  echo "Watch live status (Ctrl+C exits):"
+  echo "  mirage-status"
 }
 
 print_next_steps() {
@@ -1024,13 +1147,14 @@ print_next_steps() {
   echo "Address:   ${ADDRESS}"
   echo "Sync:      ${sync}"
   echo
-  echo "HTTPS: point A/AAAA at this IP, then:  mirage-domain your.domain"
-  echo "Status:    mirage-status"
-  echo "Tmux:      Everything runs in tmux; open it with:"
-  echo "           docker exec -it mirage tmux attach -t mirage"
-  echo "           Status opens first and refreshes immediately; Ctrl+PageDown cycles logs."
+  echo "HTTPS: point A/AAAA at this IP, then:  mirage-domain --set your.domain"
+  echo "Backup:    mirage-backup     (then copy the archive off this server)"
+  echo "Restore:   mirage-restore FILE"
   echo "This node will register itself once synced. Do not run create-validator by hand."
   echo "=============================================="
+  echo
+  echo "Watch live status (Ctrl+C exits):"
+  echo "  mirage-status"
 }
 
 main() {
@@ -1100,6 +1224,7 @@ main() {
   fi
 
   if ! state_at_least launched; then
+    apply_replacement_watermark
     launch
     seed_update_state
     advance_state launched

@@ -52,8 +52,8 @@ docker ps -a
 
 docker exec "${CONTAINER}" ps aux | grep -E "caddy|python|miraged"
 
-docker exec "${CONTAINER}" tmux list-panes -t mirage || true
-docker exec "${CONTAINER}" tmux capture-pane -t mirage:0 -p | tail -50 || true
+docker exec "${CONTAINER}" supervisorctl -c /etc/supervisor/supervisord.conf status || true
+docker exec "${CONTAINER}" tail -50 /root/.mirage/logs/node/node-supervisor.log || true
 ```
 
 ### Common file locations (inside the container)

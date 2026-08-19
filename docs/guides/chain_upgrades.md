@@ -7,12 +7,12 @@ This guide is the **exact** operational flow for upgrades that change the blockc
 - **Upgrade “name”**: the on-chain upgrade plan name (example: `v1.7.7-tier-pricing`).
   - This must match the string passed to `app.UpgradeKeeper.SetUpgradeHandler("<name>", ...)` in `blockchain/app/upgrades.go`.
   - This must also match the `plan.name` in the governance proposal JSON.
-- **Deployment model**: a single Docker container (`mirage`) starts a tmux session and runs:
+- **Deployment model**: a single Docker container (`mirage`) starts Supervisor as PID 1 and runs:
   - `miraged start ... | cronolog ...` (node logs go to `~/.mirage/logs/node/miraged-YYYY-MM-DD.log`)
   - other services (postgres, backend, indexer, etc.)
 - **What happens at upgrade height**:
-  - When the chain reaches the scheduled upgrade height, **`miraged start` exits** to force a restart so the upgrade handler can run on startup.
-  - The Docker container usually **does not exit** (tmux stays alive), so you must **restart the container** (or redeploy) to bring the node back up.
+  - When the chain reaches the scheduled upgrade height, **`miraged start` exits**.
+  - If you ran `mirage-update --prepare`, the host timer recreates the whole container from the staged image. Do not restart the old binary across the halt.
 
 ### Step 0 — Pick a good upgrade name
 
@@ -115,35 +115,24 @@ Tip: do a dry-run first to confirm the final JSON that will be broadcast:
 cd /home/nik/projects/mirage/public/mirage-node && python3 scripts/submit_proposal.py remote scripts/proposals/proposal_upgrade.json --dry-run
 ```
 
-### Step 6 — Deploy the new image to validators (before upgrade height)
+### Step 6 — Prepare the new image before the upgrade height
 
-You want the new binary available everywhere **before** the upgrade height.
-
-Deploy to a server:
+On each validator, after the governance plan is on-chain:
 
 ```bash
-cd /home/nik/projects/mirage/public/mirage-node && ./deploy/deploy.sh root@your-server --update --file deploy/mirage-docker-dev.tar.gz
+mirage-update --prepare
 ```
 
-What this does:
-- stops and removes the old `mirage` container
-- loads the new image tarball
-- starts a fresh `mirage` container
-- container startup runs deploy migrations + init + tmux services (including `miraged start`)
+That verifies the signed release, requires `activation=upgrade-halt` and a matching on-chain plan name, pulls the image while the current node keeps running, and arms automatic activation at the halt.
 
-### Step 7 — At the upgrade height: restart `mirage` so the chain continues
+### Step 7 — At the upgrade height: automatic activation
 
 At the scheduled height:
-- the currently running `miraged start` process will exit
-- you must restart it by restarting the container (or redeploying)
+- the currently running `miraged` process exits and stays stopped (it does not consume its crash-restart budget)
+- the host activation timer recreates the whole container from the prepared digest
+- if the staged release is missing or mismatched, the validator stays halted for operator action; it never restarts the old binary across the upgrade height
 
-If you already deployed the new image in Step 6, the quickest restart is:
-
-```bash
-ssh root@your-server 'docker restart mirage'
-```
-
-If you did **not** deploy the new image yet, you must deploy it now (Step 6) and that will restart the container as part of deployment.
+If the prepared image is missing or mismatched, the validator stays halted for operator action. Do not `docker restart` the old container across the halt.
 
 ### Step 8 — Verify the upgrade actually applied
 

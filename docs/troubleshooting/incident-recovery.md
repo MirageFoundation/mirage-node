@@ -78,7 +78,7 @@ After the node catches up:
 
 **Scripts**: [`scripts/divergence_watchdog.py`](../../scripts/divergence_watchdog.py), [`scripts/recover.sh`](../../scripts/recover.sh).
 
-Each container ships with a `watchdog` tmux window that polls miraged every 60s and triggers an in-place recovery when it detects either:
+Each container ships with a supervised `watchdog` program that polls miraged every 60s and triggers an in-place recovery when it detects either:
 
 1. The miraged log contains `"wrong Block.Header.AppHash"` or `"CONSENSUS FAILURE!!!"` within the last 5 minutes, **or**
 2. The local `latest_block_height` has not advanced for ~10 polls (~10 min) **and** ≥2 healthy peers report a height ≥20 blocks ahead.
@@ -87,7 +87,7 @@ Default mode is [`recover.sh peer-pull --auto`](../../scripts/recover.sh). It ru
 
 1. Verifies cool-down (≥6 h since last recovery) and that the opt-out marker `~/.mirage/.recovery_disabled` does not exist.
 2. Selects ≥2 healthy peers from `persistent_peers` and confirms they agree on `app_hash` for a recent height (refuses to act on a split-brain peer set).
-3. Pauses the `indexer`, `backend`, and `status` tmux windows.
+3. Pauses the `indexer` and `backend` Supervisor programs.
 4. Stops `miraged`, **backs up `priv_validator_state.json`** (so the height-watermark is preserved — no double-sign risk), wipes only the chain DBs (`application.db`, `blockstore.db`, `cs.wal`, `evidence.db`, `snapshots`, `state.db`, `tx_index.db`).
 5. SSHes to the highest healthy peer using the dedicated recovery key. The peer's `authorized_keys` forces `recover.sh serve`, which pauses the peer's `miraged`, streams a gzipped tar of chain DBs, and resumes the peer on exit.
 6. Extracts that tar locally, restores the local `priv_validator_state.json`, restarts `miraged` through the supervisor, resumes services, and verifies block progress before writing the cool-down marker (`~/.mirage/.divergence_recovery_lock`).
@@ -116,7 +116,7 @@ docker exec mirage bash /opt/mirage/scripts/recover.sh peer-pull --auto --force
 
 **Logs**:
 
-- Watchdog decisions: `~/.mirage/logs/deploy/divergence_watchdog-YYYY-MM-DD.log` (or `tmux attach -t mirage` → `watchdog`)
+- Watchdog decisions: `~/.mirage/logs/deploy/divergence_watchdog-YYYY-MM-DD.log` (or `mirage-logs watchdog`)
 - Recovery actions: `~/.mirage/logs/deploy/divergence_recovery-YYYY-MM-DD.log`
 - Backups of `priv_validator_state.json` are timestamped under `~/.mirage/.recovery_backup/`.
 

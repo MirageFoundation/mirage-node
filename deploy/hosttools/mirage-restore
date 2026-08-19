@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-restore BACKUP [--check]
+
+  BACKUP     path to a verified .tar.zst archive
+  --check    verify manifest, hashes, compatibility, and space without mutation
+
+A mutating restore asks you to type exactly 'restore'. Miraged keeps signing.
+
+EOF
+}
+
+CHECK=0
+BACKUP=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --check) CHECK=1; shift ;;
+    --*)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n "$BACKUP" ]]; then
+        echo "ERROR: only one BACKUP path is accepted" >&2
+        exit 2
+      fi
+      BACKUP="$1"
+      shift
+      ;;
+  esac
+done
+if [[ -z "$BACKUP" ]]; then
+  echo "ERROR: BACKUP path is required" >&2
+  usage >&2
+  exit 2
+fi
+if [[ ! -f "$BACKUP" ]]; then
+  echo "ERROR: backup not found: $BACKUP" >&2
+  exit 1
+fi
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+abs=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$BACKUP")
+inner="/root/.mirage/backups/.restore-input-$$.tar.zst"
+docker cp "$abs" "mirage:${inner}"
+cleanup() { docker exec mirage rm -f "$inner" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
+if [[ "$CHECK" -eq 1 ]]; then
+  docker exec mirage python3 /opt/mirage/deploy/online_restore.py --check "$inner"
+  exit $?
+fi
+
+if [[ ! -t 0 ]] || ! : </dev/tty 2>/dev/null; then
+  echo "ERROR: restore requires a controlling TTY" >&2
+  exit 1
+fi
+echo "This restores local databases, configuration, and optional media."
+echo "Chain databases and the consensus signing watermark are never restored."
+printf "Type exactly 'restore' to continue: "
+read -r confirm </dev/tty || true
+if [[ "$confirm" != "restore" ]]; then
+  echo "ERROR: confirmation did not match; nothing changed" >&2
+  exit 1
+fi
+
+echo "==> Taking a pre-restore snapshot"
+docker exec mirage python3 /opt/mirage/deploy/online_backup.py
+docker exec mirage python3 /opt/mirage/deploy/online_restore.py --yes "$inner"

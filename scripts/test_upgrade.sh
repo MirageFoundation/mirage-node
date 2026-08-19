@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local release rehearsal: reset from the latest mirage.vote backup, deploy the
 # current tree, raise the PoW limit, then launch test_blockchain / test_backend
-# / verify_upgrade in the container tmux session. When the release registers a
+# / verify_upgrade as detached docker exec jobs. When the release registers a
 # chain upgrade handler it also passes the software-upgrade proposal and waits
 # for the halt and the plan to apply.
 #
@@ -12,7 +12,7 @@
 # catch, and both are silent:
 #
 #   * Skipping the proposal for a release that DOES change chain code leaves the
-#     upgrade path completely unrehearsed while every pane still reports passed.
+#     upgrade path completely unrehearsed while every job still reports passed.
 #   * Passing the proposal for a release that registers NO handler halts the
 #     chain at the plan height with nothing able to resume it, which looks like
 #     a hung node rather than an operator error.
@@ -25,14 +25,13 @@
 #   ~/.mirage/upgrade_tests/all.json                               written when all three finish
 #
 # Usage:
-#   scripts/test_upgrade.sh                     # run the pipeline and launch the panes
+#   scripts/test_upgrade.sh                     # run the pipeline and launch the jobs
 #   scripts/test_upgrade.sh --no-chain-upgrade  # same, for a release with no handler
-#   scripts/test_upgrade.sh --wait              # block until the panes finish, exit 0 iff all passed
+#   scripts/test_upgrade.sh --wait              # block until the jobs finish, exit 0 iff all passed
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONTAINER="${CONTAINER:-mirage}"
-SESSION="${SESSION:-mirage}"
 STATUS_HOST="${HOME}/.mirage/upgrade_tests"
 STATUS_CTN="/root/.mirage/upgrade_tests"
 PROPOSAL_UPGRADE="${ROOT}/scripts/proposals/proposal_upgrade.json"
@@ -57,13 +56,13 @@ usage() {
   cat <<'EOF'
 Local release rehearsal: reset from the latest mirage.vote backup, deploy the
 current tree, raise the PoW limit, then launch test_blockchain / test_backend /
-verify_upgrade in the container tmux session. A release that registers a chain
+verify_upgrade as detached docker exec jobs. A release that registers a chain
 upgrade handler additionally passes the software-upgrade proposal and waits for
 the halt and the plan to apply.
 
-  scripts/test_upgrade.sh                     run the pipeline and launch the panes
+  scripts/test_upgrade.sh                     run the pipeline and launch the jobs
   scripts/test_upgrade.sh --no-chain-upgrade  same, for a release that ships no handler
-  scripts/test_upgrade.sh --wait              block until the panes finish; exit 0 iff all passed
+  scripts/test_upgrade.sh --wait              block until the jobs finish; exit 0 iff all passed
 
 --no-chain-upgrade is cross-checked against blockchain/app/upgrades.go. The run
 aborts if the flag and the source disagree in either direction, because both
@@ -317,18 +316,8 @@ except Exception as e:
 PY
 }
 
-tmux_has_session() {
-  docker exec "$CONTAINER" tmux has-session -t "$SESSION"
-}
-
-kill_window_if_present() {
-  local name="$1"
-  local windows
-  windows="$(docker exec "$CONTAINER" tmux list-windows -t "$SESSION" -F '#W')"
-  if grep -qx "$name" <<<"$windows"; then
-    log "killing existing tmux window ${SESSION}:${name}"
-    docker exec "$CONTAINER" tmux kill-window -t "${SESSION}:${name}"
-  fi
+supervisor_ready() {
+  docker exec "$CONTAINER" test -S /var/run/supervisor.sock
 }
 
 write_run_job() {
@@ -571,34 +560,21 @@ wait_chain_advancing() {
   die "chain did not advance past ${first} within ${APPLIED_BUDGET_SEC}s after deploy"
 }
 
-launch_panes() {
+launch_jobs() {
   write_run_job
-  wait_until 60 "tmux session ${SESSION}" tmux_has_session
-  kill_window_if_present tests
-  kill_window_if_present verify
+  wait_until 60 "supervisord socket" supervisor_ready
 
-  log "creating tmux window tests (upper=blockchain, lower=backend)"
-  docker exec "$CONTAINER" tmux new-window -t "$SESSION" -n tests -c /opt/mirage
-  docker exec "$CONTAINER" tmux split-window -t "${SESSION}:tests" -v -c /opt/mirage
-  docker exec "$CONTAINER" tmux select-layout -t "${SESSION}:tests" even-vertical
-  docker exec "$CONTAINER" tmux send-keys -t "${SESSION}:tests.0" \
-    "bash ${STATUS_CTN}/run_job.sh blockchain python3 tests/test_blockchain.py" C-m
-  docker exec "$CONTAINER" tmux send-keys -t "${SESSION}:tests.1" \
-    "bash ${STATUS_CTN}/run_job.sh backend python3 tests/test_backend.py" C-m
-
-  log "creating tmux window verify"
-  docker exec "$CONTAINER" tmux new-window -t "$SESSION" -n verify -c /opt/mirage
-  docker exec "$CONTAINER" tmux send-keys -t "${SESSION}:verify" \
-    "bash ${STATUS_CTN}/run_job.sh verify python3 /opt/mirage/scripts/verify_upgrade.py" C-m
-
-  docker exec "$CONTAINER" tmux select-window -t "${SESSION}:tests"
+  log "launching detached docker exec jobs: blockchain, backend, verify"
+  docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" blockchain python3 tests/test_blockchain.py
+  docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" backend python3 tests/test_backend.py
+  docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" verify python3 /opt/mirage/scripts/verify_upgrade.py
 }
 
 print_monitor() {
   cat <<EOF
 
-Jobs launched in tmux session '${SESSION}' (windows: tests, verify).
-Attach:  docker exec -it ${CONTAINER} tmux attach -t ${SESSION}
+Jobs launched as detached docker exec processes.
+Watch live status:  mirage-status
 
 Poll (host, volume-mounted):
   cat ${STATUS_HOST}/pipeline.stage
@@ -659,7 +635,7 @@ run_pipeline() {
   set_stage pow
   ensure_pow_limit
 
-  launch_panes
+  launch_jobs
   set_stage launched
   print_monitor
 }

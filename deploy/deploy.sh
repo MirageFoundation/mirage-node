@@ -44,8 +44,8 @@ Local deployment:
   deploy/deploy.sh --local --update
 
 Remote access:
-  ssh user@host 'docker logs mirage'
-  ssh -t user@host 'docker exec -it mirage tmux attach -t mirage'
+  ssh user@host 'docker logs -f mirage'
+  ssh user@host mirage-status
 EOF
 }
 
@@ -722,7 +722,7 @@ else
 fi
 
 # Set hostname: prefer DOMAIN, fallback to MONIKER
-# Replace dots with dashes for tmux compatibility (tmux names can't have periods)
+# Replace dots with dashes for container hostname compatibility
 if [ -n "$DOMAIN_VALUE" ]; then
   CLEAN_HOSTNAME=$(echo "$DOMAIN_VALUE" | tr '.' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
@@ -960,7 +960,7 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
   echo "==> Done. Container 'mirage' is running locally."
   echo ""
   echo "Container access:"
-  echo "  Attach tmux:  docker exec -it mirage tmux attach -t mirage"
+  echo "  Status:       mirage-status"
   echo "  Shell:        docker exec -it mirage bash"
   echo "  Logs:         docker logs -f mirage"
 else
@@ -969,8 +969,8 @@ else
   echo "      ssh $REMOTE 'docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain=yourdomain.com'"
   echo ""
   echo "Remote container access:"
-  echo "  Attach tmux session:"
-  echo "    ssh -t $REMOTE 'docker exec -it mirage tmux attach -t mirage'"
+  echo "  Live status:"
+  echo "    ssh $REMOTE mirage-status"
   echo "  Shell into container:"
   echo "    ssh -t $REMOTE 'docker exec -it mirage bash'"
   echo "  Follow logs:"

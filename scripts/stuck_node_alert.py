@@ -15,7 +15,7 @@ alert.
 
 This script is the dead-man's-switch that closes both gaps. It is a tiny,
 stdlib-only daemon that imports NOTHING from the watchdog (separate failure
-domain) and runs in its OWN tmux window. Its single rule: a healthy validator
+domain) and runs as its own Supervisor program. Its single rule: a healthy validator
 ALWAYS advances its height within seconds, so if the local height has not moved
 for > STUCK_ALERT_SECONDS — or /status has been unreachable that long — page a
 human. That is true regardless of `catching_up`, regardless of whether any

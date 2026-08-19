@@ -18,6 +18,7 @@ The installer imports that phrase into `keyring-backend test` on the host. Anyon
 ```bash
 ssh root@YOUR_IP
 curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
+# optional: bash -s -- --domain example.com
 ```
 
 The installer updates Ubuntu, applies a noninteractive full upgrade, and installs the host baseline before starting Mirage. If Ubuntu requires a reboot, the installer stops before launching the node; reboot and run the same command again to resume.
@@ -30,7 +31,7 @@ The 12-word mnemonic, pasted on one line with a space between each word, is the 
 | Domain | none | `MIRAGE_DOMAIN` | `DOMAIN`; HTTPS is requested at startup |
 | Media uploads | off | `MIRAGE_MEDIA_UPLOADS` | `MEDIA_UPLOADS_ENABLED` |
 
-Set any of those variables to install with a different answer; an empty value is a real answer. Add a domain later with `mirage-domain example.com`, which requests the certificate and binds the name. Turn uploads on only if a scanning edge fronts this node, because uploads are stored on its disk and nothing else inspects them.
+Set any of those variables to install with a different answer; an empty value is a real answer. Add a domain later with `mirage-domain --set example.com`, which requests the certificate and binds the name. Turn uploads on only if a scanning edge fronts this node, because uploads are stored on its disk and nothing else inspects them.
 
 Nodes installed this way recover from a divergence on their own (`WATCHDOG_AUTORECOVER=true`), which suits an operator who is not watching at 04:00. The diverged state is snapshotted before recovery touches anything either way.
 
@@ -56,7 +57,7 @@ Do not eyeball a downloaded script. For a node-served copy, check it against Git
 Point an A/AAAA record at the VM, then:
 
 ```bash
-mirage-domain example.com
+mirage-domain --set example.com
 ```
 
 Wallet features that need a secure origin wait until this step.
@@ -64,9 +65,19 @@ Wallet features that need a secure origin wait until this step.
 ### Day-to-day
 
 ```bash
-mirage-status
-mirage-update             # activate a staged ordinary release
-mirage-update --rollback  # only when the signed release permits rollback
+mirage-status                  # live dashboard, Ctrl+C exits
+mirage-status --once           # one snapshot
+mirage-status --json           # machine-readable health
+mirage-update                  # activate a staged ordinary release
+mirage-update --prepare        # arm automatic activation at a governed halt
+mirage-update --status         # active/staged/prepared, no changes
+mirage-update --rollback       # only when the signed release permits rollback
+mirage-backup                  # online backup; copy the archive off-server
+mirage-restore BACKUP          # restore local data; miraged keeps signing
+mirage-logs                    # follow service logs
+mirage-restart                 # whole-container restart when it is safe
+docker logs -f mirage          # container stdout (bootstrap / supervisord)
+# persistent logs: ~/.mirage/logs/{node,indexer,backend,caddy,postgres,supervisor,deploy}/
 
 # Only when this node's own tooling is too old to accept the current manifest:
 # it rejects every release and cannot update its way out. The digest comes from
@@ -75,7 +86,11 @@ mirage-update --rollback  # only when the signed release permits rollback
 mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:...
 ```
 
-The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Host tools on the machine are replaced from that image only when you activate, not when the hourly check stages it. Governance-halt releases also stage, but the host tool refuses to activate them manually; use the governed upgrade procedure at the announced halt. A staged release is refused if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Being several releases behind is not a reason for refusal: the new image applies every deploy migration the node has not run yet, so a node that missed updates catches up in one step. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
+The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Host tools on the machine are replaced from that image only when you activate, not when the hourly check stages it. Governance-halt releases are prepared with `mirage-update --prepare`, which pulls the image while the current node keeps running and arms automatic activation at the halt. A staged release is refused if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Being several releases behind is not a reason for refusal: the new image applies every deploy migration the node has not run yet, so a node that missed updates catches up in one step. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
+
+If this seed is already a validator on a machine that is gone for good, the installer asks you to type exactly `replace`. That writes a signing watermark above the live chain height so the new host cannot double-sign. The old VM must never be started again. Replacement discards local indexer, backend, and media history; `mirage-backup` is the way to keep that data, and it does not take the validator down.
+
+Archives from `mirage-backup` are secret operational material. Keep a copy off the server.
 
 ## What the installer will refuse
 
@@ -84,7 +99,8 @@ The node checks for signed releases hourly. Ordinary releases stage and wait for
 - No SSH public key in `/root/.ssh/authorized_keys` (it will not disable password auth and lock you out)
 - A mnemonic that is not exactly 12 BIP-39 English words
 - An account with no username, or with less than 10,000,000 MIRAGE (it prints the actual balance)
-- A seed whose consensus key is already a validator on another host (migrate with `scripts/backup_restore.py --migrate` instead)
+- A seed whose consensus key is already a validator on another host, unless you type exactly `replace` after the old machine is permanently gone
+
 - A network manifest with no persistent peers, an expired one, or a signature that does not match the pinned key
 - A release older than the network manifest's `min_release`
 - A pulled image whose `RepoDigest` does not match the signed manifest

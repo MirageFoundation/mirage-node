@@ -2,7 +2,7 @@
 
 ### One command, one recovery phrase
 
-Running a validator takes a single command and the twelve words you already have. Nothing else is asked. Your validator is named after your Mirage username, it serves on the machine's IP address, and it does not accept media uploads — the three answers that are right for a new public node. The install tells you each decision as it makes it, shows where synchronization begins, and gives you one command for the live dashboard and service logs. That dashboard is the first thing you see when you attach and refreshes immediately. Every default can be changed afterwards without reinstalling, or supplied from the start through an environment variable for scripted installs.
+Running a validator takes a single command and the twelve words you already have. Nothing else is asked. Your validator is named after your Mirage username, it serves on the machine's IP address, and it does not accept media uploads — the three answers that are right for a new public node. The install tells you each decision as it makes it, shows where synchronization begins, and finishes with one command for the live dashboard. `mirage-status` refreshes every second; Ctrl+C exits. Every default can be changed afterwards without reinstalling, or supplied from the start through an environment variable for scripted installs.
 
 ### A name that sticks
 

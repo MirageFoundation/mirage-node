@@ -312,15 +312,16 @@ peer_validate_app_hash() {
 }
 
 # ── Shared in-container helpers (peer-pull and state-sync share these) ──
+svctl() {
+  supervisorctl -c /etc/supervisor/supervisord.conf "$@"
+}
+
 stop_miraged_supervised() {
-  # The node tmux window no longer runs `miraged start` directly; it runs
-  # deploy/run_miraged_supervised.sh, which restarts miraged on crash. During a
-  # recovery we need an intentional stop, not a crash-loop. So the sequence is:
+  # The node program is deploy/run_miraged_supervised.sh. During recovery we
+  # need an intentional Supervisor stop, not a crash-loop restart:
   #
-  #   1. Send C-c to the tmux node window. The supervisor's signal trap should
-  #      set STOP_REQUESTED=1, terminate its child miraged, and exit 0.
-  #   2. Wait up to 30s for both `miraged start` and the supervisor process to
-  #      disappear.
+  #   1. supervisorctl stop node (stopasgroup/killasgroup on the program).
+  #   2. Wait up to 30s for both `miraged start` and the wrapper to disappear.
   #   3. Escalate to SIGTERM, then SIGKILL.
   #   4. If either process still exists, fail hard BEFORE wiping DBs.
   #
@@ -332,10 +333,8 @@ stop_miraged_supervised() {
   # wipe_chain_dbs records these in the forensic snapshot manifest, and after we
   # stop the node the RPC is gone.
   capture_local_divergence_context
-  log "stopping miraged + supervisor (tmux $TMUX_SESSION:node)..."
-  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    tmux send-keys -t "$TMUX_SESSION:node" C-c 2>/dev/null || true
-  fi
+  log "stopping miraged via Supervisor (program: node)..."
+  svctl stop node >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
     if ! pgrep -f "miraged start" >/dev/null 2>&1 && ! pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
       break
@@ -343,13 +342,13 @@ stop_miraged_supervised() {
     sleep 1
   done
   if pgrep -f "miraged start" >/dev/null 2>&1 || pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
-    log "supervisor didn't exit gracefully, sending SIGTERM"
+    log "node program didn't exit gracefully, sending SIGTERM"
     pkill -TERM -f "run_miraged_supervised.sh" 2>/dev/null || true
     pkill -TERM -f "miraged start" 2>/dev/null || true
     sleep 5
   fi
   if pgrep -f "miraged start" >/dev/null 2>&1 || pgrep -f "run_miraged_supervised.sh" >/dev/null 2>&1; then
-    log "supervisor still running, sending SIGKILL"
+    log "node still running, sending SIGKILL"
     pkill -KILL -f "run_miraged_supervised.sh" 2>/dev/null || true
     pkill -KILL -f "miraged start" 2>/dev/null || true
     sleep 2
@@ -527,7 +526,7 @@ wipe_chain_dbs() {
 
 # Captures TODAYS_LOG and SUPERVISOR_LOG_LINE_START so verify_recovery_health
 # can scan only the post-restart slice for "panic:". MUST be called BEFORE
-# tmux send-keys restarts miraged.
+# supervisorctl start node restarts miraged.
 prepare_supervisor_log_marker() {
   TODAYS_LOG="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
   SUPERVISOR_LOG_LINE_START=1
@@ -537,16 +536,13 @@ prepare_supervisor_log_marker() {
 }
 
 restart_miraged_via_supervisor() {
-  # Always restart via the supervisor, never `miraged start` directly. If the
-  # node panics again, the supervisor gives it bounded retries and writes
+  # Always restart via Supervisor, never `miraged start` directly. If the
+  # node panics again, the wrapper gives it bounded retries and writes
   # supervisor messages into the miraged daily log, which is exactly what the
   # watchdog and incident triage expect.
-  log "restarting miraged in tmux $TMUX_SESSION:node ..."
-  local cmd="BIN=\"$BIN\" NODE_HOME=\"$NODE_HOME\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_miraged_supervised.sh\""
-  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    tmux send-keys -t "$TMUX_SESSION:node" "$cmd" C-m
-  else
-    log "WARNING: tmux session $TMUX_SESSION missing; container restart will pick this up"
+  log "starting miraged via Supervisor (program: node)..."
+  if ! svctl start node; then
+    die "supervisorctl start node failed"
   fi
 }
 
@@ -585,36 +581,26 @@ verify_recovery_health() {
   done
 }
 
-pause_tmux_services() {
+pause_app_services() {
   # These services depend on the local node and can burn CPU during recovery.
   # Pausing them reduces noise while the node restarts and avoids backend/indexer
   # loops hammering an RPC endpoint that we know is unavailable.
-  log "pausing indexer/backend/status windows ..."
-  for w in indexer backend status; do
-    tmux send-keys -t "$TMUX_SESSION:$w" C-c 2>/dev/null || true
-  done
+  log "pausing indexer/backend via Supervisor..."
+  svctl stop indexer backend >/dev/null 2>&1 || true
   sleep 3
 }
 
-resume_tmux_services() {
-  log "resuming indexer/backend/status ..."
-  if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then return 0; fi
-  if tmux list-windows -t "$TMUX_SESSION" -F '#W' 2>/dev/null | grep -qx "indexer"; then
-    tmux send-keys -t "$TMUX_SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/indexer/main.py" C-m
-  fi
-  if tmux list-windows -t "$TMUX_SESSION" -F '#W' 2>/dev/null | grep -qx "backend"; then
-    tmux send-keys -t "$TMUX_SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
-  fi
-  if tmux list-windows -t "$TMUX_SESSION" -F '#W' 2>/dev/null | grep -qx "status"; then
-    tmux send-keys -t "$TMUX_SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
-  fi
+resume_app_services() {
+  log "resuming indexer/backend via Supervisor..."
+  svctl start indexer >/dev/null 2>&1 || true
+  svctl start backend >/dev/null 2>&1 || true
 }
 
 write_cooldown_lock_if_verified() {
   # The cool-down lock is the watchdog's "we already acted" marker. It must be
   # written only after verification, never merely after launching recovery.
   # Otherwise a bad recovery can suppress the next real recovery attempt.
-  log "monitor: tmux attach -t $TMUX_SESSION  (window 'node')"
+  log "monitor: mirage-status"
   log "logs:    $LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
   log "this run's log: $LOG_FILE"
   log "NOTE: after blocksync catches up, run: docker exec mirage bash $ROOT_DIR/scripts/unjail_validator.sh"
@@ -632,7 +618,7 @@ write_cooldown_lock_if_verified() {
 # leave the node down indefinitely (which is what bit us during the May 25
 # incident: miraged stayed dead after a "successful" recovery).
 #
-# Each mode sets the global flags TMUX_PAUSED / LOCAL_STOPPED as it crosses
+# Each mode sets the global flags SERVICES_PAUSED / LOCAL_STOPPED as it crosses
 # those checkpoints, and clears them (well, sets SERVICES_RESTARTED=1) once
 # services are healthy again. The cleanup function only acts when the script
 # is exiting non-zero AND services have not yet been restarted; otherwise it
@@ -647,9 +633,9 @@ peer_pull_cleanup_on_abort() {
       log "peer-pull aborted (rc=$rc); attempting best-effort miraged restart"
       restart_miraged_via_supervisor || true
     fi
-    if [ "${TMUX_PAUSED:-0}" -eq 1 ]; then
+    if [ "${SERVICES_PAUSED:-0}" -eq 1 ]; then
       log "peer-pull aborted (rc=$rc); attempting best-effort service resume"
-      resume_tmux_services || true
+      resume_app_services || true
     fi
   fi
   exit "$rc"
@@ -675,9 +661,9 @@ state_sync_cleanup_on_abort() {
       log "  attempting best-effort miraged restart"
       restart_miraged_via_supervisor || true
     fi
-    if [ "${TMUX_PAUSED:-0}" -eq 1 ]; then
+    if [ "${SERVICES_PAUSED:-0}" -eq 1 ]; then
       log "  attempting best-effort service resume"
-      resume_tmux_services || true
+      resume_app_services || true
     fi
   fi
   exit "$rc"
@@ -712,7 +698,6 @@ setup_in_container_mode() {
   LOCK="${LOCK:-/root/.mirage/.divergence_recovery_lock}"
   DISABLE_MARKER="${DISABLE_MARKER:-/root/.mirage/.recovery_disabled}"
   BIN="${BIN:-/opt/mirage/blockchain/bin/miraged}"
-  TMUX_SESSION="${TMUX_SESSION:-mirage}"
   COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-21600}"
   LOGS_DIR="${LOGS_DIR:-/root/.mirage/logs}"
   ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
@@ -752,14 +737,14 @@ cmd_peer_pull() {
   #   gzip -t the tar
   #   verify tar listing has required dirs
   #   --- destructive boundary ---
-  #   pause tmux services       (TMUX_PAUSED=1, install cleanup trap)
+  #   pause app services        (SERVICES_PAUSED=1, install cleanup trap)
   #   stop local miraged        (LOCAL_STOPPED=1)
   #   backup priv_validator_state.json
   #   wipe local chain DBs
   #   extract tar into local NODE_HOME/data
   #   restore priv_validator_state.json
   #   restart local miraged via supervisor (SERVICES_RESTARTED=1)
-  #   resume tmux services
+  #   resume app services
   #   verify height progress + no panic
   #   clear cleanup trap
   #   write cool-down lock
@@ -865,7 +850,7 @@ cmd_peer_pull() {
   # go to stderr, so they do not corrupt the tar stream.
   #
   # ssh -n reads stdin from /dev/null. The watchdog invokes recover.sh from a
-  # tmux pane, so without -n this background ssh would read the controlling TTY,
+  # supervised process, so without -n this background ssh would read the controlling TTY,
   # take SIGTTIN, and stop (state T). A stopped child ignores SIGTERM, so the
   # plain `timeout` could never reap it and recovery hung indefinitely. -k
   # escalates to SIGKILL (which a stopped process cannot ignore) if SIGTERM is
@@ -902,8 +887,8 @@ cmd_peer_pull() {
 
   # --- Destructive boundary. From here on, install the cleanup trap so an
   # abort restarts services instead of leaving the node down. ---
-  pause_tmux_services
-  TMUX_PAUSED=1
+  pause_app_services
+  SERVICES_PAUSED=1
   trap peer_pull_cleanup_on_abort EXIT INT TERM
   stop_miraged_supervised
   LOCAL_STOPPED=1
@@ -928,7 +913,7 @@ cmd_peer_pull() {
   prepare_supervisor_log_marker
   restart_miraged_via_supervisor
   SERVICES_RESTARTED=1
-  resume_tmux_services
+  resume_app_services
   verify_recovery_health
   # Verification done; cool-down lock writing has its own non-destructive exit
   # codes (5 = not verified). Disarm the cleanup trap so a 5 does not trigger
@@ -983,7 +968,6 @@ cmd_restart() {
   NODE_HOME="${NODE_HOME:-/root/.mirage/node}"
   DISABLE_MARKER="${DISABLE_MARKER:-/root/.mirage/.recovery_disabled}"
   BIN="${BIN:-/opt/mirage/blockchain/bin/miraged}"
-  TMUX_SESSION="${TMUX_SESSION:-mirage}"
   LOGS_DIR="${LOGS_DIR:-/root/.mirage/logs}"
   ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
   # Restart verifies faster than peer-pull: no blocksync of a fresh DB, the node
@@ -1029,7 +1013,7 @@ cmd_restart() {
   stop_miraged_supervised
   restart_miraged_via_supervisor
   verify_recovery_health
-  log "monitor: tmux attach -t $TMUX_SESSION  (window 'node')"
+  log "monitor: mirage-status"
   log "logs:    $LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
   log "this run's log: $LOG_FILE"
   if [ "$RECOVERY_VERIFIED" = "1" ]; then
@@ -1116,8 +1100,8 @@ cmd_state_sync() {
 
   # --- Destructive boundary. The cleanup trap also resets STATESYNC_ENABLE
   # on abort so a supervisor-driven restart does not re-trigger state-sync. ---
-  pause_tmux_services
-  TMUX_PAUSED=1
+  pause_app_services
+  SERVICES_PAUSED=1
   trap state_sync_cleanup_on_abort EXIT INT TERM
   stop_miraged_supervised
   LOCAL_STOPPED=1
@@ -1181,7 +1165,7 @@ PY
   log "resetting STATESYNC_ENABLE=false in $ENV_FILE for future restarts..."
   sed -i 's|^STATESYNC_ENABLE=.*|STATESYNC_ENABLE=false|' "$ENV_FILE"
 
-  resume_tmux_services
+  resume_app_services
   if [ "$snapshot_ok" = "1" ]; then
     verify_recovery_health
   fi
@@ -1556,7 +1540,7 @@ Env overrides (peer-pull):
   PEER_PULL_SECONDS   default: 1800
 
 Env overrides (all in-container modes):
-  NODE_HOME, ENV_FILE, LOCK, BIN, TMUX_SESSION, ROOT_DIR, LOGS_DIR,
+  NODE_HOME, ENV_FILE, LOCK, BIN, ROOT_DIR, LOGS_DIR,
   COOLDOWN_SECONDS, RECOVERY_VERIFY_SECONDS, RECOVERY_LOG
 
 Env overrides (state-sync only):

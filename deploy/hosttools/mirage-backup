@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-backup [--output PATH | --stdout] [--with-media]
+
+  (no args)          verified mode-0600 archive in ~/.mirage/backups/
+  --output PATH      atomically publish to PATH
+  --stdout           stream the verified archive (mutually exclusive with --output)
+  --with-media       include finalized uploaded media
+
+Archives are secret operational material. Copy them off-server.
+
+EOF
+}
+
+OUTPUT=""
+STDOUT=0
+MEDIA=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --output)
+      OUTPUT="${2:-}"
+      if [[ -z "$OUTPUT" || "$OUTPUT" == -* ]]; then
+        echo "ERROR: --output requires a PATH" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --stdout) STDOUT=1; shift ;;
+    --with-media) MEDIA=1; shift ;;
+    *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+if [[ -n "$OUTPUT" && "$STDOUT" -eq 1 ]]; then
+  echo "ERROR: --output and --stdout cannot be combined" >&2
+  exit 2
+fi
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+ARGS=()
+[[ "$MEDIA" -eq 1 ]] && ARGS+=(--with-media)
+if [[ "$STDOUT" -eq 1 ]]; then
+  exec docker exec mirage python3 /opt/mirage/deploy/online_backup.py --stdout "${ARGS[@]}"
+fi
+if [[ -n "$OUTPUT" ]]; then
+  host_out=$(python3 -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$OUTPUT")
+  if [[ -e "$host_out" ]]; then
+    echo "ERROR: refusing to overwrite $host_out" >&2
+    exit 1
+  fi
+  inner="/root/.mirage/backups/.host-output-$$.tar.zst"
+  host_partial="${host_out}.partial"
+  cleanup_partial() { rm -f "$host_partial" "${host_partial}.sha256"; docker exec mirage rm -f "$inner" "${inner}.sha256" >/dev/null 2>&1 || true; }
+  trap cleanup_partial EXIT
+  if ! docker exec mirage python3 /opt/mirage/deploy/online_backup.py --output "$inner" "${ARGS[@]}"; then
+    exit 1
+  fi
+  docker cp "mirage:${inner}" "$host_partial"
+  docker cp "mirage:${inner}.sha256" "${host_partial}.sha256"
+  chmod 600 "$host_partial" "${host_partial}.sha256"
+  python3 -c 'import os,sys; os.replace(sys.argv[1], sys.argv[2]); os.replace(sys.argv[3], sys.argv[4])' \
+    "$host_partial" "$host_out" "${host_partial}.sha256" "${host_out}.sha256"
+  trap - EXIT
+  docker exec mirage rm -f "$inner" "${inner}.sha256"
+  echo "backup written: $host_out"
+  echo "sha256: $(tr -d '[:space:]' < "${host_out}.sha256")"
+  exit 0
+fi
+exec docker exec -t mirage python3 /opt/mirage/deploy/online_backup.py "${ARGS[@]}"

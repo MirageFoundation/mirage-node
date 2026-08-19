@@ -1134,7 +1134,7 @@ def start_with_entrypoint(image_ref: str):
             break
         time.sleep(2)
     else:
-        raise RuntimeError("Node not ready after 240s. Check: docker exec -it mirage tmux attach -t mirage")
+        raise RuntimeError("Node not ready after 240s. Check: mirage-status  (or docker logs -f mirage)")
 
     # Quick verification that entrypoint started everything
     time.sleep(5)
@@ -1158,7 +1158,7 @@ def start_with_entrypoint(image_ref: str):
             all_ok = False
 
     if not all_ok:
-        status("WARNING: Some services failed. Check: docker exec -it mirage tmux attach -t mirage")
+        status("WARNING: Some services failed. Check: mirage-status  (or docker logs -f mirage)")
     else:
         status("All services running")
 

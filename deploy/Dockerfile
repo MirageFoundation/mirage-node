@@ -123,7 +123,7 @@ RUN apt-get update && apt-get install -y \
     postgresql \
     postgresql-client \
     postgresql-common \
-    tmux \
+    supervisor \
     micro \
     tree \
     curl \
@@ -133,6 +133,7 @@ RUN apt-get update && apt-get install -y \
     procps \
     dnsutils \
     cronolog \
+    zstd \
     htop \
     less \
     netcat-openbsd \
@@ -193,6 +194,10 @@ WORKDIR /opt/mirage
 # - 26656: P2P (node-to-node communication)
 # - 26657: RPC (optional, for external queries)
 EXPOSE 80 443 26656 26657
+
+# Docker reports failed services; unless-stopped does not restart on unhealthy.
+HEALTHCHECK --interval=30s --timeout=15s --start-period=180s --retries=5 \
+  CMD python3 /opt/mirage/scripts/status_dashboard.py --json --require CometBFT,Backend,Indexer,Endpoints
 
 # Set entrypoint
 ENTRYPOINT ["/opt/mirage/deploy/entrypoint.sh"]

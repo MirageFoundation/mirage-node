@@ -1,3 +1,71 @@
 #!/usr/bin/env bash
+# Live operator status dashboard. Interactive by default; --once/--json for scripts.
 set -euo pipefail
-exec docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --once "$@"
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-status [--once | --json] [--interval SECONDS]
+
+  (no args)             live dashboard, one-second refresh, Ctrl+C exits
+  --once                render one human-readable snapshot and exit
+  --json                emit one machine-readable health result; exit 0/1
+  --interval SECONDS    live refresh interval (positive integer)
+
+EOF
+}
+
+ONCE=0
+JSON=0
+INTERVAL=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --once) ONCE=1; shift ;;
+    --json) JSON=1; shift ;;
+    --interval)
+      INTERVAL="${2:-}"
+      if [[ -z "$INTERVAL" || ! "$INTERVAL" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: --interval requires a positive integer" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ "$ONCE" -eq 1 && "$JSON" -eq 1 ]]; then
+  echo "ERROR: --once and --json cannot be combined" >&2
+  exit 2
+fi
+if [[ -n "$INTERVAL" && ( "$ONCE" -eq 1 || "$JSON" -eq 1 ) ]]; then
+  echo "ERROR: --interval is only valid for the live dashboard" >&2
+  exit 2
+fi
+
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+ARGS=()
+if [[ "$JSON" -eq 1 ]]; then
+  ARGS+=(--json)
+elif [[ "$ONCE" -eq 1 ]]; then
+  ARGS+=(--once)
+else
+  ARGS+=(--interval "${INTERVAL:-1}")
+fi
+
+if [[ "$ONCE" -eq 0 && "$JSON" -eq 0 && -t 0 && -t 1 ]]; then
+  exec docker exec -it \
+    -e TERM="${TERM:-xterm-256color}" \
+    -e COLUMNS="${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}" \
+    -e LINES="${LINES:-$(tput lines 2>/dev/null || echo 24)}" \
+    mirage python3 /opt/mirage/scripts/status_dashboard.py "${ARGS[@]}"
+fi
+exec docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py "${ARGS[@]}"

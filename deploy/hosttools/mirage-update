@@ -13,6 +13,30 @@ VERIFY=/usr/local/bin/mirage-verify
 LAUNCH=/usr/local/bin/mirage-launch
 SAFETY_BLOCKS="${UPGRADE_PREFLIGHT_SAFETY_BLOCKS:-500}"
 
+show_help() {
+  cat <<'EOF'
+Usage: mirage-update [--prepare | --status | --rollback]
+
+  (no args)     check, verify, stage, and activate an ordinary release
+  --prepare     verify and pre-pull the governed upgrade, then arm halt activation
+  --status      show active/staged/prepared state without mutation
+  --rollback    restore the previous image when the signed policy permits it
+
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) show_help; exit 0 ;;
+  --tick|--rollback|--prepare|--status|--activate-if-halted|"") ;;
+  --refresh-hosttools)
+    if [[ "${2:-}" != "--image" || -z "${3:-}" ]]; then
+      echo "usage: mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:..." >&2
+      exit 2
+    fi
+    ;;
+  *) echo "ERROR: unknown argument: $1" >&2; show_help >&2; exit 2 ;;
+esac
+
 mkdir -p "$STATE_DIR"
 
 exec 9>"$LOCK_DIR/lock"
@@ -252,16 +276,17 @@ install_hosttools_from_image() {
     echo "ERROR: staged image pubkey $image_fp does not match host trust anchor $host_fp" >&2
     exit 1
   fi
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
     install -m 0755 "$staging/$tool" "/usr/local/bin/$tool"
   done
   install -m 0755 "$staging/prune_mirage_images.sh" /usr/local/bin/prune_mirage_images.sh
   install -m 0755 "$staging/mirage-weekly-restart.sh" /usr/local/sbin/mirage-weekly-restart.sh
   install -m 0644 "$staging/release_verify.py" /usr/local/share/mirage/release_verify.py
-  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer; do
+  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
     install -m 0644 "$staging/systemd/$tool" "/etc/systemd/system/$tool"
   done
   systemctl daemon-reload
+  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
 }
 
 tick() {
@@ -425,14 +450,198 @@ refresh_hosttools() {
   echo "host tools refreshed from $image"
 }
 
+show_status() {
+  python3 - "$STATE_FILE" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+state = json.load(open(path)) if os.path.isfile(path) else {}
+print("active:", state.get("active") or "(none)")
+print("staged:", state.get("staged") or "(none)")
+print("staged_activation:", state.get("staged_activation") or "(none)")
+print("rollback_safe:", state.get("active_rollback_safe"))
+print("consensus_breaking:", state.get("active_consensus_breaking"))
+PY
+  if [[ -f "$HOME/.mirage/upgrade/prepared.json" ]]; then
+    python3 - "$HOME/.mirage/upgrade/prepared.json" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))
+print("prepared_upgrade:", p.get("upgrade_name"))
+print("prepared_height:", p.get("plan_height"))
+print("prepared_image:", p.get("image"))
+print("prepared_at:", p.get("prepared_at"))
+PY
+  else
+    echo "prepared_upgrade: (none)"
+  fi
+  if [[ -f "$HOME/.mirage/upgrade/halt-detected.txt" ]]; then
+    echo "halt_detected: yes"
+    cat "$HOME/.mirage/upgrade/halt-detected.txt"
+  else
+    echo "halt_detected: no"
+  fi
+  if [[ -f "$STATE_DIR/activating" ]]; then
+    echo "activation_ready: activating"
+  elif [[ -f "$HOME/.mirage/node/data/upgrade-info.json" && -f "$HOME/.mirage/upgrade/prepared.json" ]]; then
+    echo "activation_ready: halt marker present"
+  else
+    echo "activation_ready: waiting for governed halt"
+  fi
+}
+
+prepare() {
+  mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known" "$HOME/.mirage/upgrade"
+  fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
+  fetch_verify "$NETWORK_URL" "$tmp/network.json"
+  activation=$(json_field "$tmp/manifest.json" activation)
+  if [[ "$activation" != "upgrade-halt" ]]; then
+    echo "ERROR: --prepare requires activation=upgrade-halt (got '$activation')" >&2
+    exit 1
+  fi
+  upgrade_name=$(json_field "$tmp/manifest.json" upgrade_name)
+  if [[ -z "$upgrade_name" ]]; then
+    echo "ERROR: release manifest is missing upgrade_name" >&2
+    exit 1
+  fi
+  plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
+    echo "ERROR: local REST is unavailable; cannot match the on-chain upgrade plan" >&2
+    exit 1
+  }
+  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
+  if [[ -z "$plan_name" || "$plan_h" -le 0 ]]; then
+    echo "ERROR: no on-chain upgrade plan is set; refuse to prepare before the proposal is passed" >&2
+    exit 1
+  fi
+  if [[ "$plan_name" != "$upgrade_name" ]]; then
+    echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
+    exit 1
+  fi
+  tick
+  image=$(json_field "$tmp/manifest.json" image)
+  release_id=$(json_field "$tmp/manifest.json" release_id)
+  python3 - "$HOME/.mirage/upgrade/prepared.json" "$STATE_DIR/prepared.json" "$upgrade_name" "$plan_h" "$image" "$release_id" <<'PY'
+import json, os, sys, time
+dest, dest2, name, height, image, rid = sys.argv[1:7]
+payload = {
+    "upgrade_name": name,
+    "plan_name": name,
+    "plan_height": int(height),
+    "image": image,
+    "release_id": int(rid),
+    "prepared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+text = json.dumps(payload, indent=2) + "\n"
+for path in (dest, dest2):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    open(tmp, "w").write(text)
+    os.replace(tmp, path)
+PY
+  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
+  echo "Prepared $upgrade_name at height $plan_h"
+  echo "The release is ready and will activate automatically at the governed halt."
+}
+
+activate_if_halted() {
+  local prepared="$HOME/.mirage/upgrade/prepared.json"
+  if [[ ! -f "$prepared" ]]; then
+    exit 0
+  fi
+  local name height image
+  name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["upgrade_name"])' "$prepared")
+  height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["plan_height"]))' "$prepared")
+  image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$prepared")
+  local marker="$HOME/.mirage/node/data/upgrade-info.json"
+  if [[ ! -f "$marker" ]]; then
+    exit 0
+  fi
+  python3 - "$marker" "$name" "$height" <<'PY' || exit 0
+import json, sys
+marker, name, height = sys.argv[1], sys.argv[2], int(sys.argv[3])
+info = json.load(open(marker))
+got_name = info.get("name") or ""
+got_h = int(info.get("height") or 0)
+if got_name != name or got_h != height:
+    raise SystemExit(1)
+PY
+  local pv="$HOME/.mirage/node/data/priv_validator_state.json"
+  if [[ ! -f "$pv" ]]; then
+    echo "ERROR: priv_validator_state.json missing; refusing activation" >&2
+    exit 1
+  fi
+  local signed_height
+  signed_height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["height"]))' "$pv")
+  if (( signed_height != height )); then
+    echo "ERROR: last committed height $signed_height does not match prepared halt $height" >&2
+    exit 1
+  fi
+  local digest want_sha
+  digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image") || {
+    echo "ERROR: prepared image $image is not present locally; refusing activation" >&2
+    exit 1
+  }
+  want_sha=${image#*@}
+  if [[ "$digest" != *"$want_sha"* ]]; then
+    echo "ERROR: local image $digest does not match prepared $image" >&2
+    exit 1
+  fi
+  echo "activating" > "$STATE_DIR/activating"
+  echo "==> Verified governed halt for $name at $height; recreating container from $image"
+  if ! "$LAUNCH" --image "$image"; then
+    rm -f "$STATE_DIR/activating"
+    echo "ERROR: failed to launch prepared image; node remains halted for operator action" >&2
+    exit 1
+  fi
+  if ! wait_for_rpc; then
+    rm -f "$STATE_DIR/activating"
+    echo "ERROR: prepared image did not become healthy; node remains halted" >&2
+    exit 1
+  fi
+  local plan_name
+  plan_name=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan \
+    | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+  if [[ -n "$plan_name" ]]; then
+    rm -f "$STATE_DIR/activating"
+    echo "ERROR: upgrade plan $plan_name is still set after activation" >&2
+    exit 1
+  fi
+  local now_h
+  now_h=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status \
+    | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"]))')
+  if (( now_h <= height )); then
+    rm -f "$STATE_DIR/activating"
+    echo "ERROR: height $now_h has not advanced past upgrade height $height" >&2
+    exit 1
+  fi
+  install_hosttools_from_image "$image"
+  python3 - "$STATE_FILE" "$image" <<'PY'
+import json, os, sys
+path, image = sys.argv[1], sys.argv[2]
+state = json.load(open(path)) if os.path.isfile(path) else {}
+state["previous"] = state.get("active") or ""
+state["active"] = image
+state["active_activation"] = "upgrade-halt"
+state["active_rollback_safe"] = False
+state["active_consensus_breaking"] = True
+state["staged"] = ""
+state["staged_activation"] = ""
+state["staged_rollback_safe"] = False
+state["staged_consensus_breaking"] = False
+tmp = path + ".tmp"
+open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
+os.replace(tmp, path)
+PY
+  rm -f "$HOME/.mirage/upgrade/halt-detected.txt" "$STATE_DIR/activating"
+  echo "activated prepared upgrade $name; chain is at height $now_h"
+}
+
 case "${1:-}" in
   --tick) tick ;;
   --rollback) rollback ;;
+  --prepare) prepare ;;
+  --status) show_status ;;
+  --activate-if-halted) activate_if_halted ;;
   --refresh-hosttools)
-    if [[ "${2:-}" != "--image" || -z "${3:-}" ]]; then
-      echo "usage: mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:..." >&2
-      exit 2
-    fi
     refresh_hosttools "$3"
     ;;
   "")
@@ -450,5 +659,5 @@ case "${1:-}" in
     fi
     activate_staged
     ;;
-  *) echo "usage: mirage-update [--tick|--rollback|--refresh-hosttools --image IMAGE]" >&2; exit 2 ;;
+  *) echo "ERROR: unknown argument: $1" >&2; show_help >&2; exit 2 ;;
 esac

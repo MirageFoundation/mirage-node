@@ -1,4 +1,91 @@
 #!/usr/bin/env bash
 set -euo pipefail
-domain="${1:?usage: mirage-domain example.com}"
-exec docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain="$domain"
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-domain --set DOMAIN
+       mirage-domain --status
+       mirage-domain --remove
+
+  --set DOMAIN   configure and validate HTTPS for DOMAIN
+  --status       report configured domain, DNS match, and certificate health
+  --remove       return the node to IP/HTTP mode (requires typing exactly: remove)
+
+EOF
+}
+
+MODE=""
+DOMAIN=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --set)
+      if [[ -n "$MODE" ]]; then
+        echo "ERROR: --set cannot be combined with --$MODE" >&2
+        exit 2
+      fi
+      MODE="set"
+      DOMAIN="${2:-}"
+      if [[ -z "$DOMAIN" || "$DOMAIN" == -* ]]; then
+        echo "ERROR: --set requires a DOMAIN" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --status)
+      if [[ -n "$MODE" ]]; then
+        echo "ERROR: --status cannot be combined with --$MODE" >&2
+        exit 2
+      fi
+      MODE="status"
+      shift
+      ;;
+    --remove)
+      if [[ -n "$MODE" ]]; then
+        echo "ERROR: --remove cannot be combined with --$MODE" >&2
+        exit 2
+      fi
+      MODE="remove"
+      shift
+      ;;
+    *)
+      echo "ERROR: unknown argument: $1" >&2
+      echo "Use --set DOMAIN (positional domain is no longer accepted)" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ -z "$MODE" ]]; then
+  usage >&2
+  exit 2
+fi
+
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+case "$MODE" in
+  set)
+    exec docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain="$DOMAIN"
+    ;;
+  status)
+    exec docker exec mirage python3 /opt/mirage/deploy/domain_status.py
+    ;;
+  remove)
+    if [[ ! -t 0 ]] || ! : </dev/tty 2>/dev/null; then
+      echo "ERROR: --remove requires a controlling TTY" >&2
+      exit 1
+    fi
+    echo "This returns the node to IP/HTTP mode and drops the TLS certificate."
+    printf "Type exactly 'remove' to continue: "
+    read -r confirm </dev/tty || true
+    if [[ "$confirm" != "remove" ]]; then
+      echo "ERROR: confirmation did not match; nothing changed" >&2
+      exit 1
+    fi
+    exec docker exec mirage python3 /opt/mirage/deploy/domain_remove.py
+    ;;
+esac

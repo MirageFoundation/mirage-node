@@ -62,7 +62,7 @@ if [[ -z "$MONIKER" ]]; then
   MONIKER=$(read_env_key MONIKER)
 fi
 
-# Hostname only names the tmux session and log prefix. When a domain is set the
+# Hostname names the container and log prefix. When a domain is set the
 # container derives its own moniker from DOMAIN in node.env, same as deploy.sh.
 if [[ -n "$DOMAIN_VALUE" ]]; then
   ARGS+=(--hostname "$(echo "$DOMAIN_VALUE" | tr '.' '-')")

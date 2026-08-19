@@ -356,7 +356,7 @@ def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
 
 
 # Load the node's own env the way the services see it. `docker exec` starts a
-# fresh shell that does not inherit the tmux session's environment.
+# fresh shell that does not inherit the Supervisor children's environment.
 _LOAD_NODE_ENV = "set -a; for f in /root/.mirage/env/*.env; do . $f; done; set +a"
 
 

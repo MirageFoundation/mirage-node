@@ -83,25 +83,11 @@ EOF
   fi
 
   if [ "$RESTART_AFTER" = "--restart" ]; then
-    # Restart the node process inside tmux pane 0
-    SESSION="${SESSION:-mirage}"
-    BIN="${BIN:-/opt/mirage/blockchain/bin/miraged}"
-    
-    # Kill miraged and tail processes
-    tmux send-keys -t "$SESSION:mirage.0" C-c
-    sleep 1
-    if pgrep -f "miraged start" >/dev/null 2>&1; then
-      pkill -f "miraged start"
+    echo "Restarting node via Supervisor..."
+    if ! supervisorctl -c /etc/supervisor/supervisord.conf restart node; then
+      echo "ERROR: supervisorctl restart node failed" >&2
+      exit 1
     fi
-    if pgrep -f "tail.*miraged.*log" >/dev/null 2>&1; then
-      pkill -f "tail.*miraged.*log"
-    fi
-    sleep 1
-    
-    # Clear the pane and restart with full command (matching entrypoint)
-    # Use tee + cronolog for live output AND date-based log files
-    tmux send-keys -t "$SESSION:mirage.0" C-l
-    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'mkdir -p \"$LOGS_DIR/node\"; $BIN start 2>&1 | tee >(cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\")'" C-m
   fi
 
   if [ "$write_state" = "1" ]; then

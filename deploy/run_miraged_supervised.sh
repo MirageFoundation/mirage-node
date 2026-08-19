@@ -146,12 +146,44 @@ if ! upgrade_preflight; then
   exit 1
 fi
 
+SKIP_ARGS=()
+if [ -n "${SKIP_UPGRADES:-}" ]; then
+  log_supervisor "SKIP_UPGRADES=${SKIP_UPGRADES}"
+  for upgrade in $(echo "$SKIP_UPGRADES" | tr ',' ' '); do
+    [ -n "$upgrade" ] || continue
+    SKIP_ARGS+=(--unsafe-skip-upgrades "$upgrade")
+  done
+fi
+
+upgrade_halt_detected() {
+  local log="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
+  [ -f "$log" ] || return 1
+  grep -aE 'UPGRADE ".+" NEEDED at height:' "$log" | tail -1
+}
+
+hold_for_governed_upgrade() {
+  local line="$1"
+  local halt_dir="/root/.mirage/upgrade"
+  mkdir -p "$halt_dir"
+  printf '%s\n' "$line" > "$halt_dir/halt-detected.txt"
+  log_supervisor "governed upgrade halt detected: $line"
+  if [ ! -f "$halt_dir/prepared.json" ]; then
+    log_supervisor "no prepared.json staged; remaining halted so the old binary cannot cross the upgrade height"
+  else
+    log_supervisor "prepared upgrade is staged; remaining halted until the host activator recreates the container"
+  fi
+  while [ "$STOP_REQUESTED" -eq 0 ]; do
+    sleep 5
+  done
+  exit 0
+}
+
 declare -a RESTART_TIMES=()
 
 while true; do
   log_supervisor "starting miraged (restarts_last_hour=${#RESTART_TIMES[@]}/${MAX_RESTARTS_PER_HOUR})"
 
-  "$BIN" start --home "$NODE_HOME" "$@" 2>&1 | tee >(cronolog "$LOGS_DIR/node/miraged-%Y-%m-%d.log")
+  "$BIN" start --home "$NODE_HOME" "${SKIP_ARGS[@]}" "$@" 2>&1 | tee >(cronolog "$LOGS_DIR/node/miraged-%Y-%m-%d.log")
   exit_code="${PIPESTATUS[0]}"
   now_epoch="$(date +%s)"
 
@@ -159,6 +191,11 @@ while true; do
   if [ "$STOP_REQUESTED" -eq 1 ]; then
     log_supervisor "stop requested; exiting"
     exit 0
+  fi
+
+  halt_line="$(upgrade_halt_detected || true)"
+  if [ -n "$halt_line" ]; then
+    hold_for_governed_upgrade "$halt_line"
   fi
 
   RESTART_TIMES+=("$now_epoch")
@@ -173,7 +210,9 @@ while true; do
 
   if [ "${#RESTART_TIMES[@]}" -gt "$MAX_RESTARTS_PER_HOUR" ]; then
     log_supervisor "restart limit exceeded; exiting"
-    exit 1
+    # Exit 0 so Supervisor autorestart=unexpected does not relaunch this
+    # wrapper with a fresh hourly budget.
+    exit 0
   fi
 
   sleep "$RESTART_BACKOFF_SECONDS"

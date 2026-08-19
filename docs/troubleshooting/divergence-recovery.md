@@ -135,7 +135,7 @@ swallowing both:
 `DIVERGENCE_PATTERNS` (→ peer-pull). The watchdog also gained an **external push
 alert**: set `ALERT_WEBHOOK_URL` (Slack/Discord/Mattermost/ntfy-compatible) and
 it POSTs a one-liner whenever it fires a loud alert or dispatches a recovery —
-so a crash/divergence pages a human instead of only landing in a tmux log nobody
+so a crash/divergence pages a human instead of only landing in a log nobody
 is watching. Unset = disabled; failures are swallowed to the forensic log and
 never stall the loop.
 
@@ -144,7 +144,7 @@ only pages on a `catching_up=true` + frozen node when it *also* finds a
 divergence log pattern — so a *silent* freeze (the 2026-06-16 case: no
 `wrong Block.Header.AppHash`, no marker) is invisible to it, and a watchdog that
 is itself `kill -STOP`'d (as during a manual recovery) can't page at all. This
-standalone pager closes both gaps: it runs in its **own** tmux window (separate
+standalone pager closes both gaps: it runs as its **own** Supervisor program (separate
 process), imports nothing from the watchdog, and pages `ALERT_WEBHOOK_URL` on a
 single rule — local height frozen, or `/status` unreachable, for
 `STUCK_ALERT_SECONDS` (default 600), regardless of any log marker. It only starts
@@ -612,7 +612,7 @@ ssh root@<sick-host> 'docker exec mirage grep -a "wrong Block.Header.AppHash" \
 
 ### 1d. Check what the watchdog saw
 
-Two logs. The tmux-pane capture (human view):
+Two logs. The live Supervisor/watchdog capture (human view):
 
 ```bash
 ssh root@<sick-host> 'docker exec mirage tail -40 \
@@ -724,7 +724,7 @@ ssh root@<sick-host> 'docker exec mirage bash /opt/mirage/scripts/recover.sh pee
 `--force` bypasses the 6 h cool-down; justified whenever you have verified the
 node is genuinely diverged and no recovery is mid-flight. The script preserves
 `priv_validator_state.json` (double-sign watermark), wipes only chain DBs,
-pulls a tar from the best peer, restarts miraged and the tmux services
+pulls a tar from the best peer, restarts miraged and the application services
 (including the indexer), and writes the cool-down lock only after verifying
 block progress.
 
@@ -761,7 +761,7 @@ ssh root@$SOURCE 'docker exec mirage curl -s http://127.0.0.1:26657/status' \
 ssh root@$SICK 'docker cp /root/snap.tar.gz mirage:/tmp/snap.tar.gz && rm /root/snap.tar.gz'
 ssh root@$SICK 'docker exec mirage bash -s' <<'EOS'
 set -euo pipefail
-tmux send-keys -t mirage:node C-c
+supervisorctl -c /etc/supervisor/supervisord.conf stop node
 for i in 1 2 3 4 5 6; do
   pgrep -f "miraged start" >/dev/null || break; sleep 5
 done
@@ -776,7 +776,7 @@ done
 tar xzf /tmp/snap.tar.gz -C /root/.mirage/node/data
 echo "old DBs in $BACKUP; priv_validator_state.json untouched:"
 cat /root/.mirage/node/data/priv_validator_state.json
-tmux send-keys -t mirage:node "bash /opt/mirage/deploy/run_miraged_supervised.sh" Enter
+supervisorctl -c /etc/supervisor/supervisord.conf start node
 EOS
 ```
 
@@ -798,9 +798,7 @@ blocks it indexed on the diverged fork are never rolled back). The symptom:
 "the number just goes up every 3 seconds" while the API stays 503.
 
 ```bash
-ssh root@<sick-host> 'docker exec mirage bash -c "
-  tmux send-keys -t mirage:indexer C-c; sleep 5
-  tmux send-keys -t mirage:indexer \"PYTHONPATH=/opt/mirage python3 /opt/mirage/indexer/main.py\" Enter"'
+ssh root@<sick-host> 'docker exec mirage supervisorctl -c /etc/supervisor/supervisord.conf restart indexer'
 ```
 
 On restart the indexer detects its DB is past/off the chain's real history,

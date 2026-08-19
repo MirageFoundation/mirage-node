@@ -189,88 +189,91 @@ def debug_log(msg: str) -> None:
         pass
 
 
-def get_tmux_visibility_state() -> tuple[bool, bool]:
-    """
-    Check if running inside tmux and whether the session is actively visible.
+_SUPERVISOR_STATES: dict[str, dict] = {}
 
-    Returns:
-        (is_in_tmux, is_visible)
-        - is_in_tmux: True if running inside a tmux session
-        - is_visible: True if the session has attached clients AND the current
-                      window is the active window (user is looking at it)
-    """
-    # Check if we're inside tmux
-    if not os.environ.get("TMUX"):
-        return False, True  # Not in tmux, assume visible
 
-    # Get our pane ID for explicit targeting
-    pane_id = os.environ.get("TMUX_PANE", "")
-
+def refresh_supervisor_states() -> dict[str, dict]:
+    """Parse `supervisorctl status` once per dashboard frame."""
+    global _SUPERVISOR_STATES
+    states: dict[str, dict] = {}
     try:
-        # Check if session has any attached clients
         result = subprocess.run(
-            ["tmux", "list-clients", "-F", "#{client_name}"],
+            ["supervisorctl", "-c", "/etc/supervisor/supervisord.conf", "status"],
             capture_output=True,
             text=True,
-            timeout=2,
+            timeout=3,
         )
-        if result.returncode != 0 or not result.stdout.strip():
-            # No clients attached = detached
-            debug_log("tmux: no clients attached (detached)")
-            return True, False
-
-        # Session has clients - check if current window is active
-        # Get our window index and compare to the session's active window
-        cmd = ["tmux", "display-message", "-p", "#{window_index} #{session_attached} #{client_session}"]
-        if pane_id:
-            cmd = [
-                "tmux",
-                "display-message",
-                "-t",
-                pane_id,
-                "-p",
-                "#{window_index} #{session_attached} #{client_session}",
-            ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
-        our_window_index = result.stdout.strip().split()[0] if result.stdout.strip() else ""
-
-        # List windows to find which one is active (has * flag)
-        result = subprocess.run(
-            ["tmux", "list-windows", "-F", "#{window_index} #{window_flags}"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-
-        active_window_index = None
-        for line in result.stdout.strip().split("\n"):
-            parts = line.split(None, 1)
-            if len(parts) >= 2:
-                idx, flags = parts[0], parts[1]
-                if "*" in flags:
-                    active_window_index = idx
-                    break
-            elif len(parts) == 1:
-                # No flags means this might be the only window
-                pass
-
-        window_active = our_window_index == active_window_index
-
-        debug_log(
-            f"tmux: pane={pane_id} our_window={our_window_index} active_window={active_window_index} visible={window_active}"
-        )
-
-        if not window_active:
-            return True, False
-
-        # Window is active - user is looking at this
-        return True, True
-
+        for line in (result.stdout or "").splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            name, state = parts[0], parts[1]
+            states[name] = {"state": state, "raw": line.strip()}
     except Exception as e:
-        debug_log(f"tmux: visibility check failed: {e}")
-        # On error, assume visible to avoid stale data
-        return True, True
+        debug_log(f"supervisor: status query failed: {e}")
+    _SUPERVISOR_STATES = states
+    return states
+
+
+def supervisor_detail(program: str) -> dict:
+    info = _SUPERVISOR_STATES.get(program)
+    if not info:
+        return {"supervisor_program": program, "supervisor_state": "unknown"}
+    return {
+        "supervisor_program": program,
+        "supervisor_state": info["state"],
+        "supervisor_raw": info["raw"],
+    }
+
+
+def format_prepared_upgrade(chain_height: int | None = None) -> str | None:
+    prepared = load_prepared_upgrade()
+    if not prepared:
+        return None
+    name = prepared.get("upgrade_name") or prepared.get("plan_name") or "?"
+    plan_h = prepared.get("plan_height") or prepared.get("height") or "?"
+    digest = str(prepared.get("image") or prepared.get("digest") or "")
+    digest_short = digest[-12:] if digest else "?"
+    if prepared.get("halt_detected"):
+        return f"Prepared {name} @ {plan_h} — halt detected, activating"
+    remaining = None
+    try:
+        remaining = int(plan_h) - int(chain_height)
+    except (TypeError, ValueError):
+        remaining = None
+    if remaining is None:
+        return f"Prepared {name} @ height {plan_h}  staged …{digest_short}"
+    if remaining > 0:
+        return f"Prepared {name} @ {plan_h} ({remaining} blocks remaining)  staged …{digest_short}"
+    return f"Prepared {name} @ {plan_h} (at/past halt)  staged …{digest_short}"
+
+
+def comet_height_from_statuses(statuses: list) -> int | None:
+    for status in statuses:
+        if status.name != "CometBFT":
+            continue
+        raw = status.details.get("height")
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def load_prepared_upgrade() -> dict | None:
+    path = Path.home() / ".mirage" / "upgrade" / "prepared.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        debug_log(f"upgrade: prepared.json unreadable: {e}")
+        return None
+    halt_path = Path.home() / ".mirage" / "upgrade" / "halt-detected.txt"
+    data["halt_detected"] = halt_path.is_file()
+    return data
 
 
 def format_age_secs(age_secs: float) -> str:
@@ -700,11 +703,16 @@ def check_node() -> ServiceStatus:
             f"status={status.value} message={message}"
         )
 
+        details.update(supervisor_detail("node"))
         return ServiceStatus(name="CometBFT", status=status, message=message, details=details)
     except requests.exceptions.ConnectionError:
-        return ServiceStatus(name="CometBFT", status=Status.ERROR, message="Not reachable", details={})
+        details = supervisor_detail("node")
+        state = details.get("supervisor_state")
+        message = f"Supervisor {state}" if state not in (None, "unknown", "RUNNING") else "Not reachable"
+        return ServiceStatus(name="CometBFT", status=Status.ERROR, message=message, details=details)
     except Exception as e:
-        return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details={})
+        details = supervisor_detail("node")
+        return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details=details)
 
 
 def check_retention() -> ServiceStatus:
@@ -1219,9 +1227,14 @@ def check_backend() -> ServiceStatus:
                 },
             )
     except requests.exceptions.ConnectionError:
-        backend = ServiceStatus(name="Backend", status=Status.ERROR, message="Not reachable", details={})
+        details = supervisor_detail("backend")
+        state = details.get("supervisor_state")
+        message = f"Supervisor {state}" if state not in (None, "unknown", "RUNNING") else "Not reachable"
+        backend = ServiceStatus(name="Backend", status=Status.ERROR, message=message, details=details)
     except Exception as e:
-        backend = ServiceStatus(name="Backend", status=Status.ERROR, message=str(e)[:25], details={})
+        backend = ServiceStatus(
+            name="Backend", status=Status.ERROR, message=str(e)[:25], details=supervisor_detail("backend")
+        )
 
     pg = check_postgres()
     backend.details["pg_status"] = pg.status.value
@@ -1231,6 +1244,8 @@ def check_backend() -> ServiceStatus:
     if pg.status == Status.ERROR and backend.status == Status.OK:
         backend.status = Status.WARN
         backend.message = f"Running (DB: {pg.message})"
+    backend.details.update(supervisor_detail("backend"))
+    backend.details["postgres_supervisor_state"] = supervisor_detail("postgres").get("supervisor_state")
     return backend
 
 
@@ -1278,8 +1293,16 @@ def check_indexer() -> ServiceStatus:
     except Exception:
         process_running = False
 
+    indexer_sv = supervisor_detail("indexer")
     if not process_running:
-        return ServiceStatus(name="Indexer", status=Status.ERROR, message="Not running", details={"running": False})
+        state = indexer_sv.get("supervisor_state")
+        message = f"Supervisor {state}" if state not in (None, "unknown", "RUNNING") else "Not running"
+        return ServiceStatus(
+            name="Indexer",
+            status=Status.ERROR,
+            message=message,
+            details={"running": False, **indexer_sv},
+        )
 
     try:
         # Get indexer height from DB
@@ -1309,6 +1332,7 @@ def check_indexer() -> ServiceStatus:
             "node_height": chain_height,
             "lag": lag,
             "rate": rate,
+            **indexer_sv,
         }
 
         if lag <= 10:
@@ -2186,7 +2210,7 @@ def _dashboard_versions() -> str:
     return f"binary {binary}  ·  frontend {frontend}"
 
 
-def render_header(width: int) -> list[str]:
+def render_header(width: int, chain_height: int | None = None) -> list[str]:
     """Render the dashboard header."""
     lines = []
 
@@ -2206,6 +2230,13 @@ def render_header(width: int) -> list[str]:
     lines.append(center_text(f"{Colors.DIM}System Status Dashboard{Colors.RESET}", width))
     lines.append(center_text(f"{Colors.BRIGHT_WHITE}{versions}{Colors.RESET}", width))
     lines.append(center_text(f"{Colors.DIM}{timestamp}{Colors.RESET}", width))
+    upgrade_text = format_prepared_upgrade(chain_height)
+    if upgrade_text:
+        if "halt detected" in upgrade_text:
+            colored = f"{Colors.BRIGHT_YELLOW}{upgrade_text}{Colors.RESET}"
+        else:
+            colored = f"{Colors.BRIGHT_CYAN}{upgrade_text}{Colors.RESET}"
+        lines.append(center_text(colored, width))
     lines.append("")
 
     return lines
@@ -2237,16 +2268,16 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     lines.append(f"{color}{status.message}{Colors.RESET}")
 
     bullet = f"{Colors.DIM}-{Colors.RESET} "
+    sv = details.get("supervisor_state")
+    if sv and sv != "RUNNING":
+        lines.append(f"{bullet}{Colors.DIM}Supervisor:{Colors.RESET} {Colors.BRIGHT_RED}{sv}{Colors.RESET}")
 
     if status.name == "CometBFT":
         if details.get("sync_target") is not None:
             height = int(details["height"])
             target = int(details["sync_target"])
             percent = min(100.0, height * 100 / target)
-            lines.append(
-                f"{bullet}{Colors.DIM}Sync:{Colors.RESET} "
-                f"{height:,} / ~{target:,} ({percent:.1f}%)"
-            )
+            lines.append(f"{bullet}{Colors.DIM}Sync:{Colors.RESET} " f"{height:,} / ~{target:,} ({percent:.1f}%)")
         elif "height" in details:
             try:
                 h = int(details["height"])
@@ -2471,12 +2502,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     return lines
 
 
-def render_dashboard(refresh_secs: int):
-    """Render the full dashboard."""
-    term_width, term_height = get_terminal_size()
-
-    # Collect all statuses -- ops-focused set only
-    statuses = [
+def collect_statuses() -> list[ServiceStatus]:
+    refresh_supervisor_states()
+    return [
         check_node(),
         check_retention(),
         check_validator(),
@@ -2488,19 +2516,74 @@ def render_dashboard(refresh_secs: int):
         check_system(),
     ]
 
-    # Hide unconfigured optional services (Validator)
-    display_statuses = [
+
+def display_statuses(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
+    return [
         s
         for s in statuses
         if s.status != Status.UNKNOWN
         or s.name in ("CometBFT", "Retention", "Backend", "Rewards", "Indexer", "Endpoints", "Disk Usage", "System")
     ]
 
+
+def render_compact_dashboard(
+    statuses: list[ServiceStatus], width: int, height: int, refresh_secs: int, chain_height: int | None = None
+) -> None:
+    """Single-column layout for 80x24 and other short/narrow terminals."""
+    output = []
+    output.append(f"{Colors.BOLD}MIRAGE{Colors.RESET}  {_dashboard_versions()}")
+    output.append(time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()))
+    upgrade_text = format_prepared_upgrade(chain_height)
+    if upgrade_text:
+        output.append(truncate(upgrade_text, width))
+    ok_count = sum(1 for s in statuses if s.status == Status.OK)
+    warn_count = sum(1 for s in statuses if s.status == Status.WARN)
+    error_count = sum(1 for s in statuses if s.status == Status.ERROR)
+    output.append(
+        f"{Colors.BRIGHT_GREEN}{ok_count} OK{Colors.RESET}  "
+        f"{Colors.BRIGHT_YELLOW}{warn_count} WARN{Colors.RESET}  "
+        f"{Colors.BRIGHT_RED}{error_count} ERR{Colors.RESET}"
+    )
+    output.append("-" * min(width, 80))
+    for status in statuses:
+        icon = ICONS.get(status.status, "?")
+        sv = status.details.get("supervisor_state")
+        sv_bit = f"  [{sv}]" if sv and sv != "RUNNING" else ""
+        line = f"{icon} {status.name:<12} {status.message}{sv_bit}"
+        output.append(truncate(line, width))
+        extra = []
+        if status.name == "CometBFT" and status.details.get("height") is not None:
+            extra.append(f"h={status.details.get('height')}")
+            if status.details.get("peers") is not None:
+                extra.append(f"peers={status.details['peers']}")
+        if status.name == "Indexer" and status.details.get("lag") is not None:
+            extra.append(f"lag={status.details['lag']}")
+        if extra:
+            output.append(truncate(f"    {Colors.DIM}{' '.join(str(x) for x in extra)}{Colors.RESET}", width))
+    footer = f"Ctrl+C exits  refresh {refresh_secs}s"
+    # Keep the compact view inside the terminal height.
+    while len(output) > max(8, height - 2):
+        output.pop()
+    output.append("")
+    output.append(footer)
+    print("\n".join(output), flush=True)
+
+
+def render_dashboard(refresh_secs: int):
+    """Render the full dashboard."""
+    term_width, term_height = get_terminal_size()
+    statuses = display_statuses(collect_statuses())
+    chain_height = comet_height_from_statuses(statuses)
+
+    if term_width < 100 or term_height < 28:
+        render_compact_dashboard(statuses, term_width, term_height, refresh_secs, chain_height)
+        return
+
     # Render header
-    output = render_header(term_width)
+    output = render_header(term_width, chain_height)
 
     # Render summary (only count displayed services)
-    output.extend(render_summary(display_statuses, term_width))
+    output.extend(render_summary(statuses, term_width))
 
     # Calculate card layout
     card_width = 38
@@ -2509,7 +2592,7 @@ def render_dashboard(refresh_secs: int):
 
     # Create cards
     cards = []
-    for status in display_statuses:
+    for status in statuses:
         content = format_card_content(status)
         card = draw_card(status.name, status.status, content, width=card_width)
         cards.append(card)
@@ -2543,12 +2626,12 @@ def render_dashboard(refresh_secs: int):
         output.append("")
 
     # Print output
-    print("\n".join(output))
+    print("\n".join(output), flush=True)
 
     # Footer
     footer = f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}"
     print()
-    print(center_text(footer, term_width))
+    print(center_text(footer, term_width), flush=True)
 
 
 def run_health_check_json(required_services: list[str]) -> dict:
@@ -2564,6 +2647,7 @@ def run_health_check_json(required_services: list[str]) -> dict:
             - services: dict mapping service name to status info
             - errors: list of error messages for unhealthy required services
     """
+    refresh_supervisor_states()
     all_statuses = [
         check_node(),
         check_validator(),
@@ -2623,90 +2707,64 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "3")),
-        help="Refresh interval when visible in seconds (default: 3)",
-    )
-    parser.add_argument(
-        "--idle-interval",
-        type=int,
-        default=int(os.environ.get("MIRAGE_CHECK_STATUS_IDLE_INTERVAL", "600")),
-        help="Refresh interval when not visible in seconds (default: 600 = 10 min)",
-    )
-    parser.add_argument(
-        "--no-clear",
-        action="store_true",
-        help="Do not clear the screen before rendering",
+        default=1,
+        help="Live refresh interval in seconds (positive integer, default: 1)",
     )
     args = parser.parse_args()
 
-    # JSON health check mode
+    if args.json and args.once:
+        parser.error("--json and --once cannot be combined")
+    if args.interval is not None and args.interval < 1:
+        parser.error("--interval must be a positive integer")
+
     if args.json:
         required = [s.strip() for s in args.require.split(",") if s.strip()]
         result = run_health_check_json(required)
+        prepared = load_prepared_upgrade()
+        if prepared:
+            result["prepared_upgrade"] = prepared
         print(json.dumps(result, indent=2))
         sys.exit(0 if result["healthy"] else 1)
 
-    active_interval = max(1, int(args.interval))
-    idle_interval = max(1, int(args.idle_interval))
+    interactive = sys.stdout.isatty() and not args.once
     refresh_requested = threading.Event()
-    dashboard_pid_path: Path | None = None
 
-    if os.environ.get("TMUX") and not args.once:
-        dashboard_pid_path = Path(
-            os.environ.get("MIRAGE_STATUS_DASHBOARD_PID", "/tmp/mirage-status-dashboard.pid")
-        )
-        dashboard_pid_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    def request_refresh(_signum=None, _frame=None):
+        refresh_requested.set()
 
-        def request_refresh(_signum, _frame):
-            refresh_requested.set()
+    if interactive:
+        signal.signal(signal.SIGWINCH, request_refresh)
 
-        signal.signal(signal.SIGUSR1, request_refresh)
+    entered_alt = False
+    hide_cursor = False
 
-    # Track last render time for idle mode
-    last_render_time = 0
+    def restore_terminal():
+        if hide_cursor:
+            sys.stdout.write("\033[?25h")
+        if entered_alt:
+            sys.stdout.write("\033[?1049l")
+        sys.stdout.flush()
 
     try:
+        if interactive:
+            sys.stdout.write("\033[?1049h\033[?25l")
+            sys.stdout.flush()
+            entered_alt = True
+            hide_cursor = True
         while True:
-            is_in_tmux, is_visible = get_tmux_visibility_state()
-
-            if is_visible:
-                # Actively visible - render and use short interval
-                if not args.no_clear:
-                    print("\033[2J\033[H", end="")
-                render_dashboard(refresh_secs=active_interval)
-                last_render_time = time.time()
-
-                if args.once:
-                    return
-                refresh_requested.wait(active_interval)
-                refresh_requested.clear()
-            else:
-                # Not visible (detached or different window)
-                # Only render if idle_interval has passed since last render
-                now = time.time()
-                time_since_render = now - last_render_time
-
-                if time_since_render >= idle_interval:
-                    if not args.no_clear:
-                        print("\033[2J\033[H", end="")
-                    render_dashboard(refresh_secs=idle_interval)
-                    last_render_time = time.time()
-
-                if args.once:
-                    return
-
-                refresh_requested.wait(2)
-                refresh_requested.clear()
-
+            if interactive or not args.once:
+                sys.stdout.write("\033[2J\033[H")
+                sys.stdout.flush()
+            render_dashboard(refresh_secs=args.interval)
+            if args.once:
+                return
+            refresh_requested.wait(args.interval)
+            refresh_requested.clear()
     except KeyboardInterrupt:
-        print("\n")
+        restore_terminal()
+        sys.exit(130)
     finally:
-        if dashboard_pid_path is not None:
-            try:
-                if dashboard_pid_path.read_text(encoding="utf-8").strip() == str(os.getpid()):
-                    dashboard_pid_path.unlink()
-            except FileNotFoundError:
-                pass
+        restore_terminal()
 
 
 if __name__ == "__main__":

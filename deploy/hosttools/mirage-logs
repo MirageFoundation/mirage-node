@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Follow persistent service logs. Default service is all.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-logs [SERVICE] [--lines N] [--once]
+
+  SERVICE     supervisor, node, indexer, backend, caddy, postgres, watchdog, stuck-alert
+              default: all
+  --lines N   initial history lines (positive integer, default 100)
+  --once      print once and exit; default follows until Ctrl+C
+
+EOF
+}
+
+SERVICE="all"
+LINES=100
+ONCE=0
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --lines)
+      LINES="${2:-}"
+      if [[ -z "$LINES" || ! "$LINES" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: --lines requires a positive integer" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    --once) ONCE=1; shift ;;
+    --*)
+      echo "ERROR: unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      POSITIONAL+=("$1")
+      shift
+      ;;
+  esac
+done
+if [[ ${#POSITIONAL[@]} -gt 1 ]]; then
+  echo "ERROR: only one SERVICE may be named" >&2
+  exit 2
+fi
+if [[ ${#POSITIONAL[@]} -eq 1 ]]; then
+  SERVICE="${POSITIONAL[0]}"
+fi
+
+case "$SERVICE" in
+  all|supervisor|node|indexer|backend|caddy|postgres|watchdog|stuck-alert) ;;
+  *)
+    echo "ERROR: unknown service '$SERVICE'" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+DOCKER_ARGS=(exec)
+if [[ "$ONCE" -eq 0 && -t 0 && -t 1 ]]; then
+  DOCKER_ARGS+=(-it)
+fi
+exec docker "${DOCKER_ARGS[@]}" mirage bash /opt/mirage/deploy/tail_service_logs.sh "$SERVICE" "$LINES" "$ONCE"

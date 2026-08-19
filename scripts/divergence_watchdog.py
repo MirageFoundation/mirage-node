@@ -51,8 +51,8 @@ peer-pull. State-sync remains an opt-in alternative — set RECOVERY_MODE=state-
 peer-pull is the default after the May 25 2026 incident where a cosmos-sdk v0.53
 state-sync bug left staking.bond_denom empty, panicking mint.BeginBlocker.
 
-Designed to run inside the mirage container, in its own tmux window, started
-by deploy/entrypoint.sh.
+Designed to run inside the mirage container as its own Supervisor program,
+started by deploy/entrypoint.sh.
 
 Detection signals:
   1) miraged's CometBFT log contains "wrong Block.Header.AppHash" or
@@ -91,8 +91,8 @@ Safety guards:
 
 FORENSIC LOGGING
 ----------------
-Every poll writes dense, tagged, greppable lines to BOTH stdout (for the tmux
-pane) AND a durable daily file /root/.mirage/logs/watchdog/watchdog-YYYY-MM-DD.log
+Every poll writes dense, tagged, greppable lines to BOTH stdout (Supervisor
+capture) AND a durable daily file /root/.mirage/logs/watchdog/watchdog-YYYY-MM-DD.log
 (90-day retention), so any incident is reconstructable months later. Tags:
 STARTUP, POLL, PEER, GATE, TRIGGER, PRECHECK, DISPATCH, INVOKE, POSTCHECK,
 COOLDOWN, ESCALATE, ALERT, DISK, LAG, IO, CRASH, SHUTDOWN. One-liner to
@@ -141,7 +141,7 @@ RESTART_ESCALATE_WINDOW_SECONDS = int(os.environ.get("RESTART_ESCALATE_WINDOW_SE
 # polluting it from the alert path locks operators out of recovery (2026-06-12).
 ALERT_LOCK = Path(os.environ.get("ALERT_LOCK", "/root/.mirage/.divergence_alert_lock"))
 ALERT_REPEAT_SECONDS = int(os.environ.get("ALERT_REPEAT_SECONDS", "1800"))  # re-alert every 30 min
-# External push alert (independent of the tmux log nobody is watching). When
+# External push alert (independent of the Supervisor capture nobody is watching). When
 # ALERT_WEBHOOK_URL is set the watchdog POSTs a one-line JSON {"text": ...} to it
 # whenever it fires a loud alert OR dispatches a recovery, so a node crash /
 # divergence pages a human. Provider-agnostic: Slack incoming webhook,
@@ -250,7 +250,7 @@ def current_log_file() -> Path:
 
 
 def _write_line(line: str) -> None:
-    """Dual-write: stdout (tmux pane / human eyeballing) AND the durable daily
+    """Dual-write: stdout (Supervisor capture / human eyeballing) AND the durable daily
     file (forensic trail). Logging must NEVER crash the watchdog, so all file
     I/O errors are swallowed."""
     print(line, flush=True)
@@ -981,7 +981,7 @@ def _emit_peer(p: dict) -> None:
 
 def _invoke(argv: list[str], reason: str | None = None) -> int | None:
     """Run a recovery subprocess WITHOUT piping its output, so recover.sh's
-    progress streams live to the tmux pane. The full step-by-step trail lives
+    progress streams live to Supervisor's capture. The full step-by-step trail lives
     in recover.sh's own daily log (child_log), cross-referenced here by pid."""
     child_log = f"{LOGS_DIR}/deploy/divergence_recovery-{datetime.now(timezone.utc):%Y-%m-%d}.log"
     env = os.environ.copy()
@@ -998,7 +998,7 @@ def _invoke(argv: list[str], reason: str | None = None) -> int | None:
             _last_external_notify = time.time()
             notify_external("node recovery dispatched", f"reason={reason} mode={RECOVERY_MODE}")
     try:
-        # stdin from /dev/null: the watchdog runs in a tmux pane, so an inherited
+        # stdin from /dev/null: the watchdog is supervised, so an inherited
         # TTY stdin would let recovery's background ssh take SIGTTIN and stop
         # (state T), which is unkillable by SIGTERM and wedges recovery forever.
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, env=env)
@@ -1039,7 +1039,7 @@ def _loud_alert(trigger: str, reason: str) -> None:
     log("============================================================")
     log("ALERT: watchdog recovery needed (see [TRIGGER]/[DISPATCH]/[ALERT] lines).")
     log(f"  trigger: {trigger}  reason: {reason}")
-    log("  Investigate: tmux attach -t mirage   (windows 'node', 'watchdog')")
+    log("  Investigate: mirage-status   (Supervisor programs: node, watchdog)")
     log(f"  Dry-run:     docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --dry-run")
     log(f"  Recover:     docker exec -it mirage bash {RECOVERY_SCRIPT} {RECOVERY_MODE} --auto")
     log("  Runbook:     docs/troubleshooting/divergence-recovery.md")

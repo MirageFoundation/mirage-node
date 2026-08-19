@@ -3,8 +3,8 @@ set -uo pipefail
 
 # Restart loop for the indexer, mirroring run_miraged_supervised.sh.
 #
-# The indexer used to run as a bare `python3 indexer/main.py` in a tmux window,
-# so any fatal exception took indexing down until an operator noticed. On
+# The indexer used to run as a bare `python3 indexer/main.py` without a restart
+# supervisor, so any fatal exception took indexing down until an operator noticed. On
 # 2026-08-11 a single post whose content broke urlsplit killed the indexer on
 # every node at height 6754167; the process never came back and the backend
 # served 503 (node_catching_up) for 80 minutes because that check reads indexer
@@ -81,7 +81,9 @@ while true; do
   if [ "${#RESTART_TIMES[@]}" -gt "$MAX_RESTARTS_PER_HOUR" ]; then
     log_supervisor "restart limit exceeded (${#RESTART_TIMES[@]} in the last hour); exiting"
     log_supervisor "ACTION ITEM the indexer is crash-looping — check the traceback above for the failing height"
-    exit 1
+    # Exit 0 so Supervisor autorestart=unexpected does not relaunch this
+    # wrapper with a fresh hourly budget.
+    exit 0
   fi
 
   sleep "$RESTART_BACKOFF_SECONDS"

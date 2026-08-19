@@ -36,8 +36,16 @@ else
 fi
 
 # Ensure priv_validator_state.json exists BEFORE miraged init (it needs this file)
-if [ ! -f "$NODE_HOME/data/priv_validator_state.json" ]; then
-  echo '{"height":"0","round":0,"step":0}' > "$NODE_HOME/data/priv_validator_state.json"
+PV_STATE="$NODE_HOME/data/priv_validator_state.json"
+if [ ! -f "$PV_STATE" ]; then
+  echo '{"height":"0","round":0,"step":0}' > "$PV_STATE"
+fi
+# Replacement installs write a live-chain watermark before first start. Preserve
+# it across `miraged init`, which must never lower a height already recorded.
+PV_STATE_BACKUP=""
+if [ -f "$PV_STATE" ]; then
+  PV_STATE_BACKUP="$(mktemp)"
+  cp -a "$PV_STATE" "$PV_STATE_BACKUP"
 fi
 
 # First run is detected before `miraged init`, which always writes a genesis.
@@ -46,6 +54,28 @@ if [ ! -f "$NODE_HOME/config/genesis.json" ]; then
   FIRST_RUN=1
   echo "==> Running miraged init to create base config (node key, base config)..."
   $BIN init "validator" --chain-id "$CHAIN_ID" --home "$NODE_HOME"
+fi
+
+if [ -n "$PV_STATE_BACKUP" ]; then
+  python3 - "$PV_STATE_BACKUP" "$PV_STATE" <<'PY'
+import json, os, sys
+src, dest = sys.argv[1], sys.argv[2]
+old = json.load(open(src, encoding="utf-8"))
+new = json.load(open(dest, encoding="utf-8")) if os.path.isfile(dest) else {"height": "0", "round": 0, "step": 0}
+def height(obj):
+    h = obj.get("height")
+    if not isinstance(h, str) or not h.isdigit():
+        raise SystemExit("priv_validator_state.json height must be a decimal string")
+    return int(h)
+if height(old) > height(new):
+    tmp = dest + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(old, f)
+        f.write("\n")
+    os.replace(tmp, dest)
+    print(f"==> Restored consensus watermark {old['height']} after init (refusing to lower to {new.get('height')})")
+PY
+  rm -f "$PV_STATE_BACKUP"
 fi
 
 # A signed consensus height proves this is an existing validator, not a joining

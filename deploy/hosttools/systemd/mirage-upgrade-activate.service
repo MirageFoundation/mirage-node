@@ -1,0 +1,10 @@
+[Unit]
+Description=Activate a prepared Mirage upgrade at a verified governance halt
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Nice=5
+Environment=HOME=/root
+ExecStart=/usr/local/bin/mirage-update --activate-if-halted
