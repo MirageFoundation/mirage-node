@@ -27,6 +27,7 @@ import os
 import re
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 
 # sha256 of the canonical (sorted keys, compact separators) mirage-1 source
@@ -67,6 +68,29 @@ def rpc(endpoint: str, path: str) -> dict:
         fail(f"{url} returned non-JSON ({len(body)} bytes): {e}")
     if "result" not in data:
         fail(f"{url} returned no result field: {str(data)[:200]}")
+    return data["result"]
+
+
+def rpc_post(endpoint: str, method: str, params: dict) -> dict:
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    request = urllib.request.Request(
+        endpoint.rstrip("/") + "/",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as resp:
+            response_body = resp.read()
+    except Exception as e:
+        fail(f"{endpoint} does not accept CometBFT JSON-RPC POST: {e}")
+    try:
+        data = json.loads(response_body)
+    except Exception as e:
+        fail(f"{endpoint} returned non-JSON to CometBFT JSON-RPC POST: {e}")
+    if data.get("error"):
+        fail(f"{endpoint} returned JSON-RPC error: {data['error']}")
+    if "result" not in data:
+        fail(f"{endpoint} returned no JSON-RPC result: {str(data)[:200]}")
     return data["result"]
 
 
@@ -162,8 +186,39 @@ def derive_trust(endpoints: list[str]) -> tuple[int, str]:
     return trust_height, distinct.pop()
 
 
+def state_sync_servers(persistent_peers: str, trust_height: int, trust_hash: str) -> list[str]:
+    peers = [peer.strip() for peer in persistent_peers.split(",") if peer.strip()]
+    if len(peers) < 2:
+        fail("PERSISTENT_PEERS must contain at least two peers for state sync")
+
+    servers = []
+    for peer in peers[:2]:
+        if peer.count("@") != 1:
+            fail(f"malformed persistent peer: {peer!r}")
+        peer_id, address = peer.split("@", 1)
+        if not re.fullmatch(r"[0-9A-Fa-f]{40}", peer_id):
+            fail(f"persistent peer has malformed node ID: {peer!r}")
+        parsed = urllib.parse.urlsplit(f"tcp://{address}")
+        try:
+            p2p_port = parsed.port
+        except ValueError as e:
+            fail(f"persistent peer has malformed address {address!r}: {e}")
+        if not parsed.hostname or not p2p_port:
+            fail(f"persistent peer has malformed address: {address!r}")
+        host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+        servers.append(f"http://{host}:26657")
+
+    for server in servers:
+        block = rpc_post(server, "block", {"height": str(trust_height)})
+        block_hash = str(((block.get("block_id") or {}).get("hash") or ""))
+        if block_hash != trust_hash:
+            fail(f"{server} returned block hash {block_hash!r} at height {trust_height}, " f"expected {trust_hash}")
+    return servers
+
+
 def main(trust_only: bool = False) -> None:
     endpoints = [e.strip() for e in os.environ.get("BOOTSTRAP_RPC", "").split(",") if e.strip()]
+    persistent_peers = os.environ.get("PERSISTENT_PEERS", "")
     chain_id = os.environ.get("CHAIN_ID", "")
     node_home = os.environ.get("NODE_HOME", "")
 
@@ -182,10 +237,11 @@ def main(trust_only: bool = False) -> None:
     if not trust_only:
         install_genesis(endpoints[0], chain_id, os.path.join(node_home, "config", "genesis.json"))
     trust_height, trust_hash = derive_trust(endpoints)
+    servers = state_sync_servers(persistent_peers, trust_height, trust_hash)
     print(f"==> State sync trust height {trust_height} hash {trust_hash}", file=sys.stderr)
 
     print("STATESYNC_ENABLE=true")
-    print(f"STATESYNC_RPC_SERVERS={','.join(endpoints)}")
+    print(f"STATESYNC_RPC_SERVERS={','.join(servers)}")
     print(f"STATESYNC_TRUST_HEIGHT={trust_height}")
     print(f"STATESYNC_TRUST_HASH={trust_hash}")
 

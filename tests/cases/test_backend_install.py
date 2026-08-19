@@ -76,6 +76,7 @@ def test_install(backend: str) -> None:
     _test_frontend_env_no_foreign_node()
     _test_launch_wait()
     _test_tmux_status_first()
+    _test_completed_installer_updates()
     _test_resume_refreshes_amended_release()
     _test_partial_chain_reset_preserves_state()
     _test_activation_and_registration_waits()
@@ -100,6 +101,7 @@ def test_install(backend: str) -> None:
     _test_releases_are_reachable_from_any_version()
     _test_hosttool_paths()
     _test_updater_hosttools_on_activate_only()
+    _test_updater_repairs_uninitialized_node()
     _test_peer_pull_requires_peer_ahead()
     _test_watermark_never_lowers()
     _test_weekly_restart_skips_catching_up()
@@ -947,7 +949,9 @@ def _test_tmux_status_first() -> None:
     installer = Path(INSTALL_SH).read_text(encoding="utf-8")
     required = (
         'tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n status',
-        'tmux select-window -t "$SESSION:status"',
+        'tmux new-window -d -t "$SESSION" -n caddy',
+        'tmux new-window -d -t "$SESSION" -n node',
+        'tmux new-window -d -t "$SESSION" -n backend',
         "client-attached",
         "mirage-status-dashboard.pid",
     )
@@ -955,8 +959,9 @@ def _test_tmux_status_first() -> None:
     if missing:
         _fail("install.tmux.status_first", f"missing status-first tmux setup: {missing}")
         return
-    if entrypoint.index("-n status") > entrypoint.index("-n caddy"):
-        _fail("install.tmux.status_order", "status is not the first tmux window")
+    dashboard_start = entrypoint.index('scripts/status_dashboard.py" C-m')
+    if entrypoint.index("-n status") > entrypoint.index("-n caddy") or dashboard_start > entrypoint.index("-n caddy"):
+        _fail("install.tmux.status_order", "status is not live before service startup")
         return
     if "from deploy.bootstrap_join import TRUST_LOOKBACK" not in installer:
         _fail("install.tmux.sync_target", "installer sync target can drift from bootstrap trust derivation")
@@ -984,6 +989,57 @@ print_next_steps
         _fail("install.tmux.operator_guidance", f"rc={result.returncode} output={output!r}")
         return
     _pass("install.tmux.status_first")
+
+
+def _test_completed_installer_updates() -> None:
+    """Re-running the one-line installer must update without extra operator commands."""
+    function = _shell_function(INSTALL_SH, "update_completed_install")
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if "if state_at_least done; then\n    update_completed_install" not in body:
+        _fail("install.completed.one_line", "completed installs still exit instead of updating")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="completed-update-") as tmpdir:
+        state = os.path.join(tmpdir, "state.json")
+        calls = os.path.join(tmpdir, "calls")
+        bindir = os.path.join(tmpdir, "bin")
+        os.makedirs(bindir)
+        image = "ghcr.io/miragefoundation/mirage-node@sha256:" + "a" * 64
+        updater = os.path.join(bindir, "mirage-update")
+        Path(updater).write_text(
+            f"""#!/bin/bash
+set -euo pipefail
+echo "$*" >> {calls!r}
+if [[ "${{1:-}}" == "--tick" ]]; then
+  python3 - <<'PY'
+import json
+open({state!r}, "w").write(json.dumps({{"staged": {image!r}}}) + "\\n")
+PY
+fi
+""",
+            encoding="utf-8",
+        )
+        os.chmod(updater, 0o755)
+        script = f"""
+set -euo pipefail
+PATH={bindir!r}:$PATH
+UPDATE_STATE_FILE={state!r}
+die() {{ echo "ERROR: $*" >&2; exit 1; }}
+{function}
+update_completed_install
+"""
+        result = _run(["bash", "-c", script])
+        recorded = Path(calls).read_text(encoding="utf-8").splitlines()
+        if result.returncode != 0:
+            _fail(
+                "install.completed.update_exit",
+                f"rc={result.returncode} out={result.stdout} err={result.stderr}",
+            )
+            return
+        if recorded != ["--tick", f"--refresh-hosttools --image {image}", ""]:
+            _fail("install.completed.update_sequence", f"calls={recorded}")
+            return
+    _pass("install.completed.single_line_updates")
 
 
 def _test_resume_refreshes_amended_release() -> None:
@@ -1713,6 +1769,87 @@ def _test_updater_hosttools_on_activate_only() -> None:
         )
         return
     _pass("install.updater.hosttools_on_activate_only")
+
+
+def _test_updater_repairs_uninitialized_node() -> None:
+    """A signed staged release must repair height zero even when RPC and REST are down."""
+    activate = _shell_function(UPDATE_SH, "activate_staged")
+    json_field = _shell_function(UPDATE_SH, "json_field")
+    updater = Path(UPDATE_SH).read_text(encoding="utf-8")
+    if 'if [[ -z "$staged" ]]; then\n      tick' not in updater:
+        _fail("install.updater.plain_command", "plain mirage-update does not check and stage first")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="updater-uninitialized-") as tmpdir:
+        home = os.path.join(tmpdir, "home")
+        state_dir = os.path.join(tmpdir, "state")
+        data_dir = os.path.join(home, ".mirage", "node", "data")
+        env_dir = os.path.join(home, ".mirage", "env")
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(env_dir, exist_ok=True)
+        os.makedirs(state_dir, exist_ok=True)
+        state_path = os.path.join(state_dir, "state.json")
+        image = "ghcr.io/miragefoundation/mirage-node@sha256:" + "a" * 64
+        Path(os.path.join(env_dir, "release-manifest.json")).write_text(
+            json.dumps({"image": image}) + "\n",
+            encoding="utf-8",
+        )
+        launch = os.path.join(tmpdir, "launch")
+        launched = os.path.join(tmpdir, "launched")
+        Path(launch).write_text(f'#!/bin/bash\necho "$*" > {launched!r}\n', encoding="utf-8")
+        os.chmod(launch, 0o755)
+
+        def run(height: int) -> subprocess.CompletedProcess:
+            Path(state_path).write_text(
+                json.dumps(
+                    {
+                        "staged": image,
+                        "staged_activation": "ordinary",
+                        "staged_rollback_safe": False,
+                        "staged_consensus_breaking": False,
+                        "active": "old",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            Path(os.path.join(data_dir, "priv_validator_state.json")).write_text(
+                json.dumps({"height": str(height), "round": 0, "step": 0}) + "\n",
+                encoding="utf-8",
+            )
+            Path(launched).unlink(missing_ok=True)
+            script = f"""
+set -euo pipefail
+HOME={home!r}
+STATE_FILE={state_path!r}
+LAUNCH={launch!r}
+SAFETY_BLOCKS=500
+tmp={tmpdir!r}
+curl() {{ return 7; }}
+wait_for_rpc() {{ return 0; }}
+install_hosttools_from_image() {{ :; }}
+{json_field}
+{activate}
+activate_staged
+"""
+            return _run(["bash", "-c", script])
+
+        result = run(0)
+        if result.returncode != 0 or not os.path.isfile(launched):
+            _fail(
+                "install.updater.uninitialized_repair",
+                f"height-zero repair failed rc={result.returncode} out={result.stdout} err={result.stderr}",
+            )
+            return
+
+        result = run(10)
+        if result.returncode == 0 or os.path.exists(launched):
+            _fail(
+                "install.updater.signed_height_guard",
+                f"activated after signed height without local safety checks: out={result.stdout} err={result.stderr}",
+            )
+            return
+    _pass("install.updater.repairs_uninitialized_node")
 
 
 def _test_peer_pull_requires_peer_ahead() -> None:

@@ -1715,6 +1715,7 @@ def test_node_join_bootstrap(backend: str):
         return _rpc
 
     original_rpc = bj.rpc
+    original_rpc_post = bj.rpc_post
     tmpdir = tempfile.mkdtemp(prefix="node-join-")
     os.makedirs(os.path.join(tmpdir, "config"), exist_ok=True)
     target = os.path.join(tmpdir, "config", "genesis.json")
@@ -1783,11 +1784,23 @@ def test_node_join_bootstrap(backend: str):
             BOOTSTRAP_RPC="http://a,http://b",
             CHAIN_ID="mirage-1",
             NODE_HOME=tmpdir,
+            PERSISTENT_PEERS=(
+                f"{'1' * 40}@192.0.2.1:26656,"
+                f"{'2' * 40}@192.0.2.2:26656"
+            ),
         )
+        bj.rpc_post = lambda endpoint, method, params: {
+            "block_id": {"hash": "A" * 64}
+        }
         output = io.StringIO()
         with redirect_stdout(output):
             bj.main(trust_only=True)
-        if open(target, encoding="utf-8").read() == "PRESERVED" and "STATESYNC_ENABLE=true" in output.getvalue():
+        if (
+            open(target, encoding="utf-8").read() == "PRESERVED"
+            and "STATESYNC_ENABLE=true" in output.getvalue()
+            and "STATESYNC_RPC_SERVERS=http://192.0.2.1:26657,http://192.0.2.2:26657"
+            in output.getvalue()
+        ):
             _pass("node_join.restart_refreshes_trust_only")
         else:
             _fail(
@@ -1817,7 +1830,8 @@ def test_node_join_bootstrap(backend: str):
             _pass("node_join.requires_two_endpoints")
     finally:
         bj.rpc = original_rpc
-        for key in ("BOOTSTRAP_RPC", "CHAIN_ID", "NODE_HOME"):
+        bj.rpc_post = original_rpc_post
+        for key in ("BOOTSTRAP_RPC", "CHAIN_ID", "NODE_HOME", "PERSISTENT_PEERS"):
             os.environ.pop(key, None)
         shutil.rmtree(tmpdir, ignore_errors=True)
 

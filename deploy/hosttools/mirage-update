@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Activate a staged ordinary release, or tick the updater (verify + pre-stage).
+# Check, stage and activate an ordinary release; --tick only pre-stages it.
 set -euo pipefail
 
 HOME="${HOME:-/root}"
@@ -96,21 +96,36 @@ activate_staged() {
     echo "ERROR: staged release has invalid activation policy '$activation'" >&2
     exit 1
   fi
-  plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan)
-  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
-  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("height") or "0")')
-  if [[ -n "$plan_name" ]]; then
-    height=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
-    remaining=$((plan_h - height))
-    if (( remaining >= 0 && remaining <= SAFETY_BLOCKS )); then
-      echo "ERROR: upgrade plan $plan_name in $remaining blocks; refusing ordinary activation" >&2
+  signed_height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["height"]))' \
+    "$HOME/.mirage/node/data/priv_validator_state.json")
+  if plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
+    plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+    plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("height") or "0")')
+    if [[ -n "$plan_name" ]]; then
+      height=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
+      remaining=$((plan_h - height))
+      if (( remaining >= 0 && remaining <= SAFETY_BLOCKS )); then
+        echo "ERROR: upgrade plan $plan_name in $remaining blocks; refusing ordinary activation" >&2
+        exit 1
+      fi
+    fi
+  elif (( signed_height == 0 )); then
+    echo "local REST is unavailable on this uninitialized node; activating its staged recovery release"
+  else
+    echo "ERROR: local REST is unavailable; refusing activation after signed height $signed_height" >&2
+    exit 1
+  fi
+  if status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status); then
+    catching=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
+    if [[ "$catching" != "False" && "$catching" != "false" ]]; then
+      echo "ERROR: node is catching up; refusing activation" >&2
       exit 1
     fi
-  fi
-  catching=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
-  if [[ "$catching" != "False" && "$catching" != "false" ]]; then
-    echo "ERROR: node is catching up; refusing activation" >&2
+  elif (( signed_height != 0 )); then
+    echo "ERROR: local RPC is unavailable; refusing activation after signed height $signed_height" >&2
     exit 1
+  else
+    echo "local RPC is unavailable on this uninitialized node; activating its staged recovery release"
   fi
   # A release is not required to be reached one version at a time. Deploy
   # migrations are applied by discovering everything this node has not run yet,
@@ -317,7 +332,7 @@ PY
       fi
     fi
     echo "no newer release (last_release_id=$last_id)"
-    exit 0
+    return 0
   fi
   docker pull "$image"
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
@@ -420,6 +435,20 @@ case "${1:-}" in
     fi
     refresh_hosttools "$3"
     ;;
-  "") activate_staged ;;
+  "")
+    staged=""
+    if [[ -f "$STATE_FILE" ]]; then
+      staged=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged") or "")' "$STATE_FILE")
+    fi
+    if [[ -z "$staged" ]]; then
+      tick
+      staged=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged") or "")' "$STATE_FILE")
+      if [[ -z "$staged" ]]; then
+        echo "already up to date"
+        exit 0
+      fi
+    fi
+    activate_staged
+    ;;
   *) echo "usage: mirage-update [--tick|--rollback|--refresh-hosttools --image IMAGE]" >&2; exit 2 ;;
 esac

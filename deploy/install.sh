@@ -9,6 +9,7 @@ set -euo pipefail
 
 STATE_DIR=/var/lib/mirage/install
 STATE_FILE="$STATE_DIR/state"
+UPDATE_STATE_FILE=/var/lib/mirage/update/state.json
 DOMAIN_ARG=""
 MONIKER_CHOICE=""
 MEDIA_UPLOADS=""
@@ -997,6 +998,21 @@ else:
 PY
 }
 
+update_completed_install() {
+  local updater staged
+  updater="$(command -v mirage-update)" || die "mirage-update is missing from this completed installation"
+  echo "==> Checking for a newer signed Mirage release..."
+  "$updater" --tick
+  staged="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged") or "")' \
+    "$UPDATE_STATE_FILE")"
+  if [[ -z "$staged" ]]; then
+    echo "==> Mirage is already up to date"
+    return 0
+  fi
+  "$updater" --refresh-hosttools --image "$staged"
+  "$updater"
+}
+
 print_next_steps() {
   local sync
   sync="$(sync_summary)"
@@ -1024,7 +1040,7 @@ main() {
   umask 077
   load_or_init_state
   if state_at_least done; then
-    echo "==> Mirage installation is already complete; use mirage-status or mirage-update"
+    update_completed_install
     return 0
   fi
 

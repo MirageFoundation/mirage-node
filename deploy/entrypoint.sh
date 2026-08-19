@@ -232,12 +232,15 @@ if [ -f "$TMUX_TEMPLATE" ]; then
   cp "$TMUX_TEMPLATE" /etc/tmux.conf
   tmux source-file /etc/tmux.conf 2>/dev/null
 fi
+tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
+tmux set-hook -t "$SESSION" client-attached \
+  "run-shell 'if [ -s /tmp/mirage-status-dashboard.pid ]; then kill -USR1 \$(cat /tmp/mirage-status-dashboard.pid); fi'"
 
 # Enable maintenance mode while services start up
 touch /etc/caddy/.maintenance
 
 # Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
-tmux new-window -t "$SESSION" -n caddy -c "$ROOT_DIR"
+tmux new-window -d -t "$SESSION" -n caddy -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee >(cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\")" C-m
 
 # PostgreSQL (start early)
@@ -292,7 +295,7 @@ if ! grep -q "^logging_collector" "$PG_CONF"; then
   echo "logging_collector = on" >> "$PG_CONF"
 fi
 
-tmux new-window -t "$SESSION" -n postgres -c "$ROOT_DIR"
+tmux new-window -d -t "$SESSION" -n postgres -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:postgres" "pg_ctlcluster 16 main start && sleep 2 && tail -f $PG_LOG_DIR/postgres-\$(date -u +%Y-%m-%d).log" C-m
 
 # Wait for PostgreSQL readiness (hard fail) using a valid role
@@ -587,7 +590,7 @@ if [ -x "$COMPACT_BIN" ] && [ -d "$NODE_HOME/data" ]; then
 fi
 
 # Node (second)
-tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
+tmux new-window -d -t "$SESSION" -n node -c "$ROOT_DIR"
 # Node home is always ~/.mirage/node (hardcoded)
 # SKIP_UPGRADES: comma-separated list of upgrade names to skip (for dev/UAT when upgrades weren't triggered via governance)
 NODE_START_CMD="BIN=\"$BIN\" NODE_HOME=\"$NODE_HOME\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_miraged_supervised.sh\""
@@ -650,11 +653,11 @@ if [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
 fi
 
 # Indexer (third) - uses wrapper script that waits for RPC
-tmux new-window -t "$SESSION" -n indexer -c "$ROOT_DIR"
+tmux new-window -d -t "$SESSION" -n indexer -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:indexer" "ROOT_DIR=\"$ROOT_DIR\" LOGS_DIR=\"$LOGS_DIR\" bash \"$ROOT_DIR/deploy/run_indexer_supervised.sh\"" C-m
 
 # Backend (fourth)
-tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
+tmux new-window -d -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
 # Keep maintenance mode active until Gunicorn and its dependencies are healthy.
@@ -691,9 +694,6 @@ echo "✓ Maintenance mode disabled"
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
-# Unified Status Dashboard (first window)
-tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
-
 # Divergence watchdog — recovery daemon. AUTO_DIVERGENCE_RECOVERY=true is now the
 # default on every host: the watchdog's first-line action is a NON-DESTRUCTIVE
 # restart (recover.sh restart), so running it everywhere is safe and lets a
@@ -705,7 +705,7 @@ if [ "${AUTO_DIVERGENCE_RECOVERY:-false}" = "true" ]; then
   WD_AUTOREC="${WATCHDOG_AUTORECOVER:-false}"
   WD_DRY="${DIVERGENCE_DRY_RUN:-false}"
   echo "==> Starting divergence watchdog (autorecover=${WD_AUTOREC}, dry_run=${WD_DRY})"
-  tmux new-window -t "$SESSION" -n watchdog -c "$ROOT_DIR"
+  tmux new-window -d -t "$SESSION" -n watchdog -c "$ROOT_DIR"
   WATCHDOG_CMD="WATCHDOG_AUTORECOVER=${WD_AUTOREC} DRY_RUN=${WD_DRY} PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/divergence_watchdog.py"
   tmux send-keys -t "$SESSION:watchdog" \
     "$WATCHDOG_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/divergence_watchdog-%Y-%m-%d.log\")" C-m
@@ -723,17 +723,13 @@ fi
 # it when one is configured. It NEVER recovers anything (detection only).
 if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
   echo "==> Starting stuck-node alert pager (independent of watchdog)"
-  tmux new-window -t "$SESSION" -n stuck-alert -c "$ROOT_DIR"
+  tmux new-window -d -t "$SESSION" -n stuck-alert -c "$ROOT_DIR"
   STUCK_CMD="PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/stuck_node_alert.py"
   tmux send-keys -t "$SESSION:stuck-alert" \
     "$STUCK_CMD 2>&1 | tee >(cronolog \"$LOGS_DIR/deploy/stuck_node_alert-%Y-%m-%d.log\")" C-m
 else
   echo "==> Stuck-node alert pager disabled (ALERT_WEBHOOK_URL unset)"
 fi
-
-tmux set-hook -t "$SESSION" client-attached \
-  "run-shell 'if [ -s /tmp/mirage-status-dashboard.pid ]; then kill -USR1 \$(cat /tmp/mirage-status-dashboard.pid); fi'"
-tmux select-window -t "$SESSION:status"
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
