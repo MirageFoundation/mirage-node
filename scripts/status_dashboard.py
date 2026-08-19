@@ -176,9 +176,6 @@ NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SE
 
 MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
 
-# Longest an unattended live dashboard may keep polling the node.
-SESSION_LIMIT_SECS = int(os.environ.get("MIRAGE_STATUS_SESSION_LIMIT_SECS", "3600"))
-
 
 def debug_log(msg: str) -> None:
     if not _DEBUG_LOG_ENABLED:
@@ -2735,6 +2732,19 @@ def paint(lines: list[str]) -> None:
     sys.stdout.flush()
 
 
+def create_session_pid_file(raw_path: str) -> Optional[Path]:
+    """Publish this process for the host wrapper to clean up on disconnect."""
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    if path.parent != Path("/tmp") or not re.fullmatch(r"mirage-status-\d+-\d+-\d+\.pid", path.name):
+        raise RuntimeError(f"invalid MIRAGE_STATUS_PID_FILE: {raw_path!r}")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as pid_file:
+        pid_file.write(f"{os.getpid()}\n")
+    return path
+
+
 def run_health_check_json(required_services: list[str]) -> dict:
     """
     Run health checks and return JSON-serializable result.
@@ -2845,6 +2855,7 @@ def main():
 
     entered_alt = False
     hide_cursor = False
+    session_pid_file: Optional[Path] = None
 
     def restore_terminal():
         nonlocal entered_alt, hide_cursor
@@ -2858,11 +2869,13 @@ def main():
 
     try:
         if interactive:
+            session_pid_file = create_session_pid_file(
+                os.environ.get("MIRAGE_STATUS_PID_FILE", "").strip()
+            )
             sys.stdout.write("\033[?1049h\033[?25l\033[2J")
             sys.stdout.flush()
             entered_alt = True
             hide_cursor = True
-        started = time.monotonic()
         while True:
             frame = render_dashboard(refresh_secs=args.interval, pin_bottom=interactive)
             if interactive:
@@ -2873,21 +2886,15 @@ def main():
                 return
             refresh_requested.wait(args.interval)
             refresh_requested.clear()
-            # docker exec forwards no signal into the container, so a dropped
-            # ssh session leaves this polling the node once a second forever.
-            # Bound the session instead of leaking a watcher nobody reads.
-            if interactive and time.monotonic() - started >= SESSION_LIMIT_SECS:
-                restore_terminal()
-                print(
-                    f"mirage-status ended after {SESSION_LIMIT_SECS // 60} minutes; run it again to resume",
-                    flush=True,
-                )
-                return
     except KeyboardInterrupt:
         restore_terminal()
         sys.exit(130)
     finally:
-        restore_terminal()
+        try:
+            restore_terminal()
+        finally:
+            if session_pid_file is not None:
+                session_pid_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

@@ -3092,9 +3092,39 @@ def _test_status_compact_layout() -> None:
     if "docker exec -it" not in status_tool or "--once" not in status_tool:
         _fail("install.status.host_tty", "mirage-status must allocate a TTY only for live mode")
         return
+    if "SESSION_LIMIT_SECS" in dashboard or "ended after" in dashboard:
+        _fail("install.status.no_session_timeout", "live status still terminates a legitimate session on a timer")
+        return
+    for required in (
+        "MIRAGE_STATUS_PID_FILE",
+        "trap cleanup_status_session EXIT",
+        "/proc/{pid}/cmdline",
+        "os.kill(pid, signal.SIGTERM)",
+    ):
+        if required not in status_tool:
+            _fail("install.status.disconnect_cleanup", f"host wrapper is missing {required!r}")
+            return
 
     sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
     import status_dashboard as dash
+
+    pid_path = Path(
+        f"/tmp/mirage-status-{os.getpid()}-{os.getppid()}-{threading.get_ident()}.pid"
+    )
+    try:
+        created = dash.create_session_pid_file(str(pid_path))
+        if created != pid_path or pid_path.read_text(encoding="utf-8").strip() != str(os.getpid()):
+            _fail("install.status.pid_registration", "dashboard did not publish its exact process id")
+            return
+    finally:
+        pid_path.unlink(missing_ok=True)
+    try:
+        dash.create_session_pid_file("/root/mirage-status-1-2-3.pid")
+    except RuntimeError:
+        pass
+    else:
+        _fail("install.status.pid_path", "dashboard accepted a pid file outside /tmp")
+        return
 
     fake = [
         dash.ServiceStatus(

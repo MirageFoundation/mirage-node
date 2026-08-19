@@ -62,10 +62,48 @@ else
 fi
 
 if [[ "$ONCE" -eq 0 && "$JSON" -eq 0 && -t 0 && -t 1 ]]; then
-  exec docker exec -it \
+  STATUS_PID_FILE="/tmp/mirage-status-$$-${RANDOM}-${RANDOM}.pid"
+
+  cleanup_status_session() {
+    local detail
+    if ! detail="$(docker exec mirage python3 -c '
+import os
+import signal
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    raw_pid = path.read_text(encoding="utf-8").strip()
+except FileNotFoundError:
+    raise SystemExit(0)
+if not raw_pid.isdigit():
+    raise SystemExit(f"invalid mirage-status pid file: {raw_pid!r}")
+pid = int(raw_pid)
+try:
+    command = Path(f"/proc/{pid}/cmdline").read_bytes()
+except FileNotFoundError:
+    path.unlink(missing_ok=True)
+    raise SystemExit(0)
+if b"/opt/mirage/scripts/status_dashboard.py" not in command:
+    raise SystemExit(f"pid {pid} is not mirage-status")
+os.kill(pid, signal.SIGTERM)
+' "$STATUS_PID_FILE" 2>&1)"; then
+      echo "WARN: could not stop disconnected mirage-status session: $detail" >&2
+    fi
+  }
+
+  trap cleanup_status_session EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  docker exec -it \
     -e TERM="${TERM:-xterm-256color}" \
     -e COLUMNS="${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}" \
     -e LINES="${LINES:-$(tput lines 2>/dev/null || echo 24)}" \
+    -e MIRAGE_STATUS_PID_FILE="$STATUS_PID_FILE" \
     mirage python3 /opt/mirage/scripts/status_dashboard.py "${ARGS[@]}"
+  exit $?
 fi
 exec docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py "${ARGS[@]}"
