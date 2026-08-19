@@ -89,19 +89,17 @@ def get_completed_migrations(config_dir: Path) -> set[str]:
 
 
 def _has_existing_data(config_dir: Path) -> bool:
-    data_root = Path(config_dir).parent
-    if (data_root / "postgres" / "PG_VERSION").exists():
-        return True
-    if (data_root / "node" / "config" / "genesis.json").exists():
-        return True
-    node_data = data_root / "node" / "data"
-    if node_data.exists():
-        try:
-            for _ in node_data.iterdir():
-                return True
-        except Exception:
-            return True
-    return False
+    """
+    True when a previous deployment left chain state behind.
+
+    Only evidence that this startup could not have produced itself counts.
+    entrypoint.sh creates the postgres cluster, fetches genesis.json and runs
+    `miraged init` before it invokes this package, so those three artifacts are
+    always present by now — testing them made the fresh-deploy branch below
+    unreachable and pointed every historical migration at an empty database.
+    The blockstore only appears once the node has actually run.
+    """
+    return (Path(config_dir).parent / "node" / "data" / "blockstore.db").exists()
 
 
 def mark_migration_complete(config_dir: Path, migration_key: str, result: str = "completed") -> None:
@@ -137,36 +135,37 @@ def run_one_time_migrations(config_dir: Path) -> int:
         logger.debug("No migrations found")
         return 0
 
-    # Fresh deployment: no .migrations file means templates already have correct
-    # defaults — mark all existing migrations as completed so they don't run.
-    migrations_file = get_migrations_file(config_dir)
-    if not migrations_file.exists():
-        if _has_existing_data(config_dir):
-            logger.warning("No .migrations file but existing data detected — running all migrations")
-        else:
-            logger.info("Fresh deployment detected (no .migrations file) — running required migrations")
-            run_count = 0
-            for filename, key, module in migrations:
-                if key not in ALWAYS_RUN_KEYS:
-                    continue
-                description = getattr(module, "DESCRIPTION", "")
-                logger.info(f"Running migration: {key} - {description}")
-                try:
-                    result = module.run(config_dir, logger)
-                    result_str = str(result) if result is not None else "completed"
-                    mark_migration_complete(config_dir, key, result_str)
-                    logger.info(f"Migration {key} completed: {result_str}")
-                    run_count += 1
-                except Exception as e:
-                    logger.error(f"Migration {key} failed: {e}", exc_info=True)
-                    raise
-            for _, key, module in migrations:
-                if key in ALWAYS_RUN_KEYS:
-                    continue
-                mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
-            return run_count
-
     completed = get_completed_migrations(config_dir)
+
+    # A host that has never produced a block has nothing for a historical
+    # migration to migrate: its env files came from the current templates, and
+    # its tables are empty. Running them anyway is not merely wasted work, it
+    # fails — a v1.29.5 patch cannot find the Caddyfile block it was written
+    # against, and a v1.28.5 backfill queried posts before the indexer existed.
+    # This is deliberately not conditioned on the tracking file: an install that
+    # died midway through has a partial one, and is still a fresh deployment.
+    if not _has_existing_data(config_dir):
+        logger.info("Fresh deployment detected (no chain data) — running required migrations only")
+        run_count = 0
+        for _, key, module in migrations:
+            if key in completed:
+                continue
+            if key not in ALWAYS_RUN_KEYS:
+                mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
+                continue
+            description = getattr(module, "DESCRIPTION", "")
+            logger.info(f"Running migration: {key} - {description}")
+            try:
+                result = module.run(config_dir, logger)
+                result_str = str(result) if result is not None else "completed"
+                mark_migration_complete(config_dir, key, result_str)
+                logger.info(f"Migration {key} completed: {result_str}")
+                run_count += 1
+            except Exception as e:
+                logger.error(f"Migration {key} failed: {e}", exc_info=True)
+                raise
+        return run_count
+
     pending = [(name, key, mod) for name, key, mod in migrations if key not in completed]
 
     if not pending:

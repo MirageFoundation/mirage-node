@@ -22,15 +22,15 @@ curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/d
 
 The installer updates Ubuntu, applies a noninteractive full upgrade, and installs the host baseline before starting Mirage. If Ubuntu requires a reboot, the installer stops before launching the node; reboot and run the same command again to resume.
 
-When prompted, paste the 12-word mnemonic on one line with a space between each word. The installer then asks three questions, all of them before it does anything slow:
+The 12-word mnemonic, pasted on one line with a space between each word, is the only thing the installer asks for. Everything else takes the default that suits a new public node, and the install prints each decision as it makes it:
 
-| Question | Default | What it sets |
-| --- | --- | --- |
-| Your validator's public name | your username | `MONIKER`, recorded on-chain when the node registers |
-| A domain for this node | none | `DOMAIN`; HTTPS is requested at startup |
-| Accept media uploads | no | `MEDIA_UPLOADS_ENABLED` |
+| Setting | Default | Environment variable | What it sets |
+| --- | --- | --- | --- |
+| Validator name | your username | `MIRAGE_MONIKER` | `MONIKER`, recorded on-chain when the node registers |
+| Domain | none | `MIRAGE_DOMAIN` | `DOMAIN`; HTTPS is requested at startup |
+| Media uploads | off | `MIRAGE_MEDIA_UPLOADS` | `MEDIA_UPLOADS_ENABLED` |
 
-Answer any of them up front with `MIRAGE_MONIKER`, `MIRAGE_DOMAIN` or `MIRAGE_MEDIA_UPLOADS`; a variable that is set is never asked about, and an empty value is a real answer. Say yes to uploads only if a scanning edge fronts this node, because uploads are stored on its disk and nothing else inspects them.
+Set any of those variables to install with a different answer; an empty value is a real answer. Add a domain later with `mirage-domain example.com`, which requests the certificate and binds the name. Turn uploads on only if a scanning edge fronts this node, because uploads are stored on its disk and nothing else inspects them.
 
 Nodes installed this way recover from a divergence on their own (`WATCHDOG_AUTORECOVER=true`), which suits an operator who is not watching at 04:00. The diverged state is snapshotted before recovery touches anything either way.
 

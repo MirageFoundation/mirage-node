@@ -308,8 +308,8 @@ set_mnemonic() {
 
 prompt_mnemonic() {
   local raw
-  printf '%s\n' \
-    "Paste your 12-word recovery phrase on ONE line, with a space between each word." \
+  printf '\n\n%s\n%s\n' \
+    "Now paste your 12-word recovery phrase on ONE line, with a space between each word." \
     "It stays hidden while you paste, and extra spacing is cleaned up for you." >/dev/tty
   read -r -s -p "Recovery phrase: " raw </dev/tty
   echo >/dev/tty
@@ -453,8 +453,33 @@ json.dump(bodies[0], sys.stdout)
 PY
 }
 
+# Balances are held in umirage; an operator reads Mirage. Grouping is done here
+# because printf "%'d" would depend on the host locale being set.
+as_mirage() {
+  local whole=$(( $1 / 1000000 )) grouped=""
+  while (( whole >= 1000 )); do
+    grouped=$(printf ',%03d%s' "$(( whole % 1000 ))" "$grouped")
+    whole=$(( whole / 1000 ))
+  done
+  printf '%d%s' "$whole" "$grouped"
+}
+
+# miraged prints an interface-registration banner on stderr every time it runs,
+# which is noise in an install transcript. Hold stderr back and print it only if
+# the command fails, so a real error is still reported in full.
+quiet_run() {
+  local errfile rc=0
+  errfile=$(mktemp)
+  "$@" 2>"$errfile" || rc=$?
+  if (( rc != 0 )); then
+    cat "$errfile" >&2
+  fi
+  rm -f "$errfile"
+  return "$rc"
+}
+
 derive_address() {
-  ADDRESS=$(echo "$MNEMONIC" | docker run --rm -i --entrypoint /bin/sh "$IMAGE" -lc \
+  ADDRESS=$(echo "$MNEMONIC" | quiet_run docker run --rm -i --entrypoint /bin/sh "$IMAGE" -lc \
     'tmp=$(mktemp -d); /opt/mirage/blockchain/bin/miraged keys add tmp --recover --home "$tmp" --keyring-backend test >/dev/null && /opt/mirage/blockchain/bin/miraged keys show tmp -a --home "$tmp" --keyring-backend test')
   ADDRESS=$(echo "$ADDRESS" | tr -d '\r' | tail -1)
   if [[ -z "$ADDRESS" ]]; then
@@ -473,7 +498,7 @@ preflight_account() {
   local amount
   amount=$(echo "$bal" | jq -r '.balance.amount // "0"')
   if [[ "$amount" -lt "$activation" ]]; then
-    die "address $ADDRESS holds $((amount / 1000000)) MIRAGE, need $((activation / 1000000))"
+    die "address $ADDRESS holds $(as_mirage "$amount") Mirage, need $(as_mirage "$activation")"
   fi
   local profile
   profile=$(agree_json "$api" "/api/get_profile?address=${ADDRESS}" "username")
@@ -481,7 +506,7 @@ preflight_account() {
   if [[ -z "$USERNAME" ]]; then
     die "address $ADDRESS has no username; create an account and set a username on mirage.talk first"
   fi
-  echo "==> Profile username @$USERNAME, balance ${amount} umirage"
+  echo "==> Profile username @$USERNAME, balance $(as_mirage "$amount") Mirage"
 }
 
 collision_guard() {
@@ -613,15 +638,14 @@ external_address() {
   die "could not detect a public address for P2P external_address"
 }
 
-# Everything the operator has to decide is asked in one block, before the
-# install spends time on anything slow, so no question interrupts a state sync.
-# Every answer also takes an environment variable, which is what makes an
-# unattended run possible: a variable that is set is never asked about, and an
-# empty value is a real answer rather than a missing one.
-prompt_settings() {
-  prompt_moniker
-  prompt_domain
-  prompt_media_uploads
+# Nothing here is asked. A new public node has one right answer for each of
+# these, so the recovery phrase stays the only thing an operator has to supply.
+# Each setting still reads an environment variable for anyone who wants a
+# different one, and every value can also be changed after the install.
+choose_settings() {
+  choose_moniker
+  choose_media_uploads
+  choose_domain
 }
 
 trim() {
@@ -630,73 +654,41 @@ trim() {
   printf '%s' "${s%"${s##*[![:space:]]}"}"
 }
 
-# In `curl ... | bash` stdin is the script itself, so an answer has to be read
-# from the controlling terminal. require_tty has already proven stdout is that
-# same terminal, which is why the questions themselves are ordinary output.
-ask() {
-  local answer
-  read -r -p "$1" answer </dev/tty
-  trim "$answer"
-}
-
 # This name is what other operators see in the validator list, and it is written
 # on-chain at registration, where changing it costs a transaction. The account's
-# username is the obvious default but not obviously the right answer.
-prompt_moniker() {
-  local raw
-  for _ in 1 2 3; do
-    if [[ -n "${MIRAGE_MONIKER+x}" ]]; then
-      raw=$(trim "$MIRAGE_MONIKER")
-    else
-      printf '%s\n' \
-        "Your validator's public name, shown in the validator list and to peers."
-      raw=$(ask "Validator name [$USERNAME]: ")
-    fi
+# username is the default because it is the name the network already knows.
+choose_moniker() {
+  local raw="$USERNAME"
+  if [[ -n "${MIRAGE_MONIKER+x}" ]]; then
+    raw=$(trim "$MIRAGE_MONIKER")
     [[ -n "$raw" ]] || raw="$USERNAME"
-    if [[ "$raw" =~ ^[[:print:]]{1,70}$ ]]; then
-      MONIKER_CHOICE="$raw"
-      echo "==> Validator name $MONIKER_CHOICE"
-      return 0
-    fi
-    echo "WARNING: a validator name must be 1-70 printable characters" >&2
-    if [[ -n "${MIRAGE_MONIKER+x}" ]]; then
-      die "MIRAGE_MONIKER is not a usable validator name"
-    fi
-  done
-  die "no usable validator name after 3 attempts"
+  fi
+  if [[ ! "$raw" =~ ^[[:print:]]{1,70}$ ]]; then
+    die "MIRAGE_MONIKER is not a usable validator name (1-70 printable characters)"
+  fi
+  MONIKER_CHOICE="$raw"
+  printf '\n%s\n' "==> Validator name: $MONIKER_CHOICE"
 }
 
-prompt_domain() {
-  local raw
+choose_domain() {
+  local raw=""
   if [[ -n "$DOMAIN_ARG" ]]; then
     warn_domain_dns "$DOMAIN_ARG"
     return 0
   fi
-  for _ in 1 2 3; do
-    if [[ -n "${MIRAGE_DOMAIN+x}" ]]; then
-      raw=$(trim "$MIRAGE_DOMAIN")
-    else
-      printf '%s\n' \
-        "A domain gives this node HTTPS and a public web address. Point its DNS A" \
-        "record at this host first. Leave it empty to run on the IP; you can add one" \
-        "later with: mirage-domain example.com"
-      raw=$(ask "Domain (empty for none): ")
-    fi
-    if [[ -z "$raw" ]]; then
-      echo "==> No domain; this node will serve on its IP"
-      return 0
-    fi
-    if valid_hostname "$raw"; then
-      DOMAIN_ARG="$raw"
-      warn_domain_dns "$raw"
-      return 0
-    fi
-    echo "WARNING: a domain looks like example.com" >&2
-    if [[ -n "${MIRAGE_DOMAIN+x}" ]]; then
-      die "MIRAGE_DOMAIN is not a hostname"
-    fi
-  done
-  die "no usable domain after 3 attempts"
+  if [[ -n "${MIRAGE_DOMAIN+x}" ]]; then
+    raw=$(trim "$MIRAGE_DOMAIN")
+  fi
+  if [[ -z "$raw" ]]; then
+    printf '\n\n%s\n' \
+      "No domain for now; this node will serve on its IP. You can set it up later using \`mirage-domain example.com\`, which will enable SSL (https) for you and bind the domain."
+    return 0
+  fi
+  if ! valid_hostname "$raw"; then
+    die "MIRAGE_DOMAIN is not a hostname"
+  fi
+  DOMAIN_ARG="$raw"
+  warn_domain_dns "$raw"
 }
 
 # HTTPS is configured at startup and a failure there is deliberately non-fatal,
@@ -719,25 +711,20 @@ warn_domain_dns() {
   fi
 }
 
-# Uploads are only accepted where a scanning edge fronts the node, which is why
-# every node without one keeps them off. The question makes that a decision
-# instead of a default nobody reads.
-prompt_media_uploads() {
-  local raw
+# Uploads put users' images and video on this node's disk, and nothing scans them
+# unless a scanning edge fronts the node. A new node has no such edge, so they
+# stay off until the operator sets MIRAGE_MEDIA_UPLOADS.
+choose_media_uploads() {
+  local raw=""
   if [[ -n "${MIRAGE_MEDIA_UPLOADS+x}" ]]; then
     raw=$(trim "$MIRAGE_MEDIA_UPLOADS")
-  else
-    printf '%s\n' \
-      "Media uploads keep users' images and video on this node's disk, and nothing" \
-      "scans them unless you put a scanning edge in front of this node."
-    raw=$(ask "Accept media uploads on this node? [y/N]: ")
   fi
   case "${raw,,}" in
     ''|n|no|false) MEDIA_UPLOADS=false ;;
     y|yes|true) MEDIA_UPLOADS=true ;;
-    *) die "answer the media uploads question with yes or no (got '${raw:0:20}')" ;;
+    *) die "MIRAGE_MEDIA_UPLOADS must be yes or no (got '${raw:0:20}')" ;;
   esac
-  echo "==> Media uploads: $MEDIA_UPLOADS"
+  printf '\n%s\n' "==> Media uploads enabled: $MEDIA_UPLOADS"
 }
 
 configure() {
@@ -817,7 +804,7 @@ identity() {
     "$IMAGE" /opt/mirage/deploy/derive_consensus_key.py --index 0 >/dev/null; then
     die "failed to derive the consensus key"
   fi
-  if ! echo "$MNEMONIC" | docker run --rm -i \
+  if ! echo "$MNEMONIC" | quiet_run docker run --rm -i \
     --entrypoint /bin/sh \
     -v /root/.mirage:/root/.mirage \
     "$IMAGE" -lc '/opt/mirage/blockchain/bin/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test >/dev/null'; then
@@ -979,6 +966,7 @@ main() {
   fi
 
   prompt_mnemonic
+  printf '\n\n%s\n' "Processing recovery phrase"
   validate_mnemonic_wordlist
   derive_address
   preflight_account
@@ -986,7 +974,7 @@ main() {
   detect_public_ip
 
   if ! state_at_least configured; then
-    prompt_settings
+    choose_settings
     configure
     advance_state configured
   fi

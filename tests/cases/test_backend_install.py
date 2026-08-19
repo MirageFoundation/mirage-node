@@ -65,6 +65,9 @@ def test_install(backend: str) -> None:
     _test_install_non_tty()
     _test_mnemonic_word_count()
     _test_mnemonic_paste_normalised()
+    _test_recovery_phrase_is_the_only_question()
+    _test_balance_reads_in_mirage()
+    _test_miraged_banner_hidden_but_errors_kept()
     _test_setup_prompts()
     _test_prompt_answers_reach_env()
     _test_external_address_rejects_injection()
@@ -75,6 +78,8 @@ def test_install(backend: str) -> None:
     _test_activation_and_registration_waits()
     _test_pinned_bootstrap_dependencies()
     _test_sshd_validation_survives_socket_activation()
+    _test_fresh_deploy_skips_historical_migrations()
+    _test_indexer_schema_precedes_migrations()
     _test_ubuntu_full_upgrade()
     _test_provider_memory_overhead()
     _test_no_swapfile_provisioned()
@@ -221,6 +226,57 @@ def _test_pinned_bootstrap_dependencies() -> None:
             _fail("install.bootstrap.pin_stale", f"{relative}: pin={match.group(1)} actual={actual}")
             return
     _pass("install.bootstrap.dependencies_pinned")
+
+
+def _test_fresh_deploy_skips_historical_migrations() -> None:
+    """A first install must not point v1.28-era data backfills at an empty database."""
+    from deploy.migrations import _has_existing_data
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Everything entrypoint.sh has already created by the time it runs
+        # `python3 -m deploy.migrations` on a host that has never started.
+        root = Path(tmp, ".mirage")
+        env = root / "env"
+        env.mkdir(parents=True)
+        (root / "postgres").mkdir()
+        (root / "postgres" / "PG_VERSION").write_text("16\n", encoding="utf-8")
+        (root / "node" / "config").mkdir(parents=True)
+        (root / "node" / "config" / "genesis.json").write_text("{}", encoding="utf-8")
+        (root / "node" / "data").mkdir()
+        (root / "node" / "data" / "priv_validator_state.json").write_text("{}", encoding="utf-8")
+
+        if _has_existing_data(env):
+            _fail(
+                "install.migrations.fresh_deploy",
+                "a fresh install is misread as an existing one, so every historical migration runs",
+            )
+            return
+
+        # A host that has actually produced blocks must still get its migrations.
+        (root / "node" / "data" / "blockstore.db").mkdir()
+        if not _has_existing_data(env):
+            _fail(
+                "install.migrations.existing_deploy",
+                "an existing deployment is misread as fresh, so pending migrations would be skipped",
+            )
+            return
+    _pass("install.migrations.fresh_deploy_detection")
+
+
+def _test_indexer_schema_precedes_migrations() -> None:
+    entrypoint = Path(REPO_ROOT, "deploy", "entrypoint.sh").read_text(encoding="utf-8")
+    schema_at = entrypoint.find("from indexer.database import DatabaseManager")
+    migrate_at = entrypoint.find("python3 -m deploy.migrations")
+    if schema_at < 0:
+        _fail(
+            "install.migrations.indexer_schema",
+            "entrypoint.sh never creates the indexer schema, so data migrations hit missing tables",
+        )
+        return
+    if migrate_at < 0 or schema_at > migrate_at:
+        _fail("install.migrations.indexer_schema_order", "indexer schema is created after migrations run")
+        return
+    _pass("install.migrations.indexer_schema_first")
 
 
 def _test_sshd_validation_survives_socket_activation() -> None:
@@ -419,6 +475,85 @@ def _test_mnemonic_paste_normalised() -> None:
     _pass(f"install.mnemonic.normalises_{len(variants)}_paste_shapes")
 
 
+def _test_recovery_phrase_is_the_only_question() -> None:
+    """An install asks for the phrase and nothing else, and says what it decided."""
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    reads = re.findall(r"^.*read .*/dev/tty.*$", body, re.M)
+    if len(reads) != 1 or "Recovery phrase" not in reads[0]:
+        _fail("install.prompts.only_the_phrase", f"unexpected interactive reads: {reads}")
+        return
+
+    # No MIRAGE_* variables: the defaults path must not block and must report.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MIRAGE_")}
+    script = _install_functions_only() + '\nUSERNAME=Anon-FuckWard\nPUBLIC_IP=203.0.113.7\nchoose_settings\n'
+    r = _run(["bash", "-c", script], env=env, stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        _fail("install.prompts.defaults_run", f"rc={r.returncode} err={(r.stderr or '')[-300:]}")
+        return
+    expected = (
+        "\n"
+        "==> Validator name: Anon-FuckWard\n"
+        "\n"
+        "==> Media uploads enabled: false\n"
+        "\n"
+        "\n"
+        "No domain for now; this node will serve on its IP. You can set it up later using "
+        "`mirage-domain example.com`, which will enable SSL (https) for you and bind the domain.\n"
+    )
+    if r.stdout != expected:
+        _fail("install.prompts.default_report", f"got {r.stdout!r}")
+        return
+    _pass("install.prompts.only_the_phrase")
+
+
+def _test_balance_reads_in_mirage() -> None:
+    """umirage is an implementation detail; an operator is shown grouped Mirage."""
+    script = _install_functions_only() + '\nas_mirage "$1"\n'
+    for amount, want in (
+        ("15000000000000", "15,000,000"),
+        ("1000000", "1"),
+        ("999000000", "999"),
+        ("1000000000", "1,000"),
+        ("0", "0"),
+    ):
+        r = _run(["bash", "-c", script, "_", amount])
+        if r.returncode != 0 or r.stdout != want:
+            _fail("install.balance.mirage_units", f"{amount} -> {r.stdout!r} (want {want!r})")
+            return
+    # The denom still appears in the REST query and the manifest field name; what
+    # must not appear is a umirage figure in something the operator reads.
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    printed = [
+        line
+        for line in body.splitlines()
+        if re.match(r"\s*(echo|printf|die)\b", line) and "umirage" in line
+    ]
+    if printed:
+        _fail("install.balance.raw_denom", f"raw umirage shown to the operator: {printed}")
+        return
+    _pass("install.balance.mirage_units")
+
+
+def _test_miraged_banner_hidden_but_errors_kept() -> None:
+    """The registration banner must not reach the transcript, and errors still must."""
+    script = _install_functions_only() + """
+quiet_run bash -c 'echo "core/types: registered msg interfaces" >&2; echo ok'
+echo "rc=$?"
+quiet_run bash -c 'echo "the real failure" >&2; exit 3' || echo "rc=$?"
+"""
+    r = _run(["bash", "-c", script])
+    if "core/types" in r.stderr:
+        _fail("install.banner.suppressed", "the miraged banner still reaches stderr on success")
+        return
+    if "ok" not in r.stdout or "rc=0" not in r.stdout:
+        _fail("install.banner.stdout_passthrough", f"stdout={r.stdout!r}")
+        return
+    if "the real failure" not in r.stderr or "rc=3" not in r.stdout:
+        _fail("install.banner.errors_kept", f"out={r.stdout!r} err={r.stderr!r}")
+        return
+    _pass("install.banner.hidden_errors_kept")
+
+
 def _test_setup_prompts() -> None:
     """The install-time questions must answer themselves from the environment.
 
@@ -430,7 +565,7 @@ def _test_setup_prompts() -> None:
     script = (
         functions
         + '\nUSERNAME=alice\nPUBLIC_IP=203.0.113.7\n'
-        + 'prompt_settings >/dev/null\n'
+        + 'choose_settings >/dev/null\n'
         + 'printf "%s|%s|%s" "$MONIKER_CHOICE" "$DOMAIN_ARG" "$MEDIA_UPLOADS"\n'
     )
 
@@ -483,7 +618,7 @@ def _test_setup_prompts() -> None:
 
     # A name is asked for before anything slow runs, and never again on a resume.
     body = Path(INSTALL_SH).read_text(encoding="utf-8")
-    if not re.search(r"if ! state_at_least configured; then\n\s+prompt_settings\n\s+configure\n", body):
+    if not re.search(r"if ! state_at_least configured; then\n\s+choose_settings\n\s+configure\n", body):
         _fail("install.prompts.placement", "prompts do not run once, immediately before configure")
         return
     _pass(f"install.prompts.answerable_from_env_{len(cases) + len(rejected)}_cases")

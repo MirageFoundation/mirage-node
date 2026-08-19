@@ -498,6 +498,19 @@ from web.backend.db import init_backend_schema
 init_backend_schema()
 PY
 
+# Same for the indexer schema. Data migrations query indexer tables, and until
+# this ran here the indexer only created them once it started — which is after
+# migrations — so any migration touching e.g. posts aborted the whole startup on
+# a host that had never indexed a block.
+echo "==> Initializing indexer schema (pre-migrations)..."
+python3 - <<'PY'
+import os
+
+from indexer.database import DatabaseManager
+
+DatabaseManager(os.environ["INDEXER_DB_URL"])
+PY
+
 # Run deploy migrations (one-time migrations + env sync with templates)
 echo "==> Running deploy migrations..."
 python3 -m deploy.migrations --config-dir "$ENV_DIR"
