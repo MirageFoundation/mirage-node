@@ -20,6 +20,8 @@ MANIFEST_DIR=""
 TEMP_MANIFEST_DIR=""
 PUBLIC_IP=""
 PUBLIC_IP6=""
+PREVIOUS_IMAGE=""
+RESUME_IMAGE_CHANGED=0
 
 GITHUB_RAW="https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod"
 RELEASE_MANIFEST_URL="${MIRAGE_MANIFEST_URL:-$GITHUB_RAW/release/manifest.json}"
@@ -213,6 +215,33 @@ use_pinned_manifests() {
       die "install state is verified but pinned manifest is missing: $MANIFEST_DIR/$name"
     fi
   done
+}
+
+refresh_manifests_for_resume() {
+  use_pinned_manifests
+  verify_manifests
+  local pinned_release_id pinned_generation
+  pinned_release_id=$(jq -r '.release_id' "$MANIFEST_DIR/manifest.json")
+  pinned_generation=$(jq -r '.generation' "$MANIFEST_DIR/network.json")
+  PREVIOUS_IMAGE=$(jq -r '.image' "$MANIFEST_DIR/manifest.json")
+
+  fetch_manifests
+  verify_manifests
+  local fetched_release_id fetched_generation fetched_image
+  fetched_release_id=$(jq -r '.release_id' "$MANIFEST_DIR/manifest.json")
+  fetched_generation=$(jq -r '.generation' "$MANIFEST_DIR/network.json")
+  fetched_image=$(jq -r '.image' "$MANIFEST_DIR/manifest.json")
+  if (( fetched_release_id < pinned_release_id )); then
+    die "fetched release id $fetched_release_id is older than pinned release id $pinned_release_id"
+  fi
+  if (( fetched_generation < pinned_generation )); then
+    die "fetched network generation $fetched_generation is older than pinned generation $pinned_generation"
+  fi
+  if [[ "$fetched_image" != "$PREVIOUS_IMAGE" ]]; then
+    RESUME_IMAGE_CHANGED=1
+    echo "==> Signed release changed during the incomplete install; switching to $fetched_image"
+  fi
+  pin_manifests
 }
 
 verify_manifests() {
@@ -822,10 +851,43 @@ running_pinned_image() {
   [[ -n "$want" && "$(docker inspect -f '{{.Image}}' mirage 2>/dev/null || true)" == "$want" ]]
 }
 
+reset_partial_chain_init() {
+  local data=/root/.mirage/node/data
+  local validator_state="$data/priv_validator_state.json"
+  [[ -d "$data" ]] || die "incomplete install has no node data directory to preserve"
+  [[ -f "$validator_state" ]] || die "incomplete install has no priv_validator_state.json"
+  local signed_height
+  signed_height=$(jq -r '.height' "$validator_state")
+  if [[ "$signed_height" != "0" ]]; then
+    die "refusing to reset an incomplete install whose validator signed height is $signed_height"
+  fi
+
+  docker rm -f mirage >/dev/null 2>&1 || true
+  local stamp cap
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  cap="/root/.mirage/.failed_install_forensics/$stamp"
+  mkdir -p "$cap"
+  printf 'reason=release_changed_before_first_rpc\nprevious_image=%s\nnew_image=%s\nsigned_height=%s\ncaptured_at=%s\n' \
+    "$PREVIOUS_IMAGE" "$IMAGE" "$signed_height" "$stamp" > "$cap/MANIFEST.txt"
+  mv "$data" "$cap/data"
+  mkdir -p "$data"
+  install -m 0600 "$cap/data/priv_validator_state.json" "$validator_state"
+  rm -f /root/.mirage/node/config/genesis.json /root/.mirage/.initialized
+  echo "==> Preserved partial chain initialization in $cap and reset it for the amended release"
+}
+
 startup_failed() {
   echo "ERROR: $1" >&2
   echo "--- last 20 lines of container output ---" >&2
   docker logs --tail 20 mirage >&2 2>&1 || true
+  echo "--- last 40 lines of miraged output ---" >&2
+  local latest_node_log
+  latest_node_log=$({ compgen -G '/root/.mirage/logs/node/miraged-*.log' || true; } | sort | tail -1)
+  if [[ -n "$latest_node_log" ]]; then
+    tail -n 40 "$latest_node_log" >&2
+  else
+    echo "No miraged log found in /root/.mirage/logs/node" >&2
+  fi
   die "the node did not come up; follow it with 'docker logs -f mirage', then re-run this installer to finish"
 }
 
@@ -951,18 +1013,19 @@ main() {
     pin_manifests
     advance_state verified
   else
-    use_pinned_manifests
-    verify_manifests
+    refresh_manifests_for_resume
   fi
   IMAGE=$(jq -r '.image' "$MANIFEST_DIR/manifest.json")
   if [[ -z "$IMAGE" || "$IMAGE" == "null" ]]; then
     die "release manifest missing image"
   fi
 
-  if ! state_at_least pulled; then
+  if (( RESUME_IMAGE_CHANGED )) || ! state_at_least pulled; then
     pull_image
     install_hosttools
-    advance_state pulled
+    if ! state_at_least pulled; then
+      advance_state pulled
+    fi
   fi
 
   prompt_mnemonic
@@ -982,6 +1045,10 @@ main() {
   if ! state_at_least identity; then
     identity
     advance_state identity
+  fi
+
+  if (( RESUME_IMAGE_CHANGED )) && state_at_least identity && ! state_at_least launched; then
+    reset_partial_chain_init
   fi
 
   if ! state_at_least launched; then

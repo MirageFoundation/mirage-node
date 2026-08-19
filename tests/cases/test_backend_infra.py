@@ -1691,7 +1691,13 @@ def test_node_join_bootstrap(backend: str):
     else:
         _fail("node_join.pin_is_sha256", f"GENESIS_SHA256={bj.GENESIS_SHA256!r}")
 
-    fake_genesis = {"chain_id": "mirage-1", "initial_height": "2096156", "app_state": {"core": {}}}
+    legacy_params = {"tiers": [{"archive_duration_days": "30"}]}
+    current_params = {"tiers": [{"max_enabled_agents": "5"}], "pow_difficulty_step": "1"}
+    fake_genesis = {
+        "chain_id": "mirage-1",
+        "initial_height": "2096156",
+        "app_state": {"core": {"params": legacy_params}, "bank": {"marker": "preserved"}},
+    }
     genesis_digest = _hashlib.sha256(bj.canonical(fake_genesis)).hexdigest()
 
     def _rpc_factory(genesis=fake_genesis, hashes=None):
@@ -1712,16 +1718,29 @@ def test_node_join_bootstrap(backend: str):
     target = os.path.join(tmpdir, "config", "genesis.json")
 
     try:
-        # A verified genesis must land on disk in the exact bytes that were
-        # hashed, so the pin stays checkable later with a plain sha256sum.
+        # miraged init leaves the current binary's schema at target. The source
+        # genesis is still verified byte-for-byte, but its obsolete core params
+        # must not be fed back to a binary that cannot decode them. State sync
+        # restores current on-chain params after InitGenesis.
+        with open(target, "w", encoding="utf-8") as f:
+            _json.dump({"app_state": {"core": {"params": current_params}}}, f)
         bj.rpc = _rpc_factory()
         bj.GENESIS_SHA256 = genesis_digest
         bj.install_genesis("http://a", "mirage-1", target)
         on_disk = _hashlib.sha256(open(target, "rb").read()).hexdigest()
-        if on_disk == genesis_digest and _json.load(open(target))["chain_id"] == "mirage-1":
-            _pass("node_join.installs_verified_genesis")
+        installed = _json.load(open(target))
+        if (
+            on_disk != genesis_digest
+            and installed["chain_id"] == "mirage-1"
+            and installed["app_state"]["core"]["params"] == current_params
+            and installed["app_state"]["bank"] == {"marker": "preserved"}
+        ):
+            _pass("node_join.installs_verified_genesis_with_current_params")
         else:
-            _fail("node_join.installs_verified_genesis", f"on_disk={on_disk} pin={genesis_digest}")
+            _fail(
+                "node_join.installs_verified_genesis_with_current_params",
+                f"on_disk={on_disk} pin={genesis_digest} installed={installed}",
+            )
 
         # The whole point of the pin: a genesis for any other chain is refused,
         # and the refusal must not leave a half-written or replaced file.

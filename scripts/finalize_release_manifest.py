@@ -51,6 +51,7 @@ def check_image(manifest: dict) -> None:
     files = (
         ("VERSION", "/opt/mirage/VERSION"),
         ("deploy/install.sh", "/opt/mirage/deploy/install.sh"),
+        ("deploy/bootstrap_join.py", "/opt/mirage/deploy/bootstrap_join.py"),
         ("deploy/harden_server.sh", "/opt/mirage/deploy/harden_server.sh"),
         ("deploy/release_verify.py", "/opt/mirage/deploy/release_verify.py"),
         ("deploy/hosttools/pubkey.pem", "/opt/mirage/deploy/hosttools/pubkey.pem"),

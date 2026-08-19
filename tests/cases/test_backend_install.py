@@ -75,6 +75,8 @@ def test_install(backend: str) -> None:
     _test_moniker_precedence()
     _test_frontend_env_no_foreign_node()
     _test_launch_wait()
+    _test_resume_refreshes_amended_release()
+    _test_partial_chain_reset_preserves_state()
     _test_activation_and_registration_waits()
     _test_pinned_bootstrap_dependencies()
     _test_sshd_validation_survives_socket_activation()
@@ -932,7 +934,99 @@ launch
     if "RPC did not become ready in 120s" in body:
         _fail("install.launch.stale_budget", "the 120s deadline that failed a real first boot is still present")
         return
+    if "last 40 lines of miraged output" not in body or "/root/.mirage/logs/node/miraged-*.log" not in body:
+        _fail("install.launch.node_log", "startup failure still hides the supervised miraged error")
+        return
     _pass("install.launch.waits_for_first_boot_and_fails_fast_on_crash")
+
+
+def _test_resume_refreshes_amended_release() -> None:
+    """An incomplete install must not remain pinned to an image that failed."""
+    function = _shell_function(INSTALL_SH, "refresh_manifests_for_resume")
+    with tempfile.TemporaryDirectory(prefix="resume-manifest-") as tmp:
+        pinned = os.path.join(tmp, "pinned")
+        fetched = os.path.join(tmp, "fetched")
+        os.makedirs(pinned)
+        os.makedirs(fetched)
+
+        def write_manifests(directory: str, release_id: int, image: str, generation: int = 2) -> None:
+            Path(directory, "manifest.json").write_text(
+                json.dumps({"release_id": release_id, "image": image}), encoding="utf-8"
+            )
+            Path(directory, "network.json").write_text(json.dumps({"generation": generation}), encoding="utf-8")
+
+        old_image = "ghcr.io/miragefoundation/mirage-node@sha256:" + "a" * 64
+        new_image = "ghcr.io/miragefoundation/mirage-node@sha256:" + "b" * 64
+        write_manifests(pinned, 1037000, old_image)
+        write_manifests(fetched, 1037000, new_image)
+        script = (
+            "set -euo pipefail\n"
+            "PREVIOUS_IMAGE=''\nRESUME_IMAGE_CHANGED=0\nMANIFEST_DIR=''\n"
+            f"use_pinned_manifests() {{ MANIFEST_DIR={pinned!r}; }}\n"
+            f"fetch_manifests() {{ MANIFEST_DIR={fetched!r}; }}\n"
+            "verify_manifests() { :; }\npin_manifests() { echo pinned; }\n"
+            "die() { echo \"ERROR: $*\" >&2; exit 1; }\n"
+            + function
+            + '\nrefresh_manifests_for_resume\nprintf "%s|%s" "$RESUME_IMAGE_CHANGED" "$PREVIOUS_IMAGE"\n'
+        )
+        r = _run(["bash", "-c", script])
+        if r.returncode != 0 or not r.stdout.endswith(f"1|{old_image}"):
+            _fail("install.resume.amended_release", f"rc={r.returncode} out={r.stdout!r} err={r.stderr!r}")
+            return
+
+        write_manifests(fetched, 1036999, new_image)
+        r = _run(["bash", "-c", script])
+        if r.returncode == 0 or "older than pinned release" not in r.stderr:
+            _fail("install.resume.rejects_downgrade", f"rc={r.returncode} err={r.stderr!r}")
+            return
+    _pass("install.resume.refreshes_amended_release")
+
+
+def _test_partial_chain_reset_preserves_state() -> None:
+    """A failed height-zero InitGenesis is moved aside before a clean retry."""
+    function = _shell_function(INSTALL_SH, "reset_partial_chain_init")
+    with tempfile.TemporaryDirectory(prefix="partial-chain-") as tmp:
+        root = os.path.join(tmp, ".mirage")
+        data = os.path.join(root, "node", "data")
+        config = os.path.join(root, "node", "config")
+        os.makedirs(data)
+        os.makedirs(config)
+        state = '{"height":"0","round":0,"step":0}\n'
+        Path(data, "priv_validator_state.json").write_text(state, encoding="utf-8")
+        Path(data, "application.db").mkdir()
+        Path(data, "application.db", "CURRENT").write_text("partial", encoding="utf-8")
+        Path(config, "genesis.json").write_text("verified source genesis", encoding="utf-8")
+        Path(root, ".initialized").write_text("", encoding="utf-8")
+
+        function = function.replace("/root/.mirage", root)
+        script = (
+            "set -euo pipefail\n"
+            "PREVIOUS_IMAGE=old-image\nIMAGE=new-image\n"
+            "die() { echo \"ERROR: $*\" >&2; exit 1; }\n"
+            "docker() { :; }\n"
+            + function
+            + "\nreset_partial_chain_init\n"
+        )
+        r = _run(["bash", "-c", script])
+        captures = list(Path(root, ".failed_install_forensics").glob("*"))
+        if r.returncode != 0 or len(captures) != 1:
+            _fail("install.resume.partial_snapshot", f"rc={r.returncode} captures={captures} err={r.stderr!r}")
+            return
+        capture = captures[0]
+        if not Path(capture, "data", "application.db", "CURRENT").is_file():
+            _fail("install.resume.partial_data", "partial chain database was not preserved")
+            return
+        if Path(data, "priv_validator_state.json").read_text(encoding="utf-8") != state:
+            _fail("install.resume.validator_state", "validator state was not restored byte-for-byte")
+            return
+        if Path(config, "genesis.json").exists() or Path(root, ".initialized").exists():
+            _fail("install.resume.bootstrap_reset", "old genesis or initialization marker survived")
+            return
+        manifest = Path(capture, "MANIFEST.txt").read_text(encoding="utf-8")
+        if "previous_image=old-image" not in manifest or "new_image=new-image" not in manifest:
+            _fail("install.resume.snapshot_manifest", manifest)
+            return
+    _pass("install.resume.partial_chain_preserved")
 
 
 def _test_activation_and_registration_waits() -> None:

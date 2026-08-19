@@ -3,7 +3,10 @@
 
 A new node only ever joins the existing network, so `miraged init`'s generated
 genesis is never the right one: it describes a brand-new single-validator chain
-at height 1. This fetches the real genesis instead and pins it by hash.
+at height 1. This fetches the real genesis and pins it by hash. The immutable
+genesis carries the core parameter JSON schema from chain launch, so after
+verification its obsolete core params are replaced with the current binary's
+generated defaults; state sync restores the current on-chain values.
 
 State sync is not optional here. Genesis carries initial_height 2096156 while
 nodes retain RETENTION_BLOCKS (~7 days) of blocks, so no peer can serve the
@@ -11,7 +14,7 @@ several million blocks a block-syncing node would ask for.
 
 Writes genesis.json and prints STATESYNC_* KEY=VALUE lines on stdout for the
 caller to parse (init.sh validates each key and never evals them). Any
-verification failure exits non-zero without touching genesis.json.
+verification or schema failure exits non-zero without touching genesis.json.
 """
 
 from __future__ import annotations
@@ -24,9 +27,11 @@ import sys
 import tempfile
 import urllib.request
 
-# sha256 of the canonical (sorted keys, compact separators) mirage-1 genesis.
-# Genesis is immutable, so this pin never needs updating. It is what stops a
-# compromised bootstrap RPC from joining a new node to a different chain.
+# sha256 of the canonical (sorted keys, compact separators) mirage-1 source
+# genesis. Genesis is immutable, so this pin never needs updating. It is what
+# stops a compromised bootstrap RPC from joining a new node to a different
+# chain. The installed file differs only in app_state.core.params, as described
+# in install_genesis().
 GENESIS_SHA256 = "79eb6a81a83707cfd34f69e6f17bf6006ffa9f521b130f51dded92e04c6cfc8d"
 
 # How far below the head to place the light-client trust height. Must stay
@@ -81,14 +86,36 @@ def install_genesis(endpoint: str, chain_id: str, target: str) -> None:
         )
     if genesis.get("chain_id") != chain_id:
         fail(f"genesis chain_id is {genesis.get('chain_id')!r}, expected {chain_id!r}")
+    genesis = json.loads(blob)
 
-    # Written in the same canonical form that was hashed, so the pin can be
-    # re-checked later with a plain sha256sum of the file on disk.
+    # miraged init created target immediately before this function runs. Its
+    # params are the exact JSON schema understood by this binary. The immutable
+    # network genesis predates several field removals and renames; feeding those
+    # old names to a current binary makes InitGenesis abort before state sync can
+    # restore the current chain state. Keep every other byte of chain state, but
+    # use current defaults for this transient pre-snapshot state.
+    try:
+        with open(target, encoding="utf-8") as f:
+            generated = json.load(f)
+        current_params = generated["app_state"]["core"]["params"]
+    except Exception as e:
+        fail(f"cannot read current core params from generated {target}: {e}")
+    if not isinstance(current_params, dict) or not current_params:
+        fail(f"generated {target} has no current core params")
+    try:
+        core = genesis["app_state"]["core"]
+    except Exception as e:
+        fail(f"verified genesis has no app_state.core object: {e}")
+    if not isinstance(core, dict) or "params" not in core:
+        fail("verified genesis has no app_state.core.params")
+    core["params"] = current_params
+    installed_blob = canonical(genesis)
+
     d = os.path.dirname(target)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".genesis-")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write(blob)
+            f.write(installed_blob)
         os.replace(tmp, target)
     except BaseException:
         if os.path.exists(tmp):
@@ -97,7 +124,8 @@ def install_genesis(endpoint: str, chain_id: str, target: str) -> None:
 
     print(
         f"==> Installed verified mirage-1 genesis "
-        f"(initial_height={genesis.get('initial_height')}, sha256={digest[:16]}...)",
+        f"(initial_height={genesis.get('initial_height')}, source_sha256={digest[:16]}..., "
+        f"current core params applied)",
         file=sys.stderr,
     )
 
