@@ -176,6 +176,9 @@ NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SE
 
 MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
 
+# Longest an unattended live dashboard may keep polling the node.
+SESSION_LIMIT_SECS = int(os.environ.get("MIRAGE_STATUS_SESSION_LIMIT_SECS", "3600"))
+
 
 def debug_log(msg: str) -> None:
     if not _DEBUG_LOG_ENABLED:
@@ -2528,7 +2531,7 @@ def display_statuses(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
 
 def render_compact_dashboard(
     statuses: list[ServiceStatus], width: int, height: int, refresh_secs: int, chain_height: int | None = None
-) -> None:
+) -> list[str]:
     """Single-column layout for 80x24 and other short/narrow terminals."""
     output = []
     output.append(f"{Colors.BOLD}MIRAGE{Colors.RESET}  {_dashboard_versions()}")
@@ -2566,18 +2569,17 @@ def render_compact_dashboard(
         output.pop()
     output.append("")
     output.append(footer)
-    print("\n".join(output), flush=True)
+    return output
 
 
-def render_dashboard(refresh_secs: int):
-    """Render the full dashboard."""
+def render_dashboard(refresh_secs: int) -> list[str]:
+    """Build one full frame. Returns lines; the caller owns painting."""
     term_width, term_height = get_terminal_size()
     statuses = display_statuses(collect_statuses())
     chain_height = comet_height_from_statuses(statuses)
 
     if term_width < 100 or term_height < 28:
-        render_compact_dashboard(statuses, term_width, term_height, refresh_secs, chain_height)
-        return
+        return render_compact_dashboard(statuses, term_width, term_height, refresh_secs, chain_height)
 
     # Render header
     output = render_header(term_width, chain_height)
@@ -2625,13 +2627,28 @@ def render_dashboard(refresh_secs: int):
                 output.append(margin_str + line)
         output.append("")
 
-    # Print output
-    print("\n".join(output), flush=True)
-
-    # Footer
     footer = f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}"
-    print()
-    print(center_text(footer, term_width), flush=True)
+    # A frame taller than the terminal scrolls, which breaks in-place repainting
+    # and brings the flicker back. Drop trailing card rows so the footer fits.
+    while len(output) > term_height - 2:
+        output.pop()
+    output.append("")
+    output.append(center_text(footer, term_width))
+    return output
+
+
+def paint(lines: list[str]) -> None:
+    """Overwrite the previous frame in place, in a single write.
+
+    Erasing the screen before collecting the next frame leaves the terminal
+    blank for as long as collection takes, which reads as a black flash once a
+    second. Each row is overwritten and erased to its end instead, and the
+    write is wrapped in synchronized-output so terminals that support it show
+    no intermediate state.
+    """
+    body = "\033[K\r\n".join(lines) + "\033[K"
+    sys.stdout.write("\033[?2026h\033[H" + body + "\033[J\033[?2026l")
+    sys.stdout.flush()
 
 
 def run_health_check_json(required_services: list[str]) -> dict:
@@ -2732,34 +2749,56 @@ def main():
     def request_refresh(_signum=None, _frame=None):
         refresh_requested.set()
 
+    def terminate(signum, _frame=None):
+        # Default SIGTERM/SIGHUP death skips the restore and leaves the
+        # operator on the alternate screen with no cursor.
+        raise SystemExit(128 + signum)
+
     if interactive:
         signal.signal(signal.SIGWINCH, request_refresh)
+        signal.signal(signal.SIGTERM, terminate)
+        signal.signal(signal.SIGHUP, terminate)
 
     entered_alt = False
     hide_cursor = False
 
     def restore_terminal():
+        nonlocal entered_alt, hide_cursor
         if hide_cursor:
             sys.stdout.write("\033[?25h")
+            hide_cursor = False
         if entered_alt:
             sys.stdout.write("\033[?1049l")
+            entered_alt = False
         sys.stdout.flush()
 
     try:
         if interactive:
-            sys.stdout.write("\033[?1049h\033[?25l")
+            sys.stdout.write("\033[?1049h\033[?25l\033[2J")
             sys.stdout.flush()
             entered_alt = True
             hide_cursor = True
+        started = time.monotonic()
         while True:
-            if interactive or not args.once:
-                sys.stdout.write("\033[2J\033[H")
-                sys.stdout.flush()
-            render_dashboard(refresh_secs=args.interval)
+            frame = render_dashboard(refresh_secs=args.interval)
+            if interactive:
+                paint(frame)
+            else:
+                print("\n".join(frame), flush=True)
             if args.once:
                 return
             refresh_requested.wait(args.interval)
             refresh_requested.clear()
+            # docker exec forwards no signal into the container, so a dropped
+            # ssh session leaves this polling the node once a second forever.
+            # Bound the session instead of leaking a watcher nobody reads.
+            if interactive and time.monotonic() - started >= SESSION_LIMIT_SECS:
+                restore_terminal()
+                print(
+                    f"mirage-status ended after {SESSION_LIMIT_SECS // 60} minutes; run it again to resume",
+                    flush=True,
+                )
+                return
     except KeyboardInterrupt:
         restore_terminal()
         sys.exit(130)

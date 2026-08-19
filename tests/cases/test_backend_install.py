@@ -2833,6 +2833,9 @@ def _test_status_compact_layout() -> None:
     if "SIGWINCH" not in dashboard:
         _fail("install.status.resize", "dashboard must refresh on SIGWINCH")
         return
+    if "SIGTERM" not in dashboard or "SIGHUP" not in dashboard:
+        _fail("install.status.restores_on_signal", "a killed dashboard must still leave the alternate screen")
+        return
     if "docker exec -it" not in status_tool or "--once" not in status_tool:
         _fail("install.status.host_tty", "mirage-status must allocate a TTY only for live mode")
         return
@@ -2847,14 +2850,26 @@ def _test_status_compact_layout() -> None:
         dash.ServiceStatus("Backend", dash.Status.ERROR, "down", {"supervisor_state": "FATAL"}),
         dash.ServiceStatus("Indexer", dash.Status.WARN, "lag", {"lag": 4, "supervisor_state": "RUNNING"}),
     ]
+    # The frame is built before anything is painted, so a slow collection can
+    # no longer leave the terminal blank between refreshes.
+    if "def paint(" not in dashboard or "\\033[?2026h" not in dashboard:
+        _fail("install.status.in_place_repaint", "live dashboard must repaint in place with synchronized output")
+        return
+    if "\\033[2J\\033[H" in dashboard:
+        _fail("install.status.no_clear_per_frame", "dashboard still erases the screen before collecting a frame")
+        return
+
     buf = io.StringIO()
     with redirect_stdout(buf):
-        dash.render_compact_dashboard(fake, 80, 24, 1)
-    text = buf.getvalue()
+        lines = dash.render_compact_dashboard(fake, 80, 24, 1)
+    if buf.getvalue():
+        _fail("install.status.renderer_prints", f"renderer wrote to stdout instead of returning a frame: {buf.getvalue()!r}")
+        return
+    text = "\n".join(lines)
     if "Ctrl+C exits" not in text or "[FATAL]" not in text or "MIRAGE" not in text:
         _fail("install.status.compact_content", text)
         return
-    visible_lines = [line for line in text.splitlines() if line]
+    visible_lines = [line for line in lines if line]
     if len(visible_lines) > 24:
         _fail("install.status.compact_height", f"{len(visible_lines)} lines for a 24-row terminal")
         return
