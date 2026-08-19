@@ -187,6 +187,10 @@ def main():
         temp_caddy = f.name
     
     os.environ["DOMAIN"] = domain
+    # This path always terminates TLS, so the mixed-content upgrade belongs in the
+    # policy. entrypoint.sh leaves it out for a node reached by IP, where the
+    # upgrade would send the module script to an https port nothing listens on.
+    os.environ["CSP_UPGRADE_INSECURE"] = "; upgrade-insecure-requests"
     result = run(["python3", str(ROOT_DIR / "deploy" / "render_template.py"),
                   str(template), temp_caddy], check=False)
     if result.returncode != 0:
@@ -200,6 +204,10 @@ def main():
     with open(temp_caddy) as f:
         rendered = f.read()
     os.unlink(temp_caddy)
+
+    if not re.search(r"Content-Security-Policy .*upgrade-insecure-requests", rendered):
+        print("ERROR: rendered CSP for an HTTPS site lost upgrade-insecure-requests")
+        return 1
     
     final_config = f"""{rendered}
 

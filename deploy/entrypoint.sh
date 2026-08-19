@@ -187,6 +187,15 @@ else
 fi
 
 echo "==> Rendering Caddyfile..."
+# A domain node terminates TLS, so upgrading mixed content is what we want. A
+# node reached by its IP serves :80 only and cannot hold a cert for an IP, so
+# upgrading rewrites the module script to https://<ip>/static/js/index.*.js,
+# which never connects and leaves the browser with a blank app.
+if [ -n "${DOMAIN:-}" ]; then
+  export CSP_UPGRADE_INSECURE="; upgrade-insecure-requests"
+else
+  export CSP_UPGRADE_INSECURE=""
+fi
 if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "$CADDYFILE"; then
   echo "ERROR: Failed to render Caddyfile" >&2
   exit 1
@@ -200,6 +209,18 @@ if ! grep -q "reverse_proxy.*127.0.0.1:5000" "$CADDYFILE"; then
   echo "ERROR: Caddyfile missing API proxy configuration" >&2
   echo "Caddyfile contents:" >&2
   cat "$CADDYFILE" >&2
+  exit 1
+fi
+# An unset CSP_UPGRADE_INSECURE renders as empty, which would silently drop the
+# directive from an HTTPS site instead of failing. Matched on the header line, so
+# a comment mentioning the directive cannot satisfy or trip either check.
+CSP_UPGRADE_RENDERED='Content-Security-Policy .*upgrade-insecure-requests'
+if [ -n "${DOMAIN:-}" ] && ! grep -q "$CSP_UPGRADE_RENDERED" "$CADDYFILE"; then
+  echo "ERROR: Caddyfile for $DOMAIN lost upgrade-insecure-requests" >&2
+  exit 1
+fi
+if [ -z "${DOMAIN:-}" ] && grep -q "$CSP_UPGRADE_RENDERED" "$CADDYFILE"; then
+  echo "ERROR: Caddyfile has upgrade-insecure-requests on a plain-HTTP node" >&2
   exit 1
 fi
 echo "✓ Caddyfile verified"

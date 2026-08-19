@@ -388,6 +388,20 @@ def truncate(text: str, max_len: int) -> str:
     return text[: max_len - 1] + "…"
 
 
+def format_mirage(amount: float) -> str:
+    """Compact MIRAGE amount, matching the `5mm` form the cards already use.
+
+    Card content is 34 columns wide, so a grouped integer plus its label runs
+    past the edge and gets cut mid-word.
+    """
+    for unit, scale in (("bn", 1_000_000_000), ("mm", 1_000_000)):
+        if amount >= scale:
+            value = amount / scale
+            text = f"{value:,.1f}" if value < 100 else f"{value:,.0f}"
+            return f"{text.removesuffix('.0')}{unit}"
+    return f"{amount:,.0f}"
+
+
 def center_text(text: str, width: int) -> str:
     """Center text within a given width."""
     visible_len = len(text.encode("utf-8").decode("utf-8"))
@@ -718,6 +732,26 @@ def check_node() -> ServiceStatus:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details=details)
 
 
+def classify_retention(retained: int, effective: int, catching_up: bool, mismatch: bool) -> tuple[Status, str]:
+    """Judge the block window against the configured one.
+
+    A window shorter than configured is not a fault. Pruning only trims once
+    the store passes min-retain-blocks, so a short window means it has not
+    filled yet — a node that just state-synced or was recovered starts at its
+    snapshot base and grows one block at a time. A window *longer* than
+    configured is the real problem: pruning is not reclaiming and the disk
+    fills.
+    """
+    tolerance = 100
+    if retained > effective + tolerance:
+        return Status.WARN, "Above expected"
+    if mismatch:
+        return Status.WARN, "Config mismatch"
+    if retained < max(0, effective - tolerance):
+        return Status.OK, "Syncing" if catching_up else "Building up"
+    return Status.OK, "Within range"
+
+
 def check_retention() -> ServiceStatus:
     """Check block retention against config + chain constraints."""
     node_home = os.path.expanduser("~/.mirage/node")
@@ -813,21 +847,7 @@ def check_retention() -> ServiceStatus:
     if effective is None or retained is None:
         return ServiceStatus(name="Retention", status=Status.WARN, message="Config missing", details=details)
 
-    tolerance = 100
-    status = Status.OK
-    message = "Within range"
-
-    if retained < max(0, effective - tolerance):
-        status = Status.WARN
-        message = "Below expected" if not catching_up else "Syncing"
-    elif retained > effective + tolerance:
-        status = Status.WARN
-        message = "Above expected"
-
-    if mismatch and status == Status.OK:
-        status = Status.WARN
-        message = "Config mismatch"
-
+    status, message = classify_retention(retained, effective, catching_up, mismatch)
     return ServiceStatus(name="Retention", status=status, message=message, details=details)
 
 
@@ -2314,10 +2334,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Retention":
         retained = details.get("retained_blocks")
         expected = details.get("expected_blocks")
+        # "blocks" does not fit beside two grouped counts, and the card is
+        # already named for what it retains.
         if retained is not None and expected is not None:
-            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,} blocks")
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} / {expected:,}")
         elif retained is not None:
-            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,}")
         pruning = details.get("pruning_strategy")
         keep = details.get("pruning_keep_recent")
         if pruning:
@@ -2338,12 +2360,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 moniker = moniker[7:]
             lines.append(f"{bullet}{Colors.DIM}Moniker:{Colors.RESET} {truncate(moniker, 18)}")
         if details.get("tokens"):
-            tok = details["tokens"]
-            if tok >= 1_000_000:
-                tok_m = tok / 1_000_000
-                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok_m:,.0f}mm MIRAGE")
-            else:
-                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok:,} MIRAGE")
+            lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {format_mirage(details['tokens'])} MIRAGE")
         if details.get("power_pct") is not None:
             pct = details["power_pct"]
             lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
@@ -2356,10 +2373,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 bal_color = Colors.BRIGHT_YELLOW
             else:
                 bal_color = Colors.BRIGHT_GREEN
-            floor_note = f" {Colors.DIM}(floor {min_liquid:,.0f}){Colors.RESET}" if min_liquid is not None else ""
+            # The floor itself is not shown: the colour says whether the balance
+            # is under it, and the card message names it when it is.
             lines.append(
                 f"{bullet}{Colors.DIM}Liquid:{Colors.RESET} "
-                f"{bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}{floor_note}"
+                f"{bal_color}{format_mirage(balance_mirage)} MIRAGE{Colors.RESET}"
             )
         if details.get("enrollment") == "pending":
             lines.append(f"{bullet}{Colors.BRIGHT_YELLOW}Enrollment pending{Colors.RESET}")
@@ -2406,8 +2424,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} {Colors.BRIGHT_GREEN}ON{Colors.RESET}")
             pool_balance = details.get("pool_balance")
             if pool_balance is not None:
-                balance_mirage = pool_balance / 1_000_000
-                lines.append(f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {balance_mirage:,.0f} MIRAGE")
+                lines.append(
+                    f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {format_mirage(pool_balance / 1_000_000)} MIRAGE"
+                )
         else:
             lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} OFF")
 
@@ -2530,7 +2549,12 @@ def display_statuses(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
 
 
 def render_compact_dashboard(
-    statuses: list[ServiceStatus], width: int, height: int, refresh_secs: int, chain_height: int | None = None
+    statuses: list[ServiceStatus],
+    width: int,
+    height: int,
+    refresh_secs: int,
+    chain_height: int | None = None,
+    pin_bottom: bool = False,
 ) -> list[str]:
     """Single-column layout for 80x24 and other short/narrow terminals."""
     output = []
@@ -2563,23 +2587,29 @@ def render_compact_dashboard(
             extra.append(f"lag={status.details['lag']}")
         if extra:
             output.append(truncate(f"    {Colors.DIM}{' '.join(str(x) for x in extra)}{Colors.RESET}", width))
-    footer = f"Ctrl+C exits  refresh {refresh_secs}s"
+    trailer = render_trailer(width, f"Ctrl+C exits  refresh {refresh_secs}s", center=False)
     # Keep the compact view inside the terminal height.
-    while len(output) > max(8, height - 2):
-        output.pop()
-    output.append("")
-    output.append(footer)
+    body_rows = max(8, height - len(trailer))
+    output = fit_rows(output, body_rows)
+    if pin_bottom:
+        while len(output) < body_rows:
+            output.append("")
+    else:
+        output.append("")
+    output.extend(trailer)
     return output
 
 
-def render_dashboard(refresh_secs: int) -> list[str]:
+def render_dashboard(refresh_secs: int, pin_bottom: bool = False) -> list[str]:
     """Build one full frame. Returns lines; the caller owns painting."""
     term_width, term_height = get_terminal_size()
     statuses = display_statuses(collect_statuses())
     chain_height = comet_height_from_statuses(statuses)
 
     if term_width < 100 or term_height < 28:
-        return render_compact_dashboard(statuses, term_width, term_height, refresh_secs, chain_height)
+        return render_compact_dashboard(
+            statuses, term_width, term_height, refresh_secs, chain_height, pin_bottom=pin_bottom
+        )
 
     # Render header
     output = render_header(term_width, chain_height)
@@ -2627,14 +2657,68 @@ def render_dashboard(refresh_secs: int) -> list[str]:
                 output.append(margin_str + line)
         output.append("")
 
-    footer = f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}"
+    trailer = render_trailer(
+        term_width, f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}", center=True
+    )
     # A frame taller than the terminal scrolls, which breaks in-place repainting
-    # and brings the flicker back. Drop trailing card rows so the footer fits.
-    while len(output) > term_height - 2:
-        output.pop()
-    output.append("")
-    output.append(center_text(footer, term_width))
+    # and brings the flicker back.
+    body_rows = term_height - len(trailer)
+    output = fit_rows(output, body_rows)
+    if pin_bottom:
+        while len(output) < body_rows:
+            output.append("")
+    else:
+        output.append("")
+    output.extend(trailer)
     return output
+
+
+def node_public_url() -> str:
+    """Where operators reach this node: its domain, else its public IP.
+
+    Both values are written to node.env at install and exported into the
+    container, so this costs nothing on the refresh path.
+    """
+    domain = os.environ.get("DOMAIN", "").strip()
+    if domain:
+        for scheme in ("https://", "http://"):
+            if domain.startswith(scheme):
+                domain = domain[len(scheme) :]
+        return f"https://{domain.rstrip('/')}"
+    external = os.environ.get("EXTERNAL_ADDRESS", "").strip()
+    if external:
+        if external.startswith("tcp://"):
+            external = external[len("tcp://") :]
+        # Drop the P2P port; IPv6 literals arrive bracketed.
+        host = external.rsplit(":", 1)[0]
+        if host:
+            return f"http://{host}"
+    return ""
+
+
+def fit_rows(lines: list[str], rows: int) -> list[str]:
+    """Shrink a frame to `rows`, giving up blank spacing before content.
+
+    Cutting from the end clips a card's bottom border, so drop the decorative
+    blank rows first, closest to the bottom first.
+    """
+    out = list(lines)
+    while len(out) > rows:
+        blank = next((i for i in range(len(out) - 1, -1, -1) if out[i] == ""), None)
+        if blank is None:
+            break
+        out.pop(blank)
+    del out[rows:]
+    return out
+
+
+def render_trailer(width: int, footer: str, center: bool) -> list[str]:
+    """The two rows pinned to the bottom: this node's address, then the footer."""
+    url = node_public_url()
+    address = url if url else f"{Colors.BRIGHT_YELLOW}address unknown{Colors.RESET}"
+    if center:
+        return [center_text(address, width), center_text(footer, width)]
+    return [truncate(address, width), truncate(footer, width)]
 
 
 def paint(lines: list[str]) -> None:
@@ -2780,7 +2864,7 @@ def main():
             hide_cursor = True
         started = time.monotonic()
         while True:
-            frame = render_dashboard(refresh_secs=args.interval)
+            frame = render_dashboard(refresh_secs=args.interval, pin_bottom=interactive)
             if interactive:
                 paint(frame)
             else:

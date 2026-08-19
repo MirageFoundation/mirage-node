@@ -15,6 +15,7 @@ import tempfile
 import threading
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from tests.common import _fail, _pass, _INSIDE_CONTAINER
 
@@ -86,6 +87,9 @@ def test_install(backend: str) -> None:
     _test_governed_upgrade_prepare()
     _test_backup_restore_contracts()
     _test_status_compact_layout()
+    _test_card_amounts_fit()
+    _test_retention_building_up()
+    _test_maintenance_gate_tracks_progress()
     _test_completed_installer_updates()
     _test_resume_refreshes_amended_release()
     _test_partial_chain_reset_preserves_state()
@@ -120,6 +124,7 @@ def test_install(backend: str) -> None:
     _test_stake_floor_and_lock()
     _test_economics_single_source()
     _test_caddy_well_known()
+    _test_caddy_csp_upgrade_scoped_to_tls()
     _test_repodigest_pin()
 
 
@@ -2339,6 +2344,65 @@ def _test_caddy_well_known() -> None:
     _pass("install.caddy.well_known_before_spa")
 
 
+def _test_caddy_csp_upgrade_scoped_to_tls() -> None:
+    """A node reached by IP must not send upgrade-insecure-requests.
+
+    It serves :80 and cannot hold a cert for an IP, so the upgrade rewrites the
+    module script to https://<ip>/static/js/index.*.js, nothing answers on 443,
+    and the browser gets a blank app instead of the site.
+    """
+    template = Path(REPO_ROOT, "deploy", "templates", "caddy", "Caddyfile")
+    body = template.read_text(encoding="utf-8")
+    if "manifest-src 'self'${CSP_UPGRADE_INSECURE}" not in body:
+        _fail("install.caddy.csp_upgrade_templated", "CSP does not end in ${CSP_UPGRADE_INSECURE}")
+        return
+
+    entry = Path(REPO_ROOT, "deploy", "entrypoint.sh").read_text(encoding="utf-8")
+    if 'export CSP_UPGRADE_INSECURE="; upgrade-insecure-requests"' not in entry:
+        _fail("install.entrypoint.csp_upgrade_export", "entrypoint does not set the directive for a domain")
+        return
+    # An unset variable renders empty, so a domain node would lose the directive
+    # silently without a startup guard. Reuse the entrypoint's own pattern so the
+    # render below is judged exactly as the running node judges it: a comment
+    # naming the directive must neither satisfy nor trip it.
+    guard = re.search(r"^CSP_UPGRADE_RENDERED='([^']+)'$", entry, re.M)
+    if not guard:
+        _fail("install.entrypoint.csp_guard", "entrypoint does not verify the rendered directive")
+        return
+    pattern = re.compile(guard.group(1))
+
+    renderer = os.path.join(REPO_ROOT, "deploy", "render_template.py")
+    with tempfile.TemporaryDirectory() as tmp:
+        for label, value, want in (
+            ("domain", "; upgrade-insecure-requests", True),
+            ("ip_only", "", False),
+        ):
+            out = os.path.join(tmp, f"Caddyfile.{label}")
+            env = dict(os.environ, CSP_UPGRADE_INSECURE=value)
+            result = _run(["python3", renderer, str(template), out], env=env)
+            if result.returncode != 0:
+                _fail(f"install.caddy.csp_render_{label}", result.stderr[-300:])
+                return
+            got = bool(pattern.search(Path(out).read_text(encoding="utf-8")))
+            if got != want:
+                _fail(
+                    f"install.caddy.csp_upgrade_{label}",
+                    f"upgrade-insecure-requests present={got}, expected {want}",
+                )
+                return
+
+    # setup_letsencrypt.py renders the same template on the HTTPS path, where the
+    # directive must always survive.
+    tls = Path(REPO_ROOT, "deploy", "setup_letsencrypt.py").read_text(encoding="utf-8")
+    if 'os.environ["CSP_UPGRADE_INSECURE"] = "; upgrade-insecure-requests"' not in tls:
+        _fail("install.letsencrypt.csp_upgrade_set", "HTTPS setup renders without the directive")
+        return
+    if "lost upgrade-insecure-requests" not in tls:
+        _fail("install.letsencrypt.csp_upgrade_verified", "HTTPS setup does not verify the rendered policy")
+        return
+    _pass("install.caddy.csp_upgrade_scoped_to_tls")
+
+
 def _test_repodigest_pin() -> None:
     install = Path(INSTALL_SH).read_text(encoding="utf-8")
     update = Path(REPO_ROOT, "deploy", "hosttools", "mirage-update").read_text(encoding="utf-8")
@@ -2823,6 +2887,172 @@ def _test_backup_restore_contracts() -> None:
     _pass("install.backup.restore_safety")
 
 
+def _test_card_amounts_fit() -> None:
+    """MIRAGE amounts are abbreviated so a card never cuts one mid-word."""
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    for amount, expected in (
+        (999_999, "999,999"),
+        (1_000_000, "1mm"),
+        (1_500_000, "1.5mm"),
+        (5_000_000, "5mm"),
+        (123_400_000, "123mm"),
+        (1_500_000_000, "1.5bn"),
+    ):
+        got = dash.format_mirage(amount)
+        if got != expected:
+            _fail("install.status.amount_format", f"{amount} rendered as {got!r}, expected {expected!r}")
+            return
+
+    # Grouped digits pushed the Validator card past its edge as "(floo..".
+    validator = dash.ServiceStatus(
+        "Validator",
+        dash.Status.OK,
+        "Active",
+        {
+            "moniker": "Amsterdam-Node",
+            "tokens": 5_000_000,
+            "power_pct": 0.025,
+            "balance_mirage": 9_999_803.17,
+            "min_liquid_mirage": 1_000_000.0,
+            "registered": True,
+            "active": True,
+        },
+    )
+    retention = dash.ServiceStatus(
+        "Retention",
+        dash.Status.WARN,
+        "Below expected",
+        {"retained_blocks": 10_929, "expected_blocks": 201_600, "pruning_strategy": "custom", "pruning_keep_recent": 1000},
+    )
+    for status in (validator, retention):
+        card = dash.draw_card(status.name, status.status, dash.format_card_content(status))
+        plain = [re.sub(r"\x1b\[[0-9;]*m", "", row) for row in card]
+        clipped = [row for row in plain if ".." in row]
+        if clipped:
+            _fail("install.status.card_truncation", f"{status.name} card still cuts content: {clipped}")
+            return
+        if any("floor" in row for row in plain):
+            _fail("install.status.card_floor", f"{status.name} card should not spell out the floor: {plain}")
+            return
+    _pass("install.status.card_amounts_fit")
+
+
+def _test_retention_building_up() -> None:
+    """A window that has not filled yet is healthy; one that overruns is not."""
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    window = 201_600
+    cases = (
+        # A freshly state-synced node starts at its snapshot base and grows.
+        ((10_957, window, False, False), dash.Status.OK, "Building up"),
+        ((10_957, window, True, False), dash.Status.OK, "Syncing"),
+        ((window, window, False, False), dash.Status.OK, "Within range"),
+        # Pruning is not reclaiming, so the disk keeps growing.
+        ((window * 2, window, False, False), dash.Status.WARN, "Above expected"),
+        ((window, window, False, True), dash.Status.WARN, "Config mismatch"),
+    )
+    for args, expected_status, expected_message in cases:
+        status, message = dash.classify_retention(*args)
+        if status != expected_status or message != expected_message:
+            _fail(
+                "install.status.retention",
+                f"retained={args[0]} of {args[1]} (catching_up={args[2]}, mismatch={args[3]}) "
+                f"gave {status.value}/{message!r}, expected {expected_status.value}/{expected_message!r}",
+            )
+            return
+    _pass("install.status.retention_building_up")
+
+
+def _maintenance_gate_run(tmp: str, stall_secs: int, backend_ready: bool, freeze_after: int) -> subprocess.CompletedProcess:
+    """Run the gate with curl/rm/sleep stubbed, so no wall-clock time passes."""
+    fake = os.path.join(tmp, "bin")
+    os.makedirs(fake, exist_ok=True)
+    counter = os.path.join(tmp, "polls")
+    removed = os.path.join(tmp, "removed")
+
+    backend_rc = 0 if backend_ready else 22
+    Path(os.path.join(fake, "curl")).write_text(
+        f"""#!/bin/bash
+case "$*" in
+  *5000/api/get_node_config*) exit {backend_rc} ;;
+  *26657/status*)
+    n=$(cat {counter!r} 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > {counter!r}
+    if [ "$n" -gt {freeze_after} ]; then n={freeze_after}; fi
+    echo "{{\\"result\\":{{\\"sync_info\\":{{\\"latest_block_height\\":\\"$((7000000 + n))\\"}}}}}}"
+    ;;
+  *) exit 22 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    # The flag lives at an absolute path a test must not touch, and instant
+    # sleeps keep a multi-hour sync inside a test run.
+    Path(os.path.join(fake, "rm")).write_text(f'#!/bin/bash\necho "$*" >> {removed!r}\n', encoding="utf-8")
+    Path(os.path.join(fake, "sleep")).write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    for name in ("curl", "rm", "sleep"):
+        os.chmod(os.path.join(fake, name), 0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = fake + os.pathsep + env["PATH"]
+    env["CHAIN_STARTUP_GRACE_SECONDS"] = str(stall_secs)
+    result = subprocess.run(
+        ["bash", os.path.join(REPO_ROOT, "deploy", "run_maintenance_gate.sh")],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    result.removed_flag = os.path.isfile(removed)  # type: ignore[attr-defined]
+    return result
+
+
+def _test_maintenance_gate_tracks_progress() -> None:
+    """A syncing node keeps the maintenance page; a stalled one still fails."""
+    stall = 20
+
+    # A node replaying blocks answers 503 for hours. The gate used to give up on
+    # a wall clock and, with autorestart=false, left the page up forever.
+    with tempfile.TemporaryDirectory(prefix="gate-syncing-") as tmp:
+        r = _maintenance_gate_run(tmp, stall, backend_ready=False, freeze_after=200)
+        if r.returncode == 0 or r.removed_flag:  # type: ignore[attr-defined]
+            _fail("install.gate.syncing", f"gate lifted maintenance for an unready backend: rc={r.returncode}")
+            return
+        elapsed = [int(m) for m in re.findall(r"\((\d+)s elapsed", r.stdout)]
+        if not elapsed or max(elapsed) <= stall:
+            _fail(
+                "install.gate.waits_while_syncing",
+                f"gave up after {max(elapsed) if elapsed else 0}s despite block progress (stall limit {stall}s)",
+            )
+            return
+        if "has not advanced" not in r.stderr:
+            _fail("install.gate.stall_message", f"unclear failure: {r.stderr!r}")
+            return
+
+    # A node that is not advancing must still fail inside the stall window.
+    with tempfile.TemporaryDirectory(prefix="gate-stalled-") as tmp:
+        r = _maintenance_gate_run(tmp, stall, backend_ready=False, freeze_after=0)
+        if r.returncode == 0 or r.removed_flag:  # type: ignore[attr-defined]
+            _fail("install.gate.stalled", f"stalled node did not fail: rc={r.returncode}")
+            return
+        elapsed = [int(m) for m in re.findall(r"\((\d+)s elapsed", r.stdout)]
+        if elapsed and max(elapsed) > stall + 60:
+            _fail("install.gate.stall_bound", f"stalled node waited {max(elapsed)}s for a {stall}s limit")
+            return
+
+    # A ready backend lifts the page.
+    with tempfile.TemporaryDirectory(prefix="gate-ready-") as tmp:
+        r = _maintenance_gate_run(tmp, stall, backend_ready=True, freeze_after=0)
+        if r.returncode != 0 or not r.removed_flag:  # type: ignore[attr-defined]
+            _fail("install.gate.lifts", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+    _pass("install.gate.tracks_sync_progress")
+
+
 def _test_status_compact_layout() -> None:
     """80x24 terminals use the compact renderer; live mode restores the alternate screen."""
     dashboard = Path(os.path.join(REPO_ROOT, "scripts", "status_dashboard.py")).read_text(encoding="utf-8")
@@ -2872,5 +3102,30 @@ def _test_status_compact_layout() -> None:
     visible_lines = [line for line in lines if line]
     if len(visible_lines) > 24:
         _fail("install.status.compact_height", f"{len(visible_lines)} lines for a 24-row terminal")
+        return
+
+    # The address an operator would type is the domain when there is one, and
+    # the public IP otherwise. Both come from node.env, so no refresh-path lookup.
+    ipv4 = {"DOMAIN": "", "EXTERNAL_ADDRESS": "tcp://203.0.113.7:26656"}
+    cases = (
+        (ipv4, "http://203.0.113.7"),
+        ({"DOMAIN": "mirage.vote", "EXTERNAL_ADDRESS": "tcp://203.0.113.7:26656"}, "https://mirage.vote"),
+        ({"DOMAIN": "", "EXTERNAL_ADDRESS": "tcp://[2001:db8::1]:26656"}, "http://[2001:db8::1]"),
+    )
+    for env, expected in cases:
+        with mock.patch.dict(os.environ, env, clear=False):
+            got = dash.node_public_url()
+        if got != expected:
+            _fail("install.status.address", f"{env} produced {got!r}, expected {expected!r}")
+            return
+
+    # The address and the key hints sit on the last two rows of the terminal.
+    with mock.patch.dict(os.environ, ipv4, clear=False):
+        pinned = dash.render_compact_dashboard(fake, 80, 24, 1, None, pin_bottom=True)
+    if len(pinned) != 24:
+        _fail("install.status.pinned_height", f"pinned frame is {len(pinned)} rows for a 24-row terminal")
+        return
+    if pinned[-2] != "http://203.0.113.7" or "Ctrl+C exits" not in pinned[-1]:
+        _fail("install.status.pinned_trailer", f"bottom rows are {pinned[-2]!r} / {pinned[-1]!r}")
         return
     _pass("install.status.compact_80x24")
