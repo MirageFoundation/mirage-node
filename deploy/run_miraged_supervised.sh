@@ -155,10 +155,19 @@ if [ -n "${SKIP_UPGRADES:-}" ]; then
   done
 fi
 
+# cosmos-sdk returns the halt verbatim from x/upgrade.Keeper.PreBlocker, and
+# CometBFT wraps it in an err="..." payload that escapes the inner quotes:
+#   ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \"v1.26.0\" NEEDED at height: 4895581: "
+# That escaped form is what the real v1.26.0 halt produced. A pattern requiring a
+# bare quote misses it, the halt goes undetected, and this wrapper restart-loops
+# the pre-upgrade binary at the halt height. Keep this in step with
+# UPGRADE_HALT_RE in scripts/divergence_watchdog.py.
+UPGRADE_HALT_PATTERN='UPGRADE[[:space:]]+\\?"[^"\\]+\\?"[[:space:]]+NEEDED[[:space:]]+at[[:space:]]+height:'
+
 upgrade_halt_detected() {
   local log="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
   [ -f "$log" ] || return 1
-  grep -aE 'UPGRADE ".+" NEEDED at height:' "$log" | tail -1
+  grep -aE "$UPGRADE_HALT_PATTERN" "$log" | tail -1
 }
 
 hold_for_governed_upgrade() {

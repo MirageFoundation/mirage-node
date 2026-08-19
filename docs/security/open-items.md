@@ -40,6 +40,17 @@ The leftover items from that sweep that the operator chose to **fix**:
 | `enable_validator_mode` overwrites `priv_validator_state.json` to head+5 on every start | **Fixed, shipped in `v1.37.0`.** Never lowers an existing watermark; skips the write while `catching_up`. Weekly restart also skips `catching_up`. |
 | NT-5 ASN layout declared twice | **Fixed, shipped in `v1.37.0`.** Layout and class map live in `shared/asn_layout.py`. |
 | Invalid UTF-8 memo can abort the indexer | **Fixed, shipped in `v1.37.0`.** `TxBody`/`TxRaw` decode failures are logged and indexed as `undecodable`; the block continues. |
+| Supervisor halt detection missed the real CometBFT log format | **Fixed, shipped in `v1.37.0`.** `upgrade_halt_detected` required a bare quote, but CometBFT wraps the halt in `err="… UPGRADE \"vX\" NEEDED at height: …"`, which is what the live v1.26.0 halt emitted. The halt went undetected, so the wrapper restart-looped the pre-upgrade binary at the halt height and never wrote `halt-detected.txt`. `UPGRADE_HALT_PATTERN` now matches both shapes, in step with `UPGRADE_HALT_RE` in the watchdog, and the test asserts against both log lines rather than the pattern text. |
+| Halt activation demanded the validator signed the halt block | **Fixed, shipped in `v1.37.0`.** `activate_if_halted` required `priv_validator_state.height == plan_height`, which only an active-set validator that voted at the halt can satisfy — a jailed or not-yet-registered node was stranded on the pre-upgrade binary, and block H never commits so even a healthy signer can sit at H-1. The chain's halt marker is now the authority; signing is consulted only to detect a stale marker. |
+| An ordinary release could strand an armed governed upgrade | **Fixed, shipped in `v1.37.0`.** `tick` restaged over a prepared upgrade and `prune_mirage_images.sh` kept only `active`/`staged`/`previous`, so the prepared digest could be pruned and activation would refuse an image it could not find. `tick` now declines to stage an ordinary release while an upgrade is armed, and the pruner keeps the prepared image. |
+
+Residual, accepted: no test exercises the governed activation path end to end.
+`scripts/test_upgrade.sh` rehearses governance halt plus a manual
+`deploy.sh --local --update`, which swaps binaries through the dev deploy script
+rather than through `prepared.json` → `mirage-upgrade-activate.timer` →
+`mirage-launch`. That path is covered by shell-level tests and source contracts
+only, so the first real `upgrade-halt` release is its first live exercise. The
+three fixes above were all found by reading it rather than running it.
 
 The closed history from `v1.36.0` follows.
 

@@ -52,6 +52,14 @@ def _shell_function(path: str, name: str) -> str:
     return "\n".join(lines[start : end + 1]) + "\n"
 
 
+def _shell_variable(path: str, name: str) -> str:
+    """Read a single-quoted top-level shell assignment, unquoted."""
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{name}='") and line.endswith("'"):
+            return line[len(name) + 2 : -1]
+    return ""
+
+
 def _ed25519_keypair(tmpdir: str) -> tuple[str, str]:
     priv = os.path.join(tmpdir, "priv.pem")
     pub = os.path.join(tmpdir, "pub.pem")
@@ -2661,8 +2669,42 @@ def _test_governed_upgrade_prepare() -> None:
     if "autorestart=unexpected does not relaunch" not in wrapper:
         _fail("install.upgrade.budget_exit", "node wrapper must exit 0 when the hourly restart budget is exhausted")
         return
-    if 'UPGRADE ".+" NEEDED at height:' not in wrapper:
-        _fail("install.upgrade.halt_line", "node wrapper does not recognise the Cosmos upgrade halt line")
+    # CometBFT wraps the halt in an err="..." payload that escapes the inner
+    # quotes. A pattern needing a bare quote misses the real production line, the
+    # halt goes undetected, and the pre-upgrade binary restart-loops at the halt
+    # height. Assert against both shapes rather than against the pattern text.
+    halt_pattern = _shell_variable(
+        os.path.join(REPO_ROOT, "deploy", "run_miraged_supervised.sh"), "UPGRADE_HALT_PATTERN"
+    )
+    if not halt_pattern:
+        _fail("install.upgrade.halt_pattern", "node wrapper has no UPGRADE_HALT_PATTERN to check")
+        return
+    escaped = 'ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \\"v1.26.0\\" NEEDED at height: 4895581: "'
+    for label, line, want in (
+        ("escaped", escaped, True),
+        ("plain", 'ERR UPGRADE "v1.26.0" NEEDED at height: 4895581', True),
+        ("apphash", 'ERR CONSENSUS FAILURE!!! err="wrong Block.Header.AppHash"', False),
+        ("unquoted", "INFO UPGRADE scheduled NEEDED at height: 5", False),
+    ):
+        with tempfile.TemporaryDirectory(prefix="halt-line-") as tmp:
+            log = os.path.join(tmp, "node.log")
+            Path(log).write_text(line + "\n", encoding="utf-8")
+            # Pass the pattern as argv: shell-quoting it inline would alter its
+            # backslashes and silently test a different pattern than ships.
+            probe = _run(["bash", "-c", 'grep -aE "$1" "$2" >/dev/null', "bash", halt_pattern, log])
+            if (probe.returncode == 0) is not want:
+                _fail(
+                    "install.upgrade.halt_line",
+                    f"{label} halt line: matched={probe.returncode == 0}, expected {want}",
+                )
+                return
+    if "hold_for_governed_upgrade" not in wrapper:
+        _fail("install.upgrade.halt_line_wired", "halt detection is not wired to the hold")
+        return
+
+    pruner = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh")).read_text(encoding="utf-8")
+    if "prepared.json" not in pruner:
+        _fail("install.upgrade.prune_keeps_prepared", "image pruner can delete the image armed for a governed halt")
         return
 
     prepare = _shell_function(UPDATE_SH, "prepare")
@@ -2764,6 +2806,70 @@ query_local_rest() {{ curl "$@"; }}
         r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
         if r.returncode != 0 or os.path.exists(prepared_path):
             _fail("install.upgrade.tick_ordinary_not_armed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+
+    # An ordinary release published after arming must not repoint "staged" and
+    # orphan the prepared digest, or the halt strands on a pruned image.
+    real_tick = _shell_function(UPDATE_SH, "tick")
+    with tempfile.TemporaryDirectory(prefix="tick-guards-armed-") as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(os.path.join(home, ".mirage", "upgrade"), exist_ok=True)
+        os.makedirs(os.path.join(home, ".mirage", "env"), exist_ok=True)
+        prepared = os.path.join(home, ".mirage", "upgrade", "prepared.json")
+        Path(prepared).write_text(
+            json.dumps({"upgrade_name": "v-halt", "plan_height": 777, "image": "img@sha256:" + ("d" * 64)}),
+            encoding="utf-8",
+        )
+        # Sources must not live in the work dir; fetch_verify copies into it.
+        src = os.path.join(tmp, "src")
+        work = os.path.join(tmp, "work")
+        os.makedirs(src, exist_ok=True)
+        os.makedirs(work, exist_ok=True)
+        state = os.path.join(tmp, "state.json")
+        Path(state).write_text(json.dumps({"last_release_id": 5, "last_network_generation": 3}), encoding="utf-8")
+        release = os.path.join(src, "release.json")
+        Path(release).write_text(
+            json.dumps(
+                {
+                    "version": "v9.9.9",
+                    "release_id": 6,
+                    "activation": "ordinary",
+                    "upgrade_name": "",
+                    "rollback_safe": False,
+                    "consensus_breaking": False,
+                    "image": "ghcr.io/miragefoundation/mirage-node@sha256:" + ("e" * 64),
+                }
+            ),
+            encoding="utf-8",
+        )
+        network = os.path.join(src, "network.json")
+        Path(network).write_text(json.dumps({"min_release": "v0.0.1", "generation": 3}), encoding="utf-8")
+        script = f"""set -euo pipefail
+HOME={home!r}
+tmp={work!r}
+STATE_FILE={state!r}
+MANIFEST_URL=release
+NETWORK_URL=network
+fetch_verify() {{
+  if [[ "$1" == release ]]; then cp {release!r} "$2"; else cp {network!r} "$2"; fi
+  printf sig > "$2.sig"
+}}
+json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
+docker() {{ echo "docker must not run while an upgrade is armed: $*" >&2; return 99; }}
+{_shell_function(UPDATE_SH, "version_at_least")}
+{_shell_function(UPDATE_SH, "canonical_hash")}
+{_shell_function(UPDATE_SH, "arm_governed_upgrade")}
+{_shell_function(UPDATE_SH, "maybe_arm_staged_upgrade")}
+{real_tick}
+tick
+"""
+        r = _run(["bash", "-c", script])
+        after = json.loads(Path(state).read_text(encoding="utf-8"))
+        if r.returncode != 0 or "is armed for height 777" not in (r.stdout or ""):
+            _fail("install.upgrade.tick_refuses_over_armed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        if after.get("staged") or after.get("last_release_id") != 5:
+            _fail("install.upgrade.tick_restaged_over_armed", after)
             return
 
     with tempfile.TemporaryDirectory(prefix="activate-") as tmp:

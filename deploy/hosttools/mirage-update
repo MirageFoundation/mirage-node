@@ -471,6 +471,17 @@ PY
     maybe_arm_staged_upgrade
     return 0
   fi
+  # An armed governed upgrade owns the next container recreate. Staging an
+  # unrelated ordinary release over it would repoint "staged", leave the prepared
+  # digest unreferenced for the image pruner, and strand the halt with
+  # "prepared image is not present locally". activate_staged already refuses
+  # ordinary activation near a plan; refuse the staging too. prepared.json only
+  # exists while an upgrade is pending, so the release lands on the next tick
+  # after the halt is crossed.
+  if [[ -f "$HOME/.mirage/upgrade/prepared.json" && "$activation" == "ordinary" ]]; then
+    echo "governed upgrade $(json_field "$HOME/.mirage/upgrade/prepared.json" upgrade_name) is armed for height $(json_field "$HOME/.mirage/upgrade/prepared.json" plan_height); not staging ordinary release $version over it"
+    return 0
+  fi
   docker pull "$image"
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
   if [[ "$digest" != "$image" && "$digest" != *"${image#*@}"* ]]; then

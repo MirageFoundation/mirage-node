@@ -4,6 +4,7 @@
 set -euo pipefail
 
 STATE_FILE=/var/lib/mirage/update/state.json
+PREPARED_FILE="${HOME:-/root}/.mirage/upgrade/prepared.json"
 keep=()
 if [[ -f "$STATE_FILE" ]]; then
   while IFS= read -r d; do
@@ -14,6 +15,14 @@ for k in ("active","staged","previous"):
     v=s.get(k) or ""
     if v: print(v)
 ' "$STATE_FILE")
+fi
+
+# The image armed for a governed halt is referenced only by prepared.json, not by
+# state.json. Deleting it makes the halt unrecoverable without a manual pull: the
+# activator refuses to launch a digest it cannot find locally.
+if [[ -f "$PREPARED_FILE" ]]; then
+  prepared_image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("image") or "")' "$PREPARED_FILE")
+  [[ -n "$prepared_image" ]] && keep+=("$prepared_image")
 fi
 
 running=$(docker inspect mirage --format '{{.Image}}' 2>/dev/null || true)
