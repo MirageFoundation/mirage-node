@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import http.server
+import inspect
 import io
 import json
 import os
@@ -13,7 +14,6 @@ import sys
 import tarfile
 import tempfile
 import threading
-from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -1438,16 +1438,21 @@ def _test_release_workflow_files_tracked() -> None:
 
 
 def _test_docker_context_excludes_private_key() -> None:
-    dockerignore = Path(REPO_ROOT, ".dockerignore").read_text(encoding="utf-8")
     forbidden = (".release_signing.pem", ".env", ".envrc", "release-manifest.candidate.json")
-    missing = [name for name in forbidden if name not in dockerignore]
-    if missing:
-        _fail("install.image.secrets", f"sensitive files are not excluded from the image build context: {missing}")
-        return
     if _INSIDE_CONTAINER:
+        # .dockerignore is itself not shipped, and inside the image the artifact
+        # can be checked directly, which is the stronger statement: the release is
+        # built on the operator's host where the signing key does exist, so a
+        # context leak would put the real key here.
         present = [name for name in forbidden if Path(REPO_ROOT, name).exists()]
         if present:
             _fail("install.image.secrets", f"sensitive build-context files present in runtime image: {present}")
+            return
+    else:
+        dockerignore = Path(REPO_ROOT, ".dockerignore").read_text(encoding="utf-8")
+        missing = [name for name in forbidden if name not in dockerignore]
+        if missing:
+            _fail("install.image.secrets", f"sensitive files are not excluded from the image build context: {missing}")
             return
     if not Path(PUBKEY).is_file():
         _fail("install.image.pubkey", "runtime image is missing the public trust anchor")
@@ -3107,12 +3112,14 @@ def _test_status_compact_layout() -> None:
         _fail("install.status.no_clear_per_frame", "dashboard still erases the screen before collecting a frame")
         return
 
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        lines = dash.render_compact_dashboard(fake, 80, 24, 1)
-    if buf.getvalue():
-        _fail("install.status.renderer_prints", f"renderer wrote to stdout instead of returning a frame: {buf.getvalue()!r}")
-        return
+    # Read the renderers' source rather than capturing stdout: categories run in
+    # parallel threads, and redirecting the process-wide stdout swallowed another
+    # category's PASS line and blamed it on the renderer.
+    for name in ("render_dashboard", "render_compact_dashboard"):
+        if re.search(r"\b(print\(|sys\.stdout)", inspect.getsource(getattr(dash, name))):
+            _fail("install.status.renderer_prints", f"{name} writes to stdout instead of returning a frame")
+            return
+    lines = dash.render_compact_dashboard(fake, 80, 24, 1)
     text = "\n".join(lines)
     if "Ctrl+C exits" not in text or "[FATAL]" not in text or "MIRAGE" not in text:
         _fail("install.status.compact_content", text)
