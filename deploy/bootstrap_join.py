@@ -37,8 +37,9 @@ import urllib.request
 # in install_genesis().
 GENESIS_SHA256 = "79eb6a81a83707cfd34f69e6f17bf6006ffa9f521b130f51dded92e04c6cfc8d"
 
-# How far below the head to place the light-client trust height. Must stay
-# inside RETENTION_BLOCKS so every endpoint can still serve the block.
+# How far below the chosen snapshot to place the light-client trust height.
+# The snapshot must be strictly after this height or CometBFT rejects it.
+# Must stay inside RETENTION_BLOCKS so every endpoint can still serve the block.
 TRUST_LOOKBACK = 2000
 
 HTTP_TIMEOUT = 60
@@ -156,16 +157,45 @@ def install_genesis(endpoint: str, chain_id: str, target: str) -> None:
     )
 
 
+def snapshot_interval() -> int:
+    raw = os.environ.get("SNAPSHOT_INTERVAL", "")
+    if not raw.isdigit() or int(raw) <= 0:
+        fail("SNAPSHOT_INTERVAL is not a positive integer")
+    return int(raw)
+
+
+def trust_height_for_head(head: int, interval: int) -> int:
+    """Pin trust below a snapshot peers already keep, not below live head.
+
+    Snapshots land on interval multiples. Head-minus-lookback often sits in
+    the gap after the last snapshot, so state-sync discovers forever and
+    never applies. Prefer the previous completed interval: keep-recent=2
+    peers still have it, and the newest one may still be in flight.
+    """
+    if interval <= 0:
+        fail(f"SNAPSHOT_INTERVAL must be a positive integer, got {interval}")
+    latest_snapshot = (head // interval) * interval
+    if latest_snapshot < interval:
+        fail(
+            f"chain head {head} has not completed a snapshot interval of {interval}; " "cannot derive state-sync trust"
+        )
+    snapshot_height = latest_snapshot - interval
+    if snapshot_height <= 0:
+        snapshot_height = latest_snapshot
+    trust_height = snapshot_height - TRUST_LOOKBACK
+    if trust_height <= 0:
+        fail(f"snapshot height {snapshot_height} is below the {TRUST_LOOKBACK}-block trust lookback")
+    return trust_height
+
+
 def derive_trust(endpoints: list[str]) -> tuple[int, str]:
-    """Pick a trust height below the head and confirm its hash on every endpoint.
+    """Pick a trust height below a kept snapshot and confirm its hash on every endpoint.
 
     There is no hash to pin for a live block, so agreement across independent
     endpoints is the check. One lying server cannot move the trust hash alone.
     """
     head = int(rpc(endpoints[0], "status")["sync_info"]["latest_block_height"])
-    trust_height = head - TRUST_LOOKBACK
-    if trust_height <= 0:
-        fail(f"chain head {head} is below the {TRUST_LOOKBACK}-block trust lookback")
+    trust_height = trust_height_for_head(head, snapshot_interval())
 
     hashes: dict[str, str] = {}
     for ep in endpoints:

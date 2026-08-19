@@ -919,6 +919,21 @@ PY
   # way; this only decides whether the node waits to be told.
   write_env_key WATCHDOG_AUTORECOVER true
   write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env
+  # A new backend.env is copied from the template with an empty HMAC key.
+  # Fresh-host migrations skip the historical filler, so write a random key
+  # here and leave an existing one alone.
+  if ! python3 - /root/.mirage/env/backend.env <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+matches = re.findall(r"^NET_TAG_HMAC_KEY=(.*)$", text, re.M)
+if len(matches) > 1:
+    raise SystemExit(f"duplicate NET_TAG_HMAC_KEY entries in {sys.argv[1]}")
+val = matches[0].strip().strip("\"'") if matches else ""
+raise SystemExit(0 if val else 1)
+PY
+  then
+    write_env_key NET_TAG_HMAC_KEY "$(python3 -c 'import secrets; print(secrets.token_hex(32))')" /root/.mirage/env/backend.env
+  fi
   cp "$MANIFEST_DIR/network.json" /root/.mirage/env/network-manifest.json
   cp "$MANIFEST_DIR/network.json.sig" /root/.mirage/env/network-manifest.json.sig
   cp "$MANIFEST_DIR/manifest.json" /root/.mirage/env/release-manifest.json

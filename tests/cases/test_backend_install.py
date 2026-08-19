@@ -74,6 +74,7 @@ def test_install(backend: str) -> None:
     _test_miraged_banner_hidden_but_errors_kept()
     _test_setup_prompts()
     _test_prompt_answers_reach_env()
+    _test_new_install_writes_random_net_tag()
     _test_external_address_rejects_injection()
     _test_forensic_snapshot_refuses_wipe()
     _test_moniker_precedence()
@@ -111,6 +112,8 @@ def test_install(backend: str) -> None:
     _test_hosttool_paths()
     _test_updater_hosttools_on_activate_only()
     _test_updater_repairs_uninitialized_node()
+    _test_updater_refuses_catching_up()
+    _test_host_tools_query_lcd_in_container()
     _test_peer_pull_requires_peer_ahead()
     _test_watermark_never_lowers()
     _test_weekly_restart_skips_catching_up()
@@ -660,6 +663,10 @@ def _test_prompt_answers_reach_env() -> None:
             'write_env_key MEDIA_UPLOADS_ENABLED "$MEDIA_UPLOADS" /root/.mirage/env/backend.env',
             "backend.env",
         ),
+        "NET_TAG_HMAC_KEY": (
+            "write_env_key NET_TAG_HMAC_KEY \"$(python3 -c 'import secrets; print(secrets.token_hex(32))')\" /root/.mirage/env/backend.env",
+            "backend.env",
+        ),
     }
     for key, (line, _dest) in expected.items():
         if line not in body:
@@ -746,6 +753,67 @@ def _test_prompt_answers_reach_env() -> None:
                 _fail("install.env_write.mode", f"{os.path.basename(path)} left at {oct(mode)}")
                 return
     _pass("install.env_write.answers_reach_their_own_files")
+
+
+def _test_new_install_writes_random_net_tag() -> None:
+    """A first install writes a random HMAC key; a filled key is left alone."""
+    from deploy.migrations import ALWAYS_RUN_KEYS
+
+    if "v1.36.1-ensure-net-tag-key" in ALWAYS_RUN_KEYS:
+        _fail(
+            "install.net_tag.not_a_skipped_migration",
+            "NET_TAG_HMAC_KEY must be written at install, not by a fresh-host-skipped migration",
+        )
+        return
+    body = Path(INSTALL_SH).read_text(encoding="utf-8")
+    if (
+        "secrets.token_hex(32)" not in body
+        or "NET_TAG_HMAC_KEY" not in body.split("configure()")[1].split("identity()")[0]
+    ):
+        _fail("install.net_tag.configure_writes_key", "configure() does not generate NET_TAG_HMAC_KEY")
+        return
+    lines = body.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "write_env_key() {")
+    end = next(i for i, line in enumerate(lines[start + 1 :], start + 1) if line.strip() == "}")
+    writer = "\n".join(line[2:] if line.startswith("  ") else line for line in lines[start : end + 1])
+    with tempfile.TemporaryDirectory(prefix="net-tag-") as tmp:
+        backend_env = os.path.join(tmp, "backend.env")
+        Path(backend_env).write_text("NET_TAG_HMAC_KEY=\n", encoding="utf-8")
+        script = f"""
+set -euo pipefail
+{writer}
+if ! python3 - {backend_env!r} <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+matches = re.findall(r"^NET_TAG_HMAC_KEY=(.*)$", text, re.M)
+if len(matches) > 1:
+    raise SystemExit(f"duplicate NET_TAG_HMAC_KEY entries in {{sys.argv[1]}}")
+val = matches[0].strip().strip("\\"\\'") if matches else ""
+raise SystemExit(0 if val else 1)
+PY
+then
+  write_env_key NET_TAG_HMAC_KEY "$(python3 -c 'import secrets; print(secrets.token_hex(32))')" {backend_env!r}
+fi
+"""
+        first = _run(["bash", "-c", script])
+        if first.returncode != 0:
+            _fail("install.net_tag.generate", f"rc={first.returncode} err={first.stderr}")
+            return
+        generated = re.search(r"^NET_TAG_HMAC_KEY=(.*)$", Path(backend_env).read_text(encoding="utf-8"), re.M)
+        raw = generated.group(1).strip().strip("'\"") if generated else ""
+        if not re.fullmatch(r"[0-9a-f]{64}", raw):
+            _fail("install.net_tag.hex", f"generated {raw!r}")
+            return
+        second = _run(["bash", "-c", script])
+        if second.returncode != 0:
+            _fail("install.net_tag.preserve_runs", f"rc={second.returncode} err={second.stderr}")
+            return
+        again = re.search(r"^NET_TAG_HMAC_KEY=(.*)$", Path(backend_env).read_text(encoding="utf-8"), re.M)
+        kept = again.group(1).strip().strip("'\"") if again else ""
+        if kept != raw:
+            _fail("install.net_tag.rotated", f"first={raw} second={kept}")
+            return
+    _pass("install.net_tag.random_on_new_install")
 
 
 def _test_external_address_rejects_injection() -> None:
@@ -1946,6 +2014,7 @@ LAUNCH={launch!r}
 SAFETY_BLOCKS=500
 tmp={tmpdir!r}
 curl() {{ return 7; }}
+query_local_rest() {{ return 7; }}
 wait_for_rpc() {{ return 0; }}
 install_hosttools_from_image() {{ :; }}
 {json_field}
@@ -1970,6 +2039,120 @@ activate_staged
             )
             return
     _pass("install.updater.repairs_uninitialized_node")
+
+
+def _test_updater_refuses_catching_up() -> None:
+    """A validator that has signed must not be swapped mid-sync; a height-zero node must not be stranded."""
+    activate = _shell_function(UPDATE_SH, "activate_staged")
+    json_field = _shell_function(UPDATE_SH, "json_field")
+    with tempfile.TemporaryDirectory(prefix="updater-catchup-") as tmpdir:
+        home = os.path.join(tmpdir, "home")
+        state_dir = os.path.join(tmpdir, "state")
+        data_dir = os.path.join(home, ".mirage", "node", "data")
+        env_dir = os.path.join(home, ".mirage", "env")
+        os.makedirs(data_dir, exist_ok=True)
+        os.makedirs(env_dir, exist_ok=True)
+        os.makedirs(state_dir, exist_ok=True)
+        state_path = os.path.join(state_dir, "state.json")
+        image = "ghcr.io/miragefoundation/mirage-node@sha256:" + "a" * 64
+        Path(os.path.join(env_dir, "release-manifest.json")).write_text(
+            json.dumps({"image": image}) + "\n",
+            encoding="utf-8",
+        )
+        launch = os.path.join(tmpdir, "launch")
+        launched = os.path.join(tmpdir, "launched")
+        Path(launch).write_text(f'#!/bin/bash\necho "$*" > {launched!r}\n', encoding="utf-8")
+        os.chmod(launch, 0o755)
+
+        def run(signed_height: int) -> subprocess.CompletedProcess:
+            Path(state_path).write_text(
+                json.dumps(
+                    {
+                        "staged": image,
+                        "staged_activation": "ordinary",
+                        "staged_rollback_safe": False,
+                        "staged_consensus_breaking": False,
+                        "active": "old",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            Path(os.path.join(data_dir, "priv_validator_state.json")).write_text(
+                json.dumps({"height": str(signed_height), "round": 0, "step": 0}) + "\n",
+                encoding="utf-8",
+            )
+            Path(launched).unlink(missing_ok=True)
+            script = f"""
+set -euo pipefail
+HOME={home!r}
+STATE_FILE={state_path!r}
+LAUNCH={launch!r}
+SAFETY_BLOCKS=500
+curl() {{
+  echo '{{"result":{{"sync_info":{{"catching_up":true,"latest_block_height":"12"}}}}}}'
+}}
+query_local_rest() {{ echo "host LCD must not be queried" >&2; return 7; }}
+wait_for_rpc() {{ return 0; }}
+install_hosttools_from_image() {{ :; }}
+{json_field}
+{activate}
+activate_staged
+"""
+            return _run(["bash", "-c", script])
+
+        signed = run(12)
+        if signed.returncode == 0 or os.path.exists(launched):
+            _fail(
+                "install.updater.catching_up_refuse",
+                f"activated a signing validator mid-sync: rc={signed.returncode} out={signed.stdout} err={signed.stderr}",
+            )
+            return
+        if "catching up" not in signed.stderr and "catching up" not in signed.stdout:
+            _fail(
+                "install.updater.catching_up_message",
+                f"missing catching-up refuse: out={signed.stdout} err={signed.stderr}",
+            )
+            return
+
+        # Height zero never signed anything, so there is no partial sync to
+        # protect and refusing would strand it on the broken release.
+        fresh = run(0)
+        if fresh.returncode != 0 or not os.path.isfile(launched):
+            _fail(
+                "install.updater.catching_up_height_zero",
+                f"stranded a height-zero node: rc={fresh.returncode} out={fresh.stdout} err={fresh.stderr}",
+            )
+            return
+    _pass("install.updater.refuses_catching_up")
+
+
+def _test_host_tools_query_lcd_in_container() -> None:
+    """LCD is not published on the host; host tools must reach it via docker exec."""
+    files = (
+        Path(REPO_ROOT, "deploy", "hosttools", "mirage-update"),
+        Path(REPO_ROOT, "deploy", "hosttools", "mirage-restart"),
+        Path(REPO_ROOT, "deploy", "hosttools", "mirage-weekly-restart.sh"),
+    )
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            if "1317" not in line or "curl" not in line:
+                continue
+            if "docker exec" in line:
+                continue
+            _fail(
+                "install.hosttools.lcd_on_host",
+                f"{path.name} curls LCD on the host: {line}",
+            )
+            return
+        if "query_local_rest" in text and "docker exec mirage curl" not in text:
+            _fail(
+                "install.hosttools.lcd_helper",
+                f"{path.name} defines query_local_rest without docker exec",
+            )
+            return
+    _pass("install.hosttools.lcd_in_container")
 
 
 def _test_peer_pull_requires_peer_ahead() -> None:
@@ -2370,6 +2553,7 @@ curl() {{
   printf '%s\\n' {plan!r}
   return 0
 }}
+query_local_rest() {{ curl "$@"; }}
 {prepare}
 prepare
 """
@@ -2442,6 +2626,7 @@ curl() {{
   if [[ "$*" == *current_plan* ]]; then printf '%s\\n' '{{"plan":null}}'; return 0; fi
   printf '%s\\n' '{{"result":{{"sync_info":{{"latest_block_height":"80"}}}}}}'
 }}
+query_local_rest() {{ curl "$@"; }}
 {activate}
 activate_if_halted
 """

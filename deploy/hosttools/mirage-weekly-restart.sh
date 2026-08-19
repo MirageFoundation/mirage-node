@@ -19,7 +19,7 @@ if [[ "$catching" == "True" || "$catching" == "true" ]]; then
   exit 0
 fi
 
-plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan)
+plan=$(docker exec mirage curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan)
 plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
 if [[ -n "$plan_name" ]]; then
   plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')

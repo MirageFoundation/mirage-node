@@ -39,7 +39,7 @@ if [[ "$catching" == "True" || "$catching" == "true" ]]; then
   exit 1
 fi
 
-plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
+plan=$(docker exec mirage curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
   echo "ERROR: local REST is unavailable; refusing restart" >&2
   exit 1
 }

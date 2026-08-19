@@ -101,6 +101,12 @@ wait_for_rpc() {
   return 1
 }
 
+# LCD is not published on the host (only 80/443/26656/26657 are). Query it
+# inside the container so a live node is not mistaken for an uninitialized one.
+query_local_rest() {
+  docker exec mirage curl -fsS --max-time 5 "$1"
+}
+
 activate_staged() {
   if [[ ! -f "$STATE_FILE" ]]; then
     echo "ERROR: no updater state; nothing is staged" >&2
@@ -122,11 +128,34 @@ activate_staged() {
   fi
   signed_height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["height"]))' \
     "$HOME/.mirage/node/data/priv_validator_state.json")
-  if plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
+  if status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status); then
+    catching=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
+    if [[ "$catching" != "False" && "$catching" != "false" ]]; then
+      # Recreating the container mid-sync throws away a partial sync, which is
+      # why this refuses. A node that has never signed has no partial state
+      # worth keeping, and refusing there strands it on the release that
+      # cannot finish syncing in the first place.
+      if (( signed_height != 0 )); then
+        echo "ERROR: node is catching up; refusing activation" >&2
+        exit 1
+      fi
+      echo "node has never signed a block; activating its staged release rather than waiting for a sync that cannot finish"
+    fi
+  elif (( signed_height != 0 )); then
+    echo "ERROR: local RPC is unavailable; refusing activation after signed height $signed_height" >&2
+    exit 1
+  else
+    echo "local RPC is unavailable on this uninitialized node; activating its staged recovery release"
+  fi
+  if plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
     plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
     plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("height") or "0")')
     if [[ -n "$plan_name" ]]; then
-      height=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
+      if [[ -z "${status:-}" ]]; then
+        echo "ERROR: upgrade plan $plan_name is set but local RPC is down; refusing activation" >&2
+        exit 1
+      fi
+      height=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
       remaining=$((plan_h - height))
       if (( remaining >= 0 && remaining <= SAFETY_BLOCKS )); then
         echo "ERROR: upgrade plan $plan_name in $remaining blocks; refusing ordinary activation" >&2
@@ -138,18 +167,6 @@ activate_staged() {
   else
     echo "ERROR: local REST is unavailable; refusing activation after signed height $signed_height" >&2
     exit 1
-  fi
-  if status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status); then
-    catching=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
-    if [[ "$catching" != "False" && "$catching" != "false" ]]; then
-      echo "ERROR: node is catching up; refusing activation" >&2
-      exit 1
-    fi
-  elif (( signed_height != 0 )); then
-    echo "ERROR: local RPC is unavailable; refusing activation after signed height $signed_height" >&2
-    exit 1
-  else
-    echo "local RPC is unavailable on this uninitialized node; activating its staged recovery release"
   fi
   # A release is not required to be reached one version at a time. Deploy
   # migrations are applied by discovering everything this node has not run yet,
@@ -502,7 +519,7 @@ prepare() {
     echo "ERROR: release manifest is missing upgrade_name" >&2
     exit 1
   fi
-  plan=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
+  plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan) || {
     echo "ERROR: local REST is unavailable; cannot match the on-chain upgrade plan" >&2
     exit 1
   }
@@ -598,7 +615,7 @@ PY
     exit 1
   fi
   local plan_name
-  plan_name=$(curl -fsS --max-time 5 http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan \
+  plan_name=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan \
     | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
   if [[ -n "$plan_name" ]]; then
     rm -f "$STATE_DIR/activating"

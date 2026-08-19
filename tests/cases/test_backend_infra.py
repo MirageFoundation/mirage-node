@@ -1638,7 +1638,9 @@ def test_indexer_profile_absent(backend):
     if mp._load_chain_profile("mirage1deletedaccount") is None:
         _pass("indexer_profile_absent.load_returns_none")
     else:
-        _fail("indexer_profile_absent.load_returns_none", "_load_chain_profile invented a profile for a deleted account")
+        _fail(
+            "indexer_profile_absent.load_returns_none", "_load_chain_profile invented a profile for a deleted account"
+        )
 
     for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_followed_topics"):
         try:
@@ -1709,7 +1711,7 @@ def test_node_join_bootstrap(backend: str):
             if path == "genesis":
                 return {"genesis": genesis}
             if path == "status":
-                return {"sync_info": {"latest_block_height": "5000"}}
+                return {"sync_info": {"latest_block_height": "25000"}}
             return {"block_id": {"hash": hashes.get(ep, "A" * 64)}}
 
         return _rpc
@@ -1719,6 +1721,7 @@ def test_node_join_bootstrap(backend: str):
     tmpdir = tempfile.mkdtemp(prefix="node-join-")
     os.makedirs(os.path.join(tmpdir, "config"), exist_ok=True)
     target = os.path.join(tmpdir, "config", "genesis.json")
+    os.environ["SNAPSHOT_INTERVAL"] = "10000"
 
     try:
         # miraged init leaves the current binary's schema at target. The source
@@ -1770,10 +1773,19 @@ def test_node_join_bootstrap(backend: str):
 
         bj.rpc = _rpc_factory()
         height, thash = bj.derive_trust(["http://a", "http://b"])
-        if height == 5000 - bj.TRUST_LOOKBACK and thash == "A" * 64:
-            _pass("node_join.derives_trust_below_head", height=height)
+        if height == 10000 - bj.TRUST_LOOKBACK and thash == "A" * 64:
+            _pass("node_join.derives_trust_below_snapshot", height=height)
         else:
-            _fail("node_join.derives_trust_below_head", f"height={height} hash={thash}")
+            _fail("node_join.derives_trust_below_snapshot", f"height={height} hash={thash}")
+        # Amsterdam case: head sits in the gap after snapshot 6926400.
+        # Trust must land below 6912000 so that snapshot is usable.
+        if bj.trust_height_for_head(6933066, 14400) != 6912000 - bj.TRUST_LOOKBACK:
+            _fail(
+                "node_join.trust_below_previous_snapshot",
+                f"trust={bj.trust_height_for_head(6933066, 14400)}",
+            )
+        else:
+            _pass("node_join.trust_below_previous_snapshot")
 
         # A pre-sync restart already has the verified genesis. It must refresh
         # trust without replacing that file, because the trust height ages while
@@ -1784,22 +1796,16 @@ def test_node_join_bootstrap(backend: str):
             BOOTSTRAP_RPC="http://a,http://b",
             CHAIN_ID="mirage-1",
             NODE_HOME=tmpdir,
-            PERSISTENT_PEERS=(
-                f"{'1' * 40}@192.0.2.1:26656,"
-                f"{'2' * 40}@192.0.2.2:26656"
-            ),
+            PERSISTENT_PEERS=(f"{'1' * 40}@192.0.2.1:26656," f"{'2' * 40}@192.0.2.2:26656"),
         )
-        bj.rpc_post = lambda endpoint, method, params: {
-            "block_id": {"hash": "A" * 64}
-        }
+        bj.rpc_post = lambda endpoint, method, params: {"block_id": {"hash": "A" * 64}}
         output = io.StringIO()
         with redirect_stdout(output):
             bj.main(trust_only=True)
         if (
             open(target, encoding="utf-8").read() == "PRESERVED"
             and "STATESYNC_ENABLE=true" in output.getvalue()
-            and "STATESYNC_RPC_SERVERS=http://192.0.2.1:26657,http://192.0.2.2:26657"
-            in output.getvalue()
+            and "STATESYNC_RPC_SERVERS=http://192.0.2.1:26657,http://192.0.2.2:26657" in output.getvalue()
         ):
             _pass("node_join.restart_refreshes_trust_only")
         else:
@@ -1831,7 +1837,7 @@ def test_node_join_bootstrap(backend: str):
     finally:
         bj.rpc = original_rpc
         bj.rpc_post = original_rpc_post
-        for key in ("BOOTSTRAP_RPC", "CHAIN_ID", "NODE_HOME", "PERSISTENT_PEERS"):
+        for key in ("BOOTSTRAP_RPC", "CHAIN_ID", "NODE_HOME", "PERSISTENT_PEERS", "SNAPSHOT_INTERVAL"):
             os.environ.pop(key, None)
         shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1844,9 +1850,10 @@ def test_node_join_bootstrap(backend: str):
         _fail("node_join.local_testnet_exempt", "init.sh no longer gates the join bootstrap on SKIP_PEERS")
 
     entrypoint_src = open(os.path.join(repo_root, "deploy", "entrypoint.sh"), encoding="utf-8").read()
+    marker_src = open(os.path.join(repo_root, "deploy", "run_state_sync_marker.sh"), encoding="utf-8").read()
     if (
         'bash "$ROOT_DIR/deploy/init.sh"' in entrypoint_src
-        and ".state_sync_complete" in entrypoint_src
+        and ".state_sync_complete" in marker_src
         and "--trust-only" in init_src
     ):
         _pass("node_join.final_render_preserves_statesync")
