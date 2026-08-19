@@ -80,7 +80,7 @@ fi
 
 # A signed consensus height proves this is an existing validator, not a joining
 # node. New nodes get a persistent completion marker as soon as state sync
-# installs a non-zero height (entrypoint.sh owns that bounded watcher).
+# installs a non-zero height (run_state_sync_marker.sh owns that bounded watcher).
 if [ -f "$NODE_HOME/data/priv_validator_state.json" ] && [ ! -f "$STATE_SYNC_COMPLETE" ]; then
   SIGNED_HEIGHT="$(python3 - "$NODE_HOME/data/priv_validator_state.json" <<'PY'
 import json
