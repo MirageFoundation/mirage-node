@@ -115,6 +115,7 @@ def test_install(backend: str) -> None:
     _test_releases_are_reachable_from_any_version()
     _test_hosttool_paths()
     _test_updater_hosttools_on_activate_only()
+    _test_updater_refreshes_before_activation()
     _test_updater_repairs_uninitialized_node()
     _test_updater_refuses_catching_up()
     _test_host_tools_query_lcd_in_container()
@@ -1349,6 +1350,9 @@ def _test_activation_and_registration_waits() -> None:
     if "budget=900" not in wait or "RestartCount" not in wait:
         _fail("install.activation.budget", "updater wait is not the padded, crash-aware one")
         return
+    if ">/dev/null 2>&1" not in wait:
+        _fail("install.activation.probe_noise", "expected RPC startup misses still print curl errors")
+        return
 
     def run_wait(running: str, restarts: str, rpc_after: int) -> subprocess.CompletedProcess:
         return _run(
@@ -1987,14 +1991,65 @@ def _test_updater_hosttools_on_activate_only() -> None:
     _pass("install.updater.hosttools_on_activate_only")
 
 
+def _test_updater_refreshes_before_activation() -> None:
+    """A manual update must supersede an older image staged by the hourly tick."""
+    fetch = _shell_function(UPDATE_SH, "fetch_verify")
+    if "mirage_cache=" not in fetch:
+        _fail("install.updater.cache_bust", "signed manifests can remain stale in the GitHub edge cache")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="updater-refresh-") as tmpdir:
+        calls = os.path.join(tmpdir, "curl-calls")
+        fetch_script = f"""set -euo pipefail
+VERIFY=true
+PUBKEY=unused
+curl() {{ printf '%s\\n' "$*" >> {calls!r}; }}
+{fetch}
+fetch_verify 'https://updates.example/manifest.json?token=abc' {os.path.join(tmpdir, "manifest.json")!r}
+"""
+        fetch_result = _run(["bash", "-c", fetch_script])
+        recorded = Path(calls).read_text(encoding="utf-8").splitlines()
+        if (
+            fetch_result.returncode != 0
+            or len(recorded) != 2
+            or "manifest.json?token=abc&mirage_cache=" not in recorded[0]
+            or "manifest.json.sig?token=abc&mirage_cache=" not in recorded[1]
+        ):
+            _fail(
+                "install.updater.cache_bust_urls",
+                f"rc={fetch_result.returncode} calls={recorded} err={fetch_result.stderr!r}",
+            )
+            return
+
+        update_now = _shell_function(UPDATE_SH, "update_now")
+        state = os.path.join(tmpdir, "state.json")
+        Path(state).write_text(json.dumps({"staged": "old-image"}) + "\n", encoding="utf-8")
+        script = f"""set -euo pipefail
+STATE_FILE={state!r}
+tick() {{
+  python3 -c 'import json,sys; open(sys.argv[1], "w").write(json.dumps({{"staged": "new-image"}}) + "\\n")' "$STATE_FILE"
+  echo tick
+}}
+activate_staged() {{
+  python3 -c 'import json,sys; print("activate " + json.load(open(sys.argv[1]))["staged"])' "$STATE_FILE"
+}}
+{update_now}
+update_now
+"""
+        result = _run(["bash", "-c", script])
+        if result.returncode != 0 or result.stdout.splitlines() != ["tick", "activate new-image"]:
+            _fail(
+                "install.updater.refreshes_staged",
+                f"rc={result.returncode} out={result.stdout!r} err={result.stderr!r}",
+            )
+            return
+    _pass("install.updater.refreshes_before_activation")
+
+
 def _test_updater_repairs_uninitialized_node() -> None:
     """A signed staged release must repair height zero even when RPC and REST are down."""
     activate = _shell_function(UPDATE_SH, "activate_staged")
     json_field = _shell_function(UPDATE_SH, "json_field")
-    updater = Path(UPDATE_SH).read_text(encoding="utf-8")
-    if 'if [[ -z "$staged" ]]; then\n      tick' not in updater:
-        _fail("install.updater.plain_command", "plain mirage-update does not check and stage first")
-        return
 
     with tempfile.TemporaryDirectory(prefix="updater-uninitialized-") as tmpdir:
         home = os.path.join(tmpdir, "home")
