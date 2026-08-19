@@ -109,10 +109,22 @@ You don't need to install anything. Just visit a public node:
 - **[mirage.vote](https://mirage.vote)** (UAT/Public Node)
 
 ### For Node Operators
-- One-line install: `curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash` (Ubuntu 24.04, see [Deployment Guide](docs/guides/deploy.md))
-- Release signing key fingerprint: `679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8` ([SECURITY.md](SECURITY.md))
-- [Infrastructure Guide](docs/troubleshooting/infrastructure.md)
-- **[Join the Mirage Portal](https://t.me/+5SILWcCke8tmODlh)** on Telegram to connect with the team and get setup help (especially if you want to run a node).
+
+You need a [mirage.talk](https://mirage.talk) account with a username, **10,000,000 MIRAGE** on it, and that account's 12-word recovery phrase.
+
+**1. Get a droplet.** On [DigitalOcean](https://cloud.digitalocean.com/droplets/new) create an Ubuntu **24.04 LTS** droplet, **amd64**, **2 vCPU / 4 GB RAM**, **40 GB** disk, with your SSH key on root. The plan the live validators use is `s-2vcpu-4gb-amd`. Any other host is fine if it is a real VM (not LXC) and matches the spec below.
+
+**Minimum spec:** Ubuntu 24.04 LTS, amd64, 4 GB RAM / 2 vCPU (at least 3800 MiB visible inside Ubuntu), 20 GB free disk (40 GB is what you actually want). Arm64 is refused.
+
+**2. Install.** SSH in as root and run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/deploy/install.sh | bash
+```
+
+Paste the recovery phrase when asked. Press Enter three times if you want the defaults (your username as the node name, no domain, uploads off). If Ubuntu needs a reboot, run the same command again after it comes back.
+
+More detail: [Deployment Guide](docs/guides/deploy.md). Signing key fingerprint: `679a39294dc9639170ca9cb4010c44cc71dd153fa2029f2e73969bff6d86c0a8` ([SECURITY.md](SECURITY.md)). Help: [Mirage Portal on Telegram](https://t.me/+5SILWcCke8tmODlh).
 
 ### For Developers
 - **Backend**: Python (Flask), Go (Mirage chain)
