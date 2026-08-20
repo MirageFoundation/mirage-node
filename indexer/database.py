@@ -571,6 +571,15 @@ class DatabaseManager:
                     ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_balance BIGINT
                     """
                 )
+                # Cumulative, monotonic node earnings. Balance samples cannot say
+                # WHY a balance moved, so diffing them counted every inbound
+                # transfer as income and every up-tick separately, inflating the
+                # figure far past anything earned. These are summed from block
+                # events instead: minted is what the core module paid this node,
+                # fees is what it paid to broadcast. Diffing a cumulative counter
+                # over a window is exact regardless of sample rate.
+                cur.execute("ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_minted_total BIGINT")
+                cur.execute("ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_fees_total BIGINT")
 
                 # topic_content_stats: per-topic content labels derived from post tags
                 cur.execute(
@@ -2584,21 +2593,38 @@ class DatabaseManager:
         created_at: int,
         node_balance: int | None = None,
         node_staked: int | None = None,
+        node_minted_total: int | None = None,
+        node_fees_total: int | None = None,
     ) -> None:
-        """Record total supply and validator liquid/staked balances."""
+        """Record total supply, validator liquid/staked balances and earnings counters."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO supply_history(height, total_supply, created_at, node_balance, node_staked)
-                    VALUES(%s, %s, %s, %s, %s)
+                    INSERT INTO supply_history(
+                        height, total_supply, created_at, node_balance, node_staked,
+                        node_minted_total, node_fees_total
+                    )
+                    VALUES(%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (height) DO UPDATE SET
                         total_supply = EXCLUDED.total_supply,
                         created_at = EXCLUDED.created_at,
                         node_balance = COALESCE(EXCLUDED.node_balance, supply_history.node_balance),
-                        node_staked = COALESCE(EXCLUDED.node_staked, supply_history.node_staked)
+                        node_staked = COALESCE(EXCLUDED.node_staked, supply_history.node_staked),
+                        node_minted_total = COALESCE(
+                            EXCLUDED.node_minted_total, supply_history.node_minted_total
+                        ),
+                        node_fees_total = COALESCE(EXCLUDED.node_fees_total, supply_history.node_fees_total)
                     """,
-                    (int(height), int(total_supply), int(created_at), node_balance, node_staked),
+                    (
+                        int(height),
+                        int(total_supply),
+                        int(created_at),
+                        node_balance,
+                        node_staked,
+                        node_minted_total,
+                        node_fees_total,
+                    ),
                 )
 
     def get_supply_history(self, since_ts: int) -> list[dict]:
@@ -2607,7 +2633,8 @@ class DatabaseManager:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT height, total_supply, created_at, node_balance, node_staked
+                    SELECT height, total_supply, created_at, node_balance, node_staked,
+                           node_minted_total, node_fees_total
                     FROM supply_history
                     WHERE created_at >= %s
                     ORDER BY height ASC
@@ -2622,6 +2649,8 @@ class DatabaseManager:
                         "timestamp": r[2],
                         "node_balance": r[3],
                         "node_staked": r[4],
+                        "node_minted_total": r[5],
+                        "node_fees_total": r[6],
                     }
                     for r in rows
                 ]

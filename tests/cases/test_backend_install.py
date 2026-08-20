@@ -101,6 +101,7 @@ def test_install(backend: str) -> None:
     _test_card_amounts_fit()
     _test_cards_are_all_one_height()
     _test_staked_balance_history()
+    _test_node_earnings_attribution()
     _test_earnings_card()
     _test_retention_building_up()
     _test_catching_up_is_not_a_fault()
@@ -3402,31 +3403,56 @@ def _test_cards_are_all_one_height() -> None:
 
 
 def _test_earnings_card() -> None:
-    """Sampled payer balance deltas produce honest 24h and 30d totals."""
+    """Cumulative minted/fee counters produce honest 24h and 30d totals.
+
+    Rows are (height, created_at, node_minted_total, node_fees_total). The card
+    used to difference balance samples, which counted an inbound transfer as
+    income and summed every up-tick rather than the net; on a relay account that
+    churns constantly it reported earnings far above anything received.
+    """
     sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
     import status_dashboard as dash
 
     now = 3_000_000
-    liquid = 10_000_000_000_000
-    staked = 5_000_000_000_000
+    # Cumulative totals carried in from long before the window opens: a window
+    # must report what accrued inside it, never the lifetime total.
+    minted0 = 900_000_000
+    fees0 = 4_000_000
     rows = [
-        (1, now - (25 * 60 * 60), liquid, 0),
-        (2, now - (23 * 60 * 60), liquid - staked, staked),
-        (3, now - (12 * 60 * 60), liquid - staked + 33_400_000, staked),
-        (4, now - (1 * 60 * 60), liquid - staked + 32_900_000, staked),
+        (1, now - (25 * 60 * 60), minted0, fees0),
+        (2, now - (23 * 60 * 60), minted0 + 1_000_000, fees0 + 100_000),
+        (3, now - (12 * 60 * 60), minted0 + 30_000_000, fees0 + 400_000),
+        (4, now - (1 * 60 * 60), minted0 + 34_400_000, fees0 + 600_000),
     ]
     details = dash.summarize_earnings_history(rows, now)
     expected = {
         "earned_24h": 33_400_000,
-        "staked_24h": staked,
         "spent_24h": 500_000,
-        "earned_30d": 33_400_000,
+        "earned_30d": 34_400_000,
+        "spent_30d": 600_000,
+        "net_30d": 33_800_000,
         "sample_count": 4,
     }
     for key, value in expected.items():
         if details.get(key) != value:
             _fail("install.status.earnings_math", f"{key}={details.get(key)!r}, expected {value!r}")
             return
+
+    # Spending more than was earned is a real state for a relay node, and the
+    # 30d total has to be allowed to go negative rather than clamp to zero.
+    loss = dash.summarize_earnings_history(
+        [(1, now - (20 * 60 * 60), 100, 100), (2, now - (60 * 60), 150, 900)], now
+    )
+    if loss["net_30d"] != -750:
+        _fail("install.status.earnings_negative", f"net_30d={loss['net_30d']!r}, expected -750")
+        return
+
+    # A single sample cannot describe a window: with nothing to difference
+    # against, the honest answer is zero, not the lifetime total.
+    single = dash.summarize_earnings_history([(1, now - (60 * 60), 5_000_000, 1_000)], now)
+    if single["earned_24h"] or single["spent_24h"] or single["net_30d"]:
+        _fail("install.status.earnings_single_sample", f"one sample produced {single!r}")
+        return
 
     for amount, expected_text in (
         (0, "0"),
@@ -3445,36 +3471,120 @@ def _test_earnings_card() -> None:
     card = dash.draw_card(earnings.name, earnings.status, dash.format_card_content(earnings))
     plain = [re.sub(r"\x1b\[[0-9;]*m", "", row) for row in card]
     rendered = "\n".join(plain)
-    for label in ("Earned 24h:", "Staked 24h:", "Spent 24h:", "Earned 30d:"):
+    for label in ("Earned 24h:", "Spent 24h:", "Total 30d:"):
         if label not in rendered:
             _fail("install.status.earnings_content", f"missing {label!r}: {rendered}")
             return
-    if "Staked 24h: +5mm MIRAGE" not in rendered or "Spent 24h:  -0.5 MIRAGE" not in rendered:
-        _fail("install.status.stake_not_spent", rendered)
+    # Transfers in and out are not earnings, so no line may imply otherwise.
+    for banned in ("Staked 24h:", "Earned 30d:"):
+        if banned in rendered:
+            _fail("install.status.earnings_content", f"card still shows {banned!r}: {rendered}")
+            return
+    if "Spent 24h:  -0.5 MIRAGE" not in rendered or "Total 30d:  +33.8 MIRAGE" not in rendered:
+        _fail("install.status.earnings_lines", rendered)
         return
     if any(".." in row for row in plain):
         _fail("install.status.earnings_fit", f"earnings card cuts content: {plain}")
         return
-    # "Spent" is a letter shorter than the other labels, so without padding its
-    # amount sits one column to the left of the other three.
+    # "Spent" and "Total" are a letter shorter than "Earned", so without padding
+    # their amounts sit one column to the left.
     columns = set()
     for row in plain:
         for marker in ("+", "-"):
-            index = row.find(f"{marker}0.5 MIRAGE")
-            if index < 0:
-                index = row.find(f"{marker}33.4 MIRAGE")
-            if index < 0:
-                index = row.find(f"{marker}5mm MIRAGE")
-            if index >= 0:
-                columns.add(index)
+            for amount in ("0.5 MIRAGE", "33.4 MIRAGE", "33.8 MIRAGE"):
+                index = row.find(f"{marker}{amount}")
+                if index >= 0:
+                    columns.add(index)
     if len(columns) != 1:
         _fail("install.status.earnings_aligned", f"amounts start at columns {sorted(columns)}: {plain}")
         return
     compact = "\n".join(dash.render_compact_dashboard([earnings], 80, 24, 1))
-    if "24h  +33.4 earned  -0.5 spent" not in compact or "24h  +5mm staked  30d +33.4 earned" not in compact:
+    if "24h  +33.4 earned  -0.5 spent" not in compact or "30d  +33.8 total" not in compact:
         _fail("install.status.earnings_compact", compact)
         return
     _pass("install.status.earnings_card")
+
+
+def _test_node_earnings_attribution() -> None:
+    """Only chain payouts and this node's own fees count; transfers never do."""
+    from indexer.address_utils import module_address
+    from indexer.main import CORE_MODULE_ADDRESS, Indexer
+    from indexer.migrations.v1_38_5_add_node_earnings_counters import MIGRATION_KEY
+
+    # The core module is the sender on every payout, so a wrong address here
+    # would silently attribute nothing rather than fail.
+    if CORE_MODULE_ADDRESS != "mirage1p4zltl2x9wx8p0lmzqpp4sdulul43u5m96x969":
+        _fail("install.earnings.core_module_address", CORE_MODULE_ADDRESS)
+        return
+    if module_address("gov") != "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg":
+        _fail("install.earnings.module_address_derivation", module_address("gov"))
+        return
+
+    node = "mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3"
+    other = "mirage1rd00maj4htc0f550pjy302maywy2wtaxv8ntaq"
+
+    def _ev(ev_type, attrs):
+        return {"type": ev_type, "attributes": [{"key": k, "value": v} for k, v in attrs.items()]}
+
+    result_obj = {
+        "txs_results": [
+            {
+                "events": [
+                    # This node paid to broadcast: real spending.
+                    _ev("tx", {"fee": "141106000umirage", "fee_payer": node}),
+                    # Another relayer's fee must not land on this node's card.
+                    _ev("tx", {"fee": "999000000umirage", "fee_payer": other}),
+                ]
+            }
+        ],
+        "finalize_block_events": [
+            # Mint payout from the core module: real income.
+            _ev("transfer", {"sender": CORE_MODULE_ADDRESS, "recipient": node, "amount": "194349602umirage"}),
+            # A user sending coins in is NOT income, and was the single biggest
+            # source of the inflated figure the balance-diff card reported.
+            _ev("transfer", {"sender": other, "recipient": node, "amount": "50000000000umirage"}),
+            # A payout to a different validator is not this node's income.
+            _ev("transfer", {"sender": CORE_MODULE_ADDRESS, "recipient": other, "amount": "1786556888umirage"}),
+        ],
+    }
+    minted, fees = Indexer._node_earnings_delta(result_obj, node)
+    if minted != 194_349_602 or fees != 141_106_000:
+        _fail("install.earnings.attribution", f"minted={minted} fees={fees}")
+        return
+
+    # Multi-denom amounts must contribute only their umirage leg.
+    mixed = {
+        "finalize_block_events": [
+            _ev("transfer", {"sender": CORE_MODULE_ADDRESS, "recipient": node, "amount": "7uother,25umirage"})
+        ]
+    }
+    if Indexer._node_earnings_delta(mixed, node) != (25, 0):
+        _fail("install.earnings.multi_denom", str(Indexer._node_earnings_delta(mixed, node)))
+        return
+
+    # A node with no resolved validator address must contribute nothing rather
+    # than match empty-string attributes.
+    if Indexer._node_earnings_delta(result_obj, "") != (0, 0):
+        _fail("install.earnings.no_validator", str(Indexer._node_earnings_delta(result_obj, "")))
+        return
+
+    main_source = Path(os.path.join(REPO_ROOT, "indexer", "main.py")).read_text(encoding="utf-8")
+    # The counters must commit inside the block transaction; writing them after
+    # the checkpoint would double-count or drop a block on a crash.
+    tx_body = main_source.split("with self.db.transaction(label=\"block\"", 1)[-1].split("finally:", 1)[0]
+    if "_accumulate_node_earnings" not in tx_body:
+        _fail("install.earnings.not_atomic", "earnings counters are not folded in inside the block transaction")
+        return
+    if MIGRATION_KEY != "v1.38.5_add_node_earnings_counters":
+        _fail("install.earnings.migration_key", MIGRATION_KEY)
+        return
+
+    database_source = Path(os.path.join(REPO_ROOT, "indexer", "database.py")).read_text(encoding="utf-8")
+    for column in ("node_minted_total", "node_fees_total"):
+        if f"ADD COLUMN IF NOT EXISTS {column} BIGINT" not in database_source:
+            _fail("install.earnings.schema", f"supply_history does not persist {column}")
+            return
+    _pass("install.earnings.attribution")
 
 
 def _test_staked_balance_history() -> None:

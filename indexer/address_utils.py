@@ -69,6 +69,18 @@ def convertbits(data: bytes, frombits: int, tobits: int, pad: bool = True):
     return ret
 
 
+def module_address(name: str, hrp: str = "mirage") -> str:
+    """Bech32 account address of a cosmos module.
+
+    authtypes.NewModuleAddress hashes the module name with SHA-256 and keeps the
+    first 20 bytes. Derived rather than hardcoded because the core module is the
+    sender on every mint payout: a stale constant would not error, it would
+    silently attribute zero earnings.
+    """
+    digest = hashlib.sha256(name.encode("utf-8")).digest()[:20]
+    return bech32_encode(hrp, convertbits(digest, 8, 5))
+
+
 def derive_owner_from_msg(msg_dict: dict) -> str:
     pub_b64 = msg_dict.get("envelope_pubkey")
     if not pub_b64:

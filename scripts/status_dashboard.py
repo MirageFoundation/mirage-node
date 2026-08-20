@@ -1606,38 +1606,46 @@ def _query_balance_rest(address: str) -> Optional[int]:
 
 
 def summarize_earnings_history(rows: list[tuple], now: int) -> dict:
-    """Classify sampled validator asset changes without counting stake as spent."""
+    """Difference the node's cumulative earnings counters over each window.
+
+    Rows are (height, created_at, minted_total, fees_total), ascending. Both
+    totals are monotonic sums of what the chain actually paid this node and what
+    it actually paid in fees, so a window is just last-minus-first. This replaced
+    differencing balance samples, which could not tell a reward from someone
+    sending coins in, and which summed every up-tick separately rather than the
+    net — on a relay account that churns constantly it reported earnings orders
+    of magnitude above anything received.
+    """
     cutoff_24h = now - EARNINGS_DAY_SECS
     cutoff_30d = now - EARNINGS_WINDOW_SECS
-    earned_24h = 0
-    staked_24h = 0
-    spent_24h = 0
-    earned_30d = 0
 
-    for previous, current in zip(rows, rows[1:]):
-        current_ts = int(current[1])
-        asset_delta = (int(current[2]) + int(current[3])) - (int(previous[2]) + int(previous[3]))
-        staked_delta = int(current[3]) - int(previous[3])
-        if current_ts >= cutoff_30d and asset_delta > 0:
-            earned_30d += asset_delta
-        if current_ts >= cutoff_24h:
-            if asset_delta > 0:
-                earned_24h += asset_delta
-            elif asset_delta < 0:
-                spent_24h += -asset_delta
-            if staked_delta > 0:
-                staked_24h += staked_delta
+    in_window = [row for row in rows if int(row[1]) >= cutoff_30d]
 
-    in_window = [int(row[1]) for row in rows if int(row[1]) >= cutoff_30d]
+    def _span(window_rows: list[tuple]) -> tuple[int, int]:
+        if len(window_rows) < 2:
+            return 0, 0
+        first, last = window_rows[0], window_rows[-1]
+        # Counters only ever grow. A decrease means the history was rebuilt or
+        # the node re-keyed, and reporting a negative earning would be a lie, so
+        # clamp rather than invent a number.
+        return (
+            max(0, int(last[2]) - int(first[2])),
+            max(0, int(last[3]) - int(first[3])),
+        )
+
+    earned_24h, spent_24h = _span([row for row in in_window if int(row[1]) >= cutoff_24h])
+    earned_30d, spent_30d = _span(in_window)
+
     coverage_secs = 0
     if len(in_window) >= 2:
-        coverage_secs = max(0, min(now, in_window[-1]) - in_window[0])
+        coverage_secs = max(0, min(now, int(in_window[-1][1])) - int(in_window[0][1]))
 
     return {
         "earned_24h": earned_24h,
-        "staked_24h": staked_24h,
         "spent_24h": spent_24h,
         "earned_30d": earned_30d,
+        "spent_30d": spent_30d,
+        "net_30d": earned_30d - spent_30d,
         "coverage_secs": coverage_secs,
         "sample_count": len(in_window),
     }
@@ -1666,10 +1674,10 @@ def check_earnings() -> ServiceStatus:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        SELECT height, created_at, node_balance, node_staked
+                        SELECT height, created_at, node_minted_total, node_fees_total
                         FROM supply_history
-                        WHERE node_balance IS NOT NULL
-                          AND node_staked IS NOT NULL
+                        WHERE node_minted_total IS NOT NULL
+                          AND node_fees_total IS NOT NULL
                           AND created_at >= %s
                         ORDER BY height ASC
                         """,
@@ -1710,8 +1718,8 @@ def check_earnings() -> ServiceStatus:
     debug_log(
         "earnings: "
         f"samples={samples} coverage={coverage}s earned_24h={details['earned_24h']} "
-        f"staked_24h={details['staked_24h']} spent_24h={details['spent_24h']} "
-        f"earned_30d={details['earned_30d']}"
+        f"spent_24h={details['spent_24h']} earned_30d={details['earned_30d']} "
+        f"spent_30d={details['spent_30d']} net_30d={details['net_30d']}"
     )
     return ServiceStatus(name="Earnings", status=Status.OK, message=message, details=details)
 
@@ -2793,29 +2801,26 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Earnings":
         if details.get("sample_count", 0) >= 2:
             earned_24h = int(details["earned_24h"])
-            staked_24h = int(details["staked_24h"])
             spent_24h = int(details["spent_24h"])
-            earned_30d = int(details["earned_30d"])
+            net_30d = int(details["net_30d"])
             lines.append(
                 f"{bullet}{Colors.DIM}Earned 24h:{Colors.RESET} "
                 f"{Colors.BRIGHT_GREEN}+{format_mirage_delta(earned_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(
-                f"{bullet}{Colors.DIM}Staked 24h:{Colors.RESET} "
-                f"{Colors.BRIGHT_CYAN}+{format_mirage_delta(staked_24h)} MIRAGE{Colors.RESET}"
-            )
-            lines.append(
-                # "Spent" is a letter shorter than "Earned" and "Staked", so the
-                # extra space keeps all four amounts in one column.
+                # "Spent" is a letter shorter than "Earned", so the extra space
+                # keeps the amounts in one column.
                 f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET}  "
                 f"{Colors.BRIGHT_RED}-{format_mirage_delta(spent_24h)} MIRAGE{Colors.RESET}"
             )
+            net_color = Colors.BRIGHT_GREEN if net_30d >= 0 else Colors.BRIGHT_RED
+            net_sign = "+" if net_30d >= 0 else "-"
             lines.append(
-                f"{bullet}{Colors.DIM}Earned 30d:{Colors.RESET} "
-                f"{Colors.BRIGHT_GREEN}+{format_mirage_delta(earned_30d)} MIRAGE{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Total 30d:{Colors.RESET}  "
+                f"{net_color}{net_sign}{format_mirage_delta(abs(net_30d))} MIRAGE{Colors.RESET}"
             )
         else:
-            lines.append(f"{bullet}{Colors.DIM}Waiting for balance samples{Colors.RESET}")
+            lines.append(f"{bullet}{Colors.DIM}Waiting for earnings samples{Colors.RESET}")
 
     elif status.name == "Endpoints":
         endpoints = details.get("endpoints", {})
@@ -3029,9 +3034,8 @@ def render_compact_dashboard(
             output.append(truncate(f"    {Colors.DIM}{' '.join(str(x) for x in extra)}{Colors.RESET}", width))
         if status.name == "Earnings" and status.details.get("sample_count", 0) >= 2:
             earned_24h = int(status.details["earned_24h"])
-            staked_24h = int(status.details["staked_24h"])
             spent_24h = int(status.details["spent_24h"])
-            earned_30d = int(status.details["earned_30d"])
+            net_30d = int(status.details["net_30d"])
             output.append(
                 truncate(
                     f"    24h  +{format_mirage_delta(earned_24h)} earned  " f"-{format_mirage_delta(spent_24h)} spent",
@@ -3040,8 +3044,7 @@ def render_compact_dashboard(
             )
             output.append(
                 truncate(
-                    f"    24h  +{format_mirage_delta(staked_24h)} staked  "
-                    f"30d +{format_mirage_delta(earned_30d)} earned",
+                    f"    30d  {'+' if net_30d >= 0 else '-'}{format_mirage_delta(abs(net_30d))} total",
                     width,
                 )
             )

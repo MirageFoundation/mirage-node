@@ -39,6 +39,7 @@ from indexer.database import (
     META_LAST_BLOCK_HASH,
     META_LAST_HEIGHT,
 )
+from indexer.address_utils import module_address
 from indexer.chain_client import ChainClient
 from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
 from indexer.migrations import run_migrations
@@ -65,6 +66,13 @@ META_HISTORY_GAPS = "history_gaps"
 META_HISTORY_COMPLETE = "history_complete"
 
 TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
+
+MINT_DENOM = "umirage"
+
+# Sender on every payout the chain makes to a validator, whether that is the
+# periodic MintIfNeeded distribution or a governance mint. Derived from the
+# module name so it cannot drift out of step with the chain.
+CORE_MODULE_ADDRESS = module_address("core")
 
 # Telemetry sampling intervals (blocks)
 SUPPLY_SAMPLE_INTERVAL = 200
@@ -179,6 +187,16 @@ class Indexer:
             logger.info("Tracking node balance for %s", self._validator_address)
         else:
             logger.warning("Validator address not resolved; node balance tracking disabled")
+
+        # Cumulative and monotonic, so a restart resumes from the committed total
+        # rather than restarting the count and understating every later window.
+        self._node_minted_total = int(self.db.get_indexer_state("node_minted_total") or 0)
+        self._node_fees_total = int(self.db.get_indexer_state("node_fees_total") or 0)
+        logger.info(
+            "Node earnings counters loaded: minted_total=%s fees_total=%s",
+            self._node_minted_total,
+            self._node_fees_total,
+        )
 
         # Migrations run in start() AFTER continuity verification so a diverged
         # or wrong-network database cannot be rewritten before we refuse to index.
@@ -396,6 +414,7 @@ class Indexer:
 
                 self._process_governance_events(result_obj, ts, height)
                 self._process_subscription_events(result_obj, ts, height)
+                self._accumulate_node_earnings(result_obj, height, now)
 
                 self.db.upsert_recent_block(height, block_hash, ts)
                 if balances is not None:
@@ -617,13 +636,19 @@ class Indexer:
             logger.info("Chain params reloaded after governance update at height %s", height)
 
     @staticmethod
-    def _collect_touched_addresses(result_obj: dict) -> set[str]:
-        """Addresses whose balance may have changed in this block."""
+    def _all_block_events(result_obj: dict) -> list[dict]:
+        """Every event in the block: per-tx first, then the block-level phases."""
         all_events: list[dict] = []
         for tx_result in result_obj.get("txs_results") or []:
             all_events.extend(tx_result.get("events") or [])
         all_events.extend(result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [])
         all_events.extend(result_obj.get("begin_block_events") or [])
+        return all_events
+
+    @staticmethod
+    def _collect_touched_addresses(result_obj: dict) -> set[str]:
+        """Addresses whose balance may have changed in this block."""
+        all_events = Indexer._all_block_events(result_obj)
 
         touched: set[str] = set()
         for ev in all_events:
@@ -635,6 +660,70 @@ class Indexer:
                 if key in ("sender", "recipient", "spender", "receiver") and val.startswith("mirage"):
                     touched.add(val.lower())
         return touched
+
+    @staticmethod
+    def _sum_umirage(amount: str) -> int:
+        """Sum the umirage in a cosmos amount string like '1umirage,2uother'."""
+        total = 0
+        for part in (amount or "").split(","):
+            part = part.strip()
+            if part.endswith(MINT_DENOM) and part[: -len(MINT_DENOM)].isdigit():
+                total += int(part[: -len(MINT_DENOM)])
+        return total
+
+    @staticmethod
+    def _node_earnings_delta(result_obj: dict, node_address: str) -> tuple[int, int]:
+        """What this node was paid, and what it paid in fees, in one block.
+
+        Minted is a transfer out of the core module account: that is the only way
+        the node is credited newly minted supply, covering both the periodic
+        MintIfNeeded payout to validators and a governance MsgMintTokens. A
+        transfer from anyone else is somebody sending coins around and is
+        deliberately not income.
+
+        Fees come from the tx event's own fee/fee_payer pair, so only what this
+        node actually paid to broadcast counts as spending.
+        """
+        if not node_address:
+            return 0, 0
+
+        minted = 0
+        fees = 0
+        for ev in Indexer._all_block_events(result_obj):
+            ev_type = ev.get("type", "")
+            if ev_type not in ("transfer", "tx"):
+                continue
+            attrs = {attr_text(a.get("key")): attr_text(a.get("value")) for a in (ev.get("attributes") or [])}
+            if ev_type == "transfer":
+                if attrs.get("sender") == CORE_MODULE_ADDRESS and attrs.get("recipient") == node_address:
+                    minted += Indexer._sum_umirage(attrs.get("amount", ""))
+            elif attrs.get("fee_payer") == node_address:
+                fees += Indexer._sum_umirage(attrs.get("fee", ""))
+        return minted, fees
+
+    def _accumulate_node_earnings(self, result_obj: dict, height: int, now: int) -> None:
+        """Fold this block's earnings into the durable cumulative counters.
+
+        Runs inside the block transaction so the counters commit with the
+        checkpoint: a crash cannot double-count a block or lose one.
+        """
+        if not self._validator_address:
+            return
+        minted, fees = self._node_earnings_delta(result_obj, self._validator_address)
+        if not minted and not fees:
+            return
+        self._node_minted_total += minted
+        self._node_fees_total += fees
+        self.db.set_indexer_state("node_minted_total", str(self._node_minted_total), now)
+        self.db.set_indexer_state("node_fees_total", str(self._node_fees_total), now)
+        logger.debug(
+            "node_earnings height=%s minted=%s fees=%s minted_total=%s fees_total=%s",
+            height,
+            minted,
+            fees,
+            self._node_minted_total,
+            self._node_fees_total,
+        )
 
     def _record_optional_telemetry(self, height: int):
         """Chart/ops samples taken after the block is committed. Never fatal.
@@ -678,6 +767,8 @@ class Indexer:
                     now,
                     node_balance=node_balance,
                     node_staked=node_staked,
+                    node_minted_total=self._node_minted_total if self._validator_address else None,
+                    node_fees_total=self._node_fees_total if self._validator_address else None,
                 )
                 self.db.set_chain_stat("total_supply", supply, now)
             except Exception as e:
