@@ -2732,8 +2732,9 @@ def _test_governed_upgrade_prepare() -> None:
     install = Path(INSTALL_SH).read_text(encoding="utf-8")
     systemd_dir = os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd")
     for legacy_unit in ("mirage-update.service", "mirage-update.timer"):
-        if os.path.exists(os.path.join(systemd_dir, legacy_unit)):
-            _fail("install.upgrade.background_fetch_unit", f"{legacy_unit} still ships")
+        unit = Path(systemd_dir, legacy_unit).read_text(encoding="utf-8")
+        if "ConditionPathExists=/var/lib/mirage/update/automatic-fetch-enabled" not in unit or "--tick" in unit:
+            _fail("install.upgrade.background_fetch_unit", f"{legacy_unit} is not an inert compatibility stub")
             return
     if "enable --now mirage-update.timer" in install:
         _fail("install.upgrade.background_fetch_enabled", "installer enables automatic release fetching")

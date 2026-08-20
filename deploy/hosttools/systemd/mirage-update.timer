@@ -1,0 +1,10 @@
+[Unit]
+Description=Compatibility stub; automatic Mirage release fetching is disabled
+ConditionPathExists=/var/lib/mirage/update/automatic-fetch-enabled
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

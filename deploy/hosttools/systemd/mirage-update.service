@@ -1,0 +1,7 @@
+[Unit]
+Description=Compatibility stub; automatic Mirage release fetching is disabled
+ConditionPathExists=/var/lib/mirage/update/automatic-fetch-enabled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/true
