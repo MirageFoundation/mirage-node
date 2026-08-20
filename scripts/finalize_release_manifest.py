@@ -60,6 +60,7 @@ def check_image(manifest: dict) -> None:
         ("scripts/status_dashboard.py", "/opt/mirage/scripts/status_dashboard.py"),
         ("deploy/hosttools/mirage-launch", "/opt/mirage/deploy/hosttools/mirage-launch"),
         ("deploy/hosttools/mirage-update", "/opt/mirage/deploy/hosttools/mirage-update"),
+        ("deploy/hosttools/mirage-upgrade", "/opt/mirage/deploy/hosttools/mirage-upgrade"),
         ("release/network.json", "/opt/mirage/release/network.json"),
         ("release/network.json.sig", "/opt/mirage/release/network.json.sig"),
     )

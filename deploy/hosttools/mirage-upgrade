@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Verify, pull and arm a governed chain upgrade.
+set -euo pipefail
+
+HOME="${HOME:-/root}"
+STATE_DIR=/var/lib/mirage/update
+LOCK_DIR="$STATE_DIR"
+MANIFEST_URL="${MIRAGE_MANIFEST_URL:-https://raw.githubusercontent.com/MirageFoundation/mirage-node/prod/release/manifest.json}"
+PUBKEY=/usr/local/share/mirage/pubkey.pem
+VERIFY=/usr/local/bin/mirage-verify
+UPDATE=/usr/local/bin/mirage-update
+
+show_help() {
+  cat <<'EOF'
+Usage: mirage-upgrade
+
+Verify the signed release for a governed chain upgrade, pull its image, and arm
+this node to swap onto it. The swap happens automatically once the chain halts
+at the governed height, and only onto the image armed here.
+
+Use mirage-update for ordinary releases. A release whose activation is not
+upgrade-halt is refused here, and a governed one is refused there.
+
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) show_help; exit 0 ;;
+  "") ;;
+  *) echo "ERROR: unknown argument: $1" >&2; show_help >&2; exit 2 ;;
+esac
+
+mkdir -p "$STATE_DIR"
+
+# A dedicated lock. Staging runs as "mirage-update --tick", which takes the
+# updater's own lock, so sharing one here would deadlock against it.
+exec 9>"$LOCK_DIR/upgrade.lock"
+if ! flock -n 9; then
+  echo "ERROR: an upgrade is already being prepared" >&2
+  exit 1
+fi
+
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+fetch_verify() {
+  local url="$1" dest="$2" nonce manifest_url signature_url base query
+  nonce="$(date +%s%N)-$$-${RANDOM}"
+  if [[ "$url" == *"?"* ]]; then
+    base="${url%%\?*}"
+    query="${url#*\?}"
+    manifest_url="${base}?${query}&mirage_cache=${nonce}"
+    signature_url="${base}.sig?${query}&mirage_cache=${nonce}"
+  else
+    manifest_url="${url}?mirage_cache=${nonce}"
+    signature_url="${url}.sig?mirage_cache=${nonce}"
+  fi
+  curl -fsSL "$manifest_url" -o "$dest"
+  curl -fsSL "$signature_url" -o "${dest}.sig"
+  "$VERIFY" --manifest "$dest" --signature "${dest}.sig" --pubkey "$PUBKEY"
+}
+
+json_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"
+}
+
+# LCD is not published on the host (only 80/443/26656/26657 are). Query it
+# inside the container so a live node is not mistaken for an uninitialized one.
+query_local_rest() {
+  docker exec mirage curl -fsS --max-time 5 "$1"
+}
+
+disable_automatic_release_fetch() {
+  systemctl disable --now mirage-update.timer >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/mirage-update.service /etc/systemd/system/mirage-update.timer
+  systemctl daemon-reload
+}
+
+# Verifying, pulling and staging a release is the updater's engine. Call it
+# rather than keeping a second copy of it that has to be held in step.
+tick() {
+  "$UPDATE" --tick
+}
+
+# Record that this node intends to cross a governed halt onto a specific image,
+# and start the timer that performs the swap. Before governance, plan_height is
+# zero; the chain-written halt marker supplies the height during activation.
+arm_governed_upgrade() {
+  local manifest="$1" upgrade_name image release_id prepared plan plan_name plan_h
+  upgrade_name=$(json_field "$manifest" upgrade_name)
+  if [[ -z "$upgrade_name" ]]; then
+    echo "ERROR: upgrade-halt manifest is missing upgrade_name" >&2
+    exit 1
+  fi
+  image=$(json_field "$manifest" image)
+  release_id=$(json_field "$manifest" release_id)
+  if ! plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
+    echo "local REST is unavailable; cannot match the on-chain upgrade plan yet"
+    return 1
+  fi
+  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
+  if [[ -z "$plan_name" && "$plan_h" -ne 0 ]]; then
+    echo "ERROR: on-chain upgrade plan has height $plan_h but no name" >&2
+    exit 1
+  fi
+  if [[ -n "$plan_name" && "$plan_h" -le 0 ]]; then
+    echo "ERROR: on-chain upgrade plan '$plan_name' has invalid height $plan_h" >&2
+    exit 1
+  fi
+  if [[ -n "$plan_name" && "$plan_name" != "$upgrade_name" ]]; then
+    echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
+    exit 1
+  fi
+  prepared="$HOME/.mirage/upgrade/prepared.json"
+  if [[ -f "$prepared" ]] \
+    && [[ "$(json_field "$prepared" upgrade_name)" == "$upgrade_name" ]] \
+    && [[ "$(json_field "$prepared" image)" == "$image" ]] \
+    && [[ "$(json_field "$prepared" plan_height)" == "$plan_h" ]]; then
+    echo "governed upgrade $upgrade_name at height $plan_h is already armed"
+    return 0
+  fi
+  mkdir -p "$HOME/.mirage/upgrade"
+  python3 - "$prepared" "$STATE_DIR/prepared.json" "$upgrade_name" "$plan_h" "$image" "$release_id" <<'PY'
+import json, os, sys, time
+dest, dest2, name, height, image, rid = sys.argv[1:7]
+payload = {
+    "upgrade_name": name,
+    "plan_name": name,
+    "plan_height": int(height),
+    "image": image,
+    "release_id": int(rid),
+    "prepared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+text = json.dumps(payload, indent=2) + "\n"
+for path in (dest, dest2):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    open(tmp, "w").write(text)
+    os.replace(tmp, path)
+PY
+  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
+  if (( plan_h > 0 )); then
+    echo "prepared $upgrade_name at height $plan_h; activation is automatic at the governed halt"
+  else
+    echo "prepared $upgrade_name before governance; the matching halt marker will supply its height"
+  fi
+  return 0
+}
+
+# Preparation is the sole path that authorizes fetching and arming a governed
+# upgrade. Halt activation later uses only this locally prepared image.
+prepare() {
+  disable_automatic_release_fetch
+  mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known" "$HOME/.mirage/upgrade"
+  fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
+  activation=$(json_field "$tmp/manifest.json" activation)
+  if [[ "$activation" != "upgrade-halt" ]]; then
+    echo "ERROR: mirage-upgrade requires activation=upgrade-halt (got '$activation'); use mirage-update" >&2
+    exit 1
+  fi
+  tick
+  arm_governed_upgrade "$HOME/.mirage/env/release-manifest.json"
+  echo "The release is ready and will activate automatically at the governed halt."
+}
+
+prepare

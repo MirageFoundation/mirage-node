@@ -138,7 +138,7 @@ mirage-update
 Being several releases behind is fine — one update applies everything it missed.
 
 **Blockchain upgrades require explicit preparation.** Before submitting the
-governance proposal, run `mirage-update --prepare`. It verifies and pulls the
+governance proposal, run `mirage-upgrade`. It verifies and pulls the
 exact signed digest and records the upgrade name. At the later governed halt,
 the local chain-written marker supplies the approved height and the activator
 swaps to that already prepared image automatically. It never fetches anything

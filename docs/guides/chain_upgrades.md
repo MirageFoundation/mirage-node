@@ -100,7 +100,7 @@ Notes:
 Before submitting the proposal, an operator must prepare each validator:
 
 ```bash
-mirage-update --prepare
+mirage-upgrade
 ```
 
 This verifies the signed manifest, pulls its digest, requires

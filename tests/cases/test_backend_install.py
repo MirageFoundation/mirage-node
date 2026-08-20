@@ -27,6 +27,7 @@ INSTALL_SH = os.path.join(REPO_ROOT, "deploy", "install.sh")
 CREATE_VALIDATOR = os.path.join(REPO_ROOT, "deploy", "create_validator.sh")
 RELEASE_VERIFY = os.path.join(REPO_ROOT, "deploy", "release_verify.py")
 UPDATE_SH = os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-update")
+UPGRADE_SH = os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-upgrade")
 PUBKEY = os.path.join(REPO_ROOT, "deploy", "hosttools", "pubkey.pem")
 NETWORK_JSON = os.path.join(REPO_ROOT, "release", "network.json")
 STAKE_PY = os.path.join(REPO_ROOT, "scripts", "stake.py")
@@ -1208,7 +1209,7 @@ def _test_public_cli_help() -> None:
     """Public host tools document -h/--help and reject unknown arguments."""
     tools = {
         "mirage-status": ["--once", "--json", "--interval"],
-        "mirage-update": ["--prepare", "--status", "--rollback"],
+        "mirage-update": ["--status", "--rollback"],
         "mirage-backup": ["--output", "--stdout", "--with-media"],
         "mirage-restore": ["--check"],
         "mirage-domain": ["--set", "--status", "--remove"],
@@ -1268,12 +1269,40 @@ def _test_public_cli_help() -> None:
         _fail("install.cli.restore.forbidden", "restore must refuse chain DB paths")
         return
     updater = Path(UPDATE_SH).read_text(encoding="utf-8")
-    if "--prepare" not in updater or "activate_if_halted" not in updater:
-        _fail("install.cli.update.prepare", "mirage-update is missing governed-upgrade prepare/activate")
+    upgrader = Path(UPGRADE_SH).read_text(encoding="utf-8")
+    # Arming a governed upgrade is mirage-upgrade's job, and only its job:
+    # leaving the old flag in place would keep two names for one action.
+    if "arm_governed_upgrade" not in upgrader:
+        _fail("install.cli.upgrade.arm", "mirage-upgrade cannot arm a governed upgrade")
+        return
+    if "--prepare" in updater:
+        _fail("install.cli.update.prepare_removed", "mirage-update still accepts --prepare; it is now mirage-upgrade")
+        return
+    if "activate_if_halted" not in updater:
+        _fail("install.cli.update.activate", "mirage-update is missing the governed-halt activator")
         return
     if "upgrade-info.json" not in updater:
         _fail("install.cli.update.marker", "activation must require the Cosmos upgrade marker")
         return
+    # An operator who reaches for the old spelling must be told the new one
+    # rather than silently doing nothing.
+    stale = _run(["bash", UPDATE_SH, "--prepare"])
+    if stale.returncode != 2:
+        _fail("install.cli.update.prepare_rc", f"rc={stale.returncode} err={stale.stderr}")
+        return
+    upgrade_help = _run(["bash", UPGRADE_SH, "--help"])
+    if upgrade_help.returncode != 0 or "Usage: mirage-upgrade" not in (upgrade_help.stdout or ""):
+        _fail("install.cli.upgrade.help", f"rc={upgrade_help.returncode} out={upgrade_help.stdout}")
+        return
+    upgrade_unknown = _run(["bash", UPGRADE_SH, "--not-a-real-flag"])
+    if upgrade_unknown.returncode != 2:
+        _fail("install.cli.upgrade.unknown_rc", f"rc={upgrade_unknown.returncode} err={upgrade_unknown.stderr}")
+        return
+    # Both tools must be installed, or the rename strands the governed path.
+    for source, label in ((updater, "mirage-update"), (Path(INSTALL_SH).read_text(encoding="utf-8"), "install.sh")):
+        if "mirage-update mirage-upgrade" not in source:
+            _fail("install.cli.upgrade.installed", f"{label} does not install mirage-upgrade")
+            return
     _pass("install.cli.public_contract")
 
 
@@ -2123,7 +2152,7 @@ update_now
 
 
 def _test_updater_repairs_uninitialized_node() -> None:
-    """A signed staged release must repair height zero even when RPC and REST are down."""
+    """A signed staged release must repair a node that is down, whatever height it signed to."""
     activate = _shell_function(UPDATE_SH, "activate_staged")
     json_field = _shell_function(UPDATE_SH, "json_field")
 
@@ -2190,11 +2219,14 @@ activate_staged
             )
             return
 
+        # A validator halted by a consensus fault looks exactly like this: no RPC,
+        # no REST, and a signed height from the blocks it managed before stopping.
+        # It is the case the updater exists for, so it must not be refused.
         result = run(10)
-        if result.returncode == 0 or os.path.exists(launched):
+        if result.returncode != 0 or not os.path.isfile(launched):
             _fail(
-                "install.updater.signed_height_guard",
-                f"activated after signed height without local safety checks: out={result.stdout} err={result.stderr}",
+                "install.updater.halted_validator_repair",
+                f"refused to update a down validator rc={result.returncode} out={result.stdout} err={result.stderr}",
             )
             return
     _pass("install.updater.repairs_uninitialized_node")
@@ -2842,18 +2874,34 @@ def _test_governed_upgrade_prepare() -> None:
                 return
     _pass("install.upgrade.halt_scan_scoped")
 
+    # A node stopped by a consensus fault has no RPC and, if it is a validator,
+    # a non-zero signed height. Refusing there meant the updater declined to
+    # update exactly the nodes that a new image would rescue: on 2026-08-20 the
+    # validators halted at 6969190 could not run mirage-update at all.
+    activate_src = _shell_function(UPDATE_SH, "activate_staged")
+    if "refusing activation after signed height" in activate_src:
+        _fail(
+            "install.update.halted_node_can_activate",
+            "activate_staged still refuses when the node is down and has signed",
+        )
+        return
+    # The live-RPC protection must survive: recreating mid-sync discards it.
+    if "node is catching up; refusing activation" not in activate_src:
+        _fail("install.update.catching_up_still_guarded", "mid-sync activation is no longer refused")
+        return
+
     pruner = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh")).read_text(encoding="utf-8")
     if "prepared.json" not in pruner:
         _fail("install.upgrade.prune_keeps_prepared", "image pruner can delete the image armed for a governed halt")
         return
 
-    prepare = _shell_function(UPDATE_SH, "prepare")
-    arm = _shell_function(UPDATE_SH, "arm_governed_upgrade")
+    prepare = _shell_function(UPGRADE_SH, "prepare")
+    arm = _shell_function(UPGRADE_SH, "arm_governed_upgrade")
     activate = _shell_function(UPDATE_SH, "activate_if_halted")
     idx_disable = prepare.find("disable_automatic_release_fetch")
     idx_tick = prepare.find("tick")
     if idx_disable < 0 or idx_tick < idx_disable or prepare.find("arm_governed_upgrade") < idx_tick:
-        _fail("install.upgrade.prepare_sequence", "--prepare must disable background fetching before fetch and arm")
+        _fail("install.upgrade.prepare_sequence", "mirage-upgrade must disable background fetching before fetch and arm")
         return
 
     def _arm_harness(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> tuple[str, str]:
@@ -2987,7 +3035,7 @@ json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
 docker() {{ echo "docker must not run while an upgrade is armed: $*" >&2; return 99; }}
 {_shell_function(UPDATE_SH, "version_at_least")}
 {_shell_function(UPDATE_SH, "canonical_hash")}
-{_shell_function(UPDATE_SH, "arm_governed_upgrade")}
+{_shell_function(UPGRADE_SH, "arm_governed_upgrade")}
 {real_tick}
 tick
 """

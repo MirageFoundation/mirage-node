@@ -433,7 +433,7 @@ install_hosttools() {
     die "image pubkey $image_fp does not match the installer's $host_fp"
   fi
   local tool
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
     if [[ ! -f "$staging/$tool" ]]; then
       die "image missing host tool $tool"
     fi

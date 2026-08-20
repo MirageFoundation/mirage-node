@@ -15,12 +15,13 @@ SAFETY_BLOCKS="${UPGRADE_PREFLIGHT_SAFETY_BLOCKS:-500}"
 
 show_help() {
   cat <<'EOF'
-Usage: mirage-update [--prepare | --status | --rollback]
+Usage: mirage-update [--status | --rollback]
 
   (no args)     check, verify, stage, and activate an ordinary release
-  --prepare     verify, pull, and arm a governed upgrade
   --status      show active/staged/prepared state without mutation
   --rollback    restore the previous image when the signed policy permits it
+
+Governed chain upgrades are prepared with mirage-upgrade, not here.
 
 Every release requires an explicit operator command. A prepared governed
 upgrade activates automatically only after the node reaches its matching halt.
@@ -30,7 +31,7 @@ EOF
 
 case "${1:-}" in
   -h|--help) show_help; exit 0 ;;
-  --tick|--rollback|--prepare|--status|--activate-if-halted|"") ;;
+  --tick|--rollback|--status|--activate-if-halted|"") ;;
   --refresh-hosttools)
     if [[ "${2:-}" != "--image" || -z "${3:-}" ]]; then
       echo "usage: mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:..." >&2
@@ -154,11 +155,14 @@ activate_staged() {
       fi
       echo "node has never signed a block; activating its staged release rather than waiting for a sync that cannot finish"
     fi
-  elif (( signed_height != 0 )); then
-    echo "ERROR: local RPC is unavailable; refusing activation after signed height $signed_height" >&2
-    exit 1
   else
-    echo "local RPC is unavailable on this uninitialized node; activating its staged recovery release"
+    # No RPC means the node is not running, so there is no partial sync to throw
+    # away and nothing is gained by waiting: a node halted by a consensus fault
+    # gets going again only by moving to a new image. This used to refuse for any
+    # node with a signed height, which is every validator, so on 2026-08-20 the
+    # nodes stopped by the supply-delta halt were the ones the updater would not
+    # update. Recreating a container that is already down cannot lose anything.
+    echo "local RPC is unavailable, so the node is down; activating its staged release"
   fi
   if plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
     plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
@@ -175,11 +179,12 @@ activate_staged() {
         exit 1
       fi
     fi
-  elif (( signed_height == 0 )); then
-    echo "local REST is unavailable on this uninitialized node; activating its staged recovery release"
   else
-    echo "ERROR: local REST is unavailable; refusing activation after signed height $signed_height" >&2
-    exit 1
+    # Same reasoning as the RPC branch above: a node that is down cannot answer,
+    # and refusing to update it leaves it down. Staging already refuses to put an
+    # ordinary release over an armed governed upgrade, so the halt this check
+    # protects cannot be crossed unnoticed by taking this path.
+    echo "local REST is unavailable, so a nearby governed halt cannot be checked; activating its staged release"
   fi
   # A release is not required to be reached one version at a time. Deploy
   # migrations are applied by discovering everything this node has not run yet,
@@ -312,7 +317,7 @@ install_hosttools_from_image() {
     echo "ERROR: staged image pubkey $image_fp does not match host trust anchor $host_fp" >&2
     exit 1
   fi
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
     install -m 0755 "$staging/$tool" "/usr/local/bin/$tool"
   done
   install -m 0755 "$staging/prune_mirage_images.sh" /usr/local/bin/prune_mirage_images.sh
@@ -323,72 +328,6 @@ install_hosttools_from_image() {
   done
   disable_automatic_release_fetch
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
-}
-
-# Record that this node intends to cross a governed halt onto a specific image,
-# and start the timer that performs the swap. Before governance, plan_height is
-# zero; the chain-written halt marker supplies the height during activation.
-arm_governed_upgrade() {
-  local manifest="$1" upgrade_name image release_id prepared plan plan_name plan_h
-  upgrade_name=$(json_field "$manifest" upgrade_name)
-  if [[ -z "$upgrade_name" ]]; then
-    echo "ERROR: upgrade-halt manifest is missing upgrade_name" >&2
-    exit 1
-  fi
-  image=$(json_field "$manifest" image)
-  release_id=$(json_field "$manifest" release_id)
-  if ! plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
-    echo "local REST is unavailable; cannot match the on-chain upgrade plan yet"
-    return 1
-  fi
-  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
-  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
-  if [[ -z "$plan_name" && "$plan_h" -ne 0 ]]; then
-    echo "ERROR: on-chain upgrade plan has height $plan_h but no name" >&2
-    exit 1
-  fi
-  if [[ -n "$plan_name" && "$plan_h" -le 0 ]]; then
-    echo "ERROR: on-chain upgrade plan '$plan_name' has invalid height $plan_h" >&2
-    exit 1
-  fi
-  if [[ -n "$plan_name" && "$plan_name" != "$upgrade_name" ]]; then
-    echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
-    exit 1
-  fi
-  prepared="$HOME/.mirage/upgrade/prepared.json"
-  if [[ -f "$prepared" ]] \
-    && [[ "$(json_field "$prepared" upgrade_name)" == "$upgrade_name" ]] \
-    && [[ "$(json_field "$prepared" image)" == "$image" ]] \
-    && [[ "$(json_field "$prepared" plan_height)" == "$plan_h" ]]; then
-    echo "governed upgrade $upgrade_name at height $plan_h is already armed"
-    return 0
-  fi
-  mkdir -p "$HOME/.mirage/upgrade"
-  python3 - "$prepared" "$STATE_DIR/prepared.json" "$upgrade_name" "$plan_h" "$image" "$release_id" <<'PY'
-import json, os, sys, time
-dest, dest2, name, height, image, rid = sys.argv[1:7]
-payload = {
-    "upgrade_name": name,
-    "plan_name": name,
-    "plan_height": int(height),
-    "image": image,
-    "release_id": int(rid),
-    "prepared_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-text = json.dumps(payload, indent=2) + "\n"
-for path in (dest, dest2):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    open(tmp, "w").write(text)
-    os.replace(tmp, path)
-PY
-  systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
-  if (( plan_h > 0 )); then
-    echo "prepared $upgrade_name at height $plan_h; activation is automatic at the governed halt"
-  else
-    echo "prepared $upgrade_name before governance; the matching halt marker will supply its height"
-  fi
-  return 0
 }
 
 tick() {
@@ -503,7 +442,7 @@ PY
   install -m 0644 "$tmp/manifest.json.sig" "$HOME/.mirage/well-known/manifest.json.sig"
   echo "staged $image activation=$activation (host tools install on activation)"
   if [[ "$activation" == "upgrade-halt" ]]; then
-    echo "governance-linked release staged; run mirage-update --prepare after its on-chain plan passes"
+    echo "governance-linked release staged; run mirage-upgrade after its on-chain plan passes"
   fi
 }
 
@@ -611,22 +550,6 @@ PY
   else
     echo "activation_ready: waiting for governed halt"
   fi
-}
-
-# Preparation is the sole path that authorizes fetching and arming a governed
-# upgrade. Halt activation later uses only this locally prepared image.
-prepare() {
-  disable_automatic_release_fetch
-  mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known" "$HOME/.mirage/upgrade"
-  fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
-  activation=$(json_field "$tmp/manifest.json" activation)
-  if [[ "$activation" != "upgrade-halt" ]]; then
-    echo "ERROR: --prepare requires activation=upgrade-halt (got '$activation')" >&2
-    exit 1
-  fi
-  tick
-  arm_governed_upgrade "$HOME/.mirage/env/release-manifest.json"
-  echo "The release is ready and will activate automatically at the governed halt."
 }
 
 activate_if_halted() {
@@ -754,7 +677,6 @@ PY
 case "${1:-}" in
   --tick) tick ;;
   --rollback) rollback ;;
-  --prepare) prepare ;;
   --status) show_status ;;
   --activate-if-halted) activate_if_halted ;;
   --refresh-hosttools)
