@@ -26,6 +26,21 @@ logger = logging.getLogger(__name__)
 # belongs to cosmos modules and is deliberately not indexed.
 CORE_TYPE_URL_PREFIX = "/mirage.core.v1."
 
+# Core messages governance can execute that move no state the indexer projects.
+# Mint/burn change balances and supply, which are re-read from the block's bank
+# events and the supply sample; punish changes validator state, which is re-read
+# from the validator sample. They have no decoder because there is nothing to
+# decode them for — so they must be excluded from the untracked-is-fatal check
+# below, which otherwise makes any proposal carrying one permanently
+# unprojectable and crash-loops the indexer on that block.
+GOVERNANCE_ONLY_TYPE_URLS = frozenset(
+    {
+        f"{CORE_TYPE_URL_PREFIX}MsgMintTokens",
+        f"{CORE_TYPE_URL_PREFIX}MsgBurnTokens",
+        f"{CORE_TYPE_URL_PREFIX}MsgPunishValidator",
+    }
+)
+
 # Profile listing pages are far larger than a normal point query, so they get
 # their own (longer) budget instead of the 3s GRPC_TIMEOUT.
 # The chain caps a page at keeper.MaxProfilesQueryLimit (100); asking for more
@@ -417,12 +432,16 @@ class ChainClient:
 
         Everything else — cosmos gov, upgrade, bank — is deliberately not the indexer's
         business, which is the same rule _process_tx applies to ordinary transactions.
+        GOVERNANCE_ONLY_TYPE_URLS is exempt: those are known to carry no projected
+        state, so dropping them is the intended outcome rather than silent drift.
         """
         untracked = sorted(
             {
                 any_msg.type_url
                 for any_msg in anys
-                if any_msg.type_url.startswith(CORE_TYPE_URL_PREFIX) and any_msg.type_url not in type_url_to_proto
+                if any_msg.type_url.startswith(CORE_TYPE_URL_PREFIX)
+                and any_msg.type_url not in type_url_to_proto
+                and any_msg.type_url not in GOVERNANCE_ONLY_TYPE_URLS
             }
         )
         if untracked:

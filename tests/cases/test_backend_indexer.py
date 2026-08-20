@@ -1453,7 +1453,7 @@ def _indexer_hardening_2026_08_14_checks() -> None:
 
     import indexer.main as indexer_main
     from indexer import params as indexer_params
-    from indexer.chain_client import ChainClient
+    from indexer.chain_client import ChainClient, GOVERNANCE_ONLY_TYPE_URLS
     from indexer.database import DatabaseManager
     from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
 
@@ -1632,6 +1632,41 @@ def _indexer_hardening_2026_08_14_checks() -> None:
         _pass("indexer_hardening.annotate_is_governance_trackable")
     else:
         _fail("indexer_hardening.annotate_is_governance_trackable", "MsgAnnotate is dispatched but not trackable")
+
+    # A mint/burn/punish proposal projects nothing, so the untracked-is-fatal check
+    # must not fire on it. It used to, which crash-looped every indexer on the block
+    # that executed the proposal while the chain itself was perfectly healthy.
+    for governance_only in sorted(GOVERNANCE_ONLY_TYPE_URLS):
+        name = governance_only.rsplit(".", 1)[-1]
+        try:
+            kept = ChainClient._filter_trackable_anys([_Any(governance_only)], TYPE_URL_TO_PROTO)
+            if kept:
+                _fail(f"indexer_hardening.governance_only_skipped.{name}", f"projected {kept}")
+            else:
+                _pass(f"indexer_hardening.governance_only_skipped.{name}")
+        except RuntimeError as e:
+            _fail(f"indexer_hardening.governance_only_skipped.{name}", f"treated as untracked: {e}")
+
+    # Mixed proposal (the make-admin shape): the tracked message still projects.
+    try:
+        kept = ChainClient._filter_trackable_anys(
+            [_Any("/mirage.core.v1.MsgSetLevel"), _Any("/mirage.core.v1.MsgMintTokens")],
+            TYPE_URL_TO_PROTO,
+        )
+        if [k["type_url"] for k in kept] == ["/mirage.core.v1.MsgSetLevel"]:
+            _pass("indexer_hardening.governance_only_mixed_proposal")
+        else:
+            _fail("indexer_hardening.governance_only_mixed_proposal", f"kept={kept}")
+    except RuntimeError as e:
+        _fail("indexer_hardening.governance_only_mixed_proposal", f"treated as untracked: {e}")
+
+    # The exemption is a named list, not a hole: a core type that is neither
+    # projected nor listed must still be fatal (covered above by MsgTotallyNew).
+    overlap = GOVERNANCE_ONLY_TYPE_URLS & set(TYPE_URL_TO_PROTO)
+    if overlap:
+        _fail("indexer_hardening.governance_only_disjoint", f"also projected: {sorted(overlap)}")
+    else:
+        _pass("indexer_hardening.governance_only_disjoint")
 
     # ── L-3: a mid-run chain_id change is rejected ───────────────────────
     #
