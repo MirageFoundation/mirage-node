@@ -11,6 +11,8 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
+import psycopg
+
 from db import connect_db
 
 log = logging.getLogger(__name__)
@@ -142,6 +144,18 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
                 log.info(f"Loaded {len(cache)} chain params from indexer DB")
                 log.debug(f"Chain params: {cache}")
                 return _PARAMS_CACHE
+            except psycopg.errors.InsufficientPrivilege as e:
+                # The retry loop exists to wait for the indexer to populate
+                # chain_params. A missing grant is not a race that resolves: it
+                # spent an hour logging identical warnings while the node served
+                # the maintenance page, and the operator saw a mute failed
+                # install. Say what is wrong, once, and stop.
+                raise RuntimeError(
+                    "the read-only indexer role cannot read the indexer DB: "
+                    f"{e}. Grant it SELECT on schema public in the indexer database "
+                    "(see ensure_local_postgres_dbs in deploy/entrypoint.sh); no "
+                    "amount of waiting will fix this."
+                ) from e
             except Exception as e:
                 last_error = e
                 if attempt < max_retries - 1:

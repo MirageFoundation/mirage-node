@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 try:
     import psycopg
@@ -175,6 +175,30 @@ _DEBUG_LOG_PATH = os.environ.get("MIRAGE_STATUS_DASHBOARD_LOG", "/tmp/mirage_sta
 NODE_LAST_BLOCK_WARN_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_WARN_SECS", "15"))
 NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SECS", "60"))
 
+# Caddy answers 503 on every route while this file exists, and
+# run_maintenance_gate.sh only removes it once the backend answers — which for a
+# node joining by state sync is after the entire catch-up. Every 503 seen while
+# it exists is the holding page doing its job, not a fault.
+MAINTENANCE_FLAG = os.environ.get("MIRAGE_MAINTENANCE_FLAG", "/etc/caddy/.maintenance").strip()
+
+# Block-progress samples. A node replaying history sits on a last block that is
+# hours old while CometBFT reports catching_up=false (blocksync exits before the
+# consensus reactor has closed the gap), so block age alone cannot tell "catching
+# up" from "halted" — and reporting a healthy sync as a stalled chain is what
+# made a working install look broken. Height movement between two samples
+# separates them, which is the same signal run_maintenance_gate.sh uses.
+PROGRESS_SAMPLE_PATH = os.environ.get("MIRAGE_STATUS_PROGRESS_FILE", "/tmp/mirage_status_progress.json").strip()
+# Older than this and the node may have restarted in between; too close together
+# and a slow replay shows no movement yet. Outside the window, probe live.
+PROGRESS_SAMPLE_MAX_AGE_SECS = 120.0
+PROGRESS_SAMPLE_MIN_GAP_SECS = 0.8
+PROGRESS_PROBE_SLEEP_SECS = 1.5
+
+# Status line + four detail lines. Every card renders exactly this many so the
+# grid stays rectangular whatever any single card has to say.
+CARD_CONTENT_LINES = 5
+CARD_DETAIL_LINES = CARD_CONTENT_LINES - 1
+
 MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
 EARNINGS_DAY_SECS = 24 * 60 * 60
 EARNINGS_WINDOW_SECS = 30 * EARNINGS_DAY_SECS
@@ -287,6 +311,26 @@ def format_age_secs(age_secs: float) -> str:
     if age_secs < 3600:
         return f"{int(age_secs / 60)}m ago"
     return f"{int(age_secs / 3600)}h ago"
+
+
+def format_duration_secs(secs: float) -> str:
+    """A span of time, for "behind" and "ETA" — never a point in the past."""
+    secs = max(0, int(secs))
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        return f"{secs // 60}m"
+    hours, minutes = secs // 3600, (secs % 3600) // 60
+    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+
+
+def maintenance_held() -> bool:
+    """True while Caddy is serving the holding page instead of the site."""
+    try:
+        return os.path.exists(MAINTENANCE_FLAG)
+    except OSError as e:
+        debug_log(f"maintenance: flag check failed: {e}")
+        return False
 
 
 def tcp_connect_ms(host: str, port: int, timeout_secs: float = 1.5) -> Optional[int]:
@@ -593,6 +637,131 @@ def merge_cards_horizontal(cards: list[list[str]], gap: int = 2) -> list[str]:
 # ============================================================================
 
 
+class BlockProgress(NamedTuple):
+    """Two block observations, and how far apart they were."""
+
+    height: int
+    block_age_secs: float
+    height_delta: Optional[int]
+    age_delta_secs: Optional[float]
+    elapsed_secs: Optional[float]
+
+
+def _read_progress_sample() -> Optional[dict]:
+    try:
+        with open(PROGRESS_SAMPLE_PATH, encoding="utf-8") as f:
+            sample = json.load(f)
+        return {
+            "height": int(sample["height"]),
+            "block_age_secs": float(sample["block_age_secs"]),
+            "at": float(sample["at"]),
+        }
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        debug_log(f"progress: no usable previous sample: {e}")
+        return None
+
+
+def _write_progress_sample(height: int, block_age_secs: float, at: float) -> None:
+    try:
+        tmp = f"{PROGRESS_SAMPLE_PATH}.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"height": height, "block_age_secs": block_age_secs, "at": at}, f)
+        os.replace(tmp, PROGRESS_SAMPLE_PATH)
+    except OSError as e:
+        # Losing the sample only costs a live probe on the next stale frame.
+        debug_log(f"progress: sample write failed: {e}")
+
+
+def _probe_height_and_block_age() -> Optional[tuple[int, float]]:
+    try:
+        sync_info = (
+            requests.get("http://127.0.0.1:26657/status", timeout=3).json().get("result", {}).get("sync_info", {})
+        )
+        bt = datetime.fromisoformat(str(sync_info["latest_block_time"]).replace("Z", "+00:00"))
+        if bt.tzinfo is None:
+            bt = bt.replace(tzinfo=timezone.utc)
+        return (
+            int(sync_info["latest_block_height"]),
+            (datetime.now(timezone.utc) - bt).total_seconds(),
+        )
+    except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+        debug_log(f"progress: live probe failed: {e}")
+        return None
+
+
+def observe_block_progress(height: int, block_age_secs: float, probe: bool) -> BlockProgress:
+    """Record this block observation and diff it against the previous one.
+
+    The live dashboard refreshes every second, so the previous sample is
+    normally fresh enough to diff for free. A one-shot run (the container health
+    check) usually has none, so when the block is stale enough to be called a
+    fault it pays for a second live probe rather than guessing.
+    """
+    now = time.time()
+    previous = _read_progress_sample()
+    _write_progress_sample(height, block_age_secs, now)
+
+    if previous is not None:
+        elapsed = now - previous["at"]
+        if PROGRESS_SAMPLE_MIN_GAP_SECS <= elapsed <= PROGRESS_SAMPLE_MAX_AGE_SECS:
+            return BlockProgress(
+                height=height,
+                block_age_secs=block_age_secs,
+                height_delta=height - previous["height"],
+                age_delta_secs=previous["block_age_secs"] - block_age_secs,
+                elapsed_secs=elapsed,
+            )
+
+    if not probe:
+        return BlockProgress(height, block_age_secs, None, None, None)
+
+    time.sleep(PROGRESS_PROBE_SLEEP_SECS)
+    probed = _probe_height_and_block_age()
+    if probed is None:
+        return BlockProgress(height, block_age_secs, None, None, None)
+
+    probed_height, probed_age = probed
+    _write_progress_sample(probed_height, probed_age, time.time())
+    return BlockProgress(
+        height=probed_height,
+        block_age_secs=probed_age,
+        height_delta=probed_height - height,
+        age_delta_secs=block_age_secs - probed_age,
+        elapsed_secs=PROGRESS_PROBE_SLEEP_SECS,
+    )
+
+
+def classify_block_progress(progress: BlockProgress) -> tuple[Status, str, Optional[int]]:
+    """Verdict for a node whose last block is old. Returns (status, message, eta).
+
+    A chain that has stopped and a chain being replayed from history look
+    identical in `latest_block_time`; only the height tells them apart.
+    """
+    age = progress.block_age_secs
+    if age < NODE_LAST_BLOCK_WARN_SECS:
+        return (Status.OK, "Running", None)
+    # Between the two thresholds the node is near the tip on a slow chain, not
+    # thousands of blocks behind, so no catch-up is in question either way.
+    if age < NODE_LAST_BLOCK_ERROR_SECS:
+        return (Status.WARN, "Slow blocks", None)
+    # Height that is not moving is the fault. A regressed height means the node
+    # restarted from lower state — a wipe and resync — between the samples, which
+    # says nothing about the current block: treat it as no measurement rather
+    # than invent a fault from it.
+    if not progress.height_delta or progress.height_delta < 0:
+        return (Status.ERROR, "No new blocks", None)
+
+    eta = None
+    if progress.age_delta_secs and progress.elapsed_secs:
+        # Seconds of chain history closed per second of wall clock. Replay is
+        # far faster than block production, so this is comfortably above 1 —
+        # unless the node is only keeping pace, and then there is no ETA to give.
+        closure_rate = progress.age_delta_secs / progress.elapsed_secs
+        if closure_rate > 0:
+            eta = int(age / closure_rate)
+    return (Status.WARN, "Catching up", eta)
+
+
 def check_node() -> ServiceStatus:
     """Check blockchain node status via RPC."""
     try:
@@ -683,15 +852,30 @@ def check_node() -> ServiceStatus:
             status = Status.WARN
             message = "State sync starting" if state_sync_starting else "Syncing"
 
-        # Even if CometBFT reports catching_up=false, a stale last block is still unhealthy
-        # — unless the chain is halted for a software upgrade, which is expected.
+        # Even if CometBFT reports catching_up=false, a stale last block is still
+        # unhealthy — unless this node is replaying history to reach the tip, or the
+        # chain is halted for a software upgrade. Both are expected.
         if block_age_secs is not None and not syncing:
-            if block_age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
-                # Before marking ERROR, check if the chain is halted for an upgrade.
-                # During a coordinated upgrade, all validators stop at the upgrade
-                # height and no new blocks are produced until 2/3+ restart with the
-                # new binary.  This is a normal, healthy state.
-                upgrade_halt = False
+            progress = observe_block_progress(
+                int(height) if str(height).isdigit() else 0,
+                block_age_secs,
+                probe=block_age_secs >= NODE_LAST_BLOCK_ERROR_SECS,
+            )
+            # The probe path re-reads /status, so prefer its fresher numbers.
+            height = progress.height or height
+            block_age_secs = progress.block_age_secs
+            block_age = format_age_secs(block_age_secs)
+            details.update({"height": height, "block_age": block_age, "block_age_secs": block_age_secs})
+
+            status, message, eta_secs = classify_block_progress(progress)
+            if message == "Catching up":
+                details["behind_secs"] = int(block_age_secs)
+                details["eta_secs"] = eta_secs
+                details["syncing"] = True
+            elif status == Status.ERROR:
+                # During a coordinated upgrade, every validator stops at the
+                # upgrade height and no new blocks are produced until 2/3+ restart
+                # with the new binary. That is a normal, healthy state.
                 try:
                     plan_resp = requests.get(
                         "http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan",
@@ -705,21 +889,12 @@ def check_node() -> ServiceStatus:
                             # Upgrade halt: plan height matches current height
                             # (or we're within 1 block of it)
                             if plan_height > 0 and abs(current_height - plan_height) <= 1:
-                                upgrade_halt = True
                                 details["upgrade_plan"] = plan.get("name")
                                 details["upgrade_height"] = plan_height
+                                status = Status.WARN
+                                message = f"Upgrade halt ({plan.get('name')})"
                 except Exception as e:
                     debug_log(f"node: upgrade plan query failed: {e}")
-
-                if upgrade_halt:
-                    status = Status.WARN
-                    message = f"Upgrade halt ({details['upgrade_plan']})"
-                else:
-                    status = Status.ERROR
-                    message = "No new blocks"
-            elif block_age_secs >= NODE_LAST_BLOCK_WARN_SECS and status != Status.ERROR:
-                status = Status.WARN
-                message = "Slow blocks"
 
         if peers == 0 and status == Status.OK:
             status = Status.ERROR
@@ -733,6 +908,7 @@ def check_node() -> ServiceStatus:
             "node: "
             f"height={height} catching_up={catching_up} state_sync_starting={state_sync_starting} peers={peers} "
             f"block_age_secs={block_age_secs} rpc_health_ok={rpc_health_ok} rpc_health_ms={rpc_health_ms} "
+            f"behind_secs={details.get('behind_secs')} eta_secs={details.get('eta_secs')} "
             f"status={status.value} message={message}"
         )
 
@@ -1230,6 +1406,7 @@ def check_postgres() -> ServiceStatus:
 
 def check_backend() -> ServiceStatus:
     """Check backend API status (includes PostgreSQL sub-check)."""
+    maintenance = maintenance_held()
     try:
         workers = 0
         try:
@@ -1252,6 +1429,7 @@ def check_backend() -> ServiceStatus:
                     "status_code": resp.status_code,
                     "response_ms": response_ms,
                     "workers": workers,
+                    "maintenance": maintenance,
                 },
             )
         else:
@@ -1267,12 +1445,28 @@ def check_backend() -> ServiceStatus:
             )
     except requests.exceptions.ConnectionError:
         details = supervisor_detail("backend")
+        details["maintenance"] = maintenance
         state = details.get("supervisor_state")
         message = f"Supervisor {state}" if state not in (None, "unknown", "RUNNING") else "Not reachable"
         backend = ServiceStatus(name="Backend", status=Status.ERROR, message=message, details=details)
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        # A backend that accepts the connection and then never answers: a Gunicorn
+        # worker stuck on its first query looks exactly like this from outside.
+        # This used to surface as a clipped exception repr — "HTTPConnectionPool(host='"
+        # — which tells an operator nothing at all.
         backend = ServiceStatus(
-            name="Backend", status=Status.ERROR, message=str(e)[:25], details=supervisor_detail("backend")
+            name="Backend",
+            status=Status.ERROR,
+            message="No response (timeout)",
+            details={**supervisor_detail("backend"), "maintenance": maintenance},
+        )
+    except Exception as e:
+        debug_log(f"backend: probe failed: {e}")
+        backend = ServiceStatus(
+            name="Backend",
+            status=Status.ERROR,
+            message=truncate(type(e).__name__, 25),
+            details={**supervisor_detail("backend"), "maintenance": maintenance, "error": str(e)[:120]},
         )
 
     pg = check_postgres()
@@ -1484,11 +1678,15 @@ def check_earnings() -> ServiceStatus:
                     rows = cur.fetchall()
         except Exception as e:
             debug_log(f"earnings: supply_history query failed: {e}")
+            # This card is the first place a missing read-only grant shows, and
+            # it is the whole reason a fresh install can sit on the maintenance
+            # page. "History unavailable" sent the operator looking at earnings.
+            denied = isinstance(e, psycopg.errors.InsufficientPrivilege)
             return ServiceStatus(
                 name="Earnings",
                 status=Status.ERROR,
-                message="History unavailable",
-                details={"error": str(e)[:40], "sample_count": 0},
+                message="DB grant missing" if denied else "History unavailable",
+                details={"error": str(e)[:120], "sample_count": 0},
             )
         _EARNINGS_HISTORY_CACHE["rows"] = rows
         _EARNINGS_HISTORY_CACHE["expires"] = time.monotonic() + EARNINGS_CACHE_SECS
@@ -1852,6 +2050,7 @@ def check_endpoints() -> ServiceStatus:
     check_rest("/chain/rest", "chain/rest")
     check_grpc_endpoint()
 
+    maintenance = maintenance_held()
     details = {
         "caddy": True,
         "configured": True,
@@ -1859,6 +2058,7 @@ def check_endpoints() -> ServiceStatus:
         "https": use_https,
         "block_height": block_height,
         "endpoints": results,
+        "maintenance": maintenance,
     }
 
     if all_ok:
@@ -1868,13 +2068,12 @@ def check_endpoints() -> ServiceStatus:
             message=f"All OK @ {block_height:,}" if block_height else "All OK",
             details=details,
         )
-    else:
-        return ServiceStatus(
-            name="Endpoints",
-            status=Status.ERROR,
-            message="Some unreachable",
-            details=details,
-        )
+    return ServiceStatus(
+        name="Endpoints",
+        status=Status.ERROR,
+        message="Some unreachable",
+        details=details,
+    )
 
 
 def check_referrals() -> ServiceStatus:
@@ -2388,6 +2587,26 @@ def render_header(width: int, chain_height: int | None = None) -> list[str]:
     return lines
 
 
+def format_sync_banner(statuses: list[ServiceStatus]) -> Optional[str]:
+    """One line explaining a catch-up, or None when the node is at the tip.
+
+    Counts alone ("2 WARN") do not tell an operator whether a fresh install is
+    working or broken, and every degraded card during a catch-up has the same
+    single cause. Say it once, at the top.
+    """
+    node = next((s for s in statuses if s.name == "CometBFT"), None)
+    if node is None or not node.details.get("behind_secs"):
+        return None
+
+    parts = [f"CATCHING UP — {format_duration_secs(node.details['behind_secs'])} behind"]
+    eta_secs = node.details.get("eta_secs")
+    if eta_secs:
+        parts.append(f"caught up in ~{format_duration_secs(eta_secs)}")
+    if any(s.details.get("maintenance") for s in statuses):
+        parts.append("public endpoints held until then")
+    return "  ·  ".join(parts)
+
+
 def render_summary(statuses: list[ServiceStatus], width: int) -> list[str]:
     """Render a summary bar."""
     ok_count = sum(1 for s in statuses if s.status == Status.OK)
@@ -2402,7 +2621,12 @@ def render_summary(statuses: list[ServiceStatus], width: int) -> list[str]:
         f"{Colors.BRIGHT_BLACK}○ {unknown_count} N/A{Colors.RESET}"
     )
 
-    return [center_text(summary, width), ""]
+    lines = [center_text(summary, width)]
+    banner = format_sync_banner(statuses)
+    if banner:
+        lines.append(center_text(f"{Colors.BRIGHT_YELLOW}{truncate(banner, width)}{Colors.RESET}", width))
+    lines.append("")
+    return lines
 
 
 def format_card_content(status: ServiceStatus) -> list[str]:
@@ -2434,7 +2658,15 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             peers = details["peers"]
             peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}Peers:{Colors.RESET} {peer_color}{peers}{Colors.RESET}")
-        if details.get("block_age"):
+        if details.get("behind_secs"):
+            # A replaying node's last block is hours old by definition, so the age
+            # of it is not the useful number — the distance left to cover is.
+            behind = format_duration_secs(details["behind_secs"])
+            lines.append(f"{bullet}{Colors.DIM}Behind:{Colors.RESET} {Colors.BRIGHT_YELLOW}{behind}{Colors.RESET}")
+            eta_secs = details.get("eta_secs")
+            eta = f"~{format_duration_secs(eta_secs)}" if eta_secs else "unknown"
+            lines.append(f"{bullet}{Colors.DIM}Caught up in:{Colors.RESET} {eta}")
+        elif details.get("block_age"):
             age_secs = details.get("block_age_secs")
             age_human = details["block_age"]
             if age_secs is None:
@@ -2521,7 +2753,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Response:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
         if details.get("status_code"):
             code = details["status_code"]
-            code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
+            if code < 400:
+                code_color = Colors.BRIGHT_GREEN
+            elif details.get("maintenance"):
+                code_color = Colors.BRIGHT_YELLOW
+            else:
+                code_color = Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
         pg_st = details.get("pg_status")
         if pg_st:
@@ -2594,8 +2831,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Disk Usage":
         breakdown = details.get("breakdown", {})
         if breakdown:
+            # Largest first, and only as many as a card holds: the smallest
+            # directories are the least interesting and were the ones making this
+            # card taller than every other.
             sorted_dirs = sorted(breakdown.items(), key=lambda x: -x[1])
-            for name, sz in sorted_dirs[:5]:
+            for name, sz in sorted_dirs[:CARD_DETAIL_LINES]:
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {_format_bytes(sz)}")
 
     elif status.name == "System":
@@ -2667,27 +2907,70 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             total = details.get("updates_total", security)
             lines.append(f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)")
 
-    # Ensure minimum card height (4 detail lines + status = 5 total)
-    while len(lines) < 5:
+    # Every card is exactly this tall: the status line plus four details. The
+    # floor stops a short card from collapsing; the ceiling stops a long one from
+    # stretching its whole row and breaking the grid, which is what one extra
+    # ~/.mirage subdirectory used to do to Disk Usage.
+    while len(lines) < CARD_CONTENT_LINES:
         lines.append("")
 
-    return lines
+    return lines[:CARD_CONTENT_LINES]
+
+
+def explain_sync_hold(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
+    """Recast "the site is down" as "the site is waiting", but only when true.
+
+    While the holding page is up, Caddy answers 503 on every route and the
+    backend refuses to serve state it knows is stale, so a node that is still
+    catching up reports the backend and every public endpoint as failures. Those
+    are one expected consequence of one cause, and saying so is the difference
+    between a working install and an install that looks broken.
+
+    The excuse has to expire, though. A node sitting at the tip with a backend
+    that still will not answer is genuinely broken — that is how a fresh install
+    whose read-only DB grants never landed presents — so the downgrade requires
+    something to actually still be behind.
+    """
+    if not any(s.details.get("maintenance") for s in statuses):
+        return statuses
+
+    node = next((s for s in statuses if s.name == "CometBFT"), None)
+    indexer = next((s for s in statuses if s.name == "Indexer"), None)
+    chain_behind = bool(node and node.details.get("behind_secs"))
+    # The backend reads chain state from the indexer, so it stays 503 until the
+    # indexer has caught up too, well after CometBFT reaches the tip.
+    indexer_behind = bool(indexer and (indexer.details.get("lag") or 0) > 100)
+    if not (chain_behind or indexer_behind):
+        return statuses
+
+    for status in statuses:
+        if status.status != Status.ERROR:
+            continue
+        if status.name == "Backend":
+            status.status = Status.WARN
+            status.message = "Waiting for chain sync"
+        elif status.name == "Endpoints":
+            status.status = Status.WARN
+            status.message = "Holding page (syncing)"
+    return statuses
 
 
 def collect_statuses() -> list[ServiceStatus]:
     refresh_supervisor_states()
-    return [
-        check_node(),
-        check_retention(),
-        check_validator(),
-        check_earnings(),
-        check_backend(),
-        check_rewards(),
-        check_indexer(),
-        check_endpoints(),
-        check_disk_usage(),
-        check_system(),
-    ]
+    return explain_sync_hold(
+        [
+            check_node(),
+            check_retention(),
+            check_validator(),
+            check_earnings(),
+            check_backend(),
+            check_rewards(),
+            check_indexer(),
+            check_endpoints(),
+            check_disk_usage(),
+            check_system(),
+        ]
+    )
 
 
 def display_statuses(statuses: list[ServiceStatus]) -> list[ServiceStatus]:
@@ -2723,6 +3006,9 @@ def render_compact_dashboard(
         f"{Colors.BRIGHT_YELLOW}{warn_count} WARN{Colors.RESET}  "
         f"{Colors.BRIGHT_RED}{error_count} ERR{Colors.RESET}"
     )
+    banner = format_sync_banner(statuses)
+    if banner:
+        output.append(truncate(f"{Colors.BRIGHT_YELLOW}{banner}{Colors.RESET}", width))
     output.append("-" * min(width, 80))
     for status in statuses:
         icon = ICONS.get(status.status, "?")
@@ -2735,6 +3021,8 @@ def render_compact_dashboard(
             extra.append(f"h={status.details.get('height')}")
             if status.details.get("peers") is not None:
                 extra.append(f"peers={status.details['peers']}")
+            if status.details.get("behind_secs"):
+                extra.append(f"behind={format_duration_secs(status.details['behind_secs'])}")
         if status.name == "Indexer" and status.details.get("lag") is not None:
             extra.append(f"lag={status.details['lag']}")
         if extra:
@@ -2746,8 +3034,7 @@ def render_compact_dashboard(
             earned_30d = int(status.details["earned_30d"])
             output.append(
                 truncate(
-                    f"    24h  +{format_mirage_delta(earned_24h)} earned  "
-                    f"-{format_mirage_delta(spent_24h)} spent",
+                    f"    24h  +{format_mirage_delta(earned_24h)} earned  " f"-{format_mirage_delta(spent_24h)} spent",
                     width,
                 )
             )
@@ -2937,13 +3224,15 @@ def run_health_check_json(required_services: list[str]) -> dict:
             - errors: list of error messages for unhealthy required services
     """
     refresh_supervisor_states()
-    all_statuses = [
-        check_node(),
-        check_validator(),
-        check_backend(),
-        check_indexer(),
-        check_endpoints(),
-    ]
+    all_statuses = explain_sync_hold(
+        [
+            check_node(),
+            check_validator(),
+            check_backend(),
+            check_indexer(),
+            check_endpoints(),
+        ]
+    )
 
     # Build services dict
     services = {}
@@ -3047,9 +3336,7 @@ def main():
 
     try:
         if interactive:
-            session_pid_file = create_session_pid_file(
-                os.environ.get("MIRAGE_STATUS_PID_FILE", "").strip()
-            )
+            session_pid_file = create_session_pid_file(os.environ.get("MIRAGE_STATUS_PID_FILE", "").strip())
             sys.stdout.write("\033[?1049h\033[?25l\033[2J")
             sys.stdout.flush()
             entered_alt = True

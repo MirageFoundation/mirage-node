@@ -512,7 +512,8 @@ psql -d mirage_indexer -f "$DUMP_FILE"
 psql -d mirage_indexer -c "GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro"
 psql -d mirage_indexer -c "GRANT USAGE ON SCHEMA public TO mirage_indexer_ro"
 psql -d mirage_indexer -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro"
-psql -d mirage_indexer -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro"
+psql -d mirage_indexer -c "ALTER DEFAULT PRIVILEGES FOR ROLE mirage_indexer IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro"
+psql -d mirage_indexer -c "ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro"
 EOF
 
 BACKEND_DUMP="/root/.mirage/node.clone/backend.sql"

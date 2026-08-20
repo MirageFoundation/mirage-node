@@ -372,7 +372,16 @@ ensure_local_postgres_dbs() {
   su - postgres -c "psql -d ${PG_DB} -c \"GRANT CONNECT ON DATABASE ${PG_DB} TO ${PG_RO_USER};\""
   su - postgres -c "psql -d ${PG_DB} -c \"GRANT USAGE ON SCHEMA public TO ${PG_RO_USER};\""
   su - postgres -c "psql -d ${PG_DB} -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PG_RO_USER};\""
-  su - postgres -c "psql -d ${PG_DB} -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_RO_USER};\""
+  # ALTER DEFAULT PRIVILEGES only covers tables created by the role it names, and
+  # it names whoever runs it — postgres — unless told otherwise. The indexer
+  # creates the entire schema itself as ${PG_USER}, and on a fresh install it does
+  # so after this block, when GRANT SELECT ON ALL TABLES has nothing to grant on
+  # yet. Without FOR ROLE, the read-only user ends up with no table it can read,
+  # the backend never loads chain params, the maintenance gate never lifts and the
+  # node serves the holding page forever. Every table the indexer creates from
+  # here on — including ones added by a later migration — needs this.
+  su - postgres -c "psql -d ${PG_DB} -c \"ALTER DEFAULT PRIVILEGES FOR ROLE ${PG_USER} IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_RO_USER};\""
+  su - postgres -c "psql -d ${PG_DB} -c \"ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_RO_USER};\""
 
   echo "✓ All Postgres databases and roles ensured."
 }
@@ -454,7 +463,8 @@ migrate_local_postgres_names() {
     su - postgres -c "psql -d mirage_indexer -c \"GRANT CONNECT ON DATABASE mirage_indexer TO mirage_indexer_ro;\"" 2>/dev/null || true
     su - postgres -c "psql -d mirage_indexer -c \"GRANT USAGE ON SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
     su - postgres -c "psql -d mirage_indexer -c \"GRANT SELECT ON ALL TABLES IN SCHEMA public TO mirage_indexer_ro;\"" 2>/dev/null || true
-    su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES FOR ROLE mirage_indexer IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro;\"" 2>/dev/null || true
+    su - postgres -c "psql -d mirage_indexer -c \"ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO mirage_indexer_ro;\"" 2>/dev/null || true
 
     python3 - <<'PYUPDATE'
 import os

@@ -15,10 +15,12 @@ import sys
 import tarfile
 import tempfile
 import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from tests.common import _fail, _pass, _INSIDE_CONTAINER
+from tests.common import _fail, _pass, _rand_str, _skip, _INSIDE_CONTAINER
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 INSTALL_SH = os.path.join(REPO_ROOT, "deploy", "install.sh")
@@ -97,9 +99,13 @@ def test_install(backend: str) -> None:
     _test_backup_restore_contracts()
     _test_status_compact_layout()
     _test_card_amounts_fit()
+    _test_cards_are_all_one_height()
     _test_staked_balance_history()
     _test_earnings_card()
     _test_retention_building_up()
+    _test_catching_up_is_not_a_fault()
+    _test_readonly_role_reads_new_indexer_tables()
+    _test_param_load_fails_fast_on_denied_grant()
     _test_maintenance_gate_tracks_progress()
     _test_completed_installer_updates()
     _test_resume_refreshes_amended_release()
@@ -3294,6 +3300,65 @@ def _test_card_amounts_fit() -> None:
     _pass("install.status.card_amounts_fit")
 
 
+def _test_cards_are_all_one_height() -> None:
+    """Every card is the same height, however much a single card has to say.
+
+    ~/.mirage grew a fifth subdirectory and Disk Usage silently rendered a row
+    taller than the other nine, so its whole row of the grid did too. The height
+    is a property of the layout, not of whichever card currently has the least to
+    report, so a card with more data than fits shows the most useful of it rather
+    than stretching.
+    """
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    # More subdirectories than a card can hold, deliberately not size-ordered.
+    disk = dash.ServiceStatus(
+        "Disk Usage",
+        dash.Status.OK,
+        "Total: 289.2 MB",
+        {
+            "total": 303_252_930,
+            "breakdown": {
+                "logs": 12_700_000,
+                "node": 192_200_000,
+                "well-known": 86_500,
+                "postgres": 78_300_000,
+                "asn": 5_900_000,
+                "env": 4_096,
+                "keyring": 2_048,
+            },
+        },
+    )
+    minimal = dash.ServiceStatus("Rewards", dash.Status.OK, "Quests OFF", {"payouts_enabled": False})
+    heights = {}
+    for status in (disk, minimal):
+        content = dash.format_card_content(status)
+        if len(content) != dash.CARD_CONTENT_LINES:
+            _fail(
+                "install.status.card_height",
+                f"{status.name} rendered {len(content)} content lines, expected {dash.CARD_CONTENT_LINES}",
+            )
+            return
+        heights[status.name] = len(dash.draw_card(status.name, status.status, content))
+    if len(set(heights.values())) != 1:
+        _fail("install.status.card_height", f"cards drew different heights: {heights}")
+        return
+
+    # The rows kept are the biggest consumers, which is the point of the card.
+    plain = [re.sub(r"\x1b\[[0-9;]*m", "", row) for row in dash.format_card_content(disk)]
+    shown = [row for row in plain if row.strip()]
+    for required in ("node", "postgres", "logs", "asn"):
+        if not any(required in row for row in shown):
+            _fail("install.status.card_height", f"Disk Usage dropped {required!r}, keeping {shown}")
+            return
+    for omitted in ("well-known", "keyring"):
+        if any(omitted in row for row in shown):
+            _fail("install.status.card_height", f"Disk Usage kept the smallest directory {omitted!r}: {shown}")
+            return
+    _pass("install.status.cards_are_all_one_height")
+
+
 def _test_earnings_card() -> None:
     """Sampled payer balance deltas produce honest 24h and 30d totals."""
     sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
@@ -3437,6 +3502,287 @@ def _test_retention_building_up() -> None:
             )
             return
     _pass("install.status.retention_building_up")
+
+
+def _test_catching_up_is_not_a_fault() -> None:
+    """A node replaying history reads as syncing, a halted one still as broken.
+
+    Both look identical in latest_block_time — hours old — and CometBFT reports
+    catching_up=false through the whole replay, so a fresh install presented as
+    four red cards with no hint that it was working exactly as intended.
+    """
+    sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
+    import status_dashboard as dash
+
+    behind = 9_960.0  # 2h 46m of chain history left to cover
+    cases = (
+        # (label, block_age, height_delta, age_delta, elapsed) -> status, message, has_eta
+        ("tip", 3.0, 1, 0.0, 1.0, dash.Status.OK, "Running", False),
+        ("replaying", behind, 6, 30.75, 1.5, dash.Status.WARN, "Catching up", True),
+        # Advancing but not closing the gap: no honest ETA exists, still a sync.
+        ("keeping pace", behind, 3, 0.0, 1.5, dash.Status.WARN, "Catching up", False),
+        ("halted", behind, 0, 0.0, 1.5, dash.Status.ERROR, "No new blocks", False),
+        ("unmeasured", behind, None, None, None, dash.Status.ERROR, "No new blocks", False),
+        # Near the tip on a slow chain is not a catch-up.
+        ("slow blocks", 30.0, 2, 1.0, 1.5, dash.Status.WARN, "Slow blocks", False),
+    )
+    for label, age, h_delta, age_delta, elapsed, want_status, want_message, want_eta in cases:
+        progress = dash.BlockProgress(
+            height=7_000_000,
+            block_age_secs=age,
+            height_delta=h_delta,
+            age_delta_secs=age_delta,
+            elapsed_secs=elapsed,
+        )
+        status, message, eta = dash.classify_block_progress(progress)
+        if status != want_status or message != want_message or bool(eta) != want_eta:
+            _fail(
+                "install.status.catching_up",
+                f"{label}: got {status.value}/{message!r}/eta={eta}, "
+                f"expected {want_status.value}/{want_message!r}/eta={'set' if want_eta else 'none'}",
+            )
+            return
+
+    # Two samples a second apart must diff without a live probe, which is what
+    # makes the once-per-second dashboard free.
+    with tempfile.TemporaryDirectory(prefix="progress-") as tmp:
+        original = dash.PROGRESS_SAMPLE_PATH
+        dash.PROGRESS_SAMPLE_PATH = os.path.join(tmp, "progress.json")
+        try:
+            dash._write_progress_sample(7_000_000, behind, time.time() - 1.0)
+            second = dash.observe_block_progress(7_000_004, behind - 20, probe=False)
+        finally:
+            dash.PROGRESS_SAMPLE_PATH = original
+    if second.height_delta != 4 or second.age_delta_secs != 20:
+        _fail(
+            "install.status.progress_sample",
+            f"height_delta={second.height_delta} age_delta={second.age_delta_secs}, expected 4 and 20",
+        )
+        return
+    sampled_message = dash.classify_block_progress(second)[1]
+    if sampled_message != "Catching up":
+        _fail("install.status.progress_verdict", f"sampled progress classified as {sampled_message!r}")
+        return
+
+    # The holding page answers 503 on every route on purpose while that happens,
+    # so those failures are explained — but only while something is still behind.
+    # A node parked at the tip with a dead backend must stay loud: that is how a
+    # fresh install whose read-only DB grants never landed presents.
+    def hold_case(behind_secs, indexer_lag, maintenance=True):
+        statuses = [
+            dash.ServiceStatus(
+                "CometBFT",
+                dash.Status.WARN if behind_secs else dash.Status.OK,
+                "Catching up" if behind_secs else "Running",
+                {"behind_secs": behind_secs} if behind_secs else {},
+            ),
+            dash.ServiceStatus("Backend", dash.Status.ERROR, "HTTP 503", {"maintenance": maintenance}),
+            dash.ServiceStatus("Indexer", dash.Status.WARN, "Behind", {"lag": indexer_lag}),
+            dash.ServiceStatus("Endpoints", dash.Status.ERROR, "Some unreachable", {"maintenance": maintenance}),
+        ]
+        dash.explain_sync_hold(statuses)
+        return {s.name: s.status for s in statuses}
+
+    hold_cases = (
+        ("chain behind", hold_case(9_960, 0), dash.Status.WARN),
+        ("indexer behind", hold_case(None, 8_000), dash.Status.WARN),
+        ("at the tip, backend dead", hold_case(None, 0), dash.Status.ERROR),
+        ("no holding page", hold_case(9_960, 0, maintenance=False), dash.Status.ERROR),
+    )
+    for label, got, want in hold_cases:
+        if got["Backend"] != want or got["Endpoints"] != want:
+            _fail(
+                "install.status.sync_hold",
+                f"{label}: backend={got['Backend'].value} endpoints={got['Endpoints'].value}, "
+                f"expected both {want.value}",
+            )
+            return
+
+    # Wiring: the same node state that produced "No new blocks" on a healthy
+    # install must now reach the card as a catch-up.
+    def fake_rpc(height: int, block_age_secs: float):
+        block_time = datetime.now(timezone.utc) - timedelta(seconds=block_age_secs)
+
+        def get(url, **_kwargs):
+            if "/status" in url:
+                body = {
+                    "result": {
+                        "sync_info": {
+                            "latest_block_height": str(height),
+                            "latest_block_time": block_time.isoformat().replace("+00:00", "Z"),
+                            "catching_up": False,
+                        },
+                        "node_info": {"network": "mirage-1"},
+                    }
+                }
+            elif "/net_info" in url:
+                body = {"result": {"peers": [{}, {}, {}, {}]}}
+            elif "/validators" in url:
+                body = {"result": {"total": 4}}
+            else:
+                body = {}
+            return mock.Mock(status_code=200, json=mock.Mock(return_value=body))
+
+        return get
+
+    with tempfile.TemporaryDirectory(prefix="checknode-") as tmp:
+        original = dash.PROGRESS_SAMPLE_PATH
+        dash.PROGRESS_SAMPLE_PATH = os.path.join(tmp, "progress.json")
+        try:
+            # Seeding the previous sample keeps the run off the live-probe path,
+            # which is the same thing the once-per-second dashboard does.
+            dash._write_progress_sample(7_000_000, behind + 30, time.time() - 1.0)
+            with mock.patch.object(dash.requests, "get", fake_rpc(7_000_006, behind)):
+                advancing = dash.check_node()
+            dash._write_progress_sample(7_000_000, behind, time.time() - 1.0)
+            with mock.patch.object(dash.requests, "get", fake_rpc(7_000_000, behind)):
+                halted = dash.check_node()
+        finally:
+            dash.PROGRESS_SAMPLE_PATH = original
+
+    if advancing.status != dash.Status.WARN or advancing.message != "Catching up":
+        _fail(
+            "install.status.check_node_catching_up",
+            f"a stale block on an advancing node gave {advancing.status.value}/{advancing.message!r}",
+        )
+        return
+    if not advancing.details.get("behind_secs") or not advancing.details.get("eta_secs"):
+        _fail("install.status.check_node_catching_up", f"card is missing behind/eta: {advancing.details}")
+        return
+    if halted.status != dash.Status.ERROR or halted.message != "No new blocks":
+        _fail(
+            "install.status.check_node_halted",
+            f"a stale block on a stopped chain gave {halted.status.value}/{halted.message!r}",
+        )
+        return
+
+    # And the operator is told once, at the top, instead of reading it off four
+    # separate degraded cards.
+    banner = dash.format_sync_banner(
+        [
+            dash.ServiceStatus(
+                name="CometBFT",
+                status=dash.Status.WARN,
+                message="Catching up",
+                details={"behind_secs": int(behind), "eta_secs": 486},
+            ),
+            dash.ServiceStatus(
+                name="Endpoints",
+                status=dash.Status.WARN,
+                message="Holding page (syncing)",
+                details={"maintenance": True},
+            ),
+        ]
+    )
+    for required in ("CATCHING UP", "2h 46m behind", "~8m", "endpoints held"):
+        if required not in (banner or ""):
+            _fail("install.status.sync_banner", f"banner {banner!r} is missing {required!r}")
+            return
+    if dash.format_sync_banner([dash.ServiceStatus("CometBFT", dash.Status.OK, "Running", {})]) is not None:
+        _fail("install.status.sync_banner", "a caught-up node must not show a catch-up banner")
+        return
+    _pass("install.status.catching_up_is_not_a_fault")
+
+
+def _test_readonly_role_reads_new_indexer_tables() -> None:
+    """A table the indexer creates after provisioning must be readable by the backend.
+
+    ALTER DEFAULT PRIVILEGES applies only to tables created by the role it names,
+    and it names whoever runs it unless told otherwise. Provisioning runs as
+    postgres while the indexer builds its schema as mirage_indexer, so without
+    FOR ROLE the read-only role gets SELECT on nothing a fresh install creates:
+    the backend logs "permission denied for table chain_stats" forever, the
+    maintenance gate never lifts, and the node serves the holding page for good.
+    A string match on the grant cannot tell the two spellings apart, so this
+    creates a table the way the indexer does and reads it the way the backend does.
+    """
+    name = "install.db.ro_reads_new_tables"
+    try:
+        import psycopg
+    except Exception as e:
+        _skip(name, f"psycopg unavailable: {e}")
+        return
+
+    rw_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    ro_url = os.environ.get("INDEXER_DB_RO_URL", "").strip()
+    if not rw_url or not ro_url:
+        _skip(name, "INDEXER_DB_URL/INDEXER_DB_RO_URL unavailable")
+        return
+
+    # public, not a throwaway schema: default privileges are granted per schema,
+    # and public is the one the indexer and every migration actually use.
+    table = f"grant_probe_{_rand_str(8)}"
+    try:
+        with psycopg.connect(rw_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'CREATE TABLE public."{table}" (id int)')
+    except Exception as e:
+        _skip(name, f"indexer DB not writable from here: {e}")
+        return
+
+    try:
+        with psycopg.connect(ro_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'SELECT count(*) FROM public."{table}"')
+                cur.fetchone()
+                # And the tables the backend actually needs at startup.
+                cur.execute("SELECT count(*) FROM chain_stats")
+                cur.fetchone()
+    except Exception as e:
+        _fail(name, f"read-only role cannot read a newly created indexer table: {e}")
+        return
+    finally:
+        with psycopg.connect(rw_url, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f'DROP TABLE IF EXISTS public."{table}"')
+    _pass(name)
+
+
+def _test_param_load_fails_fast_on_denied_grant() -> None:
+    """A missing grant stops the load; only a not-yet-populated table is waited on.
+
+    The retry budget is an hour, for the indexer to write chain_params. A denied
+    SELECT is not that race and never resolves, and spending the hour on it is
+    how a broken install stayed quiet: 65 identical warnings, a maintenance page,
+    and no statement of what was actually wrong.
+    """
+    name = "install.db.params_fail_fast"
+    backend_src = os.path.join(REPO_ROOT, "web", "backend")
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    try:
+        import psycopg
+
+        import params as params_mod
+    except Exception as e:
+        _skip(name, f"backend modules not importable: {e}")
+        return
+
+    def denied():
+        raise psycopg.errors.InsufficientPrivilege("permission denied for table chain_stats")
+
+    started = time.monotonic()
+    with mock.patch.object(params_mod, "_query_params_from_db", denied):
+        try:
+            params_mod.load_params(force=True, max_retries=5, retry_interval=30.0)
+        except RuntimeError as e:
+            message = str(e)
+        except Exception as e:
+            _fail(name, f"raised {type(e).__name__} instead of a RuntimeError explaining the grant: {e}")
+            return
+        else:
+            _fail(name, "a denied SELECT on chain_stats was not treated as fatal")
+            return
+    elapsed = time.monotonic() - started
+
+    if elapsed > 1.0:
+        _fail(name, f"waited {elapsed:.1f}s before giving up; a denied grant must not be retried")
+        return
+    for required in ("read-only", "SELECT", "permission denied"):
+        if required not in message:
+            _fail(name, f"error message {message!r} does not mention {required!r}")
+            return
+    _pass(name)
 
 
 def _maintenance_gate_run(
