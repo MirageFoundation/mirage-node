@@ -236,6 +236,20 @@ DIVERGENCE_PATTERNS = (
 # chain DBs. Treat it as non-divergence.
 UPGRADE_HALT_RE = re.compile(r'UPGRADE\s+\\?"[^"\\]+\\?"\s+NEEDED\s+at\s+height:')
 
+# A CONSENSUS_FATAL:* halt is the node refusing to commit state it cannot vouch
+# for. Every peer executing the same block reaches the same conclusion at the
+# same height, so there is no healthy peer to pull from and a wipe only destroys
+# the one copy of the block that caused it. Like an upgrade halt this is
+# operator-fixable — ship a corrected binary — and must never escalate to
+# destructive recovery. On 2026-08-20 a supply-delta halt took all four
+# validators at height 6969190; nothing was wiped only because a stale
+# upgrade-halt line happened to trip the gate below.
+#
+# PRUNE_HOLE is deliberately excluded: that one means the LOCAL chain DB has a
+# hole in its version history, which is exactly the case peer-pull repairs. It
+# stays in DIVERGENCE_PATTERNS.
+CONSENSUS_FATAL_HALT_RE = re.compile(r"CONSENSUS_FATAL:(?!PRUNE_HOLE\b)[A-Z][A-Z0-9_]*")
+
 
 # ── Logging ─────────────────────────────────────────────────────────────
 def now() -> str:
@@ -353,6 +367,17 @@ def log_has_upgrade_halt(text: str) -> bool:
     if not text:
         return False
     return bool(UPGRADE_HALT_RE.search(ANSI_RE.sub("", text)))
+
+
+def log_has_consensus_fatal_halt(text: str) -> bool:
+    """True when recent logs show a CONSENSUS_FATAL halt that peer-pull cannot fix.
+
+    Same disposition as an upgrade halt: alert and leave the node down for an
+    operator, because the fault is deterministic and every peer has it too.
+    """
+    if not text:
+        return False
+    return bool(CONSENSUS_FATAL_HALT_RE.search(ANSI_RE.sub("", text)))
 
 
 def log_window_has_pattern(text: str, patterns: tuple[str, ...], window_secs: int) -> str | None:
@@ -737,6 +762,7 @@ def decide_action(
     pull_mode: str = RECOVERY_MODE,
     destructive_disabled_reason: str = "WATCHDOG_AUTORECOVER off",
     upgrade_halt: bool = False,
+    halt_kind: str = "upgrade halt",
 ) -> Decision:
     """Map a fired trigger to a concrete action. PURE: every piece of
     side-effecting state (cool-down remainders, recent restart count, gate) is
@@ -747,7 +773,10 @@ def decide_action(
       stall + ah match   -> restart (ungated), unless recurrence threshold hit
       stall + ah mismatch-> peer-pull (gated)
       process_dead       -> restart (ungated, force past restart cool-down)
-      any trigger + halt -> alert (upgrade halt is a binary swap, not a wipe)
+      any trigger + halt -> alert (a halt is a binary swap, not a wipe)
+
+    `halt_kind` names the halt in the alert so the operator is not sent after
+    the wrong cause; it does not change the disposition.
     """
     if trigger is None:
         return Decision("noop", [], "no trigger")
@@ -758,12 +787,12 @@ def decide_action(
         return Decision(
             "alert",
             [],
-            f"{trigger} during upgrade halt; refusing restart/wipe (swap binaries)",
+            f"{trigger} during {halt_kind}; refusing restart/wipe (swap binaries)",
             [
                 (
                     "ALERT",
                     {
-                        "kind": "upgrade-halt",
+                        "kind": halt_kind.replace(" ", "-"),
                         "trigger": trigger,
                     },
                 )
@@ -887,6 +916,7 @@ def decide_escalation_after_restart(
     pull_mode: str = RECOVERY_MODE,
     destructive_disabled_reason: str = "WATCHDOG_AUTORECOVER off",
     upgrade_halt: bool = False,
+    halt_kind: str = "upgrade halt",
 ) -> Decision:
     """Called when a `restart` action returned non-zero (5 = chain did not
     advance; other = error). PURE. Decides whether to escalate to peer-pull."""
@@ -896,12 +926,12 @@ def decide_escalation_after_restart(
         return Decision(
             "alert",
             [],
-            f"restart exit {exit_code}; upgrade halt in logs; refusing peer-pull",
+            f"restart exit {exit_code}; {halt_kind} in logs; refusing peer-pull",
             [
                 (
                     "ALERT",
                     {
-                        "kind": "upgrade-halt",
+                        "kind": halt_kind.replace(" ", "-"),
                         "exit_code": exit_code,
                     },
                 )
@@ -1571,11 +1601,17 @@ def run(dry_run: bool) -> int:
                 continue
 
             upgrade_halt = False
+            halt_kind = "upgrade halt"
             halt_log = latest_log_file()
             if halt_log:
-                upgrade_halt = log_has_upgrade_halt(tail_recent(halt_log))
+                halt_text = tail_recent(halt_log)
+                if log_has_upgrade_halt(halt_text):
+                    upgrade_halt = True
+                elif log_has_consensus_fatal_halt(halt_text):
+                    upgrade_halt = True
+                    halt_kind = "consensus-fatal halt"
             if upgrade_halt:
-                emit("GATE", upgrade_halt=True, log=halt_log.name if halt_log else "")
+                emit("GATE", upgrade_halt=True, halt_kind=halt_kind, log=halt_log.name if halt_log else "")
 
             # ── Pure dispatch ───────────────────────────────────────────
             decision = decide_action(
@@ -1590,6 +1626,7 @@ def run(dry_run: bool) -> int:
                 dry_run=dry_run,
                 destructive_disabled_reason=destructive_disabled_reason,
                 upgrade_halt=upgrade_halt,
+                halt_kind=halt_kind,
             )
             emit(
                 "DISPATCH",
@@ -1642,6 +1679,7 @@ def run(dry_run: bool) -> int:
                     force=(trigger == TRIGGER_PROCESS_DEAD and not upgrade_halt),
                     destructive_disabled_reason=destructive_disabled_reason,
                     upgrade_halt=upgrade_halt,
+                    halt_kind=halt_kind,
                 )
                 emit("DISPATCH", action=esc.action, reason=esc.reason, argv=json.dumps(esc.argv) if esc.argv else "[]")
                 for tag, kv in esc.emits:

@@ -279,3 +279,57 @@ def test_upgrade_halt_with_escaped_quotes_is_not_divergence():
 def test_upgrade_halt_with_plain_quotes_is_not_divergence():
     text = 'ERR CONSENSUS FAILURE!!! err="failed; error UPGRADE "v1.27.0" NEEDED at height: 5: "'
     assert wd.log_window_has_pattern(text, wd.DIVERGENCE_PATTERNS, 300) is None
+
+
+# ── CONSENSUS_FATAL halts: operator-fixable, never a wipe ───────────────
+#
+# The 2026-08-20 outage: a supply-delta invariant halted all four validators at
+# the same height. Peer-pull cannot fix that — every peer halts identically, so
+# there is no healthy state to pull — and wiping destroys the block that caused
+# it. Nothing was wiped only because a stale upgrade-halt line tripped the gate.
+
+
+def test_log_has_consensus_fatal_halt():
+    text = (
+        'ERR CONSENSUS_FATAL:CORE_INVARIANT err="supply delta invariant violated for umirage" '
+        "height=6969190 invariant=supply_delta module=baseapp"
+    )
+    assert wd.log_has_consensus_fatal_halt(text) is True
+    assert wd.log_has_consensus_fatal_halt("wrong Block.Header.AppHash") is False
+    assert wd.log_has_consensus_fatal_halt("") is False
+
+
+def test_prune_hole_is_not_treated_as_operator_fixable():
+    # PRUNE_HOLE is local DB corruption, which peer-pull genuinely repairs, so
+    # it must stay a divergence rather than joining the never-wipe class.
+    assert wd.log_has_consensus_fatal_halt("CONSENSUS_FATAL:PRUNE_HOLE") is False
+    assert wd.log_window_has_pattern("CONSENSUS_FATAL:PRUNE_HOLE", wd.DIVERGENCE_PATTERNS, 300) is not None
+
+
+def test_process_dead_consensus_fatal_alerts_not_wipe():
+    d = _decide(
+        trigger=wd.TRIGGER_PROCESS_DEAD,
+        upgrade_halt=True,
+        halt_kind="consensus-fatal halt",
+        restart_cooldown_remaining_s=0,
+        local_app_hash=None,
+        peer_app_hashes={},
+    )
+    assert d.action == "alert"
+    assert d.argv == []
+    assert "consensus-fatal halt" in d.reason
+    assert any(tag == "ALERT" and kv.get("kind") == "consensus-fatal-halt" for tag, kv in d.emits)
+
+
+def test_restart_exit_5_consensus_fatal_refuses_peer_pull():
+    d = wd.decide_escalation_after_restart(
+        exit_code=5,
+        autorecover=True,
+        pull_cooldown_remaining_s=0,
+        force=True,
+        upgrade_halt=True,
+        halt_kind="consensus-fatal halt",
+    )
+    assert d.action == "alert"
+    assert d.argv == []
+    assert "consensus-fatal halt" in d.reason

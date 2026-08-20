@@ -2799,6 +2799,48 @@ def _test_governed_upgrade_prepare() -> None:
         _fail("install.upgrade.halt_line_wired", "halt detection is not wired to the hold")
         return
 
+    # The scan must see only the run that just exited. Reading the whole day's
+    # file matches halts from earlier runs that were already resolved: on
+    # 2026-08-20 every validator exited on an unrelated invariant fault at 15:01
+    # while that day's log still held a v1.38.0 halt from 01:02, so each one held
+    # for an upgrade that had already happened, never restarted, and reported the
+    # wrong cause for a fleet-wide outage.
+    if "mark_run_start" not in wrapper:
+        _fail("install.upgrade.halt_scan_scoped", "node wrapper does not mark where the current run's output begins")
+        return
+    wrapper_path = os.path.join(REPO_ROOT, "deploy", "run_miraged_supervised.sh")
+    halt_funcs = _shell_function(wrapper_path, "current_run_output") + _shell_function(
+        wrapper_path, "upgrade_halt_detected"
+    )
+    stale = escaped + "\n"
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for label, appended, want in (
+        ("stale_halt_from_earlier_run", "FATAL: supply delta invariant violated for umirage\n", False),
+        ("halt_in_this_run", escaped + "\n", True),
+    ):
+        with tempfile.TemporaryDirectory(prefix="halt-scope-") as tmp:
+            os.makedirs(os.path.join(tmp, "node"))
+            log = os.path.join(tmp, "node", f"miraged-{today}.log")
+            Path(log).write_text(stale, encoding="utf-8")
+            offset = len(stale.encode("utf-8"))
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(appended)
+            harness = (
+                "set -uo pipefail\n"
+                'LOGS_DIR="$1"; RUN_LOG_DATE="$2"; RUN_LOG_OFFSET="$3"; UPGRADE_HALT_PATTERN="$4"\n'
+                f"{halt_funcs}"
+                'line="$(upgrade_halt_detected || true)"\n'
+                '[ -n "$line" ]\n'
+            )
+            probe = _run(["bash", "-c", harness, "bash", tmp, today, str(offset), halt_pattern])
+            if (probe.returncode == 0) is not want:
+                _fail(
+                    "install.upgrade.halt_scan_scoped",
+                    f"{label}: detected={probe.returncode == 0}, expected {want}",
+                )
+                return
+    _pass("install.upgrade.halt_scan_scoped")
+
     pruner = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh")).read_text(encoding="utf-8")
     if "prepared.json" not in pruner:
         _fail("install.upgrade.prune_keeps_prepared", "image pruner can delete the image armed for a governed halt")

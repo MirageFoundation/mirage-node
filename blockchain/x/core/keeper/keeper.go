@@ -1590,6 +1590,17 @@ func (k Keeper) addSupplyDelta(ctx sdk.Context, delta sdkmath.Int) error {
 // recorded bank supply must equal BeginBlock start + accumulated mint/burn
 // delta. It complements, but does not replace, the full supply-vs-balances
 // invariant because it cannot observe a missing account-balance write.
+//
+// The delta only counts mint/burn routed through this keeper's tracked
+// wrappers, so a mismatch does not by itself mean the ledger is wrong: any
+// other module moving the mint denom lands here too. x/staking burning a slash
+// is the reachable case, and on 2026-08-20 it halted all four validators at
+// height 6969190 — the first liveness jail since this guard shipped in v1.31.0
+// burned 5000000000umirage that the delta never saw, on a chain whose supply
+// still matched its balances exactly. So a mismatch is settled with the full
+// scan rather than treated as fatal on its own: supply equalling the sum of all
+// balances is the property that actually matters, and this delta is only a
+// cheap proxy for it.
 func (k Keeper) AssertSupplyDeltaInvariant(ctx sdk.Context) error {
 	store := k.storeService.OpenKVStore(ctx)
 	startBz, err := store.Get(k.blockSupplyStartKey())
@@ -1621,11 +1632,16 @@ func (k Keeper) AssertSupplyDeltaInvariant(ctx sdk.Context) error {
 	expected := start.Add(delta)
 	supply := k.bankSupply(ctx, k.mintDenom()).Amount
 	if !supply.Equal(expected) {
-		err := fmt.Errorf(
-			"supply delta invariant violated for %s: supply %s != start %s + delta %s (expected %s, diff %s)",
-			k.mintDenom(), supply.String(), start.String(), delta.String(), expected.String(), supply.Sub(expected).String(),
-		)
-		return haltFinalizeInvariantError(ctx, "supply_delta", err)
+		untracked := supply.Sub(expected)
+		ctx.Logger().Info("supply delta: untracked supply change, reconciling against full supply invariant",
+			"height", ctx.BlockHeight(), "denom", k.mintDenom(), "supply", supply.String(),
+			"start", start.String(), "delta", delta.String(), "expected", expected.String(),
+			"untracked", untracked.String())
+		if err := k.AssertSupplyInvariant(ctx); err != nil {
+			return err
+		}
+		ctx.Logger().Info("supply delta: full supply invariant holds; untracked supply change accepted",
+			"height", ctx.BlockHeight(), "denom", k.mintDenom(), "untracked", untracked.String())
 	}
 	return nil
 }

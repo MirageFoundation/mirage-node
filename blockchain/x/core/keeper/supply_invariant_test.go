@@ -142,10 +142,64 @@ func TestAssertSupplyDeltaInvariant_Mismatch(t *testing.T) {
 
 	require.NoError(t, k.CaptureBlockSupplyStart(ctx))
 	require.NoError(t, k.addSupplyDelta(ctx, sdkmath.NewInt(50)))
-	// Supply not updated → mismatch (stale-read / missed tracking shape)
+	// Supply not updated → mismatch (stale-read / missed tracking shape). The
+	// balances do not back the supply either, so the reconciling full scan fails
+	// too and the guard still reports a violation.
 	err := k.AssertSupplyDeltaInvariant(ctx)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "supply delta invariant violated")
+	require.Contains(t, err.Error(), "supply invariant violated")
+}
+
+// TestAssertSupplyDeltaInvariant_UntrackedBurnReconciles reproduces the
+// 2026-08-20 halt: x/staking burned 5000000000umirage slashing a validator
+// jailed for a liveness fault, which never passes through this keeper's tracked
+// wrappers, so the delta was short by exactly the slashed amount at EndBlock.
+// Supply still matched the sum of balances, so nothing was wrong — but the
+// guard halted anyway, and every validator halted at the same height because
+// the fault is deterministic. A delta mismatch that the full scan clears must
+// pass.
+func TestAssertSupplyDeltaInvariant_UntrackedBurnReconciles(t *testing.T) {
+	k, bank := newDeltaTestKeeper(1000, []int64{600, 400})
+	ctx := sdk.Context{}.WithContext(context.Background()).WithLogger(log.NewNopLogger())
+
+	require.NoError(t, k.CaptureBlockSupplyStart(ctx))
+	// A slash burn the core keeper never saw: supply and balances both drop by 5.
+	bank.supply = 995
+	bank.balances = []int64{600, 395}
+	require.NoError(t, k.AssertSupplyDeltaInvariant(ctx))
+}
+
+// The reconcile must compose with tracked activity in the same block: a slash
+// alongside an ordinary tracked mint still leaves supply backed by balances.
+func TestAssertSupplyDeltaInvariant_UntrackedBurnWithTrackedMint(t *testing.T) {
+	k, bank := newDeltaTestKeeper(1000, []int64{600, 400})
+	ctx := sdk.Context{}.WithContext(context.Background()).WithLogger(log.NewNopLogger())
+
+	require.NoError(t, k.CaptureBlockSupplyStart(ctx))
+	require.NoError(t, k.addSupplyDelta(ctx, sdkmath.NewInt(50)))
+	bank.supply = 1045
+	bank.balances = []int64{650, 395}
+	require.NoError(t, k.AssertSupplyDeltaInvariant(ctx))
+}
+
+// A delta mismatch that the full scan cannot clear is still consensus-fatal
+// during finalization: the reconcile is a second opinion, not an exemption.
+func TestAssertSupplyDeltaInvariant_UnbackedMismatchHaltsDuringFinalize(t *testing.T) {
+	restore := consensusfatal.SetHaltForTest(func(err error) { panic(err) })
+	defer restore()
+
+	k, bank := newDeltaTestKeeper(1000, []int64{600, 400})
+	ctx := sdk.Context{}.
+		WithContext(context.Background()).
+		WithLogger(log.NewNopLogger()).
+		WithExecMode(sdk.ExecModeFinalize)
+
+	require.NoError(t, k.CaptureBlockSupplyStart(ctx))
+	// Supply dropped with no matching balance change: unbacked, so fatal.
+	bank.supply = 995
+	require.Panics(t, func() {
+		_ = k.AssertSupplyDeltaInvariant(ctx)
+	})
 }
 
 func TestAssertSupplyDeltaInvariant_AbsentStartFallsBack(t *testing.T) {

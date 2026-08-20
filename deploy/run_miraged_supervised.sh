@@ -164,10 +164,49 @@ fi
 # UPGRADE_HALT_RE in scripts/divergence_watchdog.py.
 UPGRADE_HALT_PATTERN='UPGRADE[[:space:]]+\\?"[^"\\]+\\?"[[:space:]]+NEEDED[[:space:]]+at[[:space:]]+height:'
 
+# Byte offset into the day's log at which the current miraged run began, so the
+# halt scan below can ignore everything written before it.
+RUN_LOG_DATE=""
+RUN_LOG_OFFSET=0
+
+mark_run_start() {
+  RUN_LOG_DATE="$(date -u +%Y-%m-%d)"
+  local log="$LOGS_DIR/node/miraged-${RUN_LOG_DATE}.log"
+  if [ -f "$log" ]; then
+    RUN_LOG_OFFSET="$(wc -c < "$log")"
+  else
+    RUN_LOG_OFFSET=0
+  fi
+}
+
+# Emit only the output of the run that just exited. Scanning the whole day's
+# file matches halts from earlier runs that were already resolved: on 2026-08-20
+# a v1.38.0 halt from 01:02 was still in the file when an unrelated invariant
+# crash exited at 15:01, so every validator held for an upgrade that had already
+# happened, never restarted, and reported the wrong cause. cronolog rotates by
+# UTC date, so a run spanning midnight continues into later files.
+current_run_output() {
+  local log today guard=0
+  today="$(date -u +%Y-%m-%d)"
+  local day="$RUN_LOG_DATE"
+  while [ "$guard" -lt 32 ]; do
+    log="$LOGS_DIR/node/miraged-${day}.log"
+    if [ -f "$log" ]; then
+      if [ "$day" = "$RUN_LOG_DATE" ]; then
+        tail -c "+$((RUN_LOG_OFFSET + 1))" "$log"
+      else
+        cat "$log"
+      fi
+    fi
+    [ "$day" = "$today" ] && break
+    day="$(date -u -d "$day + 1 day" +%Y-%m-%d)" || break
+    guard=$((guard + 1))
+  done
+}
+
 upgrade_halt_detected() {
-  local log="$LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
-  [ -f "$log" ] || return 1
-  grep -aE "$UPGRADE_HALT_PATTERN" "$log" | tail -1
+  [ -n "$RUN_LOG_DATE" ] || return 1
+  current_run_output | grep -aE "$UPGRADE_HALT_PATTERN" | tail -1
 }
 
 hold_for_governed_upgrade() {
@@ -191,6 +230,7 @@ declare -a RESTART_TIMES=()
 
 while true; do
   log_supervisor "starting miraged (restarts_last_hour=${#RESTART_TIMES[@]}/${MAX_RESTARTS_PER_HOUR})"
+  mark_run_start
 
   "$BIN" start --home "$NODE_HOME" "${SKIP_ARGS[@]}" "$@" 2>&1 | tee >(cronolog "$LOGS_DIR/node/miraged-%Y-%m-%d.log")
   exit_code="${PIPESTATUS[0]}"
@@ -201,6 +241,11 @@ while true; do
     log_supervisor "stop requested; exiting"
     exit 0
   fi
+
+  # cronolog is fed through a process substitution, so the last lines of the run
+  # can still be in flight here. The scan below now only reads this run's own
+  # output, which makes that flush load-bearing rather than incidental.
+  sleep 1
 
   halt_line="$(upgrade_halt_detected || true)"
   if [ -n "$halt_line" ]; then
