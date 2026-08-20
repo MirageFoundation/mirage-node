@@ -343,9 +343,12 @@ reclaim_disk_for_pull() {
     /usr/local/bin/prune_mirage_images.sh
   else
     # A node updating from a release that predates the pruner has to be able to
-    # reach one that ships it, so this cannot be fatal — but it is still wrong.
-    echo "WARNING: /usr/local/bin/prune_mirage_images.sh is missing; pruning dangling layers only" >&2
-    docker image prune -f >/dev/null || true
+    # reach one that ships it, so a missing pruner cannot be fatal. It does not
+    # get a blanket `docker image prune` as a consolation: a digest pull is
+    # untagged and Docker calls every untagged image dangling, so that would
+    # delete this node's rollback target and any image armed for a governed
+    # halt. Reclaiming nothing is recoverable; the disk check below reports it.
+    echo "WARNING: /usr/local/bin/prune_mirage_images.sh is missing; not reclaiming" >&2
   fi
   local free_mb
   free_mb=$(df -BM --output=avail / | tail -1 | tr -dc '0-9')

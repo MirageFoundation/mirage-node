@@ -3,7 +3,7 @@
 # active, staged, previous, and any forensic/recovery tags.
 set -euo pipefail
 
-STATE_FILE=/var/lib/mirage/update/state.json
+STATE_FILE="${MIRAGE_UPDATE_STATE_FILE:-/var/lib/mirage/update/state.json}"
 PREPARED_FILE="${HOME:-/root}/.mirage/upgrade/prepared.json"
 keep=()
 if [[ -f "$STATE_FILE" ]]; then
@@ -40,22 +40,57 @@ is_kept() {
   return 1
 }
 
-while IFS= read -r line; do
-  [[ -z "$line" ]] && continue
-  id=${line%% *}
-  ref=${line#* }
-  if [[ "$ref" == *forensic* || "$ref" == *recovery* || "$ref" == *divergence* ]]; then
-    continue
-  fi
-  if is_kept "$ref" || is_kept "$id"; then
-    continue
-  fi
-  echo "removing $ref $id"
-  docker rmi "$id" >/dev/null || true
-done < <(docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' | grep -E 'miragefoundation/mirage-node|mirage:local' || true)
+# Walk every image, tagged or not, and judge each one against `keep` above.
+#
+# Both deploy.sh and mirage-update fetch releases by digest, and a digest pull
+# leaves the image with an empty RepoTags. So a sweep that reads only
+# {{.Repository}}:{{.Tag}} matched no release image at all, which is why nothing
+# was ever reclaimed. `docker image prune` is not the answer either: Docker calls
+# any untagged image dangling, so on these hosts that means every release image,
+# and prune does not consult `keep`. It would delete the rollback target, a
+# release staged but not yet activated, and the image armed for a governed halt
+# -- the last of which strands the upgrade, because the activator refuses a
+# digest it cannot find locally.
+#
+# Matching on RepoDigests instead of tags identifies the release an image
+# actually is, which is the same form `keep` holds.
+while IFS= read -r id; do
+  [[ -z "$id" ]] && continue
+  tags=$(docker image inspect "$id" --format '{{join .RepoTags " "}}' 2>/dev/null || true)
+  digests=$(docker image inspect "$id" --format '{{join .RepoDigests " "}}' 2>/dev/null || true)
+  refs="$tags $digests"
 
-# Untagged layers from interrupted or superseded pulls. The loop above only walks
-# tagged mirage refs and never sees these; on val1 they were 3.4 GiB of the disk
-# that filled mid-pull and stopped the validator signing. Dangling only — never
-# `-a`, which would also delete the rollback target simply for not running.
-docker image prune -f >/dev/null || true
+  if [[ "$refs" == *forensic* || "$refs" == *recovery* || "$refs" == *divergence* ]]; then
+    continue
+  fi
+
+  if [[ "$refs" == *miragefoundation/mirage-node* || "$refs" == *mirage:local* ]]; then
+    :
+  elif [[ -z "${tags// /}" && -z "${digests// /}" ]]; then
+    # No tag and no digest: the remains of an interrupted or superseded pull,
+    # attributable to nothing and reclaimable by no other rule. On val1 these
+    # were 3.4 GiB of the disk that filled mid-pull and stopped the validator.
+    :
+  else
+    continue
+  fi
+
+  kept=0
+  if is_kept "$id"; then
+    kept=1
+  else
+    for ref in $refs; do
+      if is_kept "$ref"; then
+        kept=1
+        break
+      fi
+    done
+  fi
+  if [[ "$kept" -eq 1 ]]; then
+    continue
+  fi
+
+  label=$(echo $refs)
+  echo "removing ${label:-<untagged>} $id"
+  docker rmi "$id" >/dev/null 2>&1 || true
+done < <(docker images -a --no-trunc --format '{{.ID}}')

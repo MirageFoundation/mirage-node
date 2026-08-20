@@ -145,6 +145,7 @@ def test_install(backend: str) -> None:
     _test_watermark_never_lowers()
     _test_weekly_restart_skips_catching_up()
     _test_images_pruned_before_every_pull()
+    _test_prune_keeps_digest_pinned_images()
     _test_stake_floor_and_lock()
     _test_economics_single_source()
     _test_mint_floor_backend_required()
@@ -2503,16 +2504,142 @@ def _test_images_pruned_before_every_pull() -> None:
         )
         return
 
-    # Untagged layers from interrupted pulls are invisible to the tagged-ref loop
-    # and were 3.4 GiB of the disk that filled on val1.
+    # Nothing may reclaim images without consulting the keep-list. `docker image
+    # prune` cannot: Docker reports every untagged image as dangling, and a
+    # digest pull is untagged, so a blanket prune deletes the rollback target and
+    # the image armed for a governed halt. Behaviour is covered by
+    # _test_prune_keeps_digest_pinned_images; this only keeps the blunt
+    # instrument out of the paths that run unattended.
+    for name in ("deploy/hosttools/prune_mirage_images.sh", "deploy/hosttools/mirage-update", "deploy/deploy.sh"):
+        text = Path(REPO_ROOT, *name.split("/")).read_text(encoding="utf-8")
+        # A comment warning against the command must not read as running it.
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        for blunt in ("docker image prune -f", "docker image prune -af", "docker image prune -a"):
+            if blunt in code:
+                _fail(
+                    "install.prune.no_blanket_prune",
+                    f"{name} runs '{blunt}', which ignores the keep-list and can delete a staged or halt-armed image",
+                )
+                return
     pruner = Path(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh").read_text(encoding="utf-8")
-    if "docker image prune -f" not in pruner:
-        _fail("install.prune.dangling", "pruner leaves dangling layers behind")
-        return
-    if "prune -af" in pruner or "prune -a " in pruner:
-        _fail("install.prune.not_all", "pruner must never use -a; it would delete the rollback target")
+    if "RepoDigests" not in pruner:
+        _fail(
+            "install.prune.matches_digests",
+            "pruner still identifies images by tag; digest-pinned pulls carry none, so it reclaims nothing",
+        )
         return
     _pass("install.prune.before_every_pull")
+
+
+def _test_prune_keeps_digest_pinned_images() -> None:
+    """The keep-list must survive the fact that release images carry no tag.
+
+    Both deploy.sh and mirage-update pull by digest, and a digest pull leaves
+    RepoTags empty. That broke the pruner in both directions: a sweep reading
+    only {{.Repository}}:{{.Tag}} matched no release image at all, and
+    `docker image prune -f` matched every one of them, because Docker calls any
+    untagged image dangling and prune never consults the keep-list. The second
+    is the dangerous one -- it deletes the rollback target, a staged release,
+    and the image armed for a governed halt, which strands the upgrade.
+    """
+    pruner = os.path.join(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh")
+    repo = "ghcr.io/miragefoundation/mirage-node"
+    # Distinct digests standing in for each role the keep-list protects.
+    ids = {
+        "active": "sha256:" + "a" * 64,
+        "previous": "sha256:" + "b" * 64,
+        "staged": "sha256:" + "c" * 64,
+        "prepared": "sha256:" + "d" * 64,
+        "obsolete": "sha256:" + "e" * 64,
+        "orphan": "sha256:" + "f" * 64,
+        "foreign": "sha256:" + "1" * 64,
+    }
+    repo_digest = {role: f"{repo}@sha256:{role_id[7:]}" for role, role_id in ids.items()}
+
+    with tempfile.TemporaryDirectory(prefix="prune-keep-") as tmp:
+        home = os.path.join(tmp, "home")
+        os.makedirs(os.path.join(home, ".mirage", "upgrade"), exist_ok=True)
+        state_file = os.path.join(tmp, "state.json")
+        Path(state_file).write_text(
+            json.dumps(
+                {
+                    "active": repo_digest["active"],
+                    "previous": repo_digest["previous"],
+                    "staged": repo_digest["staged"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"image": repo_digest["prepared"]}), encoding="utf-8"
+        )
+
+        removed = os.path.join(tmp, "removed.txt")
+        # Every release image is untagged, exactly as a digest pull leaves it.
+        # 'orphan' has neither tag nor digest (an interrupted pull) and must go;
+        # 'foreign' is another project's tagged image and must be left alone.
+        tags = {role: "" for role in ids}
+        tags["foreign"] = "postgres:16-alpine"
+        digests = {role: repo_digest[role] for role in ids}
+        digests["orphan"] = ""
+        digests["foreign"] = "postgres@sha256:" + "1" * 64
+
+        by_id = {ids[role]: role for role in ids}
+        stub = f"""#!/usr/bin/env python3
+import sys
+TAGS = {tags!r}
+DIGESTS = {digests!r}
+BY_ID = {by_id!r}
+IDS = {list(ids.values())!r}
+a = sys.argv[1:]
+if a[:2] == ["inspect", "mirage"]:
+    print({ids["active"]!r})
+elif a[0] == "images":
+    print("\\n".join(IDS))
+elif a[:2] == ["image", "inspect"]:
+    role = BY_ID[a[2]]
+    print(TAGS[role] if "RepoTags" in a[-1] else DIGESTS[role])
+elif a[0] == "rmi":
+    open({removed!r}, "a").write(BY_ID[a[1]] + "\\n")
+else:
+    sys.exit(1)
+"""
+        bindir = os.path.join(tmp, "bin")
+        os.makedirs(bindir, exist_ok=True)
+        docker = os.path.join(bindir, "docker")
+        Path(docker).write_text(stub, encoding="utf-8")
+        os.chmod(docker, 0o755)
+
+        env = {
+            **os.environ,
+            "HOME": home,
+            "MIRAGE_UPDATE_STATE_FILE": state_file,
+            "PATH": bindir + os.pathsep + os.environ.get("PATH", ""),
+        }
+        result = _run(["bash", pruner], env=env, timeout=60)
+        if result.returncode != 0:
+            _fail("install.prune.keep_exit", f"rc={result.returncode} err={result.stderr[-400:]}")
+            return
+
+        gone = set(Path(removed).read_text(encoding="utf-8").split()) if os.path.isfile(removed) else set()
+        for role in ("active", "previous", "staged", "prepared"):
+            if role in gone:
+                _fail(
+                    "install.prune.keep_protected",
+                    f"pruner deleted the {role} image; a digest pull is untagged, not disposable",
+                )
+                return
+        if "foreign" in gone:
+            _fail("install.prune.keep_foreign", "pruner deleted an unrelated project's image")
+            return
+        for role in ("obsolete", "orphan"):
+            if role not in gone:
+                _fail(
+                    "install.prune.reclaims",
+                    f"pruner kept the {role} image, so nothing is reclaimed and disks still fill",
+                )
+                return
+    _pass("install.prune.keeps_digest_pinned")
 
 
 def _test_stake_floor_and_lock() -> None:
