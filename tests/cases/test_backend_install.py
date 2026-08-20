@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import fcntl
 import http.server
 import inspect
@@ -108,6 +109,8 @@ def test_install(backend: str) -> None:
     _test_sshd_validation_survives_socket_activation()
     _test_fresh_deploy_skips_historical_migrations()
     _test_indexer_schema_precedes_migrations()
+    _test_indexer_param_refresh_schedule()
+    _test_node_temp_cleanup()
     _test_ubuntu_full_upgrade()
     _test_provider_memory_overhead()
     _test_no_swapfile_provisioned()
@@ -134,9 +137,65 @@ def test_install(backend: str) -> None:
     _test_weekly_restart_skips_catching_up()
     _test_stake_floor_and_lock()
     _test_economics_single_source()
+    _test_mint_floor_backend_required()
     _test_caddy_well_known()
     _test_caddy_csp_upgrade_scoped_to_tls()
     _test_repodigest_pin()
+
+
+def _test_node_temp_cleanup() -> None:
+    from deploy.migrations._helpers import cleanup_node_temp_files
+
+    with tempfile.TemporaryDirectory(prefix="node-temp-cleanup-") as tmp:
+        config_dir = Path(tmp, ".mirage", "env")
+        node_config = Path(tmp, ".mirage", "node", "config")
+        config_dir.mkdir(parents=True)
+        node_config.mkdir(parents=True)
+        temp_file = node_config / "write-file-atomic-123"
+        keep_file = node_config / "config.toml"
+        temp_file.write_text("partial", encoding="utf-8")
+        keep_file.write_text("config", encoding="utf-8")
+
+        cleaned = cleanup_node_temp_files(config_dir)
+        if cleaned != 1 or temp_file.exists() or not keep_file.exists():
+            _fail(
+                "install.migrations.node_temp_cleanup",
+                f"cleaned={cleaned} temp_exists={temp_file.exists()} config_exists={keep_file.exists()}",
+            )
+            return
+    _pass("install.migrations.node_temp_cleanup")
+
+
+def _test_indexer_param_refresh_schedule() -> None:
+    import indexer.main as indexer_main
+
+    indexer = object.__new__(indexer_main.Indexer)
+    indexer.chain = mock.Mock(grpc_target="127.0.0.1:9090")
+    indexer._params_need_post_block_refresh = True
+    indexer._catch_up_mode = True
+    with (
+        mock.patch.object(indexer_main, "load_chain_params") as load,
+        mock.patch.object(indexer_main, "get_raw_params", return_value={"mint_floor_split": 0.2}),
+    ):
+        snapshot, reason = indexer._chain_params_snapshot_for_block(1)
+        if snapshot != {"mint_floor_split": 0.2} or reason != "post-start":
+            _fail("install.indexer.params_post_start", f"snapshot={snapshot!r} reason={reason!r}")
+            return
+        load.assert_called_once_with("127.0.0.1:9090", force=True)
+
+        indexer._params_need_post_block_refresh = False
+        load.reset_mock()
+        snapshot, reason = indexer._chain_params_snapshot_for_block(indexer_main.PARAMS_REFRESH_INTERVAL)
+        if snapshot is not None or reason or load.called:
+            _fail("install.indexer.params_skip_catchup", f"snapshot={snapshot!r} reason={reason!r}")
+            return
+
+        indexer._catch_up_mode = False
+        snapshot, reason = indexer._chain_params_snapshot_for_block(indexer_main.PARAMS_REFRESH_INTERVAL)
+        if snapshot != {"mint_floor_split": 0.2} or reason != "periodic":
+            _fail("install.indexer.params_periodic", f"snapshot={snapshot!r} reason={reason!r}")
+            return
+    _pass("install.indexer.params_refresh_schedule")
 
 
 def _test_version_file() -> None:
@@ -2414,6 +2473,26 @@ def _test_economics_single_source() -> None:
     _pass("install.economics.single_source")
 
 
+def _test_mint_floor_backend_required() -> None:
+    """The backend must reject an indexer row that predates field 55."""
+    source_path = Path(REPO_ROOT, "web", "backend", "params.py")
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+    required_float_params = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if any(isinstance(target, ast.Name) and target.id == "_REQUIRED_FLOAT_PARAMS" for target in node.targets):
+            required_float_params = ast.literal_eval(node.value)
+            break
+    if required_float_params is None:
+        _fail("install.params.mint_floor_required", "_REQUIRED_FLOAT_PARAMS assignment is missing")
+        return
+    if "mint_floor_split" not in required_float_params:
+        _fail("install.params.mint_floor_required", f"required floats={required_float_params!r}")
+        return
+    _pass("install.params.mint_floor_required")
+
+
 def _test_caddy_well_known() -> None:
     caddy = Path(REPO_ROOT, "deploy", "templates", "caddy", "Caddyfile").read_text(encoding="utf-8")
     idx_well = caddy.find("handle /.well-known/mirage/*")
@@ -3249,11 +3328,26 @@ def _test_earnings_card() -> None:
         if label not in rendered:
             _fail("install.status.earnings_content", f"missing {label!r}: {rendered}")
             return
-    if "Staked 24h: +5mm MIRAGE" not in rendered or "Spent 24h: -0.5 MIRAGE" not in rendered:
+    if "Staked 24h: +5mm MIRAGE" not in rendered or "Spent 24h:  -0.5 MIRAGE" not in rendered:
         _fail("install.status.stake_not_spent", rendered)
         return
     if any(".." in row for row in plain):
         _fail("install.status.earnings_fit", f"earnings card cuts content: {plain}")
+        return
+    # "Spent" is a letter shorter than the other labels, so without padding its
+    # amount sits one column to the left of the other three.
+    columns = set()
+    for row in plain:
+        for marker in ("+", "-"):
+            index = row.find(f"{marker}0.5 MIRAGE")
+            if index < 0:
+                index = row.find(f"{marker}33.4 MIRAGE")
+            if index < 0:
+                index = row.find(f"{marker}5mm MIRAGE")
+            if index >= 0:
+                columns.add(index)
+    if len(columns) != 1:
+        _fail("install.status.earnings_aligned", f"amounts start at columns {sorted(columns)}: {plain}")
         return
     compact = "\n".join(dash.render_compact_dashboard([earnings], 80, 24, 1))
     if (

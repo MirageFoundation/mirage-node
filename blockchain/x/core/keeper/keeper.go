@@ -29,11 +29,18 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 )
 
+type stakingKeeper interface {
+	GetValidator(context.Context, sdk.ValAddress) (stakingtypes.Validator, error)
+	PowerReduction(context.Context) sdkmath.Int
+	IterateValidators(context.Context, func(int64, stakingtypes.ValidatorI) bool) error
+	IterateBondedValidatorsByPower(context.Context, func(int64, stakingtypes.ValidatorI) bool) error
+}
+
 type Keeper struct {
 	storeService corestore.KVStoreService
 	cdc          codec.Codec
 	bank         bankkeeper.Keeper
-	staking      *stakingkeeper.Keeper
+	staking      stakingKeeper
 	distribution *distrkeeper.Keeper
 	slashing     slashingkeeper.Keeper
 }
@@ -1883,161 +1890,44 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		return vals[i].OperatorAddress < vals[j].OperatorAddress
 	})
 
-	// Split pools based on param MintDynamicSplit [0,1]
-	split := params.MintDynamicSplit
-	dynDec, errDec := sdkmath.LegacyNewDecFromStr(fmt.Sprintf("%.18f", split))
-	if errDec != nil {
-		return fmt.Errorf("mint distribution: invalid MintDynamicSplit %s: %w",
-			fmt.Sprintf("%.18f", split), errDec)
-	}
-	dynamicPool := dynDec.MulInt(amt).TruncateInt()
-	if dynamicPool.IsNegative() || dynamicPool.GT(amt) {
-		return fmt.Errorf("mint distribution: dynamic pool %s outside [0,%s]",
-			dynamicPool.String(), amt.String())
-	}
-	baselinePool := amt.Sub(dynamicPool)
-
-	// Baseline stake-weighted distribution
-	type validatorReward struct {
-		validator stakingtypes.Validator
-		baseline  sdkmath.Int
-		dynamic   sdkmath.Int
-	}
-	var rewards []validatorReward
-
-	baselineDistributed := sdkmath.ZeroInt()
-	for _, val := range vals {
-		share := sdkmath.LegacyNewDecFromInt(val.Tokens).Quo(sdkmath.LegacyNewDecFromInt(total_stake))
-		valAmt := share.MulInt(baselinePool).TruncateInt()
-		if valAmt.IsPositive() {
-			baselineDistributed = baselineDistributed.Add(valAmt)
-			rewards = append(rewards, validatorReward{validator: val, baseline: valAmt, dynamic: sdkmath.ZeroInt()})
-		} else {
-			rewards = append(rewards, validatorReward{validator: val, baseline: sdkmath.ZeroInt(), dynamic: sdkmath.ZeroInt()})
+	// Gather the per-validator inputs the split depends on. Credits are capped
+	// here so one heavy relayer cannot take the entire work pool.
+	creditCap := sdkmath.NewIntFromUint64(params.MintDynamicCreditCap)
+	inputs := make([]mintInput, len(vals))
+	for i, val := range vals {
+		credits := k.GetRelayCredit(ctx, val.OperatorAddress)
+		capped := credits
+		if credits.GT(creditCap) {
+			capped = creditCap
 		}
-		ctx.Logger().Info("baseline alloc",
+		inputs[i] = mintInput{tokens: val.Tokens, creditsCapped: capped}
+		ctx.Logger().Info("mint input",
 			"valoper", val.OperatorAddress,
 			"tokens", val.Tokens.String(),
-			"share", share.String(),
-			"baseline_pool", baselinePool.String(),
-			"baseline_alloc", valAmt.String(),
-		)
-	}
-	// fix baseline remainder deterministically to last
-	baseRemainder := baselinePool.Sub(baselineDistributed)
-	if baseRemainder.IsPositive() && len(rewards) > 0 {
-		rewards[len(rewards)-1].baseline = rewards[len(rewards)-1].baseline.Add(baseRemainder)
-		ctx.Logger().Info("baseline remainder assigned",
-			"valoper", rewards[len(rewards)-1].validator.OperatorAddress,
-			"remainder", baseRemainder.String(),
-		)
-	}
-
-	// Dynamic pool: weight by (credits_i * voting_power_i)
-	// Gather credits for current validators
-	type dynWeight struct {
-		idx    int
-		weight sdkmath.LegacyDec
-	}
-	var weights []dynWeight
-	sumWeights := sdkmath.LegacyNewDec(0)
-	for i, vr := range rewards {
-		credits := k.GetRelayCredit(ctx, vr.validator.OperatorAddress)
-		// Cap credits by MintDynamicCreditCap per interval
-		limit := sdkmath.NewIntFromUint64(params.MintDynamicCreditCap)
-		creditsCapped := credits
-		if credits.GT(limit) {
-			creditsCapped = limit
-		}
-		if !creditsCapped.IsPositive() || !vr.validator.Tokens.IsPositive() {
-			weights = append(weights, dynWeight{idx: i, weight: sdkmath.LegacyNewDec(0)})
-			ctx.Logger().Info("dynamic weight",
-				"valoper", vr.validator.OperatorAddress,
-				"credits", credits.String(),
-				"credits_after_cap", creditsCapped.String(),
-				"limit", limit.String(),
-				"tokens", vr.validator.Tokens.String(),
-				"weight", "0",
-			)
-			continue
-		}
-		w := sdkmath.LegacyNewDecFromInt(creditsCapped).Mul(sdkmath.LegacyNewDecFromInt(vr.validator.Tokens))
-		weights = append(weights, dynWeight{idx: i, weight: w})
-		sumWeights = sumWeights.Add(w)
-		ctx.Logger().Info("dynamic weight",
-			"valoper", vr.validator.OperatorAddress,
 			"credits", credits.String(),
-			"credits_after_cap", creditsCapped.String(),
-			"limit", limit.String(),
-			"tokens", vr.validator.Tokens.String(),
-			"weight", w.String(),
+			"credits_after_cap", capped.String(),
+			"credit_cap", creditCap.String(),
 		)
 	}
 
-	dynamicAssigned := sdkmath.ZeroInt()
-	if dynamicPool.IsPositive() {
-		if !sumWeights.IsPositive() {
-			// Fallback: no credits → stake-weighted distribution like baseline
-			dynDistributed := sdkmath.ZeroInt()
-			for i, vr := range rewards {
-				share := sdkmath.LegacyNewDecFromInt(vr.validator.Tokens).Quo(sdkmath.LegacyNewDecFromInt(total_stake))
-				valAmt := share.MulInt(dynamicPool).TruncateInt()
-				rewards[i].dynamic = valAmt
-				dynDistributed = dynDistributed.Add(valAmt)
-				ctx.Logger().Info("dynamic fallback alloc",
-					"valoper", vr.validator.OperatorAddress,
-					"tokens", vr.validator.Tokens.String(),
-					"share", share.String(),
-					"dynamic_pool", dynamicPool.String(),
-					"dynamic_alloc", valAmt.String(),
-				)
-			}
-			rem := dynamicPool.Sub(dynDistributed)
-			if rem.IsPositive() && len(rewards) > 0 {
-				rewards[len(rewards)-1].dynamic = rewards[len(rewards)-1].dynamic.Add(rem)
-				ctx.Logger().Info("dynamic fallback remainder assigned",
-					"valoper", rewards[len(rewards)-1].validator.OperatorAddress,
-					"remainder", rem.String(),
-				)
-			}
-			dynamicAssigned = dynDistributed.Add(rem)
-		} else if sumWeights.IsPositive() {
-			// initial allocation proportional to weights
-			lastIdxWithWeight := -1
-			for _, w := range weights {
-				if !w.weight.IsPositive() {
-					continue
-				}
-				lastIdxWithWeight = w.idx
-				alloc := w.weight.MulInt(dynamicPool).QuoTruncate(sumWeights).TruncateInt()
-				if alloc.IsPositive() {
-					rewards[w.idx].dynamic = alloc
-					dynamicAssigned = dynamicAssigned.Add(alloc)
-					ctx.Logger().Info("dynamic alloc initial",
-						"valoper", rewards[w.idx].validator.OperatorAddress,
-						"alloc", alloc.String(),
-					)
-				}
-			}
-			// final remainder, if any, add to the last with positive weight (deterministic)
-			finalR := dynamicPool.Sub(dynamicAssigned)
-			if finalR.IsPositive() && lastIdxWithWeight >= 0 {
-				rewards[lastIdxWithWeight].dynamic = rewards[lastIdxWithWeight].dynamic.Add(finalR)
-				dynamicAssigned = dynamicAssigned.Add(finalR)
-				ctx.Logger().Info("dynamic alloc remainder",
-					"valoper", rewards[lastIdxWithWeight].validator.OperatorAddress,
-					"extra", finalR.String(),
-				)
-			}
-		}
+	shares, err := splitMint(amt, params.MintFloorSplit, params.MintDynamicSplit, total_stake, inputs)
+	if err != nil {
+		return fmt.Errorf("mint distribution: %w", err)
 	}
 
 	// Build and validate every recipient before minting.
-	operatorAddrs := make([]string, len(rewards))
-	amounts := make([]sdkmath.Int, len(rewards))
-	for i, r := range rewards {
-		operatorAddrs[i] = r.validator.OperatorAddress
-		amounts[i] = r.baseline.Add(r.dynamic)
+	operatorAddrs := make([]string, len(vals))
+	amounts := make([]sdkmath.Int, len(vals))
+	for i, val := range vals {
+		operatorAddrs[i] = val.OperatorAddress
+		amounts[i] = shares[i].total()
+		ctx.Logger().Info("mint alloc",
+			"valoper", val.OperatorAddress,
+			"floor", shares[i].floor.String(),
+			"work", shares[i].work.String(),
+			"stake", shares[i].stake.String(),
+			"total", amounts[i].String(),
+		)
 	}
 	recipients, skippedInvalid, totalMint, mismatch := buildMintRecipients(operatorAddrs, amounts)
 	if mismatch {
@@ -2076,9 +1966,8 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		"validators", len(recipients),
 		"skipped_invalid_validators", len(skippedInvalid),
 		"total_stake", total_stake.String(),
-		"baseline_pool", baselinePool.String(),
-		"dynamic_pool", dynamicPool.String(),
-		"dynamic_assigned", dynamicAssigned.String(),
+		"floor_split", params.MintFloorSplit,
+		"dynamic_split", params.MintDynamicSplit,
 	)
 	return nil
 }

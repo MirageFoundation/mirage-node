@@ -1223,7 +1223,10 @@ def test_rate_limit(backend: str):
 
     url = f"{backend}/api/get_parameters"
     session = requests.Session()
-    burst_size = 30
+    # Caddy's api_limit permits 50 events per one-second window. A probe below
+    # that threshold cannot demonstrate enforcement and used to fail while the
+    # limiter was behaving exactly as configured.
+    burst_size = 75
     max_attempts = 3
 
     for attempt in range(1, max_attempts + 1):

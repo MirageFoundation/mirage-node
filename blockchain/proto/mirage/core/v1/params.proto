@@ -143,6 +143,14 @@ message Params {
   // replaces could not represent every split without rounding drift.
   // Default: 9500 (95% reserved, 5% burned).
   uint64 subscription_reserve_bps = 54;
+
+  // mint_floor_split is the fraction [0,1] of MintQuantity paid out equally to
+  // every bonded validator, regardless of stake or traffic. It is what makes a
+  // small node worth running at all. mint_floor_split + mint_dynamic_split must
+  // not exceed 1; the remainder stays stake-weighted.
+  // Zero is valid so Params blobs written before v1.38.0 still decode.
+  // Default: 0.20 (20% floor).
+  double mint_floor_split = 55;
 }
 
 // AwardConfig defines a single award type and its cost.

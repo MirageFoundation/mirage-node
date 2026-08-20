@@ -70,6 +70,7 @@ TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
 SUPPLY_SAMPLE_INTERVAL = 200
 HEAD_HEIGHT_SAMPLE_INTERVAL = 10
 PEERS_SAMPLE_INTERVAL = 20
+PARAMS_REFRESH_INTERVAL = 20
 BLOCK_PRUNE_INTERVAL = 1000
 RECENT_BLOCKS_KEEP = 1000
 REDGIFS_BACKFILL_INTERVAL = 20
@@ -204,6 +205,12 @@ class Indexer:
         self.running = False
         self.ws = None
         self._catch_up_mode: bool = False
+        # RPC can become reachable while an upgrade block is still applying.
+        # The startup query may therefore observe the pre-handler params. The
+        # first indexed block must replace that snapshot after the block is
+        # committed; periodic refreshes cover future handler-driven changes
+        # that do not arrive in a MsgUpdateParams transaction.
+        self._params_need_post_block_refresh = True
         self._redgifs = redgifs.RedgifsResolver()
         self._redgifs_missing: set[str] = set()
         self._redgifs_skip: set[str] = set()
@@ -321,6 +328,22 @@ class Indexer:
     # Block processing
     # ------------------------------------------------------------------
 
+    def _chain_params_snapshot_for_block(self, height: int) -> tuple[dict | None, str]:
+        """Return a required current-params snapshot when this block must refresh it."""
+        reason = ""
+        if self._params_need_post_block_refresh:
+            reason = "post-start"
+        elif not self._catch_up_mode and height % PARAMS_REFRESH_INTERVAL == 0:
+            reason = "periodic"
+        if not reason:
+            return None, ""
+
+        load_chain_params(self.chain.grpc_target, force=True)
+        snapshot = dict(get_raw_params())
+        if not snapshot:
+            raise RuntimeError(f"Chain params refresh returned empty data at height {height}")
+        return snapshot, reason
+
     def _process_block(self, height: int):
         """Project one block into PostgreSQL atomically, then advance the checkpoint."""
         blk = self.chain.get_block(height)
@@ -360,6 +383,7 @@ class Indexer:
         # a slow/failed gRPC call cannot hold row locks against other DB users.
         touched = self._collect_touched_addresses(result_obj)
         balances = self.chain.get_balances_batch(sorted(touched)) if touched else None
+        params_snapshot, params_refresh_reason = self._chain_params_snapshot_for_block(height)
 
         self.chain.begin_block_profile_cache()
         try:
@@ -377,12 +401,17 @@ class Indexer:
                 if balances is not None:
                     self.db.upsert_balances_batch(sorted(balances.items()), now)
                     logger.debug("balances.refreshed height=%s addresses=%d", height, len(balances))
+                if params_snapshot is not None:
+                    self.db.set_chain_stat("chain_params", params_snapshot, now)
                 self.db.set_indexer_state("last_processed_time", str(now), now)
                 self.db.set_checkpoint(height, block_hash, chain_id)
         finally:
             self.chain.end_block_profile_cache()
 
         self._last_height = height
+        if params_snapshot is not None:
+            self._params_need_post_block_refresh = False
+            logger.info("Chain params refreshed at height %s (%s)", height, params_refresh_reason)
         logger.debug("block.committed height=%s", height)
 
         self._record_optional_telemetry(height)

@@ -8,6 +8,7 @@ import (
 	"cosmossdk.io/log/v2"
 	sdkmath "cosmossdk.io/math"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,6 +26,7 @@ type bankCall struct {
 // injection knobs. The ledger tracks supply deltas so tests can assert
 // final supply matches expectations.
 type mockMintBank struct {
+	bankkeeper.Keeper
 	calls []bankCall
 
 	mintFail    error

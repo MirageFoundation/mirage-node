@@ -355,7 +355,20 @@ def test_indexer(backend: str):
         else:
             _fail("indexer.chain_config_has_award_configs", f"award_configs={type(ac).__name__}")
 
-        # 3.5 chain_config block_time present
+        # 3.5 mint split is served from the backend's own parameter cache. This
+        # catches a running backend that stayed on the pre-upgrade indexer row
+        # even though direct chain queries already show the new field.
+        try:
+            floor = float(cfg["mint_floor_split"])
+            dynamic = float(cfg["mint_dynamic_split"])
+            if 0 <= floor <= 1 and 0 <= dynamic <= 1 and floor + dynamic <= 1:
+                _pass("indexer.chain_config_mint_split", floor=floor, dynamic=dynamic)
+            else:
+                _fail("indexer.chain_config_mint_split", f"floor={floor} dynamic={dynamic}")
+        except (KeyError, TypeError, ValueError) as e:
+            _fail("indexer.chain_config_mint_split", str(e))
+
+        # 3.6 chain_config block_time present
         bt = cfg.get("block_time")
         try:
             fbt = float(bt)
@@ -367,7 +380,7 @@ def test_indexer(backend: str):
         except Exception:
             _fail("indexer.chain_config_block_time_positive", f"block_time={bt}")
 
-    # 3.6 params pow_base_bits present and in range
+    # 3.7 params pow_base_bits present and in range
     if isinstance(params, dict) and params.get("pow_base_bits") is not None:
         pb = int(params.get("pow_base_bits") or 0)
         if 1 <= pb <= 256:
@@ -380,7 +393,7 @@ def test_indexer(backend: str):
             f"pow_base_bits={params.get('pow_base_bits') if isinstance(params, dict) else None}",
         )
 
-    # 3.7 chain_params in indexer DB contains both renamed proto keys and
+    # 3.8 chain_params in indexer DB contains both renamed proto keys and
     # legacy compatibility aliases (required by backend/frontend public API).
     if _check_local_docker():
         db_name = _get_indexer_db_name()

@@ -194,7 +194,8 @@ func DefaultParams() Params {
 		MintInterval:         200,             // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
 		MintQuantity:         125_000_000_000, // 125,000 MIRAGE per 10min
 		MintDynamicCreditCap: 25,              // default cap per interval per validator (same as default PowMessageLimit)
-		MintDynamicSplit:     0.5,             // 50% dynamic by default
+		MintFloorSplit:       0.20,
+		MintDynamicSplit:     0.10,
 
 		// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty)
 		MinDifficulty: 10,
@@ -278,6 +279,16 @@ func (p Params) Validate() error {
 	if math.IsNaN(p.MintDynamicSplit) || math.IsInf(p.MintDynamicSplit, 0) ||
 		p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
 		return fmt.Errorf("mint_dynamic_split must be in [0,1]")
+	}
+	if math.IsNaN(p.MintFloorSplit) || math.IsInf(p.MintFloorSplit, 0) ||
+		p.MintFloorSplit < 0 || p.MintFloorSplit > 1 {
+		return fmt.Errorf("mint_floor_split must be in [0,1]")
+	}
+	// The stake pool is the remainder, so a sum above 1 would mint more than
+	// MintQuantity. Checked here rather than in the keeper because MsgUpdateParams
+	// can move either field independently.
+	if p.MintFloorSplit+p.MintDynamicSplit > 1 {
+		return fmt.Errorf("mint_floor_split + mint_dynamic_split must be <= 1, got %v", p.MintFloorSplit+p.MintDynamicSplit)
 	}
 	// The floor exists because the PoW ante rejects an envelope whose
 	// last_block_hash has aged out of this window. Set it below the envelope age

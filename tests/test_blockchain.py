@@ -65,7 +65,11 @@ from tests.cases.test_blockchain_tiers import (
 )
 from tests.cases.test_blockchain_social import test_follow_limits, test_hard_cap_vs_deque
 from tests.cases.test_blockchain_governance import test_governance_reject, test_direct_bank
-from tests.cases.test_blockchain_params import test_params_schema, test_params_mask_governance
+from tests.cases.test_blockchain_params import (
+    test_params_schema,
+    test_params_mask_governance,
+    test_mint_split_params,
+)
 from tests.cases.test_blockchain_features import (
     test_chain_auto_renewal,
     test_biography,
@@ -93,6 +97,7 @@ ALL_CATEGORIES = {
     "governance": test_governance_reject,
     "params_schema": test_params_schema,
     "params_mask": test_params_mask_governance,
+    "mint_split": test_mint_split_params,
     "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "subscribe_validation": test_subscribe_validation,
     "subscribe_gift_reject": test_subscribe_gift_rejects_higher_tier,

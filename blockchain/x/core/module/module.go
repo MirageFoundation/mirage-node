@@ -1387,6 +1387,7 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"mint_quantity":               func(d *types.Params, s types.Params) { d.MintQuantity = s.MintQuantity },
 	"mint_dynamic_credit_cap":     func(d *types.Params, s types.Params) { d.MintDynamicCreditCap = s.MintDynamicCreditCap },
 	"mint_dynamic_split":          func(d *types.Params, s types.Params) { d.MintDynamicSplit = s.MintDynamicSplit },
+	"mint_floor_split":            func(d *types.Params, s types.Params) { d.MintFloorSplit = s.MintFloorSplit },
 	"block_hash_window":           func(d *types.Params, s types.Params) { d.BlockHashWindow = s.BlockHashWindow },
 	"min_username_size":           func(d *types.Params, s types.Params) { d.MinUsernameSize = s.MinUsernameSize },
 	"max_username_size":           func(d *types.Params, s types.Params) { d.MaxUsernameSize = s.MaxUsernameSize },

@@ -175,6 +175,42 @@ def test_params_schema(backend: str) -> None:
     except Exception as e:
         _fail("params_schema.proposal_masks", str(e))
 
+def test_mint_split_params(backend: str) -> None:
+    """The mint splits must be queryable and internally consistent on the chain.
+
+    The stake pool is whatever the floor and work pools leave behind, so a sum
+    above 1 would mint more than mint_quantity every interval. The exact live
+    values are asserted by verify_upgrade.py, which only runs after the governed
+    upgrade; this holds on any chain, upgraded or not.
+    """
+    try:
+        params = _get_chain_params()
+    except Exception as e:
+        _fail("mint_split.query", str(e))
+        return
+
+    for field in ("mint_floor_split", "mint_dynamic_split", "mint_quantity", "mint_interval"):
+        if field not in params:
+            _fail("mint_split.queryable", f"{field} missing from chain params: {sorted(params)[:12]}...")
+            return
+    _pass("mint_split.queryable")
+
+    try:
+        floor = float(params["mint_floor_split"])
+        dynamic = float(params["mint_dynamic_split"])
+    except (TypeError, ValueError) as e:
+        _fail("mint_split.numeric", f"{e}: floor={params['mint_floor_split']!r} dynamic={params['mint_dynamic_split']!r}")
+        return
+
+    if not (0 <= floor <= 1) or not (0 <= dynamic <= 1):
+        _fail("mint_split.bounds", f"floor={floor} dynamic={dynamic} must both be in [0,1]")
+        return
+    if floor + dynamic > 1:
+        _fail("mint_split.sum", f"floor {floor} + dynamic {dynamic} = {floor + dynamic} exceeds the whole mint")
+        return
+    _pass("mint_split.bounds")
+    _debug(f"mint_split: floor={floor} work={dynamic} stake={round(1 - floor - dynamic, 6)}")
+
 
 def _gov_min_deposit(expedited: bool) -> str:
     code, out = _run_miraged(

@@ -37,7 +37,7 @@ from node import require_runtime, derive_address_from_pubkey as _derive_address_
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
 from user_last_seen import update_user_last_seen
-from params import load_params, expect_params
+from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
     IGNORE_AGENT_BLOCKED_POSTS,
@@ -4021,11 +4021,11 @@ def get_circulation_stats():
 # ---- get_chain_config: chain governance params only ----
 _CHAIN_CONFIG_CACHE: Optional[Dict[str, Any]] = None
 _CHAIN_CONFIG_CACHE_TIME: float = 0.0
-_CHAIN_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — governance changes are rare
+_CHAIN_CONFIG_CACHE_TTL: float = PARAMS_REFRESH_SECONDS
 
 
 def _build_chain_config() -> dict:
-    """Pure helper: build chain governance params (24h server-side memoization)."""
+    """Pure helper: build chain governance params."""
     global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
 
     now = time.monotonic()
@@ -4044,6 +4044,8 @@ def _build_chain_config() -> dict:
         "subscription_period": p["subscription_period"],
         "subscription_reserve_bps": p["subscription_reserve_bps"],
         "mint_interval": p["mint_interval"],
+        "mint_floor_split": p["mint_floor_split"],
+        "mint_dynamic_split": p["mint_dynamic_split"],
         "block_time": _get_block_time_seconds(),
         "tiers": p["tiers"],
         "award_configs": p["award_configs"],
@@ -4057,7 +4059,8 @@ def _build_chain_config() -> dict:
 def get_chain_config():
     """Chain governance params (tiers, limits, subscription_period, etc.).
 
-    These change only via governance proposals. Cached 24h server-side.
+    Cached for the same 60-second window as the underlying parameter cache, so
+    governance and upgrade-handler changes become visible together.
     No difficulty/height — use get_network_stats or get_parameters for those.
     """
     rid = next_request_id()

@@ -517,6 +517,7 @@ def _build_pool():
     f_awards.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_awards.type_name = ".mirage.core.v1.AwardConfig"
     add_f(msg4, "subscription_reserve_bps", 54, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "mint_floor_split", 55, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
 
     # MsgUpdateParams (authority + Params + update_mask)
     #

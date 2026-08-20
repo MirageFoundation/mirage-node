@@ -1,12 +1,12 @@
 {
-    "title": "Release v1.37.0 (installer setup questions)",
-    "summary": "NOT SUBMITTED ON THE LIVE CHAIN FOR v1.37.0. This release asks the operator for a validator name, a domain and an uploads policy during install, and stops a domain from overwriting a chosen name. Every change is in the host installer and in startup config rendering: no consensus state, no transaction execution, no query semantics. A v1.37.0 upgrade handler is registered, as earlier minor releases did, so scripts/test_upgrade.sh can rehearse the real halt-and-swap path against this plan name locally. Because nodes on v1.36.8 and v1.37.0 compute identical results from identical blocks, no halt is proposed on the live chain.",
+    "title": "Release v1.38.0 (mint floor: 20% equal / 10% work / 70% stake)",
+    "summary": "THIS UPGRADE HALTS THE CHAIN. Every validator must be running v1.38.0 when the plan height is reached. Mint distribution changes shape: today 25% of each interval is stake-weighted and 75% is weighted by relay credits multiplied by stake, which makes the work pool a second stake pool and leaves a small validator earning a rounding error for the same hosting work. From v1.38.0 each interval splits three ways: 20% paid equally to every bonded, non-jailed validator, 10% weighted by capped relay credits alone, and the remaining 70% weighted by stake. The upgrade handler writes mint_floor_split = 0.20 and mint_dynamic_split = 0.10; the new mint_floor_split param (field 55) does not exist before this binary, which is why this cannot be a param-change proposal. mint_quantity and mint_interval are unchanged. This is a consensus change: a node still on v1.37.0 computes a different allocation from the same block, so mixed binaries would fork on the first mint interval after the halt. Jailed and unbonded validators remain excluded.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.37.0",
+                "name": "v1.38.0",
                 "height": "T+50",
                 "info": ""
             }

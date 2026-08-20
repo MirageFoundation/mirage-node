@@ -2568,7 +2568,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 f"{Colors.BRIGHT_CYAN}+{format_mirage_delta(staked_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(
-                f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET} "
+                # "Spent" is a letter shorter than "Earned" and "Staked", so the
+                # extra space keeps all four amounts in one column.
+                f"{bullet}{Colors.DIM}Spent 24h:{Colors.RESET}  "
                 f"{Colors.BRIGHT_RED}-{format_mirage_delta(spent_24h)} MIRAGE{Colors.RESET}"
             )
             lines.append(

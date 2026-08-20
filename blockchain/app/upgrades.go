@@ -56,6 +56,18 @@ func validateV1340Params(params coretypes.Params) error {
 	return nil
 }
 
+// v1_11_0DefaultParams freezes the defaults that handler wrote at its own
+// historical height. Calling today's DefaultParams directly used to be harmless
+// only while its mint fields stayed unchanged; v1.38.0 adds the floor and moves
+// the dynamic share, and leaking those values into v1.11.0 would rewrite state
+// sixteen upgrades before the governed activation.
+func v1_11_0DefaultParams() coretypes.Params {
+	params := coretypes.DefaultParams()
+	params.MintFloorSplit = 0
+	params.MintDynamicSplit = 0.5
+	return params
+}
+
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
 	// Add more upgrade handlers as needed
@@ -1004,7 +1016,7 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// --- 2. Write fresh default params first so GetParams doesn't fail ---
 			// (The old bytes will fail unmarshal due to wire type change.)
-			defaults := coretypes.DefaultParams()
+			defaults := v1_11_0DefaultParams()
 			if err := app.CoreKeeper.SetParams(sdkCtx, defaults); err != nil {
 				return nil, err
 			}
@@ -2371,6 +2383,69 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.37.0 complete")
+			return toVM, nil
+		},
+	)
+
+	// v1.38.0: the mint changes shape. Until now 25% of every interval was
+	// stake-weighted and 75% was weighted by credits multiplied by stake, which
+	// made the "work" pool a second stake pool: a 5M-stake validator serving the
+	// same traffic as a 5B-stake one earned roughly a thousandth as much, so a
+	// small node was not worth running. From here the interval splits three ways:
+	// 20% paid equally to every bonded validator, 10% by relay credits alone, and
+	// the remaining 70% by stake.
+	//
+	// This one genuinely halts the chain. MintIfNeeded computes a different
+	// allocation from the same block, so a fleet on mixed binaries would disagree
+	// on every mint interval and fork — unlike v1.36.0 and v1.37.0, which were
+	// registered only so a release could be scheduled.
+	//
+	// The handler writes the live numbers because the pool the floor pays from
+	// does not exist before this binary. A param-change proposal could not have
+	// done it: stored Params carry no field 55, and the old code has no floor to
+	// point it at.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.38.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.38.0 (mint floor split 20/10/70)...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.38.0: RunMigrations failed: %w", err)
+			}
+
+			// Stored Params predate field 55, so the floor decodes as 0 and the
+			// dynamic split is whatever governance last set (0.75 on the live
+			// chain). Both are overwritten here so every node starts the first
+			// post-upgrade interval from identical params.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			previousFloor := params.MintFloorSplit
+			previousDynamic := params.MintDynamicSplit
+			params.MintFloorSplit = 0.20
+			params.MintDynamicSplit = 0.10
+			if err := params.Validate(); err != nil {
+				return nil, fmt.Errorf("v1.38.0: params failed validation after setting mint splits: %w", err)
+			}
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				return nil, fmt.Errorf("v1.38.0: SetParams failed: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.38.0: set mint splits",
+				"mint_floor_split", params.MintFloorSplit,
+				"previous_floor_split", previousFloor,
+				"mint_dynamic_split", params.MintDynamicSplit,
+				"previous_dynamic_split", previousDynamic,
+			)
+
+			// A wrong split here mints the wrong amount on every interval from the
+			// next one onward, so confirm the write landed rather than trusting it.
+			stored := app.CoreKeeper.GetParams(sdkCtx)
+			if stored.MintFloorSplit != 0.20 || stored.MintDynamicSplit != 0.10 {
+				return nil, fmt.Errorf("v1.38.0: stored mint splits are floor=%v dynamic=%v, want 0.2/0.1",
+					stored.MintFloorSplit, stored.MintDynamicSplit)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.38.0 complete")
 			return toVM, nil
 		},
 	)

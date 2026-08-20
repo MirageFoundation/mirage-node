@@ -162,6 +162,8 @@ func TestParamsValidateRejectsNonFiniteFloats(t *testing.T) {
 	}{
 		{"mint_dynamic_split_nan", func(p *Params) { p.MintDynamicSplit = math.NaN() }},
 		{"mint_dynamic_split_inf", func(p *Params) { p.MintDynamicSplit = math.Inf(1) }},
+		{"mint_floor_split_nan", func(p *Params) { p.MintFloorSplit = math.NaN() }},
+		{"mint_floor_split_inf", func(p *Params) { p.MintFloorSplit = math.Inf(1) }},
 		// subscription_reserve_percent is absent on purpose: v1.34.0 retired it in
 		// favour of subscription_reserve_bps, nothing reads it, and constraining it
 		// would break the from-genesis replay of the handlers that set it.
@@ -179,6 +181,36 @@ func TestParamsValidateRejectsNonFiniteFloats(t *testing.T) {
 			tt.mutate(&p)
 			require.Error(t, p.Validate())
 		})
+	}
+}
+
+// TestMintSplitsCannotExceedWholeMint guards the invariant the keeper relies on:
+// the stake pool is whatever is left after the floor and work pools, so a sum
+// above 1 would mint more than mint_quantity. Governance can move either field
+// on its own, so the combined bound has to live in Validate.
+func TestMintSplitsCannotExceedWholeMint(t *testing.T) {
+	p := DefaultParams()
+	require.NoError(t, p.Validate())
+
+	p.MintFloorSplit = 0.20
+	p.MintDynamicSplit = 0.80
+	require.NoError(t, p.Validate(), "summing to exactly 1 leaves an empty stake pool, which is legal")
+
+	p.MintDynamicSplit = 0.81
+	err := p.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mint_floor_split + mint_dynamic_split")
+
+	// Zero floor is what every pre-v1.38.0 stored Params blob decodes to, so it
+	// has to stay valid alongside the live 0.75 dynamic split.
+	p.MintFloorSplit = 0
+	p.MintDynamicSplit = 0.75
+	require.NoError(t, p.Validate())
+
+	for _, bad := range []float64{-0.01, 1.01} {
+		p = DefaultParams()
+		p.MintFloorSplit = bad
+		require.Error(t, p.Validate(), "mint_floor_split %v must be rejected", bad)
 	}
 }
 
@@ -224,6 +256,8 @@ func TestGenesisParamsStillValidate(t *testing.T) {
 
 	require.NoError(t, p.Validate(),
 		"a real genesis must validate on this binary or every from-genesis node panics in InitGenesis")
+	require.Zero(t, p.MintFloorSplit,
+		"a pre-v1.38.0 params blob has no field 55 and must decode with the floor disabled")
 }
 
 // TestGenesisCarriesSubscriptionReserveBps is the M-1(c) regression test.

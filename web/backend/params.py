@@ -53,6 +53,7 @@ _REQUIRED_INT_PARAMS = [
 
 _REQUIRED_FLOAT_PARAMS = [
     "mint_dynamic_split",
+    "mint_floor_split",
     "pow_factor",
 ]
 

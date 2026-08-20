@@ -38,6 +38,18 @@ func TestValidateV1340Params(t *testing.T) {
 	require.ErrorContains(t, validateV1340Params(narrow), "below the 20-block floor")
 }
 
+func TestV1110DefaultsDoNotActivateV1380MintSplit(t *testing.T) {
+	historical := v1_11_0DefaultParams()
+	require.Zero(t, historical.MintFloorSplit,
+		"the floor must not enter state before the v1.38.0 handler")
+	require.Equal(t, 0.5, historical.MintDynamicSplit,
+		"the v1.11.0 handler must preserve its pre-v1.38.0 dynamic default")
+
+	current := coretypes.DefaultParams()
+	require.Equal(t, 0.20, current.MintFloorSplit)
+	require.Equal(t, 0.10, current.MintDynamicSplit)
+}
+
 // TestStoreLoaderWithExistingStore tests that using StoreUpgrades.Added for
 // a store that already exists causes a panic due to IAVL version conflicts.
 // This is the bug that was encountered during the v1.10.4-restore-sdk upgrade.
@@ -146,6 +158,7 @@ var expectedUpgradeHandlers = []string{
 	"v1.35.0",
 	"v1.36.0",
 	"v1.37.0",
+	"v1.38.0",
 }
 
 // TestUpgradeHandlersRegistered verifies every expected handler is registered
@@ -155,7 +168,7 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	app := New(log.NewNopLogger(), db, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
 	require.NoError(t, app.Load(true))
 
-	require.Len(t, expectedUpgradeHandlers, 48, "update the expected handler list and this count together")
+	require.Len(t, expectedUpgradeHandlers, 49, "update the expected handler list and this count together")
 
 	seen := make(map[string]struct{}, len(expectedUpgradeHandlers))
 	for _, name := range expectedUpgradeHandlers {

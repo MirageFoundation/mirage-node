@@ -336,7 +336,7 @@ def cleanup_node_temp_files(config_dir: Path, logger=None) -> int:
         logger = logging.getLogger(__name__)
 
     data_dir = config_dir.parent  # ~/.mirage
-    node_config_dir = data_dir / "main" / "config"
+    node_config_dir = data_dir / "node" / "config"
 
     if not node_config_dir.exists():
         return 0
