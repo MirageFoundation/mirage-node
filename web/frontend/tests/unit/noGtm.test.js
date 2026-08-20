@@ -26,6 +26,15 @@ describe('no GTM / third-party executables', () => {
         expect(worker).toContain('WebAssembly.instantiate');
     });
 
+    it('pow worker is loaded from a per-build URL', () => {
+        // /pow/ is not fingerprinted, so a bare URL is undeliverable to any
+        // browser holding a cached copy.
+        const handler = fs.readFileSync(path.join(root, 'src/utils/TransactionHandler.js'), 'utf8');
+        expect(handler).toContain('__MIRAGE_APP_VERSION__');
+        expect(handler).toContain('new Worker(POW_WORKER_URL)');
+        expect(handler).not.toContain('new Worker("/pow/worker.js")');
+    });
+
     it('FAQ markdown embeds via Vite define', () => {
         const faq = fs.readFileSync(path.join(root, 'src/content/faqMarkdown.js'), 'utf8');
         expect(faq).toContain('__MIRAGE_FAQ_MARKDOWN__');

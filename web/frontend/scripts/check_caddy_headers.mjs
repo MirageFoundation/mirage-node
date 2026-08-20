@@ -19,7 +19,13 @@ import { dirname, resolve } from 'node:path';
 const here = dirname(fileURLToPath(import.meta.url));
 const CADDYFILE = resolve(here, '../../../deploy/templates/caddy/Caddyfile');
 
+// Every asset directory needs an explicit cache policy. A path the origin says
+// nothing about is not uncached: the CDN substitutes its own default, which for
+// /pow/* was 30 days, long enough that a fix to the PoW engine cannot be
+// delivered at all. /static/* is fingerprinted and immutable by design; /pow/*
+// is not fingerprinted and must revalidate.
 const REQUIRED = [
+    ['/pow/* cache policy', /@pow path \/pow\/\*[\s\S]{0,200}?header @pow Cache-Control "no-cache"/],
     ['X-Frame-Options', /X-Frame-Options\s+"DENY"/],
     ['X-Content-Type-Options', /X-Content-Type-Options\s+"nosniff"/],
     ['Referrer-Policy', /Referrer-Policy\s+"strict-origin-when-cross-origin"/],

@@ -12,6 +12,14 @@ import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
 
+// /pow/ is not fingerprinted the way /static/ is, so a bare worker URL is served
+// from a browser's own cache for as long as the response allowed -- v1.38.1
+// shipped a worker change no returning visitor would have received. The build
+// version makes the URL change with every release.
+const POW_WORKER_URL = `/pow/worker.js?v=${encodeURIComponent(
+    typeof __MIRAGE_APP_VERSION__ === 'string' && __MIRAGE_APP_VERSION__ ? __MIRAGE_APP_VERSION__ : 'dev'
+)}`;
+
 const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "empty username": "username_required",
     "empty txhash": "tx_hash_required",
@@ -5205,7 +5213,7 @@ class TransactionHandler {
                 return;
             }
             // Perform PoW as usual
-            const worker = new Worker("/pow/worker.js");
+            const worker = new Worker(POW_WORKER_URL);
             this._activePowWorker = worker;
 
             // Set the flag before starting PoW

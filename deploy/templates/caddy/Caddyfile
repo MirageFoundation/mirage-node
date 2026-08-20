@@ -204,6 +204,15 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		@immutable path /static/*
 		header @immutable Cache-Control "public, max-age=31536000, immutable"
 
+		# The PoW engine (argon2 wasm + worker). This was the one asset directory
+		# with no policy here, and the CDN filled the gap with a 30-day default,
+		# so the worker fix in v1.38.1 would not have reached a returning visitor
+		# for a month. It is not fingerprinted the way /static/* is, so it has to
+		# revalidate rather than be declared immutable. The bodies are ~78KB in
+		# total and are only fetched when a transaction is signed.
+		@pow path /pow/*
+		header @pow Cache-Control "no-cache"
+
 		@html path /
 		header @html Cache-Control "no-cache"
 

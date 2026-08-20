@@ -4347,9 +4347,7 @@ def _build_bootstrap_view(
     if feed_name not in ("home", "following"):
         return None
 
-    guest_key = (
-        _guest_feed_cache_key(feed_name, sort_mode, 1, limit, allowed_tags) if _is_guest(addr) else None
-    )
+    guest_key = _guest_feed_cache_key(feed_name, sort_mode, 1, limit, allowed_tags) if _is_guest(addr) else None
     if guest_key is not None:
         cached = _guest_feed_cache_get(guest_key)
         if cached is not None:
@@ -5709,9 +5707,7 @@ def get_posts():
         cached = _guest_feed_cache_get(guest_key)
         if cached is not None:
             # Impressions are still counted per request; only the feed is shared.
-            _track_image_impressions(
-                cached.get("posts") or [], rid, context=f"get_posts.feed.{feed}.guest_cached"
-            )
+            _track_image_impressions(cached.get("posts") or [], rid, context=f"get_posts.feed.{feed}.guest_cached")
             log_event(rid, "get_posts.guest_cache.hit", key=guest_key)
             return jsonify(cached)
 
