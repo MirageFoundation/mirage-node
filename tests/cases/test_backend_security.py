@@ -1811,13 +1811,16 @@ def test_fleet_url_validation(backend):
 
 
 def _check_active_node_sites():
-    """Fleet membership is the bonded validator set, filtered to https sites.
+    """Listing a node and trusting it with a credential are separate questions.
 
-    The destination list decides who is handed the admin's signed proof, so what
-    matters here is what a moniker can talk this node into: an `http://` name, a
-    bare IP, or a host that resolves inside the network must be dropped rather
-    than contacted, however the validator spells it. Called with the caller's
-    stubbed resolver still installed, so `evil.example` resolves privately here.
+    /network lists every reachable node, http included: a node reached by IP can
+    hold no certificate, so requiring https there hid real nodes and had the page
+    reporting two servers while four ran. The fan-out list is the one that decides
+    who is handed the admin's signed proof, and it stays narrow -- https, and a
+    name rather than a bare address, since no certificate proves an IP. A host
+    that resolves inside the network is dropped from both. Called with the
+    caller's stubbed resolver still installed, so `evil.example` resolves
+    privately here.
     """
     try:
         import fleet
@@ -1827,29 +1830,55 @@ def _check_active_node_sites():
 
     original_lookup = fleet.get_active_validators
 
-    def _sites(monikers):
+    def _stub(monikers):
         fleet.get_active_validators = lambda: [
             {"moniker": m, "operator_address": f"miragevaloper{i}"} for i, m in enumerate(monikers)
         ]
         fleet._sites_cache = []
         fleet._sites_cached_at = 0.0
+
+    def _sites(monikers):
+        _stub(monikers)
         return fleet.active_node_sites()
+
+    def _fanout(monikers):
+        _stub(monikers)
+        return fleet.authenticated_node_sites()
 
     try:
         cases = {
-            # (monikers) -> sites
+            # (monikers) -> displayed sites
             ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
-            ("http://mirage.talk",): [],
-            ("93.184.216.34",): [],
+            # Shown now. A validator serving plain http is still a real node.
+            ("http://mirage.talk",): ["http://mirage.talk"],
+            # A global IP is a place a visitor can go; schemeless still means https.
+            ("93.184.216.34",): ["https://93.184.216.34"],
+            ("http://93.184.216.34",): ["http://93.184.216.34"],
+            # Resolves inside the network: dropped, listed or not.
             ("evil.example",): [],
+            # Names nowhere reachable, so there is no link to offer.
             ("frankfurt-node", "", "no-dot"): [],
             ("mirage.talk", "MIRAGE.TALK", "https://mirage.talk"): ["https://mirage.talk"],
         }
         wrong = {monikers: got for monikers, want in cases.items() if (got := _sites(monikers)) != want}
         if not wrong:
-            _pass("fleet.sites_are_https_active_nodes", checked=len(cases))
+            _pass("fleet.sites_include_reachable_http_nodes", checked=len(cases))
         else:
-            _fail("fleet.sites_are_https_active_nodes", f"mismatches: {wrong}")
+            _fail("fleet.sites_include_reachable_http_nodes", f"mismatches: {wrong}")
+
+        # The credential boundary must not have moved with the display list.
+        fanout_cases = {
+            ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
+            ("http://mirage.talk",): [],
+            ("93.184.216.34",): [],
+            ("http://93.184.216.34",): [],
+            ("evil.example",): [],
+        }
+        wrong = {m: got for m, want in fanout_cases.items() if (got := _fanout(m)) != want}
+        if not wrong:
+            _pass("fleet.fanout_stays_authenticated_only", checked=len(fanout_cases))
+        else:
+            _fail("fleet.fanout_stays_authenticated_only", f"mismatches: {wrong}")
 
         # The list is cached, so a page view cannot turn into a fan of lookups.
         calls = {"n": 0}

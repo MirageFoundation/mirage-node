@@ -180,15 +180,17 @@ def test_backend_hardening(backend: str):
         "print('OK' if ok else ('BAD', _clamp_page(10**9), MAX_FEED_PAGE))\n",
     )
 
-    # ── H-2: the fan-out only ever addresses an https active node ────────
+    # ── H-2: the fan-out only ever addresses an authenticated active node ─
     # The operator-configured roster this replaced could not answer "who is in
     # the fleet" on a chain anyone can join, so membership is the bonded
-    # validator set again. What still has to hold is the destination filter: a
-    # moniker only becomes a destination as a named https host, so an http name
-    # or a bare IP is dropped rather than handed the admin's proof. DNS is
-    # stubbed so the probe asserts the policy, not the container's resolver.
+    # validator set again. The destination filter still has to hold, and it is
+    # now deliberately narrower than what /network lists: a moniker becomes a
+    # destination only as a named https host, so an http name or a bare IP is
+    # displayed but never handed the admin's proof. Asserting the fan-out is a
+    # strict subset is the point -- widening the page must not widen the
+    # credential. DNS is stubbed so the probe asserts policy, not the resolver.
     _probe(
-        "backend_hardening.fanout_targets_https_active_nodes_only",
+        "backend_hardening.fanout_targets_authenticated_active_nodes_only",
         "import socket, fleet, fleet_url\n"
         "fleet_url.socket.getaddrinfo = lambda h, p, *a, **k: "
         "[(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', p))]\n"
@@ -199,8 +201,11 @@ def test_backend_hardening(backend: str):
         "fleet._sites_cached_at = 0.0\n"
         "sites = fleet.active_node_sites()\n"
         "import stats\n"
-        "same = stats.fleet_fanout_targets() == sites\n"
-        "print('OK' if sites == ['https://a.example'] and same else ('BAD', sites, same))\n",
+        "targets = stats.fleet_fanout_targets()\n"
+        "shown = sites == ['http://a.example', 'https://93.184.216.34', 'https://a.example']\n"
+        "narrow = targets == ['https://a.example']\n"
+        "subset = set(targets) <= set(sites)\n"
+        "print('OK' if shown and narrow and subset else ('BAD', sites, targets))\n",
     )
     _probe(
         "backend_hardening.peer_stats_validated",

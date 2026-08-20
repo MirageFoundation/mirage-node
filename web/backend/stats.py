@@ -27,7 +27,7 @@ from flask import g, has_request_context, request
 
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
-from fleet import active_node_sites
+from fleet import authenticated_node_sites
 
 logger = logging.getLogger(__name__)
 
@@ -1073,10 +1073,16 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
 def fleet_fanout_targets() -> List[str]:
     """Destinations the admin stats fan-out may forward the admin's proof to.
 
-    Every active node, straight from the chain — see ``fleet.active_node_sites``.
-    An operator-maintained roster cannot answer "who is in the fleet" on a chain
-    anyone can join: it goes stale the moment a node is added or dies, which is
-    how this dashboard ended up reporting one server while the fleet ran four.
+    Every active node that can be authenticated, straight from the chain — see
+    ``fleet.authenticated_node_sites``. An operator-maintained roster cannot
+    answer "who is in the fleet" on a chain anyone can join: it goes stale the
+    moment a node is added or dies, which is how this dashboard ended up
+    reporting one server while the fleet ran four.
+
+    This is deliberately narrower than the list /network displays. A node
+    reachable only over http is a real node and is shown there, but it cannot
+    receive the proof: nothing about a plain-http destination proves it is the
+    host it claims to be, and there is no certificate to pin.
 
     The destination list is still a credential boundary, because the admin's
     proof is replayable across nodes for its five-minute lifetime. What bounds it
@@ -1089,7 +1095,7 @@ def fleet_fanout_targets() -> List[str]:
     host it controls can harvest a live proof from any admin who opens the
     dashboard.
     """
-    return active_node_sites()
+    return authenticated_node_sites()
 
 
 def _coerce_count(value: Any, field: str) -> int:

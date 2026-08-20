@@ -146,6 +146,7 @@ def test_install(backend: str) -> None:
     _test_weekly_restart_skips_catching_up()
     _test_images_pruned_before_every_pull()
     _test_prune_keeps_digest_pinned_images()
+    _test_moniker_update_pays_and_verifies()
     _test_stake_floor_and_lock()
     _test_economics_single_source()
     _test_mint_floor_backend_required()
@@ -2529,6 +2530,79 @@ def _test_images_pruned_before_every_pull() -> None:
         )
         return
     _pass("install.prune.before_every_pull")
+
+
+def _test_moniker_update_pays_and_verifies() -> None:
+    """A moniker that failed to change must not look like one that was already right.
+
+    The moniker is what puts a node on /network, because the site list is built
+    from the bonded validator set and a label like `mirage-node-3` names nowhere
+    a visitor can go. The updater sent its transaction with no fee, so every run
+    was rejected for insufficient fee, and it ended in `|| true` with output
+    redirected to /dev/null, so every rejection was discarded and the deploy
+    reported success. Two nodes kept their install-time labels and the page
+    showed two servers while four were running.
+
+    So: a fee, a fatal non-zero broadcast code, and confirmation from the chain.
+    """
+    path = Path(REPO_ROOT, "deploy", "update_moniker.sh")
+    if not path.is_file():
+        _fail("install.moniker.script_present", "deploy/update_moniker.sh is missing")
+        return
+    script = path.read_text(encoding="utf-8")
+    code = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
+
+    if "--gas-prices" not in code:
+        _fail(
+            "install.moniker.pays_fee",
+            "moniker update sends no fee, so the chain rejects it for insufficient fee",
+        )
+        return
+    if "minimum-gas-prices" not in code:
+        _fail(
+            "install.moniker.fee_from_node_config",
+            "gas price must come from the node's own app.toml, not a hardcoded guess",
+        )
+        return
+    # Scoped to the broadcast: elsewhere a suppressed error can be deliberate,
+    # but the transaction's own outcome is the thing that went missing.
+    idx_tx = code.find("tx staking edit-validator")
+    broadcast = code[idx_tx : code.find("\n\n", idx_tx)] if idx_tx >= 0 else ""
+    if "|| true" in broadcast or "/dev/null" in broadcast:
+        _fail(
+            "install.moniker.does_not_swallow",
+            "moniker update discards its own failure, which is how the stale monikers went unnoticed",
+        )
+        return
+    if '.code // empty' not in code or 'CODE" != "0"' not in code:
+        _fail(
+            "install.moniker.checks_broadcast_code",
+            "a rejected broadcast must be fatal, not ignored",
+        )
+        return
+    # Accepted into the mempool is not committed, so the only real proof is the
+    # chain reporting the new value.
+    idx_broadcast = code.find("tx staking edit-validator")
+    idx_confirm = code.rfind("current_moniker")
+    if idx_broadcast < 0 or idx_confirm < idx_broadcast:
+        _fail(
+            "install.moniker.confirms_on_chain",
+            "moniker update never re-reads the chain, so a dropped tx passes as success",
+        )
+        return
+
+    # deploy.sh must actually use it, and must not keep its own inline copy.
+    deploy = Path(REPO_ROOT, "deploy", "deploy.sh").read_text(encoding="utf-8")
+    if "deploy/update_moniker.sh" not in deploy:
+        _fail("install.moniker.deploy_uses_script", "deploy.sh does not run update_moniker.sh")
+        return
+    if "MONIKER_UPDATE_SCRIPT" in deploy:
+        _fail(
+            "install.moniker.no_inline_copy",
+            "deploy.sh still carries an inline moniker updater that can drift from the script",
+        )
+        return
+    _pass("install.moniker.pays_and_verifies")
 
 
 def _test_prune_keeps_digest_pinned_images() -> None:

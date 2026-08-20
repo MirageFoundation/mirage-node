@@ -4533,8 +4533,15 @@ def get_peers():
     under two addresses, while a node that is genuinely part of the network but
     not currently gossiping with this one never appeared at all.
 
-    Sites with no https moniker are omitted rather than linked over http or by
-    raw IP — see `fleet.active_node_sites`.
+    Every reachable node, http included. Requiring https here conflated being
+    listed with being trusted to receive a credential: a node reached by IP can
+    hold no certificate, so it served plain http and was hidden, and this page
+    reported two servers while four were running. The stats fan-out still
+    forwards the admin proof only to destinations it can authenticate — see
+    `fleet.authenticated_node_sites`.
+
+    A validator whose moniker names nowhere reachable is still omitted, because
+    there is no address to send a visitor to.
     """
     try:
         return jsonify({"peers": [{"ip": "", "moniker": url} for url in active_node_sites()]})

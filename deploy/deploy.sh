@@ -896,12 +896,11 @@ fi
 if [ "$MODE" = "update" ]; then
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     echo "==> Checking if validator moniker needs update..."
-    MONIKER_UPDATE_SCRIPT=$'# Ensure strict mode in container\nset -euo pipefail\ncd /opt/mirage\nVALOPER=$(/opt/mirage/blockchain/bin/miraged keys show validator --home /root/.mirage/node --keyring-backend test --bech val -a 2>/dev/null || echo \"\")\nif [ -z \"$VALOPER\" ]; then\n  echo \"Validator not found, skipping moniker update\"\n  exit 0\nfi\nCURRENT=$(/opt/mirage/blockchain/bin/miraged q staking validator \"$VALOPER\" --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null | jq -r \".validator.description.moniker // \\\"\\\"\" || echo \"\")\nif [ \"$CURRENT\" = \"${NEW_MONIKER:-}\" ]; then\n  echo \"Validator moniker already set to \\\"${NEW_MONIKER:-}\\\"\"\n  exit 0\nfi\necho \"Updating validator moniker from \\\"$CURRENT\\\" to \\\"${NEW_MONIKER:-}\\\"\"\n/opt/mirage/blockchain/bin/miraged tx staking edit-validator --new-moniker=\"${NEW_MONIKER:-}\" \\\n  --from validator --home /root/.mirage/node --keyring-backend test \\\n  --chain-id mirage-1 --node tcp://127.0.0.1:26657 --gas auto --gas-adjustment 1.5 -y >/dev/null 2>&1 || true\n'
     if [ "$LOCAL_MODE" -eq 1 ]; then
       # For local mode, run docker exec directly (run_ssh would wrap it in another docker exec)
-      echo "$MONIKER_UPDATE_SCRIPT" | docker exec -e NEW_MONIKER="$MONIKER_VALUE" -i mirage bash -seuo pipefail
+      docker exec -e NEW_MONIKER="$MONIKER_VALUE" -i mirage bash /opt/mirage/deploy/update_moniker.sh
     else
-      echo "$MONIKER_UPDATE_SCRIPT" | run_ssh "docker exec -e NEW_MONIKER=\"$MONIKER_VALUE\" -i mirage bash -seuo pipefail"
+      run_ssh "docker exec -e NEW_MONIKER=\"$MONIKER_VALUE\" -i mirage bash /opt/mirage/deploy/update_moniker.sh"
     fi
   fi
 fi
