@@ -126,18 +126,9 @@ def test_stats_pure(backend):
         _fail("stats.pure", f"backend modules not importable: {e}")
         return
 
-    # Moniker -> URL normalization for server discovery.
-    cases = {
-        "mirage.vote": "https://mirage.vote",
-        "https://mirage.talk": "https://mirage.talk",
-        "192.0.2.1": None,  # raw IP is never a stats endpoint
-        "no-dot": None,
-    }
-    bad = {m: st._normalize_moniker_url(m) for m, exp in cases.items() if st._normalize_moniker_url(m) != exp}
-    if not bad:
-        _pass("stats.moniker_normalization")
-    else:
-        _fail("stats.moniker_normalization", f"mismatches: {bad}")
+    # Moniker -> URL normalization moved to fleet_url with the switch to chain
+    # discovery, and is asserted there by fleet_url.accepts_public_endpoints /
+    # fleet_url.rejects_unsafe_destinations in the security suite.
 
     # Event classification: engagement vs visit vs ignored.
     klass = {

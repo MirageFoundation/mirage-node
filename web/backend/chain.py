@@ -391,6 +391,43 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
     return out
 
 
+# Cosmos staking BondStatus. Only a bonded validator is in the active set, and
+# jailing removes a validator from that set, so bonded is also the liveness test:
+# a node that is gone stops signing, gets jailed for downtime and drops out on
+# its own. Nothing has to be de-listed by hand.
+BOND_STATUS_BONDED = 3
+
+
+def get_active_validators() -> list[Dict[str, str]]:
+    """Every bonded validator from indexer DB chain_stats.
+
+    This is the chain's own answer to "which nodes are active right now". It is
+    not operator configuration and no one can add themselves to it without
+    holding a bonded validator's stake.
+    """
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'validators'")
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            raise RuntimeError("validators missing in indexer DB")
+        if not isinstance(row[0], list):
+            raise RuntimeError("validators invalid format in indexer DB")
+        validators = []
+        for v in row[0]:
+            if not isinstance(v, dict):
+                raise RuntimeError("validators entry invalid")
+            if int(v.get("status") or 0) != BOND_STATUS_BONDED:
+                continue
+            validators.append(
+                {
+                    "moniker": str(v.get("moniker", "") or "").strip(),
+                    "operator_address": str(v.get("operator_address", "") or "").strip(),
+                }
+            )
+        return validators
+
+
 def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
     """Get connected peers from indexer DB chain_stats."""
     with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
@@ -426,5 +463,6 @@ __all__ = [
     "is_node_catching_up",
     "classify_reject",
     "get_connected_peers",
+    "get_active_validators",
     "get_indexer_health",
 ]

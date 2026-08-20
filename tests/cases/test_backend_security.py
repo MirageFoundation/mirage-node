@@ -1804,8 +1804,73 @@ def test_fleet_url_validation(backend):
             _pass("fleet_url.request_pinned_to_validated_ip")
         else:
             _fail("fleet_url.request_pinned_to_validated_ip", f"sent={sent}")
+
+        _check_active_node_sites()
     finally:
         fleet_url.socket.getaddrinfo = original
+
+
+def _check_active_node_sites():
+    """Fleet membership is the bonded validator set, filtered to https sites.
+
+    The destination list decides who is handed the admin's signed proof, so what
+    matters here is what a moniker can talk this node into: an `http://` name, a
+    bare IP, or a host that resolves inside the network must be dropped rather
+    than contacted, however the validator spells it. Called with the caller's
+    stubbed resolver still installed, so `evil.example` resolves privately here.
+    """
+    try:
+        import fleet
+    except Exception as e:
+        _fail("fleet.importable", f"fleet not importable: {e}")
+        return
+
+    original_lookup = fleet.get_active_validators
+
+    def _sites(monikers):
+        fleet.get_active_validators = lambda: [
+            {"moniker": m, "operator_address": f"miragevaloper{i}"} for i, m in enumerate(monikers)
+        ]
+        fleet._sites_cache = []
+        fleet._sites_cached_at = 0.0
+        return fleet.active_node_sites()
+
+    try:
+        cases = {
+            # (monikers) -> sites
+            ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
+            ("http://mirage.talk",): [],
+            ("93.184.216.34",): [],
+            ("evil.example",): [],
+            ("frankfurt-node", "", "no-dot"): [],
+            ("mirage.talk", "MIRAGE.TALK", "https://mirage.talk"): ["https://mirage.talk"],
+        }
+        wrong = {monikers: got for monikers, want in cases.items() if (got := _sites(monikers)) != want}
+        if not wrong:
+            _pass("fleet.sites_are_https_active_nodes", checked=len(cases))
+        else:
+            _fail("fleet.sites_are_https_active_nodes", f"mismatches: {wrong}")
+
+        # The list is cached, so a page view cannot turn into a fan of lookups.
+        calls = {"n": 0}
+
+        def _counting():
+            calls["n"] += 1
+            return [{"moniker": "mirage.vote", "operator_address": "v"}]
+
+        fleet.get_active_validators = _counting
+        fleet._sites_cache = []
+        fleet._sites_cached_at = 0.0
+        fleet.active_node_sites()
+        fleet.active_node_sites()
+        if calls["n"] == 1:
+            _pass("fleet.sites_cached")
+        else:
+            _fail("fleet.sites_cached", f"{calls['n']} chain reads for two calls, expected 1")
+    finally:
+        fleet.get_active_validators = original_lookup
+        fleet._sites_cache = []
+        fleet._sites_cached_at = 0.0
 
 
 def test_analytics_identity_trust(backend):

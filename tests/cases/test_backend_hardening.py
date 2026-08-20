@@ -180,21 +180,27 @@ def test_backend_hardening(backend: str):
         "print('OK' if ok else ('BAD', _clamp_page(10**9), MAX_FEED_PAGE))\n",
     )
 
-    # ── H-2: the fan-out roster is operator-configured and https-only ────
+    # ── H-2: the fan-out only ever addresses an https active node ────────
+    # The operator-configured roster this replaced could not answer "who is in
+    # the fleet" on a chain anyone can join, so membership is the bonded
+    # validator set again. What still has to hold is the destination filter: a
+    # moniker only becomes a destination as a named https host, so an http name
+    # or a bare IP is dropped rather than handed the admin's proof. DNS is
+    # stubbed so the probe asserts the policy, not the container's resolver.
     _probe(
-        "backend_hardening.roster_rejects_insecure",
-        "import os, settings\n"
-        "accepted = []\n"
-        "for v in ['http://a.example', 'https://1.2.3.4', 'not-a-url', 'https://', 'ftp://a.example']:\n"
-        "    os.environ['ROSTER_PROBE'] = v\n"
-        "    try:\n"
-        "        settings._parse_https_roster_env('ROSTER_PROBE')\n"
-        "        accepted.append(v)\n"
-        "    except Exception:\n"
-        "        pass\n"
-        "os.environ['ROSTER_PROBE'] = 'https://a.example,https://b.example'\n"
-        "good = settings._parse_https_roster_env('ROSTER_PROBE')\n"
-        "print('OK' if not accepted and len(good) == 2 else ('BAD', accepted, good))\n",
+        "backend_hardening.fanout_targets_https_active_nodes_only",
+        "import socket, fleet, fleet_url\n"
+        "fleet_url.socket.getaddrinfo = lambda h, p, *a, **k: "
+        "[(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', p))]\n"
+        "monikers = ['http://a.example', '93.184.216.34', 'not-a-host', '', 'a.example']\n"
+        "fleet.get_active_validators = lambda: "
+        "[{'moniker': m, 'operator_address': 'v'} for m in monikers]\n"
+        "fleet._sites_cache = []\n"
+        "fleet._sites_cached_at = 0.0\n"
+        "sites = fleet.active_node_sites()\n"
+        "import stats\n"
+        "same = stats.fleet_fanout_targets() == sites\n"
+        "print('OK' if sites == ['https://a.example'] and same else ('BAD', sites, same))\n",
     )
     _probe(
         "backend_hardening.peer_stats_validated",

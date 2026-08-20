@@ -69,6 +69,9 @@ TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
 
 MINT_DENOM = "umirage"
 
+# Cosmos staking BondStatus for a validator in the active set.
+BOND_STATUS_BONDED = 3
+
 # Sender on every payout the chain makes to a validator, whether that is the
 # periodic MintIfNeeded distribution or a governance mint. Derived from the
 # module name so it cannot drift out of step with the chain.
@@ -78,6 +81,11 @@ CORE_MODULE_ADDRESS = module_address("core")
 SUPPLY_SAMPLE_INTERVAL = 200
 HEAD_HEIGHT_SAMPLE_INTERVAL = 10
 PEERS_SAMPLE_INTERVAL = 20
+# The validator set is how the fleet knows which nodes are active: the backend
+# fans admin stats out to it and /network lists it. Sampled on the same cadence
+# as peers, because a set refreshed only at startup meant a node that joined was
+# invisible until the next restart and a node that died stayed listed forever.
+VALIDATORS_SAMPLE_INTERVAL = 20
 PARAMS_REFRESH_INTERVAL = 20
 BLOCK_PRUNE_INTERVAL = 1000
 RECENT_BLOCKS_KEEP = 1000
@@ -180,6 +188,10 @@ class Indexer:
 
         self.db = DatabaseManager(db_url)
         self.chain = ChainClient(jsonrpc_url)
+
+        # Last bonded set seen, so the periodic resync can log the moment a node
+        # joins or leaves the fleet instead of every time it looks.
+        self._bonded_monikers: frozenset[str] | None = None
 
         # Resolve validator address for node balance tracking
         self._validator_address = _resolve_validator_address()
@@ -786,6 +798,12 @@ class Indexer:
             except Exception as e:
                 logger.warning("Telemetry: connected peers refresh failed at height %s: %s", height, e)
 
+        if height % VALIDATORS_SAMPLE_INTERVAL == 0:
+            try:
+                self._sync_validator_info(now)
+            except Exception as e:
+                logger.warning("Telemetry: validator refresh failed at height %s: %s", height, e)
+
         if height % REDGIFS_BACKFILL_INTERVAL == 0:
             try:
                 self._backfill_redgifs_thumbnails()
@@ -1352,7 +1370,22 @@ class Indexer:
             )
         self.db.set_chain_stat("validators", validators, now)
         self.db.set_chain_stat("total_staked", sum(int(v["tokens"] or 0) for v in validators), now)
-        logger.info("Startup resync: %d validators stored", len(validators))
+
+        # The bonded set is the fleet: the backend fans admin stats out to it and
+        # /network lists it. A change is worth an INFO line even though the sync
+        # itself is routine, because "who is active" is otherwise invisible until
+        # someone notices the dashboard counting the wrong number of servers.
+        bonded = frozenset(v["moniker"] for v in validators if v["status"] == BOND_STATUS_BONDED)
+        if bonded != self._bonded_monikers:
+            logger.info(
+                "validators.bonded_changed count=%d joined=%s left=%s",
+                len(bonded),
+                sorted(bonded - (self._bonded_monikers or frozenset())),
+                sorted((self._bonded_monikers or frozenset()) - bonded),
+            )
+            self._bonded_monikers = bonded
+        else:
+            logger.debug("validators.synced total=%d bonded=%d", len(validators), len(bonded))
 
     def _snapshot_all_balances(self, now: int):
         """Snapshot balances for all profile owners + system wallets."""

@@ -27,8 +27,7 @@ from flask import g, has_request_context, request
 
 from client_ip import hash_visitor_id
 from db import connect_backend_db, connect_db
-from fleet_url import validate_fleet_endpoint
-from settings import STATS_FLEET_ROSTER
+from fleet import active_node_sites
 
 logger = logging.getLogger(__name__)
 
@@ -973,17 +972,6 @@ def compute_local_stats(start: int, end: int) -> Dict[str, Any]:
 # ── Server discovery ─────────────────────────────────────────────────────────
 
 
-def _normalize_moniker_url(moniker: str) -> Optional[str]:
-    """Return an http(s) base URL for a validator moniker, or None to skip it.
-
-    A moniker is attacker-influenced text, so a schemed one gets the same
-    hostname and address checks as a bare one. An IP is never a stats endpoint
-    and must never be used as an identity/merge key.
-    """
-    endpoint = validate_fleet_endpoint(moniker)
-    return endpoint.url if endpoint else None
-
-
 def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: int) -> Dict[str, Any]:
     """Combine per-server stats into one fleet view.
 
@@ -1085,26 +1073,23 @@ def aggregate_server_stats(ok_servers: List[Dict[str, Any]], start: int, end: in
 def fleet_fanout_targets() -> List[str]:
     """Destinations the admin stats fan-out may forward the admin's proof to.
 
-    This used to be ``discover_servers()``, which unioned validator monikers with
-    live P2P peer monikers and IPs. Every one of those is self-declared text from
-    an unauthenticated source: peering with a node and setting your moniker to a
-    domain you own put your host in this list, and the aggregate route then POSTed
-    the admin's live signature proof to it. The proof is deliberately replayable
-    across fleet nodes, so one harvested copy worked against siblings that had
-    never seen the nonce.
+    Every active node, straight from the chain — see ``fleet.active_node_sites``.
+    An operator-maintained roster cannot answer "who is in the fleet" on a chain
+    anyone can join: it goes stale the moment a node is added or dies, which is
+    how this dashboard ended up reporting one server while the fleet ran four.
 
-    The roster is operator configuration instead. Nothing an outsider can write
-    reaches this list, and https is enforced by the parser rather than preferred,
-    since the discovery path also synthesised ``http://`` endpoints.
+    The destination list is still a credential boundary, because the admin's
+    proof is replayable across nodes for its five-minute lifetime. What bounds it
+    now is the cost of appearing here: only a bonded validator is listed, and
+    bonding requires the validator's own stake, since third-party delegation is
+    disabled chain-wide. Compare the free-for-all this replaced, where peering
+    with a node and naming yourself after a domain you own was enough. Ending the
+    replay outright means binding each proof to one destination, which the client
+    must do at signing time; until then a validator that names itself after a
+    host it controls can harvest a live proof from any admin who opens the
+    dashboard.
     """
-    targets: List[str] = []
-    seen: set = set()
-    for url in STATS_FLEET_ROSTER:
-        key = url.rstrip("/")
-        if key not in seen:
-            seen.add(key)
-            targets.append(key)
-    return targets
+    return active_node_sites()
 
 
 def _coerce_count(value: Any, field: str) -> int:

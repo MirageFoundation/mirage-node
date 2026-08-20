@@ -72,8 +72,8 @@ from chain import (
     get_pow_base_bits as _get_pow_base_bits,
     get_pow_factor as _get_pow_factor,
     is_node_catching_up as _is_catching_up,
-    get_connected_peers as _get_connected_peers,
 )
+from fleet import active_node_sites
 
 
 def _now_epoch() -> int:
@@ -4522,54 +4522,22 @@ def bootstrap():
     return jsonify(resp)
 
 
-def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
-    """Get peer information including IP and on-chain validator moniker."""
-
-    def _normalize_moniker(moniker: str) -> str:
-        m = (moniker or "").strip()
-        if not m:
-            return ""
-
-        if m.startswith("http://") or m.startswith("https://"):
-            return m
-
-        if any(ch.isspace() for ch in m) or "/" in m:
-            return m
-
-        host = m
-        if ":" in host:
-            maybe_host, maybe_port = host.rsplit(":", 1)
-            if maybe_host and maybe_port.isdigit():
-                host = maybe_host
-
-        host = host.strip(".")
-        if host.count(".") < 1:
-            return m
-
-        labels = host.split(".")
-        for label in labels:
-            if not label or len(label) > 63:
-                return m
-            if label[0] == "-" or label[-1] == "-":
-                return m
-            if not re.fullmatch(r"[A-Za-z0-9-]+", label):
-                return m
-
-        return f"https://{m}"
-
-    return {
-        "ip": peer["ip"],
-        "moniker": _normalize_moniker(peer.get("moniker", "")),
-    }
-
-
 @public_bp.route("/api/get_peers")
 def get_peers():
-    """Return a list of currently connected peers with domain resolution."""
+    """Every active node's site, for the Sites list on /network.
+
+    The active set from the chain, not this node's P2P connections. Both were
+    called "peers", but only one of them answers the question the page is
+    actually asking: a node you can open in a browser. A P2P connection may be a
+    validator with no web presence, and the same fleet member could appear twice
+    under two addresses, while a node that is genuinely part of the network but
+    not currently gossiping with this one never appeared at all.
+
+    Sites with no https moniker are omitted rather than linked over http or by
+    raw IP — see `fleet.active_node_sites`.
+    """
     try:
-        peers_data = _get_connected_peers()
-        peers = [_get_peer_info(p) for p in peers_data]
-        return jsonify({"peers": peers})
+        return jsonify({"peers": [{"ip": "", "moniker": url} for url in active_node_sites()]})
     except Exception as e:
         return safe_error(e)
 
@@ -8377,15 +8345,21 @@ def admin_stats_aggregate():
         "start": start,
         "end": end,
     }
-    local_norm = local_label.rstrip("/")
+    # Match how the fleet list spells this node before excluding it, rather than
+    # comparing raw labels: discovery yields a validated lowercase https URL,
+    # while the local label is DOMAIN or a bare moniker. Any spelling difference
+    # would make the node HTTP self-call and count its own visitors twice.
+    local_endpoint = validate_fleet_endpoint(local_label)
+    local_norm = (local_endpoint.url if local_endpoint else local_label.rstrip("/")).lower()
     for base_url in _stats.fleet_fanout_targets():
-        if base_url.rstrip("/") == local_norm:
+        if base_url.rstrip("/").lower() == local_norm:
             continue
         entry: Dict[str, Any] = {"server": base_url}
-        # Revalidate at send time: the roster is resolved fresh here, and this
-        # request carries the admin's signed proof. IP literals are no longer
-        # accepted — a credential destination has to be a named https host so the
-        # certificate can actually be checked against something.
+        # Revalidate at send time: discovery is cached for a minute and this
+        # request carries the admin's signed proof, so the address it actually
+        # goes to is resolved here. IP literals are not accepted — a credential
+        # destination has to be a named https host so the certificate can be
+        # checked against something.
         endpoint = validate_fleet_endpoint(base_url)
         if endpoint is None or endpoint.url.split(":", 1)[0] != "https":
             entry["status"] = "rejected"

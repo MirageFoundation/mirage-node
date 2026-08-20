@@ -576,7 +576,7 @@ the corresponding check confirmed to fail. All 18 mutations were caught.
 | :-- | :-- | :-- |
 | **C-1** | Fixed | `topic_matches_pattern` in the new `web/backend/topic_glob.py` is a direct port of the chain's linear `topicMatchesPattern`, verified against the Go original across 6,047 differential cases. Wildcards are capped at 4 at the validator (`routes/core.py`), and `_blocked_topics_sql` drops over-cap patterns from the `LIKE` pre-filter rather than bounding them, since `_topic_is_blocked` remains authoritative and linear. |
 | **H-1** | Fixed | `_clamp_page` floors at 1 and caps at `MAX_FEED_PAGE = 200` at every entry point; the five uncapped pool computations now apply `min(…, MAX_CANDIDATE_POOL)` and the inbox path `min(…, MAX_INBOX_ROWS)`. |
-| **H-2** | Fixed (one part scoped out) | Fan-out destinations come from the operator-configured `STATS_FLEET_ROSTER`, which requires `https://` and a fully-qualified hostname — bare IPs are rejected, since they cannot present a name-matching certificate. P2P moniker discovery and the `http://` endpoint synthesis are deleted. Peer responses are strictly validated and normalised by `validate_peer_stats`. **Per-destination proofs are not implemented**: the proof format is shared with the client and scoping it per host is a protocol change. The roster removes the attacker's ability to choose a destination, which is the exploitable half. |
+| **H-2** | Fixed (one part scoped out) | Fan-out destinations come from the operator-configured `STATS_FLEET_ROSTER`, which requires `https://` and a fully-qualified hostname — bare IPs are rejected, since they cannot present a name-matching certificate. P2P moniker discovery and the `http://` endpoint synthesis are deleted. Peer responses are strictly validated and normalised by `validate_peer_stats`. **Per-destination proofs are not implemented**: the proof format is shared with the client and scoping it per host is a protocol change. The roster removes the attacker's ability to choose a destination, which is the exploitable half. **Superseded in v1.38.7** — see the note below. |
 | **H-3** | Fixed | Daily and flash quest completion now run inside `_locked_transaction("quest_assignment:<owner>")`, sharing a key with quest assignment so the two serialise against each other. A `_cursor` context manager threads one cursor through every nested helper so the read-decide-write is a single transaction. Verified against a real PostgreSQL: two concurrent completers produced two reward rows unlocked, one locked. |
 | **M-1** | Fixed | `_send_push_to_user` takes the actor and drops the notification when the recipient — or an agent they enabled — has blocked them, mirroring the inbox filter; the lookup fails closed. Reply and mention delivery re-check that the source post still exists and is not deleted, instead of pushing the snapshotted text. |
 | **M-2** | Fixed | Mentions are capped at `MAX_MENTIONS_PER_POST = 10` per post at enqueue, and unresolvable `@words` are dropped after a single batched lookup rather than each costing a row and a connection. A 20,000-character post drops from 3,015 outbox rows to at most 10. |
@@ -612,6 +612,28 @@ unauthenticated, so anyone holding a copy of the push-token table can send pushe
 users. Closing it needs a token issued *and* enhanced security enabled in the Expo
 dashboard, which is an operator action outside this repository. Recorded in
 [`open-items.md`](../open-items.md).
+
+### H-2's roster was replaced by chain discovery in v1.38.7
+
+The roster held the destination list still, but it could not answer *who is in the
+fleet* on a chain anyone can join. It was operator-maintained, so it went stale the
+moment a node was added or died: the fleet ran four nodes while the dashboard
+aggregated one, which is a wrong answer presented as a complete one. Membership is
+now the bonded validator set read from chain state (`web/backend/fleet.py`), and a
+moniker only becomes a destination as a named https host — `http://`, bare IPs and
+names resolving off the public Internet are dropped, so the two properties this
+finding actually turned on are unchanged.
+
+What did change is who can put themselves on the list. It is no longer nobody: a
+validator can set its moniker to a host it controls and be sent a live admin proof.
+The cost of that is now a bonded validator's self-stake, because third-party
+delegation is disabled chain-wide — against the original finding, where peering with
+a node was free. Replay is still open and still bounded by the five-minute proof
+lifetime, and the same proof authorises `/api/get_stats`. **Per-destination proofs
+remain the real fix** and are still a client-side protocol change: the client would
+fetch the target list, sign one proof per host, and each node would verify its own
+name in the payload. Until then, treat the active validator set as the trust
+boundary for the admin stats surface.
 
 ### M-3 changed a request contract, and the regression check did not notice
 

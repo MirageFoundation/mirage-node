@@ -70,49 +70,6 @@ def _parse_address_csv_env(key: str) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _parse_https_roster_env(key: str) -> tuple[str, ...]:
-    """Parse a comma-separated roster of https fleet base URLs.
-
-    The stats fan-out forwards the admin's live signature proof to every
-    destination, so the destination list is a credential boundary. It used to be
-    built from validator and P2P monikers, which are self-declared attacker text:
-    peering with a node and naming yourself after a domain you own was enough to
-    be handed a working admin proof. An operator-configured roster is the only
-    source here that an outsider cannot write to.
-
-    https is mandatory rather than preferred, because the previous path also
-    synthesised http:// endpoints and sent the proof over the network in the clear.
-    """
-    raw = os.environ[key].strip()  # KeyError if missing
-    if not raw:
-        return ()
-    values: list[str] = []
-    seen: set[str] = set()
-    for part in raw.split(","):
-        value = part.strip().rstrip("/")
-        if not value:
-            raise ValueError(f"Env var {key} contains an empty entry")
-        if not value.startswith("https://"):
-            raise ValueError(f"Env var {key} entries must start with https://, got '{value}'")
-        host = value[len("https://") :]
-        if not re.fullmatch(r"[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?", host):
-            raise ValueError(f"Env var {key} entry is not a bare https host, got '{value}'")
-        hostname = host.split(":", 1)[0]
-        # A bare IP cannot present a name-matching certificate, so TLS against one
-        # is unverifiable in practice — which is the whole reason https is required
-        # here. Require a dotted name with a non-numeric TLD.
-        if re.fullmatch(r"[0-9.]+", hostname):
-            raise ValueError(f"Env var {key} entry must be a hostname, not an IP address: '{value}'")
-        if "." not in hostname:
-            raise ValueError(f"Env var {key} entry must be a fully-qualified hostname, got '{value}'")
-        lower = value.lower()
-        if lower in seen:
-            raise ValueError(f"Env var {key} contains duplicate entry '{value}'")
-        seen.add(lower)
-        values.append(lower)
-    return tuple(values)
-
-
 # ── Required env vars (validated at import time) ────────────────────────────
 
 REGISTRATION_ENABLED = require_bool_env("REGISTRATION_ENABLED")
@@ -152,10 +109,6 @@ if QUESTS_PAYOUTS_ENABLED and not re.fullmatch(r"mirage1[0-9a-z]{38}", QUESTS_RE
 # upload scanning) fronts uploads, so no unscanned media can reach the node. A
 # node with no scanning edge sets this false and /api/upload_media returns 403.
 MEDIA_UPLOADS_ENABLED = require_bool_env("MEDIA_UPLOADS_ENABLED")
-
-# Fleet members the admin stats fan-out may forward the admin's proof to. Empty
-# means "this node aggregates only itself", which is correct for a single node.
-STATS_FLEET_ROSTER = _parse_https_roster_env("STATS_FLEET_ROSTER")
 
 # Every other security-relevant setting in this module is required; this one was
 # silently defaulted, and empty means _expo_headers omits the Authorization header
