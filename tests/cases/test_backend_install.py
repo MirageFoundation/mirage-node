@@ -148,6 +148,7 @@ def test_install(backend: str) -> None:
     _test_economics_single_source()
     _test_mint_floor_backend_required()
     _test_caddy_well_known()
+    _test_stale_chunk_recovery()
     _test_caddy_csp_upgrade_scoped_to_tls()
     _test_repodigest_pin()
 
@@ -2549,6 +2550,50 @@ def _test_caddy_well_known() -> None:
             _fail("install.entrypoint.mirror_complete", f"well-known mirror does not publish {name}")
             return
     _pass("install.caddy.well_known_before_spa")
+
+
+def _test_stale_chunk_recovery() -> None:
+    """A deploy renames every chunk, so a browser on the previous build asks for
+    files the origin no longer has. Two things went wrong when that happened:
+    the SPA catch-all answered those asset requests with 200 index.html, which
+    the browser rejects as a text/html module, and the client-side reload that
+    exists to recover matched only Chrome's failure wording, so Firefox and
+    Safari sat on a blank route. Either one alone breaks the page.
+    """
+    caddy = Path(REPO_ROOT, "deploy", "templates", "caddy", "Caddyfile").read_text(encoding="utf-8")
+    idx_404 = caddy.find("respond @missing_asset 404")
+    idx_try = caddy.find("try_files {path} /index.html")
+    if idx_404 < 0:
+        _fail("install.caddy.missing_asset_404", "no 404 for a missing /static/* asset")
+        return
+    if idx_try < 0 or idx_404 > idx_try:
+        _fail("install.caddy.missing_asset_order", "the 404 must be reached before the SPA fallback")
+        return
+    matcher = caddy[caddy.find("@missing_asset", 0):idx_404]
+    if "path /static/*" not in matcher or "not file" not in matcher:
+        _fail("install.caddy.missing_asset_matcher", f"matcher does not scope to absent /static/*: {matcher!r}")
+        return
+
+    app = Path(REPO_ROOT, "web", "frontend", "src", "App.js").read_text(encoding="utf-8")
+    start = app.find("function lazyWithRetry(")
+    if start < 0:
+        _fail("install.frontend.lazy_retry", "lazyWithRetry is gone")
+        return
+    body = app[start:app.find("\nconst MainView", start)]
+    if "window.location.reload()" not in body:
+        _fail("install.frontend.lazy_retry_reload", "a failed chunk import no longer reloads")
+        return
+    # Firefox says "error loading dynamically imported module" and Safari says
+    # "Importing a module script failed". Any per-browser string here means the
+    # browsers not on the list stay broken, which is the bug this covers.
+    for prose in ("Failed to fetch dynamically imported module", "Loading chunk", "ChunkLoadError"):
+        if prose in body:
+            _fail("install.frontend.lazy_retry_sniffing", f"recovery gated on browser-specific text {prose!r}")
+            return
+    if "removeItem(CHUNK_RELOAD_KEY)" not in app:
+        _fail("install.frontend.lazy_retry_rearm", "the once-per-tab guard is never cleared after a good load")
+        return
+    _pass("install.stale_chunk_recovery")
 
 
 def _test_caddy_csp_upgrade_scoped_to_tls() -> None:

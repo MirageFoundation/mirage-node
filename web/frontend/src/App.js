@@ -25,31 +25,51 @@ import { updateNotification } from './utils/notifications';
 // triggers a page reload to fetch the new main.js with correct chunk references.
 const CHUNK_RELOAD_KEY = 'chunk_reload_attempted';
 
+function chunkReloadAttempted() {
+    try {
+        return sessionStorage.getItem(CHUNK_RELOAD_KEY) !== null;
+    } catch (_) { /* noop */ }
+    return false;
+}
+
+function setChunkReloadAttempted(attempted) {
+    try {
+        if (attempted) sessionStorage.setItem(CHUNK_RELOAD_KEY, 'true');
+        else sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    } catch (_) { /* noop */ }
+}
+
 function lazyWithRetry(importFn) {
     return React.lazy(() =>
-        importFn().catch((error) => {
-            // Check if this is a chunk load error (typically ChunkLoadError or similar)
-            const isChunkError =
-                error?.name === 'ChunkLoadError' ||
-                error?.message?.includes('Loading chunk') ||
-                error?.message?.includes('Failed to fetch dynamically imported module') ||
-                error?.message?.includes("expected expression, got '<'");
-
-            if (isChunkError) {
-                // Prevent infinite reload loops: only reload once per session
-                const hasReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY);
-                if (!hasReloaded) {
-                    console.warn('[Mirage] Chunk load error detected, reloading to fetch updated app...');
-                    sessionStorage.setItem(CHUNK_RELOAD_KEY, 'true');
-                    window.location.reload();
-                    // Return a never-resolving promise to prevent React from rendering an error
-                    return new Promise(() => { });
-                } else {
-                    console.error('[Mirage] Chunk load error persists after reload:', error);
-                }
+        importFn().then((loaded) => {
+            // Re-arm the guard. Without this a tab gets one rescue for its whole
+            // life, so a second deploy while it is still open strands it again.
+            setChunkReloadAttempted(false);
+            return loaded;
+        }).catch((error) => {
+            // Any failure is treated as a stale bundle. These are same-origin
+            // imports of files the running build shipped with, so they resolve
+            // unless a deploy renamed them. This used to match the failure text
+            // against a list that only held Chrome's wording: Firefox says
+            // "error loading dynamically imported module" and Safari says
+            // "Importing a module script failed", so on those browsers the
+            // reload never fired and the route stayed blank until the user
+            // refreshed by hand. Tracking each browser's prose is not
+            // maintainable, so it no longer tries.
+            if (navigator.onLine === false) {
+                // Reloading with no network replaces the app with the browser's
+                // offline page, which is worse than reporting the failure.
+                throw error;
             }
-            // Re-throw if not a chunk error or if reload already attempted
-            throw error;
+            if (chunkReloadAttempted()) {
+                console.error('[Mirage] Chunk load error persists after reload:', error);
+                throw error;
+            }
+            console.warn('[Mirage] Chunk load error detected, reloading to fetch updated app...', error);
+            setChunkReloadAttempted(true);
+            window.location.reload();
+            // Never resolve, so React does not render an error mid-reload.
+            return new Promise(() => { });
         })
     );
 }

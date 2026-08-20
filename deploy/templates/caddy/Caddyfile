@@ -228,8 +228,23 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		header @version Cache-Control "no-store"
 		rewrite /version /version.txt
 
-		try_files {path} /index.html
-		file_server
+		# A fingerprinted asset that is gone must 404 rather than fall through to
+		# the SPA shell below. Every deploy renames these files, so a browser
+		# still running the previous build asks for names the origin no longer
+		# has; answering 200 with index.html makes it reject a text/html module
+		# ("disallowed MIME type") and the route never renders. It is also a
+		# cacheable 200, so the CDN can pin an HTML body to a .js URL. route
+		# rather than bare directives because the order here is the point.
+		route {
+			@missing_asset {
+				path /static/*
+				not file
+			}
+			respond @missing_asset 404
+
+			try_files {path} /index.html
+			file_server
+		}
 	}
 
 	# Show maintenance page when backends are down (502/503)
