@@ -487,11 +487,15 @@ LIMIT 1;\\" 2>&1" """,
             _fail("indexer.network_stats_has_server_balance", f"server_balance={svb}")
 
         e24 = ns.get("earned_24h")
-        b24 = ns.get("burned_24h")
-        if e24 is not None and b24 is not None and int(e24) >= 0 and int(b24) >= 0:
-            _pass("indexer.network_stats_has_earned_burned", earned_24h=e24, burned_24h=b24)
+        s24 = ns.get("spent_24h")
+        if e24 is not None and s24 is not None and int(e24) >= 0 and int(s24) >= 0:
+            _pass("indexer.network_stats_has_earned_spent", earned_24h=e24, spent_24h=s24)
         else:
-            _fail("indexer.network_stats_has_earned_burned", f"earned_24h={e24} burned_24h={b24}")
+            _fail("indexer.network_stats_has_earned_spent", f"earned_24h={e24} spent_24h={s24}")
+        # "burned" was the old name for money leaving the node, and it counted
+        # every outgoing transfer, so a delegation showed up as tokens destroyed.
+        if "burned_24h" in ns:
+            _fail("indexer.network_stats_no_burned_24h", "get_network_stats still returns burned_24h")
 
         # 4.9 chain_config block_time consistency with network_stats
         ns_bt = ns.get("block_time")

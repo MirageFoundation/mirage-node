@@ -116,7 +116,7 @@ export function useNetwork({
                         current_height: typeof data.current_height !== 'undefined' ? Number(data.current_height) : undefined,
                         difficulty_history: Array.isArray(data.difficulty_history) ? data.difficulty_history : [],
                         earned_24h: typeof data.earned_24h !== 'undefined' ? Number(data.earned_24h) : undefined,
-                        burned_24h: typeof data.burned_24h !== 'undefined' ? Number(data.burned_24h) : undefined
+                        spent_24h: typeof data.spent_24h !== 'undefined' ? Number(data.spent_24h) : undefined
                     }));
                 }
             } catch (_) { }

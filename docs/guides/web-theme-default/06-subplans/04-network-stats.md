@@ -39,9 +39,9 @@ The initial pass used a panel-based (`InfoPanel`) layout with lifted surfaces. T
   - **Earned vs Spent** (Server tab) — `NodeMintBurnChart`.
 - **Sites section** — `PeerRow`s flush-left, no row divider.
 - **Top Holders section** — `AccountRow` restructured from a 3-column grid to flex so the rank aligns flush with the Sites list (`AccountRank` `flex-shrink: 0`, `min-width: 1.25rem`), no row divider.
-- **Validator Balance section** (Server tab) — Staked, Balance, Earned (24h), Burned (24h).
+- **Validator Balance section** (Server tab) — Staked, Balance, Earned (24h), Spent (24h).
   - Earned (24h) renders as a **`StatusPill`** with `voteUp` tone when positive (`voteUpBg` + `voteUp` text).
-  - Burned (24h) renders as a **`StatusPill`** with `voteDown` tone when positive (`voteDownBg` + `voteDown` text).
+  - Spent (24h) renders as a **`StatusPill`** with `voteDown` tone when positive (`voteDownBg` + `voteDown` text).
   - Values use `formatMirageCompact` → K/M/B suffixes.
 - **Validator Addresses section** (Server tab) — Address / Valoper / Valcons rows. Copy action is now an **`IconActionButton`** (28×28 pill, `actionIconBg` / `actionIconHoverBg`, `buttonSuccessBg` + `voteUp` on success, `HiClipboardDocument` → `HiCheck`) — matches ProfileView's address-copy pattern. The old `Button` text ("Copy" / "Copied!") is gone.
 

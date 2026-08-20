@@ -3737,38 +3737,42 @@ def get_network_stats():
         except Exception:
             pass
 
-        # Compute real 24h earned from node_balance changes in supply_history
-        earned_24h = 0
-        burned_24h = 0
+        # Difference the node's cumulative payout and fee counters, which the
+        # indexer accumulates from block events. Differencing node_balance
+        # instead counted every transfer in as income and every transfer out as
+        # a loss, so a freshly funded node reported its entire holding as 24h
+        # earnings and reported the stake it had just delegated as burned.
+        since_ts = int(time.time()) - 86400
+        conn_sh = connect_db(timeout=5.0, busy_timeout_ms=5000)
         try:
-            since_ts = int(time.time()) - 86400
-            conn_sh = connect_db(timeout=5.0, busy_timeout_ms=5000)
             cur_sh = conn_sh.cursor()
             cur_sh.execute(
                 """
-                SELECT node_balance FROM supply_history
-                WHERE created_at >= %s AND node_balance IS NOT NULL
+                SELECT node_minted_total, node_fees_total FROM supply_history
+                WHERE created_at >= %s
+                  AND node_minted_total IS NOT NULL
+                  AND node_fees_total IS NOT NULL
                 ORDER BY height ASC
                 """,
                 (since_ts,),
             )
             rows_sh = cur_sh.fetchall()
+        finally:
             conn_sh.close()
-            for i in range(1, len(rows_sh)):
-                diff = rows_sh[i][0] - rows_sh[i - 1][0]
-                if diff > 0:
-                    earned_24h += diff
-                elif diff < 0:
-                    burned_24h += abs(diff)
-        except Exception:
-            pass
+        earned_24h = 0
+        spent_24h = 0
+        if len(rows_sh) >= 2:
+            # Both counters only ever grow. A decrease means the history was
+            # rebuilt, and reporting negative earnings would be a lie.
+            earned_24h = max(0, int(rows_sh[-1][0]) - int(rows_sh[0][0]))
+            spent_24h = max(0, int(rows_sh[-1][1]) - int(rows_sh[0][1]))
 
         resp = {
             "server_balance": server_balance,
             "staked_balance": staked_balance,
             "block_time": block_time,
             "earned_24h": earned_24h,
-            "burned_24h": burned_24h,
+            "spent_24h": spent_24h,
             "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
@@ -3801,7 +3805,8 @@ def _get_cached_supply_history() -> list:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT height, total_supply, created_at, node_balance
+            SELECT height, total_supply, created_at, node_balance,
+                   node_minted_total, node_fees_total
             FROM supply_history
             WHERE created_at >= %s
             ORDER BY height ASC
@@ -3813,7 +3818,14 @@ def _get_cached_supply_history() -> list:
         conn.close()
 
     history = [
-        {"height": r[0], "total_supply": r[1], "timestamp": r[2], "node_balance": r[3] if len(r) > 3 else None}
+        {
+            "height": r[0],
+            "total_supply": r[1],
+            "timestamp": r[2],
+            "node_balance": r[3],
+            "node_minted_total": r[4],
+            "node_fees_total": r[5],
+        }
         for r in rows
     ]
 

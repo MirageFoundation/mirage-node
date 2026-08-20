@@ -564,8 +564,8 @@ function NodeBalanceChart({
 function NodeMintBurnChart({
     history
 }) {
-    // Filter to entries that have node_balance recorded
-    const raw = (history || []).filter(h => h.node_balance != null);
+    // Filter to entries that have the earnings counters recorded
+    const raw = (history || []).filter(h => h.node_minted_total != null && h.node_fees_total != null);
     if (raw.length < 2) {
         return <ChartWrapper>
             <ChartContainer>
@@ -573,7 +573,7 @@ function NodeMintBurnChart({
                     fontSize: '0.75rem',
                     color: '#888'
                 }}>
-                    (collecting node balance data...)
+                    (collecting earnings data...)
                 </Mono>
             </ChartContainer>
         </ChartWrapper>;
@@ -586,21 +586,18 @@ function NodeMintBurnChart({
         innerH
     } = CHART;
 
-    // Derive cumulative earned/spent from balance + supply changes
-    // Node "earned" = balance increases, "spent" = balance decreases
-    const data = [];
-    let cumEarned = 0;
-    let cumSpent = 0;
-    for (let i = 1; i < raw.length; i++) {
-        const diff = raw[i].node_balance - raw[i - 1].node_balance;
-        if (diff > 0) cumEarned += diff; else if (diff < 0) cumSpent += -diff;
-        data.push({
-            timestamp: raw[i].timestamp,
-            earned: cumEarned,
-            spent: cumSpent
-        });
-    }
+    // The counters are lifetime totals, so the window is each sample measured
+    // against its first. Summing balance movements instead treated coins arriving
+    // as earnings and coins leaving as spending.
+    const origin = raw[0];
+    const data = raw.slice(1).map(h => ({
+        timestamp: h.timestamp,
+        earned: Math.max(0, h.node_minted_total - origin.node_minted_total),
+        spent: Math.max(0, h.node_fees_total - origin.node_fees_total)
+    }));
     if (data.length < 1) return null;
+    const cumEarned = data[data.length - 1].earned;
+    const cumSpent = data[data.length - 1].spent;
     const totalEarned = cumEarned / 1e6;
     const totalSpent = cumSpent / 1e6;
     const maxY = Math.max(cumEarned, cumSpent, 1);
@@ -809,9 +806,9 @@ export default function NetworkView({
                             </ValueBox>
                         </RowCentered>
                         <RowCentered>
-                            <Label>Burned (24h):</Label>
+                            <Label>Spent (24h):</Label>
                             <ValueBox>
-                                <Mono>{cfg.burned_24h == null ? '(loading...)' : `${formatMirage(cfg.burned_24h)} MIRAGE`}</Mono>
+                                <Mono>{cfg.spent_24h == null ? '(loading...)' : `${formatMirage(cfg.spent_24h)} MIRAGE`}</Mono>
                             </ValueBox>
                         </RowCentered>
                         <RowCentered>

@@ -103,6 +103,7 @@ def test_install(backend: str) -> None:
     _test_cards_are_all_one_height()
     _test_staked_balance_history()
     _test_node_earnings_attribution()
+    _test_web_earnings_sources()
     _test_earnings_card()
     _test_retention_building_up()
     _test_catching_up_is_not_a_fault()
@@ -3551,6 +3552,68 @@ def _test_earnings_card() -> None:
         _fail("install.status.earnings_compact", compact)
         return
     _pass("install.status.earnings_card")
+
+
+def _test_web_earnings_sources() -> None:
+    """The web validator card reads the same counters as the terminal dashboard.
+
+    It used to difference node_balance, so a node that had just been funded and
+    had delegated reported its whole holding as 24h earnings and its delegation
+    as burned. Both numbers were nonsense, and "burned" was the wrong word for
+    coins that had merely moved.
+    """
+    backend = Path(os.path.join(REPO_ROOT, "web", "backend", "routes", "public.py")).read_text(encoding="utf-8")
+    stats = backend[backend.index("def get_network_stats()") :]
+    stats = stats[: stats.index("def _get_cached_supply_history")]
+    # Comments explain the old behaviour by name, so judge the code alone.
+    stats = "\n".join(line for line in stats.splitlines() if not line.strip().startswith("#"))
+    if "node_minted_total" not in stats or "node_fees_total" not in stats:
+        _fail("install.web_earnings.counters", "get_network_stats does not read the earnings counters")
+        return
+    if "node_balance" in stats:
+        _fail("install.web_earnings.balance_diff", "get_network_stats still derives earnings from node_balance")
+        return
+    if '"spent_24h"' not in stats or "burned_24h" in stats:
+        _fail("install.web_earnings.field", "get_network_stats must return spent_24h and not burned_24h")
+        return
+    # A failed read must surface, not be reported as zero earnings.
+    earnings_block = stats[stats.index("node_minted_total, node_fees_total") : stats.index("resp = {")]
+    if "except" in earnings_block:
+        _fail("install.web_earnings.swallow", "get_network_stats silently reports zero earnings on error")
+        return
+    history = backend[backend.index("def _get_cached_supply_history") :]
+    history = history[: history.index("def _get_last_seen_rollups")]
+    for column in ("node_minted_total", "node_fees_total"):
+        if column not in history:
+            _fail("install.web_earnings.history", f"supply history does not expose {column}")
+            return
+
+    themes = os.path.join(REPO_ROOT, "web", "frontend", "src", "themes")
+    for theme in sorted(os.listdir(themes)):
+        view = os.path.join(themes, theme, "routes", "NetworkView.js")
+        if not os.path.isfile(view):
+            continue
+        body = Path(view).read_text(encoding="utf-8")
+        chart = body[body.index("function NodeMintBurnChart") :]
+        end = chart.find("\nfunction ", 1)
+        chart = chart[:end] if end > 0 else chart
+        if "node_minted_total" not in chart or "node_balance" in chart:
+            _fail(f"install.web_earnings.{theme}.chart", "earnings chart still charts balance movement")
+            return
+        if "Burned (24h)" in body or "burned_24h" in body:
+            _fail(f"install.web_earnings.{theme}.label", "validator card still says Burned (24h)")
+            return
+        if "Spent (24h)" not in body or "spent_24h" not in body:
+            _fail(f"install.web_earnings.{theme}.spent", "validator card does not show Spent (24h)")
+            return
+
+    hook = Path(os.path.join(REPO_ROOT, "web", "frontend", "src", "logic", "useNetwork.js")).read_text(
+        encoding="utf-8"
+    )
+    if "spent_24h" not in hook or "burned_24h" in hook:
+        _fail("install.web_earnings.hook", "useNetwork does not map spent_24h")
+        return
+    _pass("install.web_earnings.sources")
 
 
 def _test_node_earnings_attribution() -> None:

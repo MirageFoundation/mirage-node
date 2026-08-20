@@ -772,25 +772,28 @@ function NodeMintBurnChart({ history }) {
     const theme = useTheme();
     const c = chartColors(theme);
 
-    const raw = (history || []).filter(h => h.node_balance != null);
+    const raw = (history || []).filter(h => h.node_minted_total != null && h.node_fees_total != null);
     if (raw.length < 2) {
         return (
             <ChartWrapper>
-                <ChartEmpty>(collecting node balance data…)</ChartEmpty>
+                <ChartEmpty>(collecting earnings data…)</ChartEmpty>
             </ChartWrapper>
         );
     }
     const { width, height, padding, innerW, innerH } = CHART;
 
-    const data = [];
-    let cumEarned = 0;
-    let cumSpent = 0;
-    for (let i = 1; i < raw.length; i++) {
-        const diff = raw[i].node_balance - raw[i - 1].node_balance;
-        if (diff > 0) cumEarned += diff; else if (diff < 0) cumSpent += -diff;
-        data.push({ timestamp: raw[i].timestamp, earned: cumEarned, spent: cumSpent });
-    }
+    // The counters are lifetime totals, so the window is each sample measured
+    // against its first. Summing balance movements instead treated coins arriving
+    // as earnings and coins leaving as spending.
+    const origin = raw[0];
+    const data = raw.slice(1).map(h => ({
+        timestamp: h.timestamp,
+        earned: Math.max(0, h.node_minted_total - origin.node_minted_total),
+        spent: Math.max(0, h.node_fees_total - origin.node_fees_total),
+    }));
     if (data.length < 1) return null;
+    const cumEarned = data[data.length - 1].earned;
+    const cumSpent = data[data.length - 1].spent;
     const totalEarned = cumEarned / 1e6;
     const totalSpent = cumSpent / 1e6;
     const maxY = Math.max(cumEarned, cumSpent, 1);
@@ -1076,12 +1079,12 @@ export default function NetworkView({ state }) {
                                                 </FieldValue>
                                             </FieldRow>
                                             <FieldRow>
-                                                <FieldLabel>Burned (24h):</FieldLabel>
+                                                <FieldLabel>Spent (24h):</FieldLabel>
                                                 <FieldValue>
-                                                    {cfg.burned_24h == null
+                                                    {cfg.spent_24h == null
                                                         ? <Skeleton width="8rem" height="0.75rem" inline />
-                                                        : <StatusPill $tone={cfg.burned_24h > 0 ? 'down' : 'neutral'}>
-                                                            −{formatMirageCompact(cfg.burned_24h)} MIRAGE
+                                                        : <StatusPill $tone={cfg.spent_24h > 0 ? 'down' : 'neutral'}>
+                                                            −{formatMirageCompact(cfg.spent_24h)} MIRAGE
                                                         </StatusPill>}
                                                 </FieldValue>
                                             </FieldRow>
