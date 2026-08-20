@@ -253,6 +253,10 @@ tmp = path + ".tmp"
 open(tmp, "w").write(json.dumps(state, indent=2) + "\n")
 os.replace(tmp, path)
 PY
+  # state.json now names the new active and the release it replaced, so the
+  # pruner keeps the rollback target and drops everything older. Without this a
+  # node accumulated every image it had ever run.
+  /usr/local/bin/prune_mirage_images.sh || true
   echo "activated $staged"
 }
 
@@ -328,6 +332,29 @@ install_hosttools_from_image() {
   done
   disable_automatic_release_fetch
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
+}
+
+# Reclaim before pulling. The tools installed the pruner but nothing ever ran it,
+# so every release a node staged left its predecessor on disk permanently. The
+# pull is what consumes the space, and running out of it does not merely fail the
+# update: the node stops being able to write its consensus WAL and stops signing.
+reclaim_disk_for_pull() {
+  if [[ -x /usr/local/bin/prune_mirage_images.sh ]]; then
+    /usr/local/bin/prune_mirage_images.sh
+  else
+    # A node updating from a release that predates the pruner has to be able to
+    # reach one that ships it, so this cannot be fatal — but it is still wrong.
+    echo "WARNING: /usr/local/bin/prune_mirage_images.sh is missing; pruning dangling layers only" >&2
+    docker image prune -f >/dev/null || true
+  fi
+  local free_mb
+  free_mb=$(df -BM --output=avail / | tail -1 | tr -dc '0-9')
+  if (( free_mb < 6144 )); then
+    echo "ERROR: only ${free_mb} MiB free on /; the release image needs ~2.2 GiB plus" >&2
+    echo "       headroom for the consensus WAL. Free space before updating: pulling" >&2
+    echo "       onto a full disk stops this validator signing." >&2
+    exit 1
+  fi
 }
 
 tick() {
@@ -411,6 +438,7 @@ PY
     echo "governed upgrade $(json_field "$HOME/.mirage/upgrade/prepared.json" upgrade_name) is armed for height $(json_field "$HOME/.mirage/upgrade/prepared.json" plan_height); not staging ordinary release $version over it"
     return 0
   fi
+  reclaim_disk_for_pull
   docker pull "$image"
   digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")
   if [[ "$digest" != "$image" && "$digest" != *"${image#*@}"* ]]; then
@@ -509,6 +537,7 @@ refresh_hosttools() {
     echo "ERROR: --image must be a digest-pinned ghcr.io/miragefoundation/mirage-node reference" >&2
     exit 2
   fi
+  reclaim_disk_for_pull
   docker pull "$image"
   install_hosttools_from_image "$image"
   echo "host tools refreshed from $image"
@@ -671,6 +700,10 @@ PY
   # and fail every tick forever.
   rm -f "$HOME/.mirage/upgrade/halt-detected.txt" "$STATE_DIR/activating" \
     "$prepared" "$STATE_DIR/prepared.json"
+  # Runs after prepared.json is gone, so the image that armed the halt is no
+  # longer pinned by it and the pruner keeps only the new active and its
+  # rollback target.
+  /usr/local/bin/prune_mirage_images.sh || true
   echo "activated prepared upgrade $name; chain is at height $now_h"
 }
 

@@ -3,6 +3,15 @@
 set -euo pipefail
 SAFETY_BLOCKS="${UPGRADE_PREFLIGHT_SAFETY_BLOCKS:-500}"
 
+# Reclaim images first, ahead of every early exit below: a host that is catching
+# up or sitting near an upgrade plan is exactly the one that must not run out of
+# disk, and this is the only cleanup that runs on a schedule rather than as a
+# side-effect of deploying. The pruner keeps the running, staged, previous and
+# halt-prepared images, so it is safe in any of those states.
+if [[ -x /usr/local/bin/prune_mirage_images.sh ]]; then
+  /usr/local/bin/prune_mirage_images.sh || true
+fi
+
 if ! docker inspect mirage --format '{{.State.Status}}' 2>/dev/null | grep -qx running; then
   echo "ERROR: mirage container is not running; weekly restart cannot proceed" >&2
   exit 1

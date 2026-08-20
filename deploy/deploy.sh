@@ -510,6 +510,35 @@ else
   fi
 fi
 
+# Reclaim disk BEFORE the image lands, not after. The prune below used to run
+# only once the new container was already up, which is too late to matter: the
+# transfer is what consumes the space. On 2026-08-20 a 2.2 GiB pull filled val1's
+# disk to 100% mid-pull, CometBFT could not write its consensus WAL ("no space
+# left on device"), and the validator stopped signing at the block it was on
+# while the rest of the chain carried on without it.
+if [ "$LOCAL_MODE" -eq 0 ]; then
+  echo "==> Reclaiming disk before transferring image..."
+  # Ship the pruner rather than hoping it is installed. deploy.sh provisions
+  # hosts but never installed the host tools, and the old call was guarded on
+  # the tool being executable — so on every host deployed this way the prune was
+  # a silent no-op. val1 had an empty /usr/local/bin and 10 GiB of dead images.
+  run_scp "$REPO_ROOT/deploy/hosttools/prune_mirage_images.sh" "$REMOTE:/usr/local/bin/prune_mirage_images.sh"
+  run_ssh 'chmod 0755 /usr/local/bin/prune_mirage_images.sh && /usr/local/bin/prune_mirage_images.sh'
+  # Refuse to deploy onto a disk that cannot take the image. Filling it does not
+  # fail the deploy, it stops the validator, so this has to be checked up front
+  # rather than discovered from a stalled node.
+  run_ssh 'set -eu
+    free_mb=$(df -BM --output=avail / | tail -1 | tr -dc "0-9")
+    if [ "$free_mb" -lt 6144 ]; then
+      echo "ERROR: only ${free_mb} MiB free on / after pruning" >&2
+      echo "       The image needs ~2.2 GiB and the node needs headroom to write its" >&2
+      echo "       consensus WAL. Deploying onto a full disk halts the validator." >&2
+      exit 1
+    fi
+    echo "    ${free_mb} MiB free on /"
+  '
+fi
+
 if [ "$USE_TARBALL" -eq 1 ] && [ "$LOCAL_MODE" -eq 0 ]; then
   echo "==> Transferring image tarball..."
   # Optimization: avoid re-uploading the tarball if possible.
@@ -768,10 +797,12 @@ fi
 echo "==> Waiting briefly for container to become healthy..."
 sleep 2
 
-# Drop unreferenced Mirage images only. Never `docker image prune -af`.
+# Drop the image this deploy just superseded. Never `docker image prune -af`.
+# The pruner is installed unconditionally before the pull, so this no longer
+# depends on the host happening to have it.
 if [ "$LOCAL_MODE" -eq 0 ]; then
-  echo "==> Pruning old Mirage images..."
-  run_ssh 'if [ -x /usr/local/bin/prune_mirage_images.sh ]; then /usr/local/bin/prune_mirage_images.sh; fi; rm -f /tmp/mirage-docker.tar.gz'
+  echo "==> Pruning superseded Mirage images..."
+  run_ssh '/usr/local/bin/prune_mirage_images.sh; rm -f /tmp/mirage-docker.tar.gz'
 fi
 
 # Ensure container is running and stable (handle restart loop) before docker exec

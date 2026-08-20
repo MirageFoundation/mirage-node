@@ -144,6 +144,7 @@ def test_install(backend: str) -> None:
     _test_peer_pull_requires_peer_ahead()
     _test_watermark_never_lowers()
     _test_weekly_restart_skips_catching_up()
+    _test_images_pruned_before_every_pull()
     _test_stake_floor_and_lock()
     _test_economics_single_source()
     _test_mint_floor_backend_required()
@@ -2435,6 +2436,85 @@ def _test_weekly_restart_skips_catching_up() -> None:
     _pass("install.weekly.skips_catching_up")
 
 
+def _test_images_pruned_before_every_pull() -> None:
+    """Reclaiming disk must precede the pull on every path that fetches an image.
+
+    Pruning after the new container is up is too late to be worth anything: the
+    transfer is what consumes the space. On 2026-08-20 a 2.2 GiB pull took val1
+    to 100% mid-pull, CometBFT could not write its consensus WAL, and the
+    validator stopped signing while the chain carried on. Both paths also used to
+    guard the prune on the pruner being executable, so on any host that had never
+    installed the host tools the cleanup was a silent no-op.
+    """
+    deploy = Path(REPO_ROOT, "deploy", "deploy.sh").read_text(encoding="utf-8")
+    idx_prune = deploy.find("prune_mirage_images.sh")
+    idx_transfer = deploy.find("Transferring image tarball")
+    if idx_prune < 0 or idx_transfer < 0 or idx_prune > idx_transfer:
+        _fail(
+            "install.prune.deploy_before_transfer",
+            "deploy.sh must prune before transferring the image, not after",
+        )
+        return
+    # The pruner has to be shipped, not assumed: deploy.sh provisions hosts but
+    # never installed the host tools.
+    if "run_scp" not in deploy[:idx_transfer] or "prune_mirage_images.sh" not in deploy[:idx_transfer]:
+        _fail("install.prune.deploy_ships_pruner", "deploy.sh must install the pruner before using it")
+        return
+
+    update = Path(REPO_ROOT, "deploy", "hosttools", "mirage-update").read_text(encoding="utf-8")
+    if "reclaim_disk_for_pull" not in update:
+        _fail("install.prune.update_reclaims", "mirage-update must reclaim disk before pulling")
+        return
+    for name in ("tick", "refresh_hosttools"):
+        body = _shell_function(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-update"), name)
+        idx_reclaim = body.find("reclaim_disk_for_pull")
+        idx_pull = body.find("docker pull")
+        if idx_reclaim < 0 or idx_pull < 0 or idx_reclaim > idx_pull:
+            _fail(
+                "install.prune.update_reclaims_first",
+                f"mirage-update {name} pulls before reclaiming disk",
+            )
+            return
+    # Activation is what makes the superseded release droppable: state.json only
+    # names the new active and its rollback target once the swap is recorded.
+    activate = _shell_function(os.path.join(REPO_ROOT, "deploy", "hosttools", "mirage-update"), "activate_staged")
+    if "prune_mirage_images.sh" not in activate:
+        _fail("install.prune.update_prunes_on_activate", "activate_staged leaves the superseded image on disk")
+        return
+
+    # The only cleanup on a schedule rather than as a side-effect of deploying,
+    # and it must run ahead of the early exits for a node that is down or syncing.
+    weekly = Path(REPO_ROOT, "deploy", "hosttools", "mirage-weekly-restart.sh").read_text(encoding="utf-8")
+    idx_prune = weekly.find("prune_mirage_images.sh")
+    idx_exit = weekly.find("exit 1")
+    if idx_prune < 0 or idx_exit < 0 or idx_prune > idx_exit:
+        _fail(
+            "install.prune.weekly_before_exit",
+            "weekly restart must prune before it can exit early",
+        )
+        return
+    # A node installed by the one-liner gets its weekly timer from
+    # harden_server.sh, which writes its own copy of the script.
+    harden = Path(REPO_ROOT, "deploy", "harden_server.sh").read_text(encoding="utf-8")
+    if "prune_mirage_images.sh" not in harden:
+        _fail(
+            "install.prune.harden_weekly",
+            "harden_server.sh weekly restart never prunes, so installer-provisioned hosts accumulate images",
+        )
+        return
+
+    # Untagged layers from interrupted pulls are invisible to the tagged-ref loop
+    # and were 3.4 GiB of the disk that filled on val1.
+    pruner = Path(REPO_ROOT, "deploy", "hosttools", "prune_mirage_images.sh").read_text(encoding="utf-8")
+    if "docker image prune -f" not in pruner:
+        _fail("install.prune.dangling", "pruner leaves dangling layers behind")
+        return
+    if "prune -af" in pruner or "prune -a " in pruner:
+        _fail("install.prune.not_all", "pruner must never use -a; it would delete the rollback target")
+        return
+    _pass("install.prune.before_every_pull")
+
+
 def _test_stake_floor_and_lock() -> None:
     stake_body = Path(STAKE_PY).read_text(encoding="utf-8")
     if '"--unordered"' not in stake_body or '"--timeout-duration"' not in stake_body:
@@ -2620,7 +2700,7 @@ def _test_stale_chunk_recovery() -> None:
     if idx_try < 0 or idx_404 > idx_try:
         _fail("install.caddy.missing_asset_order", "the 404 must be reached before the SPA fallback")
         return
-    matcher = caddy[caddy.find("@missing_asset", 0):idx_404]
+    matcher = caddy[caddy.find("@missing_asset", 0) : idx_404]
     if "path /static/*" not in matcher or "not file" not in matcher:
         _fail("install.caddy.missing_asset_matcher", f"matcher does not scope to absent /static/*: {matcher!r}")
         return
@@ -2630,7 +2710,7 @@ def _test_stale_chunk_recovery() -> None:
     if start < 0:
         _fail("install.frontend.lazy_retry", "lazyWithRetry is gone")
         return
-    body = app[start:app.find("\nconst MainView", start)]
+    body = app[start : app.find("\nconst MainView", start)]
     if "window.location.reload()" not in body:
         _fail("install.frontend.lazy_retry_reload", "a failed chunk import no longer reloads")
         return
@@ -2998,7 +3078,9 @@ def _test_governed_upgrade_prepare() -> None:
     idx_disable = prepare.find("disable_automatic_release_fetch")
     idx_tick = prepare.find("tick")
     if idx_disable < 0 or idx_tick < idx_disable or prepare.find("arm_governed_upgrade") < idx_tick:
-        _fail("install.upgrade.prepare_sequence", "mirage-upgrade must disable background fetching before fetch and arm")
+        _fail(
+            "install.upgrade.prepare_sequence", "mirage-upgrade must disable background fetching before fetch and arm"
+        )
         return
 
     def _arm_harness(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> tuple[str, str]:
@@ -3585,9 +3667,7 @@ def _test_earnings_card() -> None:
 
     # Spending more than was earned is a real state for a relay node, and the
     # 30d total has to be allowed to go negative rather than clamp to zero.
-    loss = dash.summarize_earnings_history(
-        [(1, now - (20 * 60 * 60), 100, 100), (2, now - (60 * 60), 150, 900)], now
-    )
+    loss = dash.summarize_earnings_history([(1, now - (20 * 60 * 60), 100, 100), (2, now - (60 * 60), 150, 900)], now)
     if loss["net_30d"] != -750:
         _fail("install.status.earnings_negative", f"net_30d={loss['net_30d']!r}, expected -750")
         return
@@ -3703,9 +3783,7 @@ def _test_web_earnings_sources() -> None:
             _fail(f"install.web_earnings.{theme}.spent", "validator card does not show Spent (24h)")
             return
 
-    hook = Path(os.path.join(REPO_ROOT, "web", "frontend", "src", "logic", "useNetwork.js")).read_text(
-        encoding="utf-8"
-    )
+    hook = Path(os.path.join(REPO_ROOT, "web", "frontend", "src", "logic", "useNetwork.js")).read_text(encoding="utf-8")
     if "spent_24h" not in hook or "burned_24h" in hook:
         _fail("install.web_earnings.hook", "useNetwork does not map spent_24h")
         return
@@ -3778,7 +3856,7 @@ def _test_node_earnings_attribution() -> None:
     main_source = Path(os.path.join(REPO_ROOT, "indexer", "main.py")).read_text(encoding="utf-8")
     # The counters must commit inside the block transaction; writing them after
     # the checkpoint would double-count or drop a block on a crash.
-    tx_body = main_source.split("with self.db.transaction(label=\"block\"", 1)[-1].split("finally:", 1)[0]
+    tx_body = main_source.split('with self.db.transaction(label="block"', 1)[-1].split("finally:", 1)[0]
     if "_accumulate_node_earnings" not in tx_body:
         _fail("install.earnings.not_atomic", "earnings counters are not folded in inside the block transaction")
         return

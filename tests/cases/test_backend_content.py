@@ -1687,7 +1687,7 @@ def _visibility_probe(name: str, code: str) -> None:
         _fail(name, f"rc={rc} out={out.strip()[-400:]}")
 
 
-def test_anon_visibility() -> None:
+def test_anon_visibility(backend: str) -> None:
     """A signed-out visitor must never be served tagged content.
 
     Two independent defects put an agent-tagged post on the anonymous frontpage:

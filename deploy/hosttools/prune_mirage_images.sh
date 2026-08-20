@@ -53,3 +53,9 @@ while IFS= read -r line; do
   echo "removing $ref $id"
   docker rmi "$id" >/dev/null || true
 done < <(docker images --format '{{.ID}} {{.Repository}}:{{.Tag}}' | grep -E 'miragefoundation/mirage-node|mirage:local' || true)
+
+# Untagged layers from interrupted or superseded pulls. The loop above only walks
+# tagged mirage refs and never sees these; on val1 they were 3.4 GiB of the disk
+# that filled mid-pull and stopped the validator signing. Dangling only — never
+# `-a`, which would also delete the rollback target simply for not running.
+docker image prune -f >/dev/null || true

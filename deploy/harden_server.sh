@@ -449,6 +449,13 @@ write_file /usr/local/sbin/mirage-weekly-restart.sh '#!/usr/bin/env bash
 set -euo pipefail
 SAFETY_BLOCKS="${UPGRADE_PREFLIGHT_SAFETY_BLOCKS:-500}"
 
+# Reclaim images ahead of every early exit below. This timer is the only cleanup
+# that runs on a schedule rather than as a side-effect of deploying, and a host
+# that is down or mid-upgrade is exactly the one that must not fill its disk.
+if [[ -x /usr/local/bin/prune_mirage_images.sh ]]; then
+  /usr/local/bin/prune_mirage_images.sh || true
+fi
+
 if ! docker inspect mirage --format "{{.State.Status}}" 2>/dev/null | grep -qx running; then
   echo "mirage container not running; skip weekly restart"
   exit 0
