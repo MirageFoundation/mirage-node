@@ -56,6 +56,7 @@ from tests.cases.test_backend_content import (
     test_image_impressions,
     test_upload_media,
     test_recent_content,
+    test_anon_visibility,
 )
 from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
 from tests.cases.test_backend_tokens import test_pow, test_tokens
@@ -157,6 +158,7 @@ ALL_CATEGORIES = {
     "subscribe_validation": test_subscribe_validation,
     "indexer_deque": test_indexer_deque_storage,
     "content_limits": test_content_limits,
+    "anon_visibility": test_anon_visibility,
     "profile_fields": test_profile_fields,
     "agent_behavior": test_agent_behavior,
     "annotate": test_annotate,
@@ -244,6 +246,7 @@ STATELESS_CATEGORIES = {
 # fixtures only. Running one of them must not create five wallets and broadcast
 # setup transactions that the selected checks never consume.
 WALLETLESS_CATEGORIES = {
+    "anon_visibility",
     "backend_hardening",
     "stats_pure",
     "error_registry",
@@ -280,6 +283,9 @@ WALLETLESS_CATEGORIES = {
 # Categories that guard a security or economic invariant. They must execute; a
 # skip here means the invariant went unchecked, which is a failure, not a pass.
 RELEASE_GATE_CATEGORIES = {
+    # A skip here means nobody checked whether the anonymous frontpage is
+    # serving tagged content, which is the exact regression it exists to catch.
+    "anon_visibility",
     "route_authz",
     "admin_authz",
     "reward_claim_authz",

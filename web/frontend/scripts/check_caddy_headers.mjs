@@ -31,7 +31,7 @@ const REQUIRED = [
 // Directives that must be present inside the enforcing CSP.
 const REQUIRED_CSP_DIRECTIVES = [
     "default-src 'self'",
-    "script-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval'",
     "worker-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",
@@ -44,8 +44,11 @@ const REQUIRED_CSP_DIRECTIVES = [
 // dropping the CDN passes every restriction check above and still stalls every
 // Bunny video behind a load error on browsers without native HLS. v1.36.0
 // enforced exactly that policy and took 1016 posts' videos down with it.
+// The same class of miss: script-src 'self' without wasm-unsafe-eval blocks
+// argon2 WASM, so signup and every free-tier tx hang until the 60s PoW timeout.
 const REQUIRED_CSP_SOURCES = [
     ['connect-src', 'b-cdn.net'],
+    ['script-src', 'wasm-unsafe-eval'],
 ];
 
 const text = readFileSync(CADDYFILE, 'utf8');
@@ -70,7 +73,7 @@ if (!cspMatch) {
     for (const [directive, source] of REQUIRED_CSP_SOURCES) {
         const value = cspMatch[1].split(';').find((d) => d.trim().startsWith(directive));
         if (!value || !value.includes(source)) {
-            failures.push(`CSP ${directive} must allow ${source} or video playback breaks`);
+            failures.push(`CSP ${directive} must allow ${source}`);
         }
     }
 }

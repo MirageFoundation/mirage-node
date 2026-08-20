@@ -81,6 +81,7 @@ const ERROR_MAP = {
     pow_timeout: "Proof-of-work took too long. Please try again later.",
     pow_worker_failed: "Proof-of-work failed. Please try again.",
     pow_worker_invalid_response: "Proof-of-work failed due to an invalid worker response.",
+    pow_wasm_csp_blocked: "This browser blocked the proof-of-work engine. Please try again, or use a different browser.",
 
     // Content / posts
     title_too_long: "Your title exceeds the maximum length.",

@@ -54,6 +54,7 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "Proof of work took too long (>60s). Your device may be too slow, or the network difficulty is too high. Please try again later.": "pow_timeout",
     "Proof of work failed: invalid worker response.": "pow_worker_invalid_response",
     "Proof of work failed": "pow_worker_failed",
+    "Proof of work WASM blocked by Content-Security-Policy": "pow_wasm_csp_blocked",
     "client error": "client_error",
     "transaction failed": "transaction_failed",
     "insufficient balance": "insufficient_balance",
@@ -5743,6 +5744,23 @@ class TransactionHandler {
                 wrapResolve(this._fail("Proof of work took too long (>60s). Your device may be too slow, or the network difficulty is too high. Please try again later."));
             }, 60000);
 
+            worker.onerror = (event) => {
+                if (powTimedOut) return;
+                powTimedOut = true;
+                clearTimeout(powTimeoutId);
+                clearInterval(intervalId);
+                try { worker.terminate(); } catch (_) { /* already dead */ }
+                this._activePowWorker = null;
+                if (this.setWarnOnLeave) {
+                    this.setWarnOnLeave(false);
+                }
+                this._setStatus("idle");
+                const detail = String((event && event.message) || 'worker_onerror');
+                console.error('[PoW] worker onerror', detail);
+                updateNotification("PoW failed. Please try again.", 5.0, true);
+                wrapResolve(this._fail("Proof of work failed", { details: detail }));
+            };
+
             worker.onmessage = async function (e) {
                 if (powTimedOut) return;
                 clearTimeout(powTimeoutId);
@@ -5762,6 +5780,11 @@ class TransactionHandler {
                 const workerData = e ? e.data : null;
                 if (workerData && typeof workerData === 'object' && workerData.error) {
                     try { console.error('[PoW] worker error', workerData); } catch (_) { }
+                    if (workerData.error === 'wasm_csp_blocked') {
+                        updateNotification("PoW engine blocked by this browser. Please try again.", 5.0, true);
+                        wrapResolve(this._fail("Proof of work WASM blocked by Content-Security-Policy"));
+                        return;
+                    }
                     updateNotification("PoW failed. Please try again.", 5.0, true);
                     wrapResolve(this._fail("Proof of work failed", { details: String(workerData.error || "") }));
                     return;

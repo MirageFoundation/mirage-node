@@ -73,6 +73,31 @@ function checkPowTarget(hashBytes, difficultySteps, powBaseBits, powFactor) {
     return hashInt <= effTarget;
 }
 
+function powErrorCode(err) {
+    const msg = String(err && err.message ? err.message : err);
+    if (/blocked by CSP/i.test(msg) || msg === 'wasm_csp_blocked') return 'wasm_csp_blocked';
+    return 'pow_failed';
+}
+
+// Empty WASM module (magic + version). instantiate() succeeds if CSP allows
+// compilation and throws CompileError "blocked by CSP" if it does not.
+// Argon2's own instantiate is async and does not reject when CSP blocks it,
+// so without this probe the worker hangs until the 60s main-thread timeout.
+async function assertWasmAllowed() {
+    const emptyModule = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
+    try {
+        await WebAssembly.instantiate(emptyModule);
+        console.debug('[PoW] wasm instantiate allowed');
+    } catch (err) {
+        const msg = String(err && err.message ? err.message : err);
+        console.error('[PoW] wasm instantiate failed', { name: err && err.name, message: msg });
+        if (/blocked by CSP/i.test(msg)) {
+            throw new Error('wasm_csp_blocked');
+        }
+        throw err;
+    }
+}
+
 async function isValidProofArgon2id(baseBytes, saltBytes, proof, difficultySteps, powBaseBits, powFactor) {
     const proofBytes = uvarint(proof >>> 0);
     const colon = new Uint8Array([":".charCodeAt(0)]);
@@ -131,7 +156,12 @@ self.onmessage = function (e) {
         self.postMessage({ error: 'invalid_params' });
         return;
     }
-    performPow(baseHex, saltHex, diff, baseBits, powFactor, start)
+    assertWasmAllowed()
+        .then(() => performPow(baseHex, saltHex, diff, baseBits, powFactor, start))
         .then((pow) => self.postMessage(pow))
-        .catch(() => self.postMessage({ error: 'pow_failed' }));
+        .catch((err) => {
+            const code = powErrorCode(err);
+            console.error('[PoW] worker failed', { error: code, detail: String(err && err.message ? err.message : err) });
+            self.postMessage({ error: code });
+        });
 };

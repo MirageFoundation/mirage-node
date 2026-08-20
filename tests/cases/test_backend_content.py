@@ -70,6 +70,7 @@ from tests.common import (
     _resolve_validator_key_addr,
     _get_spendable_balance,
     _required_sub1_spend_budget_umirage,
+    docker_python,
 )
 from tests.backend_helpers import (
     _do_post,
@@ -1670,3 +1671,141 @@ def test_recent_content(backend: str) -> None:
             "recent_content.has_more_with_cursor",
             f"code={code_small} items={len(small_items)} has_more={(data_small or {}).get('has_more')}",
         )
+
+
+def _visibility_probe(name: str, code: str) -> None:
+    """Run `code` in the container; pass when it prints OK and exits cleanly.
+
+    Same contract as the hardening probes: the snippet is embedded in a
+    double-quoted shell string, so it must contain no double quotes and no
+    literal backslashes.
+    """
+    rc, out = docker_python(code, timeout=60)
+    if "rc=0" in out and "OK" in out and "BAD" not in out:
+        _pass(name)
+    else:
+        _fail(name, f"rc={rc} out={out.strip()[-400:]}")
+
+
+def test_anon_visibility() -> None:
+    """A signed-out visitor must never be served tagged content.
+
+    Two independent defects put an agent-tagged post on the anonymous frontpage:
+    `_apply_agent_edits` returned early for a guest, so the tag an auto-enabled
+    agent had applied was never overlaid and the tag filter judged the post by
+    its own empty tag; and `allowed_tags` defaulted to 'sensitive' for everyone,
+    so natively tagged posts passed too. Both are asserted behaviourally here,
+    along with the two caches that keep the guest path from paying for the
+    overlay on every request.
+    """
+    if not _check_local_docker():
+        _skip("anon_visibility", "requires the local mirage container")
+        return
+
+    # ── The auto-enabled agent's tag reaches a signed-out viewer ──────────
+    # Reverting the guest branch in _apply_agent_edits leaves tag == '' here,
+    # which is exactly how the post reached the frontpage untagged.
+    _visibility_probe(
+        "anon_visibility.agent_tag_applied_for_guest",
+        "import routes.public as rp\n"
+        "class Cur:\n"
+        "    def __init__(self):\n"
+        "        self.rows = []\n"
+        "    def execute(self, sql, params=None):\n"
+        "        low = sql.lower()\n"
+        "        if 'select post_txhash' in low and 'agent_edits' in low:\n"
+        "            self.rows = [('p1', 'agent1', None, None, None, 'sensitive', None, None)]\n"
+        "        else:\n"
+        "            self.rows = []\n"
+        "    def fetchall(self):\n"
+        "        return self.rows\n"
+        "    def fetchone(self):\n"
+        "        return self.rows[0] if self.rows else None\n"
+        "rp.merge_auto_enabled_agents = lambda cur, agents: ['agent1']\n"
+        "posts = [{'post_id': 'p1', 'tag': ''}]\n"
+        "rp._apply_agent_edits(Cur(), posts, '')\n"
+        "guest_tag = posts[0].get('tag')\n"
+        "posts2 = [{'post_id': 'p1', 'tag': ''}]\n"
+        "rp._apply_agent_edits(Cur(), posts2, 'guest')\n"
+        "named_guest_tag = posts2[0].get('tag')\n"
+        "ok = guest_tag == 'sensitive' and named_guest_tag == 'sensitive'\n"
+        "print('OK' if ok else ('BAD', guest_tag, named_guest_tag))\n",
+    )
+
+    # ── A guest gets no tags, whatever the client asks for ────────────────
+    # The clamp cannot be a default: every shipped bundle and both apps send
+    # allowed_tags=sensitive, and the edge caches them for weeks.
+    _visibility_probe(
+        "anon_visibility.allowed_tags_clamped_for_guest",
+        "import routes.public as rp\n"
+        "from flask import Flask\n"
+        "app = Flask('probe')\n"
+        "with app.test_request_context('/api/get_posts?allowed_tags=sensitive,adult'):\n"
+        "    anon = rp._viewer_allowed_tags('')\n"
+        "    named = rp._viewer_allowed_tags('guest')\n"
+        "    signed = rp._viewer_allowed_tags('mirage1abc')\n"
+        "with app.test_request_context('/api/get_posts'):\n"
+        "    anon_default = rp._viewer_allowed_tags('')\n"
+        "    signed_default = rp._viewer_allowed_tags('mirage1abc')\n"
+        "ok = (anon == set() and named == set() and signed == {'sensitive', 'adult'}\n"
+        "      and anon_default == set() and signed_default == {'sensitive'})\n"
+        "print('OK' if ok else ('BAD', anon, named, signed, anon_default, signed_default))\n",
+    )
+
+    # ── An empty policy hides every tagged post ──────────────────────────
+    # _is_tag_allowed passes an empty tag unconditionally, which is correct for
+    # untagged posts and is why the overlay above has to run before the filter.
+    _visibility_probe(
+        "anon_visibility.empty_policy_hides_tagged",
+        "import routes.public as rp\n"
+        "posts = [{'post_id': 'a', 'tag': ''}, {'post_id': 'b', 'tag': 'sensitive'},\n"
+        "         {'post_id': 'c', 'tag': 'adult'}]\n"
+        "kept = rp._filter_posts_by_allowed_tags(posts, set(), rid='probe', context='probe')\n"
+        "ids = [p['post_id'] for p in kept]\n"
+        "print('OK' if ids == ['a'] else ('BAD', ids))\n",
+    )
+
+    # ── The guest feed is computed once, not per request ─────────────────
+    # Overlaying agent edits for guests put work on the busiest endpoint on the
+    # site, for a result every guest shares. Entries must be copies: both call
+    # sites merge into the response they get back.
+    _visibility_probe(
+        "anon_visibility.guest_feed_cache_isolated",
+        "import routes.public as rp\n"
+        "rp._guest_feed_cache.clear()\n"
+        "k1 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set())\n"
+        "k2 = rp._guest_feed_cache_key('home', 'newest', 1, 25, set())\n"
+        "k3 = rp._guest_feed_cache_key('home', 'magic', 2, 25, set())\n"
+        "rp._guest_feed_cache_put(k1, {'posts': [{'post_id': 'a'}], 'total': 1})\n"
+        "hit = rp._guest_feed_cache_get(k1)\n"
+        "hit['posts'][0]['post_id'] = 'mutated'\n"
+        "again = rp._guest_feed_cache_get(k1)\n"
+        "ok = (again['posts'][0]['post_id'] == 'a' and len({k1, k2, k3}) == 3\n"
+        "      and rp._guest_feed_cache_get(k2) is None and rp._guest_feed_cache_get(k3) is None)\n"
+        "rp._guest_feed_cache.clear()\n"
+        "print('OK' if ok else ('BAD', hit, again))\n",
+    )
+
+    # ── AUTO_ENABLED_AGENTS is verified once per TTL, not per request ────
+    # The address list is static config; the query only checks the profiles are
+    # still live. Resolving it per call charged every feed request, signed in or
+    # not, for an answer identical for everyone.
+    _visibility_probe(
+        "anon_visibility.auto_agents_resolved_once",
+        "import auto_agents as aa\n"
+        "class Cur:\n"
+        "    calls = 0\n"
+        "    def execute(self, sql, params=None):\n"
+        "        Cur.calls += 1\n"
+        "    def fetchall(self):\n"
+        "        return [('agent1',)]\n"
+        "aa.AUTO_ENABLED_AGENTS = ['agent1']\n"
+        "aa._resolved_agents = None\n"
+        "aa._resolved_expires_at = 0.0\n"
+        "cur = Cur()\n"
+        "first = aa._resolve_auto_enabled_agents(cur)\n"
+        "second = aa._resolve_auto_enabled_agents(cur)\n"
+        "merged = aa.merge_auto_enabled_agents(cur, [])\n"
+        "ok = first == ['agent1'] and second == ['agent1'] and merged == ['agent1'] and Cur.calls == 1\n"
+        "print('OK' if ok else ('BAD', Cur.calls, first, second, merged))\n",
+    )

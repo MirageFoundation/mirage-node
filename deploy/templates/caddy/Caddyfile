@@ -186,7 +186,13 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 			# cert, so upgrading would send the module script to https, where
 			# nothing answers, and the app would not load at all. entrypoint.sh
 			# fills it in and refuses to start a domain node that lost it.
-			Content-Security-Policy "default-src 'self'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com https://*.b-cdn.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'${CSP_UPGRADE_INSECURE}"
+			# script-src includes 'wasm-unsafe-eval' because every free-tier tx
+			# (including signup) compiles argon2 WASM in /pow/worker.js.
+			# 'self' alone makes WebAssembly.instantiate() throw CompileError
+			# (blocked by CSP); the worker never hashes and the UI sits on
+			# Preparing... until the 60s PoW timeout. This token allows WASM
+			# compilation only — it does not allow JS eval.
+			Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://api.giphy.com https://*.b-cdn.net; img-src 'self' data: blob: https:; media-src 'self' blob: https:; frame-src https://www.youtube.com https://youtube.com https://www.redgifs.com https://redgifs.com https://rumble.com https://www.rumble.com https://iframe.cloudflarestream.com https://*.cloudflarestream.com https://videodelivery.net; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'${CSP_UPGRADE_INSECURE}"
 		}
 
 		@aasa path /.well-known/apple-app-site-association

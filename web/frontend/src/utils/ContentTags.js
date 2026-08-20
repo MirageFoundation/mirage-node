@@ -25,7 +25,18 @@ function isShowTagAdultEnabled() {
     }
 }
 
+function isSignedIn() {
+    const owner = Storage.load('publicKey', '');
+    return !!owner && owner !== 'guest';
+}
+
 export function getAllowedTags() {
+    // Signed-out visitors get no tagged content at all. They cannot reach the
+    // settings that would turn a tag off, so the per-tag preferences below only
+    // describe a signed-in viewer. The backend clamps this independently; asking
+    // for nothing here keeps the request honest rather than relying on that.
+    if (!isSignedIn()) return [];
+
     const tags = [];
     if (Storage.load('show_tag_sensitive', true) !== false) tags.push('sensitive');
     if (isShowTagAdultEnabled()) tags.push('adult');

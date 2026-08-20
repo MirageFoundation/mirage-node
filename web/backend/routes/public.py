@@ -17,6 +17,7 @@ Endpoints:
 """
 
 import bisect
+import copy
 import json
 import logging
 import os
@@ -265,6 +266,30 @@ def _normalize_api_tag(tag: str) -> str:
 def _parse_allowed_tags(raw: str) -> set[str]:
     """Parse and normalize the allowed_tags query param."""
     return set(_normalize_api_tag(t) for t in (raw or "").split(",") if t.strip())
+
+
+def _is_guest(address: str) -> bool:
+    """True when the request carries no signed-in viewer."""
+    viewer = (address or "").strip().lower()
+    return not viewer or viewer == "guest"
+
+
+def _viewer_allowed_tags(address: str) -> set[str]:
+    """Allowed tags for this request, clamped to nothing when signed out.
+
+    A signed-in viewer keeps the 'sensitive' default and whatever they chose in
+    settings. A signed-out visitor gets no tagged content at all, regardless of
+    what the client asked for: every shipped bundle and both apps send
+    allowed_tags=sensitive, and the edge caches assets for 30 days, so trusting
+    the parameter would leave tagged posts on the anonymous frontpage long after
+    this ships.
+    """
+    tags = _parse_allowed_tags(request.args.get("allowed_tags", default="sensitive", type=str))
+    if _is_guest(address):
+        if tags:
+            logger.debug("allowed_tags clamped for anonymous viewer requested=%s", sorted(tags))
+        return set()
+    return tags
 
 
 def _is_tag_allowed(tag: str, allowed_tags: set[str]) -> bool:
@@ -755,22 +780,27 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     Replacement fields: topic, title, content, tag, media (first non-None in priority order).
     Appendix: collect ALL non-empty appendices in agent priority order.
     """
-    if not viewer or not posts:
+    if not posts:
         return posts
     viewer_lower = (viewer or "").strip().lower()
-    if not viewer_lower or viewer_lower == "guest":
-        return posts
+    is_guest = _is_guest(viewer)
 
     eligible_posts = posts
 
-    agents = _get_enabled_agents(cur, viewer)
+    # A signed-out visitor has no agent list of their own, but AUTO_ENABLED_AGENTS
+    # is configured to apply to every user. Returning early here meant the tag an
+    # auto-enabled agent had put on a post was never overlaid for guests, so the
+    # tag filter downstream judged the post by its own empty tag and published it
+    # on the anonymous frontpage untagged.
+    agents = merge_auto_enabled_agents(cur, []) if is_guest else _get_enabled_agents(cur, viewer)
     logger.debug(
-        "apply_agent_edits: viewer=%s raw_agents=%s post_count=%d",
-        viewer_lower,
+        "apply_agent_edits: viewer=%s guest=%s raw_agents=%s post_count=%d",
+        viewer_lower or "(anonymous)",
+        is_guest,
         agents,
         len(posts),
     )
-    if agents:
+    if agents and not is_guest:
         agents = [a for a in agents if a.lower() != viewer_lower]
 
     post_ids = [p.get("post_id", "").lower() for p in eligible_posts if p.get("post_id")]
@@ -778,15 +808,16 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
         return posts
     post_ph = ",".join(["%s"] * len(post_ids))
 
-    cur.execute(
-        f"""SELECT 1 FROM agent_edits
-            WHERE post_txhash IN ({post_ph})
-              AND LOWER(agent_address) = %s
-            LIMIT 1""",
-        post_ids + [viewer_lower],
-    )
-    if cur.fetchone():
-        agents.insert(0, viewer_lower)
+    if not is_guest:
+        cur.execute(
+            f"""SELECT 1 FROM agent_edits
+                WHERE post_txhash IN ({post_ph})
+                  AND LOWER(agent_address) = %s
+                LIMIT 1""",
+            post_ids + [viewer_lower],
+        )
+        if cur.fetchone():
+            agents.insert(0, viewer_lower)
     if not agents:
         logger.debug("apply_agent_edits: no agents for viewer=%s, skipping overlay", viewer_lower)
         return posts
@@ -3881,6 +3912,48 @@ def _agg_cache_put(key: str, value: Any) -> None:
         _agg_cache[key] = (now + AGG_CACHE_TTL_SECONDS, value)
 
 
+# ---- Anonymous feed cache ----
+# A signed-out visitor has no blocked lists, no seen map, no vote state and a
+# fixed agent list, so page N of the guest feed is a single value shared by
+# every guest. It was recomputed from scratch on every request on the busiest
+# endpoint on the site: the feed query itself, the media enrichment, the agent
+# overlay and the tag filter. Compute it once per TTL instead. Signed-in
+# requests never read or write this cache — their feed is viewer-specific.
+# 30s matches AGG_CACHE_TTL_SECONDS; a new post reaches the anonymous
+# frontpage within that window.
+GUEST_FEED_CACHE_TTL_SECONDS = 30
+_guest_feed_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
+_guest_feed_cache_lock = threading.Lock()
+
+
+def _guest_feed_cache_key(feed: str, sort_mode: str, page: int, limit: int, allowed_tags: set[str]) -> str:
+    # allowed_tags is clamped to empty for guests today, but it stays in the key
+    # so a future policy change cannot serve one tag policy's posts under another.
+    return f"{feed}|{sort_mode}|{page}|{limit}|{','.join(sorted(allowed_tags))}"
+
+
+def _guest_feed_cache_get(key: str) -> Optional[Dict[str, Any]]:
+    with _guest_feed_cache_lock:
+        entry = _guest_feed_cache.get(key)
+        if not entry or entry[0] <= int(time.time()):
+            return None
+        # Deep copy: callers merge and enrich the response they get back, and a
+        # shared entry would accumulate those edits across requests.
+        return copy.deepcopy(entry[1])
+
+
+def _guest_feed_cache_put(key: str, value: Dict[str, Any]) -> None:
+    now = int(time.time())
+    with _guest_feed_cache_lock:
+        # Keys are built from clamped, validated arguments (feed name, sort mode,
+        # clamped page/limit), so the space is small — evict expired entries only.
+        if len(_guest_feed_cache) > 128:
+            for k, v in list(_guest_feed_cache.items()):
+                if v[0] <= now:
+                    del _guest_feed_cache[k]
+        _guest_feed_cache[key] = (now + GUEST_FEED_CACHE_TTL_SECONDS, copy.deepcopy(value))
+
+
 _WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
 
 # Cache for full overview stats (expensive query)
@@ -4223,7 +4296,7 @@ def _build_bootstrap_view(
                 "limit": str(limit),
                 "page": "1",
                 "by": sort_mode,
-                "allowed_tags": ",".join(sorted(allowed_tags)) if allowed_tags else "sensitive",
+                "allowed_tags": ",".join(sorted(allowed_tags)),
                 **({"address": addr} if addr else {}),
             },
         ):
@@ -4273,6 +4346,18 @@ def _build_bootstrap_view(
     # feed:home / feed:following only from here
     if feed_name not in ("home", "following"):
         return None
+
+    guest_key = (
+        _guest_feed_cache_key(feed_name, sort_mode, 1, limit, allowed_tags) if _is_guest(addr) else None
+    )
+    if guest_key is not None:
+        cached = _guest_feed_cache_get(guest_key)
+        if cached is not None:
+            _track_image_impressions(
+                cached.get("posts") or [], rid, context=f"bootstrap.view.feed.{feed_name}.guest_cached"
+            )
+            log_event(rid, "bootstrap.view.guest_cache.hit", key=guest_key)
+            return {"kind": "feed", "feed": feed_name, **cached}
 
     conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
     try:
@@ -4328,6 +4413,8 @@ def _build_bootstrap_view(
             )
             _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
         resp.pop("_timings", None)
+        if guest_key is not None:
+            _guest_feed_cache_put(guest_key, resp)
         return {"kind": "feed", "feed": feed_name, **resp}
     finally:
         try:
@@ -4350,7 +4437,6 @@ def bootstrap():
     address = (request.args.get("address") or "").strip() or None
     view_raw = request.args.get("view", default=None, type=str)
     by_raw = (request.args.get("by", default="", type=str) or "").strip().lower()
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
     limit = request.args.get("limit", 15, type=int)
     log_event(rid, "bootstrap.begin", address=address, view=view_raw)
 
@@ -4366,7 +4452,7 @@ def bootstrap():
             log_event(rid, f"bootstrap.{name}.err", error=str(e))
             return None
 
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+    allowed_tags = _viewer_allowed_tags(address)
 
     resp: Dict[str, Any] = {
         "node_config": _safe("node_config", _build_node_config),
@@ -4780,13 +4866,12 @@ def get_topics():
     limit = request.args.get("limit", 50, type=int)
     limit = min(max(1, limit), 200)
     min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
 
     # Cache the anonymous case only. The response is filtered by the viewer's
     # blocked topics further down, so a key that ignored the viewer would serve one
     # user's filtered view to another. Anonymous is the unrestricted path anyway.
     viewer_addr = request.args.get("address", default="", type=str)
+    allowed_tags = _viewer_allowed_tags(viewer_addr)
     cache_key = f"topics:{limit}:{min_posts}:{','.join(sorted(allowed_tags))}"
     if not viewer_addr:
         cached = _agg_cache_get(cache_key)
@@ -5042,8 +5127,7 @@ def search():
     offset = max(0, offset)
     viewer = request.args.get("address", default="", type=str).strip()
 
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+    allowed_tags = _viewer_allowed_tags(viewer)
 
     # Detect search type from prefix
     if q_raw.startswith("@"):
@@ -5601,10 +5685,35 @@ def get_posts():
     topic = request.args.get("topic", default=None, type=str)
     address = request.args.get("address", default="", type=str)
 
-    # Parse allowed_tags: comma-separated list of tags the user wants to see
-    # Default: only 'sensitive' is allowed; others (adult, violence, gore, death) are hidden
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+    # Parse allowed_tags: comma-separated list of tags the user wants to see.
+    # Signed in, only 'sensitive' is allowed by default (adult, violence, gore,
+    # death are hidden); signed out, nothing tagged is allowed at all.
+    allowed_tags = _viewer_allowed_tags(address)
+
+    # Feed mode and sort are pure request parsing, and a signed-out feed request
+    # is answered from the shared guest cache before any database work:
+    # connect_db is an unpooled connect, so opening it first would charge every
+    # cache hit a full Postgres handshake.
+    feed = (request.args.get("feed", default=None, type=str) or "").strip().lower()
+    sort_mode = (request.args.get("by", default="", type=str) or "").strip().lower()
+    if sort_mode and sort_mode not in ("magic", "newest"):
+        return jsonify({"error": "unsupported sort mode", "sort_mode": sort_mode}), 400
+    sort_mode = sort_mode or "magic"
+
+    guest_key = (
+        _guest_feed_cache_key(feed, sort_mode, page, limit, allowed_tags)
+        if feed in ("home", "following") and _is_guest(address)
+        else None
+    )
+    if guest_key is not None:
+        cached = _guest_feed_cache_get(guest_key)
+        if cached is not None:
+            # Impressions are still counted per request; only the feed is shared.
+            _track_image_impressions(
+                cached.get("posts") or [], rid, context=f"get_posts.feed.{feed}.guest_cached"
+            )
+            log_event(rid, "get_posts.guest_cache.hit", key=guest_key)
+            return jsonify(cached)
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5618,17 +5727,6 @@ def get_posts():
         blocked_ms = round((time.monotonic() - _t_blocked) * 1000, 2)
 
         deleted_clause = _deleted_filter()
-
-        # New feed modes: Home / Following
-        feed = request.args.get("feed", default=None, type=str)
-        feed = (feed or "").strip().lower()
-        sort_mode = (request.args.get("by", default="", type=str) or "").strip().lower()
-
-        # Only supported sort modes.
-        if sort_mode and sort_mode not in ("magic", "newest"):
-            return jsonify({"error": "unsupported sort mode", "sort_mode": sort_mode}), 400
-
-        sort_mode = sort_mode or "magic"
 
         # ── Seen-posts: load persisted map for novelty scoring ────
         persisted_seen: dict[str, int] = {}
@@ -5732,6 +5830,9 @@ def get_posts():
                     returned=len(resp.get("posts") or []),
                     **inner,
                 )
+
+            if guest_key is not None:
+                _guest_feed_cache_put(guest_key, resp)
 
             conn.close()
             return jsonify(resp)
@@ -6084,8 +6185,7 @@ def get_user_posts():
     page = _clamp_page(page)
     offset = (page - 1) * limit
 
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
+    allowed_tags = _viewer_allowed_tags(viewer)
     if not allowed_tags:
         log_event(rid, "get_user_posts.allowed_tags.empty", owner=owner[:12] if owner else None)
     if post_type == "comments":
