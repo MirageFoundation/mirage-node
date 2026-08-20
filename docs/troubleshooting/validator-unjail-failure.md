@@ -1,5 +1,17 @@
 # Validator Unjail Troubleshooting: Tx Accepted but Not Included
 
+Unjailing itself is one command on the host:
+
+```bash
+mirage-unjail
+```
+
+It refuses to submit while the node is catching up, since a validator that is
+not signing yet is jailed again on the next window. It also reports, without
+submitting, when the validator is not jailed, when the jail period has not
+elapsed, and when the validator is tombstoned. The rest of this page is for
+when that command reports a submitted transaction that never lands.
+
 This guide covers a common failure mode where an unjail transaction appears to be accepted by the mempool, but it never shows up in a block.
 
 ### Symptoms
@@ -62,7 +74,7 @@ miraged q staking validator "${VALOPER}" --node "${RPC}" -o json | jq '.validato
 
 ### Related
 
-- `scripts/unjail_validator.sh`
+- `mirage-unjail` (host tool; wraps `scripts/unjail_validator.sh` in the container)
 - `docs/troubleshooting/common-issues.md`
 
 

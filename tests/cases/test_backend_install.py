@@ -148,6 +148,7 @@ def test_install(backend: str) -> None:
     _test_economics_single_source()
     _test_mint_floor_backend_required()
     _test_caddy_well_known()
+    _test_unjail_tool()
     _test_stale_chunk_recovery()
     _test_caddy_csp_upgrade_scoped_to_tls()
     _test_repodigest_pin()
@@ -1217,6 +1218,7 @@ def _test_public_cli_help() -> None:
         "mirage-domain": ["--set", "--status", "--remove"],
         "mirage-logs": ["--lines", "--once"],
         "mirage-restart": [],
+        "mirage-unjail": [],
     }
     for name, flags in tools.items():
         path = os.path.join(REPO_ROOT, "deploy", "hosttools", name)
@@ -2550,6 +2552,55 @@ def _test_caddy_well_known() -> None:
             _fail("install.entrypoint.mirror_complete", f"well-known mirror does not publish {name}")
             return
     _pass("install.caddy.well_known_before_spa")
+
+
+def _test_unjail_tool() -> None:
+    """Unjailing is the operator's job after any outage, so it is a host tool.
+
+    Two properties matter beyond it existing. It must refuse while the node is
+    catching up, because a validator that is not signing yet is jailed again on
+    the next window. And it must not carry a second copy of the transaction
+    logic: sequence handling and state-based confirmation live in the container
+    script, which is the only place they should live.
+    """
+    tool = Path(REPO_ROOT, "deploy", "hosttools", "mirage-unjail")
+    if not tool.exists():
+        _fail("install.unjail.exists", "deploy/hosttools/mirage-unjail is missing")
+        return
+    body = tool.read_text(encoding="utf-8")
+    if "catching_up" not in body:
+        _fail("install.unjail.sync_guard", "does not refuse while the node is catching up")
+        return
+    if "unjail_validator.sh" not in body:
+        _fail("install.unjail.delegates", "does not delegate the transaction to the container script")
+        return
+    if "tx slashing unjail" in body:
+        _fail("install.unjail.duplicate_tx", "builds its own unjail transaction instead of delegating")
+        return
+
+    # Installed by both paths, or a node gets the tool only on a fresh install.
+    for name, path in (("install.sh", INSTALL_SH), ("mirage-update", UPDATE_SH)):
+        text = Path(path).read_text(encoding="utf-8")
+        if "mirage-unjail" not in text:
+            _fail("install.unjail.installed", f"{name} does not install mirage-unjail")
+            return
+
+    script = Path(REPO_ROOT, "scripts", "unjail_validator.sh").read_text(encoding="utf-8")
+    # The jail terms have to come from this validator's own signing info. Reading
+    # the chain-wide list and guessing which entry is ours misreports jailed_until
+    # as soon as a second validator is jailed, which is exactly when an outage
+    # makes this needed.
+    if "signing-info" not in script or "consensus_pubkey.value" not in script:
+        _fail("install.unjail.signing_info", "does not resolve signing info from the validator's own pubkey")
+        return
+    for guess in ("heuristic", "Using first jailed signing-info", "MOST_RECENT"):
+        if guess in script:
+            _fail("install.unjail.no_guessing", f"still guesses which signing-info is ours ({guess!r})")
+            return
+    if "tombstoned" not in script:
+        _fail("install.unjail.tombstoned", "does not check for tombstoning before submitting")
+        return
+    _pass("install.unjail_tool")
 
 
 def _test_stale_chunk_recovery() -> None:

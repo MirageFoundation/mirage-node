@@ -675,7 +675,7 @@ ssh root@mirage.vote 'docker exec mirage /opt/mirage/blockchain/bin/miraged q st
 ### Unjailing a Validator
 
 ```bash
-ssh root@mirage.vote 'docker exec mirage bash /opt/mirage/scripts/unjail_validator.sh'
+ssh root@mirage.vote mirage-unjail
 ```
 
 ### Manual Database Query

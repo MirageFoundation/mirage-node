@@ -124,6 +124,7 @@ mirage-backup                  # online backup — copy the archive off the serv
 mirage-restore BACKUP          # restore from an archive
 mirage-domain --set DOMAIN     # serve a domain over HTTPS
 mirage-restart                 # whole-container restart, refused when unsafe
+mirage-unjail                  # rejoin the active set after an outage jailed this node
 ```
 
 ### Updates

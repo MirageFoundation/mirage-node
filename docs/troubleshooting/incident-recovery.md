@@ -180,18 +180,19 @@ clients automatically retry with the new last-block-hash on the next refresh.
 
 ## 3. Unjailing a validator
 
-**Script**: [`scripts/unjail_validator.sh`](../../scripts/unjail_validator.sh). **Troubleshooting**: [`docs/troubleshooting/validator-unjail-failure.md`](validator-unjail-failure.md).
+**Host tool**: `mirage-unjail`, which wraps [`scripts/unjail_validator.sh`](../../scripts/unjail_validator.sh). **Troubleshooting**: [`docs/troubleshooting/validator-unjail-failure.md`](validator-unjail-failure.md).
 
 ```bash
-ssh root@<host> 'docker exec -it mirage /opt/mirage/scripts/unjail_validator.sh'
+ssh root@<host> mirage-unjail
 ```
 
-The script:
+It:
 
-1. Waits for `jailed_until` to pass.
-2. Queries the on-chain account sequence (never guesses).
-3. Generates + signs + broadcasts an `unjail` tx in sync mode.
-4. Verifies via state (`jailed` flips to `false`), not by tx-hash lookup.
+1. Refuses while the node is catching up, since a validator that is not signing yet is jailed again on the next window.
+2. Reports and stops if the validator is not jailed, is tombstoned, or its `jailed_until` has not passed. The jail terms are read from this validator's own signing info, looked up by its consensus pubkey.
+3. Queries the on-chain account sequence (never guesses).
+4. Generates + signs + broadcasts an `unjail` tx in sync mode, through this node's own RPC.
+5. Verifies via state (`jailed` flips to `false`), not by tx-hash lookup.
 
 If it fails, see the troubleshooting guide first. **If it fails with `local consensus pubkey does not match on-chain`, stop and go to §6 — do not retry.** That message means your `priv_validator_key.json` does not match the on-chain validator record and retrying will not help.
 

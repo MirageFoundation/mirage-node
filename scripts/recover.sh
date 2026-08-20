@@ -603,7 +603,7 @@ write_cooldown_lock_if_verified() {
   log "monitor: mirage-status"
   log "logs:    $LOGS_DIR/node/miraged-$(date -u +%Y-%m-%d).log"
   log "this run's log: $LOG_FILE"
-  log "NOTE: after blocksync catches up, run: docker exec mirage bash $ROOT_DIR/scripts/unjail_validator.sh"
+  log "NOTE: after blocksync catches up, run: mirage-unjail"
   if [ "$RECOVERY_VERIFIED" = "1" ]; then
     date -u +%Y-%m-%dT%H:%M:%SZ > "$LOCK"
     log "recovery verified. Cool-down lock written: $LOCK"

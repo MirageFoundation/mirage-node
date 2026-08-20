@@ -317,7 +317,7 @@ install_hosttools_from_image() {
     echo "ERROR: staged image pubkey $image_fp does not match host trust anchor $host_fp" >&2
     exit 1
   fi
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart mirage-unjail; do
     install -m 0755 "$staging/$tool" "/usr/local/bin/$tool"
   done
   install -m 0755 "$staging/prune_mirage_images.sh" /usr/local/bin/prune_mirage_images.sh

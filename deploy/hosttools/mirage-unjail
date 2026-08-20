@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Return this validator to the active set after a downtime jailing.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: mirage-unjail
+
+Submit this node's unjail transaction and wait for the jail flag to clear.
+
+A validator is jailed for missing too many blocks, which is what happens after
+an outage. Unjailing is the operator's job: the chain does not do it for you,
+and until it is done the node keeps running without earning or signing.
+
+Nothing is submitted if the validator is not jailed, if its jail period has not
+elapsed yet, or if it is tombstoned (permanent, and not recoverable by unjail).
+Each of those is reported instead.
+
+EOF
+}
+
+if [[ $# -gt 0 ]]; then
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+fi
+
+if ! docker inspect mirage --format '{{.State.Running}}' 2>/dev/null | grep -qx true; then
+  echo "ERROR: mirage container is not running" >&2
+  exit 1
+fi
+
+if [[ -f /root/.mirage/upgrade/halt-detected.txt || -f /var/lib/mirage/update/activating ]]; then
+  echo "ERROR: governed halt or activation is in progress; finish that first" >&2
+  exit 1
+fi
+
+status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status) || {
+  echo "ERROR: local RPC is unavailable; the node must be up and synced to unjail" >&2
+  exit 1
+}
+
+# Unjailing a node that is not signing yet just gets it jailed again on the next
+# window, so the sync check is a refusal rather than a warning.
+catching=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["catching_up"])')
+if [[ "$catching" == "True" || "$catching" == "true" ]]; then
+  height=$(echo "$status" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"])')
+  echo "ERROR: node is still catching up (height $height); unjail once it is synced" >&2
+  exit 1
+fi
+
+# Broadcast through our own node. The script can pick a peer's RPC instead, which
+# exists for the case where the local node is unusable, but that is ruled out by
+# the checks above and a peer we do not control is the worse place to send a
+# signed transaction.
+exec docker exec -e USE_REMOTE_RPC=false mirage bash /opt/mirage/scripts/unjail_validator.sh

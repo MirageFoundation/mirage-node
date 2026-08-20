@@ -433,7 +433,7 @@ install_hosttools() {
     die "image pubkey $image_fp does not match the installer's $host_fp"
   fi
   local tool
-  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart; do
+  for tool in mirage-verify mirage-launch mirage-status mirage-update mirage-upgrade mirage-domain mirage-enroll mirage-backup mirage-restore mirage-logs mirage-restart mirage-unjail; do
     if [[ ! -f "$staging/$tool" ]]; then
       die "image missing host tool $tool"
     fi
@@ -1168,6 +1168,7 @@ print_next_steps() {
   echo "  mirage-domain --set DOMAIN  serve a domain over HTTPS (point A/AAAA here first)"
   echo "  mirage-logs [SERVICE]       read the logs"
   echo "  mirage-update               apply the newest signed release"
+  echo "  mirage-unjail               rejoin the active set after an outage jailed this node"
   echo "  mirage-backup               archive this node (copy the archive off this server)"
   echo "  mirage-restore BACKUP       restore from an archive"
   echo

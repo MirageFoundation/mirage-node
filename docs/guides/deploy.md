@@ -76,6 +76,7 @@ mirage-backup                  # online backup; copy the archive off-server
 mirage-restore BACKUP          # restore local data; miraged keeps signing
 mirage-logs                    # follow service logs
 mirage-restart                 # whole-container restart when it is safe
+mirage-unjail                  # rejoin the active set after a downtime jailing
 docker logs -f mirage          # container stdout (bootstrap / supervisord)
 # persistent logs: ~/.mirage/logs/{node,indexer,backend,caddy,postgres,supervisor,deploy}/
 

@@ -143,261 +143,64 @@ say "Account:  $ACCOUNT_ADDR"
 say "Valoper:  $VALOPER"
 say ""
 
-# 3) IMMEDIATELY check jailed status and jailed_until BEFORE attempting anything
+# 3) Check whether we are jailed, and if so on what terms
 say "=== Checking Validator Status ==="
 VAL_INFO_PRE="$($BIN q staking validator "$VALOPER" --node "$RPC" -o json 2>/dev/null || echo "{}")"
-JAILED_PRE="$(echo "$VAL_INFO_PRE" | jq -r '.validator.jailed // false' 2>/dev/null || echo "false")"
-TOMBSTONED_PRE="false"
-JAILED_UNTIL_PRE=""
+JAILED_PRE="$(echo "$VAL_INFO_PRE" | jq -r '.validator.jailed // false')"
 
-if [ "$JAILED_PRE" = "true" ]; then
-  say ""
-  say "⚠️  VALIDATOR IS JAILED"
-  say ""
-  
-  # Get all signing-infos immediately to show jailed_until
-  SLASH_INFO_PRE="$($BIN q slashing signing-infos --node "$RPC" -o json 2>/dev/null || echo "{}")"
-  
-  # Get jailed signing-infos (those with jailed_until set and not epoch zero)
-  JAILED_SIGNING_INFOS="$(echo "$SLASH_INFO_PRE" | jq -r '.info[]? | select(.jailed_until != null and .jailed_until != "" and .jailed_until != "1970-01-01T00:00:00Z") | [.address, .jailed_until, .tombstoned] | @tsv' 2>/dev/null)"
-  
-  if [ -n "$JAILED_SIGNING_INFOS" ]; then
-    # Show all jailed signing-infos immediately
-    say "Found jailed signing-infos:"
-    echo "$JAILED_SIGNING_INFOS" | while IFS=$'\t' read -r addr until tomb; do
-      say "  Consensus Address: $addr"
-      say "  Jailed Until: $until"
-      say "  Tombstoned: $tomb"
-      say ""
-    done
-    
-    # Match to OUR validator by matching consensus pubkey to signing-info
-    say "Matching signing-info to our validator (operator: $VALOPER)..."
-    
-    # Get our validator's consensus pubkey
-    VAL_CONSENSUS_PUBKEY_PRE="$(echo "$VAL_INFO_PRE" | jq -r '.validator.consensus_pubkey.value // ""' 2>/dev/null || echo "")"
-    
-    if [ -z "$VAL_CONSENSUS_PUBKEY_PRE" ] || [ "$VAL_CONSENSUS_PUBKEY_PRE" = "" ]; then
-      die "Could not get validator consensus pubkey"
-    fi
-    
-    # Get all validators to find which one has our consensus pubkey and operator
-    ALL_VALS_PRE="$($BIN q staking validators --node "$RPC" -o json 2>/dev/null || echo "{}")"
-    
-    # Find validator with our operator and consensus pubkey
-    OUR_VAL_CONSENSUS_ADDR=""
-    # Query validators to find the one with our operator, then get its consensus address
-    # Validators query doesn't return consensus_address directly, so we need to match differently
-    
-    # Match by checking each jailed signing-info against all validators
-    # For each jailed signing-info, check if any validator with our operator matches
-    CONS_ADDR_BECH32=""
-    JAILED_UNTIL_PRE=""
-    TOMBSTONED_PRE="false"
-    
-    # Try to match by checking if any validator with our operator has a consensus pubkey
-    # that corresponds to a jailed signing-info
-    # Since we can't directly convert, we'll match by checking all validators
-    # and finding which one has our operator, then try to match signing-infos
-    
-    # Get all validators with our operator address
-    VALS_WITH_OUR_OP=$(echo "$ALL_VALS_PRE" | jq -r --arg op "$VALOPER" '.validators[]? | select(.operator_address==$op) | .consensus_pubkey.value' 2>/dev/null)
-    
-    if [ -n "$VALS_WITH_OUR_OP" ]; then
-      # We found validators with our operator - now match signing-infos
-      # Since we can't directly convert pubkey to consensus address, we'll match by:
-      # 1. Check if there's only one jailed signing-info (use it)
-      # 2. Otherwise, try to match by checking validators for each signing-info
-      
-      JAILED_COUNT=$(echo "$JAILED_SIGNING_INFOS" | wc -l)
-      if [ "$JAILED_COUNT" -eq 1 ]; then
-        # Only one jailed signing-info - assume it's ours
-        CONS_ADDR_BECH32="$(echo "$JAILED_SIGNING_INFOS" | cut -f1)"
-        JAILED_UNTIL_PRE="$(echo "$JAILED_SIGNING_INFOS" | cut -f2)"
-        TOMBSTONED_PRE="$(echo "$JAILED_SIGNING_INFOS" | cut -f3)"
-        say "✓ Matched: Only one jailed signing-info found"
-        say ""
-      else
-        # Multiple jailed signing-infos - need to match more carefully
-        # Try to match by checking which validator has our consensus pubkey
-        # and see if we can find a corresponding signing-info
-        
-        # For each jailed signing-info, check if we can match it to our validator
-        # by checking if any validator with our operator has a matching pubkey
-        # Since we can't convert easily, we'll use the validator's consensus pubkey
-        # to try to match
-        
-        # Actually, let's try querying each signing-info and see if we can match
-        # by checking validators. But signing-info doesn't tell us which validator it belongs to.
-        
-        # Best approach: Match by checking if our validator's consensus pubkey
-        # matches any validator, then try to find the corresponding signing-info
-        # Since we can't convert, we'll match by checking all validators for our operator
-        # and consensus pubkey, then use heuristic
-        
-        # Check if our validator exists with matching pubkey
-        OUR_VAL_MATCH=$(echo "$ALL_VALS_PRE" | jq -r --arg op "$VALOPER" --arg pub "$VAL_CONSENSUS_PUBKEY_PRE" '.validators[]? | select(.operator_address==$op and .consensus_pubkey.value==$pub) | .operator_address' 2>/dev/null | head -1)
-        
-        if [ -n "$OUR_VAL_MATCH" ] && [ "$OUR_VAL_MATCH" = "$VALOPER" ]; then
-          # Our validator exists - now try to match signing-infos
-          # Since we can't directly convert, we'll try to match by checking
-          # if any validator in the active set has our consensus pubkey
-          # and matches a jailed signing-info
-          
-          # Try to get consensus address from local priv_validator_key.json
-          LOCAL_HEX_ADDR=""
-          if [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
-            LOCAL_HEX_ADDR=$(jq -r '.address // empty' "$NODE_HOME/config/priv_validator_key.json" 2>/dev/null | tr '[:lower:]' '[:upper:]' || echo "")
-          fi
-          
-          # Match by querying validator set to find our validator's hex address
-          # Then match that to jailed signing-infos
-          MATCHED=false
-          
-          # Query validator set at multiple heights to find our validator
-          # (it might not be in current set if jailed)
-          OUR_VAL_HEX_ADDR=""
-          for HEIGHT in "" "1" "100" "500" "1000" "1500"; do
-            VALIDATOR_SET=$(curl -sf "$RPC_HTTP/validators${HEIGHT:+?height=$HEIGHT}" 2>/dev/null || echo "{}")
-            if [ -n "$VALIDATOR_SET" ] && [ "$VALIDATOR_SET" != "{}" ]; then
-              # Find validator with our pubkey and get its hex address
-              VAL_HEX=$(echo "$VALIDATOR_SET" | jq -r --arg pub "$VAL_CONSENSUS_PUBKEY_PRE" '.result.validators[]? | select(.pub_key.value==$pub) | .address' 2>/dev/null | head -1)
-              if [ -n "$VAL_HEX" ] && [ "$VAL_HEX" != "" ] && [ "$VAL_HEX" != "null" ]; then
-                OUR_VAL_HEX_ADDR="$VAL_HEX"
-                break
-              fi
-            fi
-          done
-          
-          # If we found our validator's hex address, match it to local hex address
-          # and then try to find the corresponding bech32 address in jailed signing-infos
-          if [ -n "$OUR_VAL_HEX_ADDR" ] && [ "$OUR_VAL_HEX_ADDR" != "" ]; then
-            # Normalize hex addresses for comparison
-            OUR_VAL_HEX_UPPER=$(echo "$OUR_VAL_HEX_ADDR" | tr '[:lower:]' '[:upper:]')
-            LOCAL_HEX_UPPER=$(echo "$LOCAL_HEX_ADDR" | tr '[:lower:]' '[:upper:]')
-            
-            if [ "$OUR_VAL_HEX_UPPER" = "$LOCAL_HEX_UPPER" ]; then
-              # Hex addresses match! Now find which jailed signing-info corresponds
-              # Since we can't convert hex to bech32 easily, we'll use the fact that
-              # our validator's pubkey matches, and try to match by checking validators
-              # at different heights to see which consensus address (bech32) corresponds
-              
-              # For each jailed signing-info, check if we can verify it's ours
-              # by checking if querying validators shows a match
-              for CONS_ADDR in $(echo "$JAILED_SIGNING_INFOS" | cut -f1); do
-                # Try to verify this signing-info is ours by checking validator set
-                # If we can find a validator with our pubkey and this consensus address matches,
-                # it's ours. But we can't easily check that.
-                
-                # Since we know our hex address matches, and we have jailed signing-infos,
-                # we'll use the one that matches our validator's status or use heuristic
-                # For now, if hex addresses match, use the most recent jailed signing-info
-                MOST_RECENT=$(echo "$JAILED_SIGNING_INFOS" | sort -t$'\t' -k2 -r | head -1)
-                CONS_ADDR_BECH32="$(echo "$MOST_RECENT" | cut -f1)"
-                MATCHED=true
-                break
-              done
-            fi
-          fi
-          
-          # If still no match, try matching each jailed signing-info by checking validators
-          if [ "$MATCHED" != "true" ]; then
-            for CONS_ADDR in $(echo "$JAILED_SIGNING_INFOS" | cut -f1); do
-              # Try to verify this signing-info belongs to our validator
-              # by checking if any validator with our pubkey matches
-              # Since we can't easily convert, we'll use heuristic: most recent jailed_until
-              MOST_RECENT=$(echo "$JAILED_SIGNING_INFOS" | sort -t$'\t' -k2 -r | head -1)
-              CONS_ADDR_BECH32="$(echo "$MOST_RECENT" | cut -f1)"
-              MATCHED=true
-              break
-            done
-          fi
-          
-          # If matched, get jailed_until and tombstoned
-          if [ "$MATCHED" = "true" ] && [ -n "$CONS_ADDR_BECH32" ]; then
-            MATCHED_INFO=$(echo "$JAILED_SIGNING_INFOS" | grep "^$CONS_ADDR_BECH32" || echo "")
-            if [ -n "$MATCHED_INFO" ]; then
-              JAILED_UNTIL_PRE="$(echo "$MATCHED_INFO" | cut -f2)"
-              TOMBSTONED_PRE="$(echo "$MATCHED_INFO" | cut -f3)"
-              say "✓ Matched signing-info to our validator (consensus address: $CONS_ADDR_BECH32)"
-              say ""
-            fi
-          else
-            # If still no match, try to match by checking which jailed signing-info
-            # has the most recent jailed_until (likely ours if recently jailed)
-            # Or use the one that matches our validator's status
-            say "⚠️  Could not precisely match signing-info. Trying to match by jailed_until time..."
-            
-            # Get our validator's jailed status and try to match
-            # Use the jailed signing-info with the most recent jailed_until
-            MOST_RECENT=$(echo "$JAILED_SIGNING_INFOS" | sort -t$'\t' -k2 -r | head -1)
-            if [ -n "$MOST_RECENT" ]; then
-              CONS_ADDR_BECH32="$(echo "$MOST_RECENT" | cut -f1)"
-              JAILED_UNTIL_PRE="$(echo "$MOST_RECENT" | cut -f2)"
-              TOMBSTONED_PRE="$(echo "$MOST_RECENT" | cut -f3)"
-              say "Using most recently jailed signing-info (heuristic match)"
-              say ""
-            else
-              # Fallback to first one
-              CONS_ADDR_BECH32="$(echo "$JAILED_SIGNING_INFOS" | head -1 | cut -f1)"
-              JAILED_UNTIL_PRE="$(echo "$JAILED_SIGNING_INFOS" | head -1 | cut -f2)"
-              TOMBSTONED_PRE="$(echo "$JAILED_SIGNING_INFOS" | head -1 | cut -f3)"
-              say "⚠️  Using first jailed signing-info (fallback)"
-              say ""
-            fi
-          fi
-        else
-          die "Could not verify our validator exists with matching consensus pubkey"
-        fi
-      fi
-    else
-      die "Could not find validator with operator address $VALOPER"
-    fi
-    
-    if [ -n "$CONS_ADDR_BECH32" ] && [ "$CONS_ADDR_BECH32" != "null" ] && [ -n "$CONS_ADDR_BECH32" ]; then
-      
-      if [ "$TOMBSTONED_PRE" = "true" ]; then
-        say "❌ VALIDATOR IS TOMBSTONED - CANNOT BE UNJAILED"
-        say "   Tombstoned validators cannot be recovered."
-        say "   You must create a new validator with a new consensus key."
-        exit 1
-      fi
-      
-      if [ -n "$JAILED_UNTIL_PRE" ] && [ "$JAILED_UNTIL_PRE" != "" ] && [ "$JAILED_UNTIL_PRE" != "null" ]; then
-        NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%S 2>/dev/null || echo "")
-        say "📅 JAILED UNTIL: $JAILED_UNTIL_PRE"
-        if [ -n "$NOW" ]; then
-          say "🕐 CURRENT TIME: $NOW"
-          say ""
-          # Simple string comparison (ISO 8601 format is sortable)
-          if [ "$NOW" \< "$JAILED_UNTIL_PRE" ]; then
-            say "❌ ERROR: jailed_until time has NOT elapsed yet!"
-            say ""
-            say "Unjail will FAIL if attempted now. You must wait until:"
-            say "  $JAILED_UNTIL_PRE"
-            say ""
-            say "The transaction will be rejected from mempool."
-            exit 1
-          else
-            say "✅ jailed_until time has elapsed. Proceeding with unjail..."
-            say ""
-          fi
-        else
-          say "⚠️  Could not determine current time. Proceeding anyway..."
-          say ""
-        fi
-      else
-        say "⚠️  Could not determine jailed_until time. Proceeding anyway..."
-        say ""
-      fi
-    else
-      say "⚠️  Could not find consensus address. Proceeding anyway..."
-      say ""
-    fi
-  fi
-else
-  say "✅ Validator is not jailed. Nothing to do."
+if [ "$JAILED_PRE" != "true" ]; then
+  say "Validator is not jailed. Nothing to do."
   exit 0
+fi
+
+say ""
+say "Validator is JAILED."
+say ""
+
+# Look the signing info up by this validator's own consensus pubkey, which the
+# slashing query accepts in place of an address. What was here before listed
+# every jailed signing-info on the chain and guessed which one was ours (the
+# most recent jailed_until, else the first), so with more than one validator
+# jailed it could read another operator's jail time and refuse an unjail that
+# was in fact due -- exactly when a fleet-wide outage makes this script needed.
+CONS_TYPE="$(echo "$VAL_INFO_PRE" | jq -r '.validator.consensus_pubkey.type // empty')"
+CONS_KEY="$(echo "$VAL_INFO_PRE" | jq -r '.validator.consensus_pubkey.value // empty')"
+if [ -z "$CONS_TYPE" ] || [ -z "$CONS_KEY" ]; then
+  die "could not read the consensus pubkey of $VALOPER"
+fi
+CONS_PUB_JSON="$(jq -cn --arg t "$CONS_TYPE" --arg k "$CONS_KEY" '{"@type":$t,key:$k}')"
+
+SIGN_INFO="$($BIN q slashing signing-info "$CONS_PUB_JSON" --node "$RPC" -o json 2>/dev/null || echo "{}")"
+CONS_ADDR_BECH32="$(echo "$SIGN_INFO" | jq -r '.val_signing_info.address // empty')"
+if [ -z "$CONS_ADDR_BECH32" ]; then
+  die "no signing info for $VALOPER on $RPC; cannot tell whether unjail is allowed"
+fi
+# Both are omitted from the response when unset, being proto3 defaults.
+TOMBSTONED_PRE="$(echo "$SIGN_INFO" | jq -r '.val_signing_info.tombstoned // false')"
+JAILED_UNTIL_PRE="$(echo "$SIGN_INFO" | jq -r '.val_signing_info.jailed_until // empty')"
+
+say "Consensus address: $CONS_ADDR_BECH32"
+say "Jailed until:      ${JAILED_UNTIL_PRE:-<unset>}"
+say "Tombstoned:        $TOMBSTONED_PRE"
+say ""
+
+if [ "$TOMBSTONED_PRE" = "true" ]; then
+  say "Validator is TOMBSTONED and cannot be unjailed."
+  say "Tombstoning is permanent: recovery needs a new validator with a new consensus key."
+  exit 1
+fi
+
+if [ -n "$JAILED_UNTIL_PRE" ]; then
+  NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # Both timestamps are ISO 8601 in UTC, which orders lexicographically.
+  if [ "$NOW" \< "$JAILED_UNTIL_PRE" ]; then
+    say "The jail period has not elapsed yet, so unjail would be rejected."
+    say "  now:          $NOW"
+    say "  jailed until: $JAILED_UNTIL_PRE"
+    exit 1
+  fi
+  say "Jail period elapsed at $JAILED_UNTIL_PRE."
+  say ""
 fi
 
 say "=== Proceeding with Unjail Transaction ==="
