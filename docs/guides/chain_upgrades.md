@@ -115,26 +115,18 @@ Tip: do a dry-run first to confirm the final JSON that will be broadcast:
 cd /home/nik/projects/mirage/public/mirage-node && python3 scripts/submit_proposal.py remote scripts/proposals/proposal_upgrade.json --dry-run
 ```
 
-### Step 6 — Nothing to do on the validators
+### Step 6 — Prepare every validator explicitly
 
-Validators arm themselves. The hourly `mirage-update --tick` timer pulls the
-signed `upgrade-halt` release and, once the on-chain plan name matches the
-manifest's `upgrade_name`, writes `prepared.json` and enables the activation
-timer. Publishing the release and passing the proposal can happen in either
-order: whichever lands second, the next tick arms the node.
-
-So the upgrade window must be at least one hour after both the release is
-published and the proposal has passed. `T+7200` (~6 hours) leaves ample room.
-
-To arm a validator immediately instead of waiting up to an hour:
+After the proposal passes, an operator must prepare each validator:
 
 ```bash
 mirage-update --prepare
 ```
 
-That runs the same arming path and fails loudly with the reason if it cannot
-arm — useful when you want confirmation rather than trust. It requires
-`activation=upgrade-halt` and an on-chain plan name matching the manifest.
+This verifies the signed manifest, pulls its digest, requires
+`activation=upgrade-halt`, and refuses to arm unless the on-chain plan name
+matches the manifest's `upgrade_name`. There is no background release fetch or
+automatic preparation.
 
 Confirm a node is armed with `mirage-update --status`, which prints
 `prepared_upgrade`, `prepared_height` and `prepared_image`.
@@ -143,7 +135,7 @@ Confirm a node is armed with `mirage-update --status`, which prints
 
 At the scheduled height:
 - the currently running `miraged` process exits and stays stopped (it does not consume its crash-restart budget)
-- the host activation timer recreates the whole container from the prepared digest
+- the host activation timer, which never fetches releases, recreates the whole container from the prepared digest
 - the halt marker the chain writes at the upgrade height is the proof the node reached the halt, so a jailed or not-yet-registered validator activates too
 - if the staged release is missing or mismatched, the validator stays halted for operator action; it never restarts the old binary across the upgrade height
 

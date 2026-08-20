@@ -35,7 +35,7 @@ The leftover items from that sweep that the operator chose to **fix**:
 
 | Item | Status |
 | :--- | :--- |
-| Host tools installed from a staged image on hourly `--tick`, before operator activation | **Fixed, shipped in `v1.37.0`.** `--tick` pulls and stages only; `activate_staged` installs host tools after the new container is healthy. |
+| Host tools installed from a staged image on hourly `--tick`, before operator activation | **Fixed in `v1.37.0`; automatic release fetching removed in `v1.38.0`.** Releases now require an explicit `mirage-update` or `mirage-update --prepare`. Only the local prepared-image halt activator remains automatic. |
 | Process-dead → peer-pull around an upgrade halt (`WATCHDOG_AUTORECOVER` + recovery key) | **Fixed, shipped in `v1.37.0`.** Upgrade-halt in recent logs alerts and refuses restart/wipe. `recover.sh` peer-pull dies unless a peer is strictly ahead of a known local height. |
 | `enable_validator_mode` overwrites `priv_validator_state.json` to head+5 on every start | **Fixed, shipped in `v1.37.0`.** Never lowers an existing watermark; skips the write while `catching_up`. Weekly restart also skips `catching_up`. |
 | NT-5 ASN layout declared twice | **Fixed, shipped in `v1.37.0`.** Layout and class map live in `shared/asn_layout.py`. |

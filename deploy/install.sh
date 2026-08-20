@@ -443,7 +443,7 @@ install_hosttools() {
   install -m 0755 "$staging/mirage-weekly-restart.sh" /usr/local/sbin/mirage-weekly-restart.sh
   install -m 0644 "$staging/release_verify.py" /usr/local/share/mirage/release_verify.py
   mkdir -p /etc/systemd/system
-  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
+  for tool in mirage-enroll.service mirage-enroll.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
     install -m 0644 "$staging/systemd/$tool" "/etc/systemd/system/$tool"
   done
   rm -rf "$staging"
@@ -1097,9 +1097,10 @@ PY
 }
 
 install_timers() {
+  systemctl disable --now mirage-update.timer >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/mirage-update.service /etc/systemd/system/mirage-update.timer
   systemctl daemon-reload
   systemctl enable --now mirage-enroll.timer
-  systemctl enable --now mirage-update.timer
   systemctl enable --now mirage-upgrade-activate.timer
 }
 

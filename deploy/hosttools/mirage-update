@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Check, stage and activate an ordinary release; --tick only pre-stages it.
+# Manually check, stage and activate signed releases.
 set -euo pipefail
 
 HOME="${HOME:-/root}"
@@ -18,12 +18,12 @@ show_help() {
 Usage: mirage-update [--prepare | --status | --rollback]
 
   (no args)     check, verify, stage, and activate an ordinary release
-  --prepare     arm a governed upgrade now instead of waiting for the hourly tick
+  --prepare     verify, pull, and arm a governed upgrade
   --status      show active/staged/prepared state without mutation
   --rollback    restore the previous image when the signed policy permits it
 
-Governed blockchain upgrades need no command: the hourly check pre-pulls the
-release and arms halt activation once the proposal is on chain.
+Every release requires an explicit operator command. A prepared governed
+upgrade activates automatically only after the node reaches its matching halt.
 
 EOF
 }
@@ -295,6 +295,12 @@ pubkey_fingerprint() {
   openssl pkey -pubin -in "$1" -outform DER | tail -c 32 | od -An -v -tx1 | tr -d ' \n'
 }
 
+disable_automatic_release_fetch() {
+  systemctl disable --now mirage-update.timer >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/mirage-update.service /etc/systemd/system/mirage-update.timer
+  systemctl daemon-reload
+}
+
 install_hosttools_from_image() {
   local image="$1" staging="$tmp/hosttools" image_fp host_fp tool
   mkdir -p "$staging"
@@ -312,10 +318,10 @@ install_hosttools_from_image() {
   install -m 0755 "$staging/prune_mirage_images.sh" /usr/local/bin/prune_mirage_images.sh
   install -m 0755 "$staging/mirage-weekly-restart.sh" /usr/local/sbin/mirage-weekly-restart.sh
   install -m 0644 "$staging/release_verify.py" /usr/local/share/mirage/release_verify.py
-  for tool in mirage-enroll.service mirage-enroll.timer mirage-update.service mirage-update.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
+  for tool in mirage-enroll.service mirage-enroll.timer mirage-upgrade-activate.service mirage-upgrade-activate.timer; do
     install -m 0644 "$staging/systemd/$tool" "/etc/systemd/system/$tool"
   done
-  systemctl daemon-reload
+  disable_automatic_release_fetch
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
 }
 
@@ -380,24 +386,6 @@ PY
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
   echo "armed $upgrade_name at height $plan_h; activation is automatic at the governed halt"
   return 0
-}
-
-# A governed upgrade must not depend on an operator being awake to type a
-# command. Every tick tries to arm, so the ordering of "release published" and
-# "proposal passed" stops mattering: whichever happens second, the next tick
-# arms the node. Without this a validator reaches the halt unarmed, stops there,
-# and stays down until a human logs in.
-maybe_arm_staged_upgrade() {
-  local manifest="$HOME/.mirage/env/release-manifest.json"
-  if [[ ! -f "$manifest" ]]; then
-    return 0
-  fi
-  if [[ "$(json_field "$manifest" activation)" != "upgrade-halt" ]]; then
-    return 0
-  fi
-  if ! arm_governed_upgrade "$manifest"; then
-    echo "governance-linked release staged; it arms itself once the plan is on chain"
-  fi
 }
 
 tick() {
@@ -468,7 +456,6 @@ PY
       fi
     fi
     echo "no newer release (last_release_id=$last_id)"
-    maybe_arm_staged_upgrade
     return 0
   fi
   # An armed governed upgrade owns the next container recreate. Staging an
@@ -476,8 +463,8 @@ PY
   # digest unreferenced for the image pruner, and strand the halt with
   # "prepared image is not present locally". activate_staged already refuses
   # ordinary activation near a plan; refuse the staging too. prepared.json only
-  # exists while an upgrade is pending, so the release lands on the next tick
-  # after the halt is crossed.
+  # exists while an upgrade is pending, so the release lands on the next manual
+  # update after the halt is crossed.
   if [[ -f "$HOME/.mirage/upgrade/prepared.json" && "$activation" == "ordinary" ]]; then
     echo "governed upgrade $(json_field "$HOME/.mirage/upgrade/prepared.json" upgrade_name) is armed for height $(json_field "$HOME/.mirage/upgrade/prepared.json" plan_height); not staging ordinary release $version over it"
     return 0
@@ -513,15 +500,13 @@ PY
   install -m 0644 "$tmp/manifest.json.sig" "$HOME/.mirage/well-known/manifest.json.sig"
   echo "staged $image activation=$activation (host tools install on activation)"
   if [[ "$activation" == "upgrade-halt" ]]; then
-    echo "governance-linked release staged; manual activation is disabled"
-    maybe_arm_staged_upgrade
+    echo "governance-linked release staged; run mirage-update --prepare after its on-chain plan passes"
   fi
 }
 
 update_now() {
-  # An hourly tick may have staged a release just before a newer manifest was
-  # published. A manual update must refresh policy first, or it can restart the
-  # node onto an image that was obsolete before the operator pressed Enter.
+  # Always refresh policy before activation so the operator cannot restart onto
+  # an image that was superseded before the command began.
   tick
   staged=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("staged") or "")' "$STATE_FILE")
   if [[ -z "$staged" ]]; then
@@ -625,10 +610,10 @@ PY
   fi
 }
 
-# The hourly tick arms governed upgrades on its own, so this exists only to arm
-# one immediately instead of waiting up to an hour, and to fail loudly with the
-# reason when it cannot.
+# Preparation is the sole path that authorizes fetching and arming a governed
+# upgrade. Halt activation later uses only this locally prepared image.
 prepare() {
+  disable_automatic_release_fetch
   mkdir -p "$HOME/.mirage/env" "$HOME/.mirage/well-known" "$HOME/.mirage/upgrade"
   fetch_verify "$MANIFEST_URL" "$tmp/manifest.json"
   activation=$(json_field "$tmp/manifest.json" activation)

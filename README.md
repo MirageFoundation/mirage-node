@@ -128,10 +128,8 @@ mirage-restart                 # whole-container restart, refused when unsafe
 
 ### Updates
 
-Your node checks hourly for a release signed by the Mirage signing key and
-pre-pulls it. Nothing unsigned is ever installed.
-
-**Ordinary releases** wait for you, because activating one restarts the node:
+Your node never fetches releases automatically. To verify, pull and activate an
+ordinary signed release:
 
 ```bash
 mirage-update
@@ -139,10 +137,11 @@ mirage-update
 
 Being several releases behind is fine — one update applies everything it missed.
 
-**Blockchain upgrades need no command.** When governance schedules one, your node
-pulls the new image while the old one keeps signing, and arms itself to switch at
-the exact halt height. The chain stops, your node swaps to the new binary, and
-blocks resume. Leave it alone and it works.
+**Blockchain upgrades require explicit preparation.** After governance passes
+the proposal, run `mirage-update --prepare`. It verifies and pulls the exact
+signed digest, matches it to the on-chain plan, and arms the node. At the halt,
+the local activator swaps to that already prepared image automatically; it
+never fetches anything itself.
 
 ### Backups
 

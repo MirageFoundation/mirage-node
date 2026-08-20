@@ -1992,10 +1992,7 @@ def _test_updater_network_only_refresh() -> bool:
             json.dumps({"last_release_id": 7, "last_network_generation": 1}),
             encoding="utf-8",
         )
-        functions = "".join(
-            _shell_function(UPDATE_SH, name)
-            for name in ("version_at_least", "canonical_hash", "arm_governed_upgrade", "maybe_arm_staged_upgrade", "tick")
-        )
+        functions = "".join(_shell_function(UPDATE_SH, name) for name in ("version_at_least", "canonical_hash", "tick"))
         script = f"""set -euo pipefail
 HOME={home!r}
 tmp={work!r}
@@ -2043,7 +2040,7 @@ def _test_hosttool_paths() -> None:
 
 
 def _test_updater_hosttools_on_activate_only() -> None:
-    """Hourly --tick must not replace host tools; activation installs them after a healthy launch."""
+    """Staging must not replace host tools; activation installs them after a healthy launch."""
     tick = _shell_function(UPDATE_SH, "tick")
     activate = _shell_function(UPDATE_SH, "activate_staged")
     if "install_hosttools_from_image" in tick:
@@ -2730,8 +2727,20 @@ apply_replacement_watermark
 
 
 def _test_governed_upgrade_prepare() -> None:
-    """The hourly tick arms governed upgrades itself; activation trusts the Cosmos marker, not signing."""
+    """Only explicit preparation fetches upgrades; halt activation uses the prepared image."""
     updater = Path(UPDATE_SH).read_text(encoding="utf-8")
+    install = Path(INSTALL_SH).read_text(encoding="utf-8")
+    systemd_dir = os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd")
+    for legacy_unit in ("mirage-update.service", "mirage-update.timer"):
+        if os.path.exists(os.path.join(systemd_dir, legacy_unit)):
+            _fail("install.upgrade.background_fetch_unit", f"{legacy_unit} still ships")
+            return
+    if "enable --now mirage-update.timer" in install:
+        _fail("install.upgrade.background_fetch_enabled", "installer enables automatic release fetching")
+        return
+    if "disable --now mirage-update.timer" not in install or "disable --now mirage-update.timer" not in updater:
+        _fail("install.upgrade.legacy_fetch_timer", "existing automatic release timer is not disabled")
+        return
     wrapper = Path(os.path.join(REPO_ROOT, "deploy", "run_miraged_supervised.sh")).read_text(encoding="utf-8")
     timer = Path(os.path.join(REPO_ROOT, "deploy", "hosttools", "systemd", "mirage-upgrade-activate.timer")).read_text(
         encoding="utf-8"
@@ -2758,7 +2767,9 @@ def _test_governed_upgrade_prepare() -> None:
     if not halt_pattern:
         _fail("install.upgrade.halt_pattern", "node wrapper has no UPGRADE_HALT_PATTERN to check")
         return
-    escaped = 'ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \\"v1.26.0\\" NEEDED at height: 4895581: "'
+    escaped = (
+        'ERR CONSENSUS FAILURE!!! err="failed to apply block; error UPGRADE \\"v1.26.0\\" NEEDED at height: 4895581: "'
+    )
     for label, line, want in (
         ("escaped", escaped, True),
         ("plain", 'ERR UPGRADE "v1.26.0" NEEDED at height: 4895581', True),
@@ -2788,8 +2799,12 @@ def _test_governed_upgrade_prepare() -> None:
 
     prepare = _shell_function(UPDATE_SH, "prepare")
     arm = _shell_function(UPDATE_SH, "arm_governed_upgrade")
-    maybe_arm = _shell_function(UPDATE_SH, "maybe_arm_staged_upgrade")
     activate = _shell_function(UPDATE_SH, "activate_if_halted")
+    idx_disable = prepare.find("disable_automatic_release_fetch")
+    idx_tick = prepare.find("tick")
+    if idx_disable < 0 or idx_tick < idx_disable or prepare.find("arm_governed_upgrade") < idx_tick:
+        _fail("install.upgrade.prepare_sequence", "--prepare must disable background fetching before fetch and arm")
+        return
 
     def _arm_harness(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> tuple[str, str]:
         """Build a shell preamble whose stubbed tick installs the release manifest."""
@@ -2821,13 +2836,13 @@ fetch_verify() {{ cp {release!r} "$2"; }}
 json_field() {{ python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }}
 tick() {{ cp {release!r} {installed!r}; }}
 systemctl() {{ :; }}
+disable_automatic_release_fetch() {{ :; }}
 curl() {{
   printf '%s\\n' {plan!r}
   return 0
 }}
 query_local_rest() {{ curl "$@"; }}
 {arm}
-{maybe_arm}
 {prepare}
 """
         return preamble, os.path.join(home, ".mirage", "upgrade", "prepared.json")
@@ -2848,12 +2863,6 @@ query_local_rest() {{ curl "$@"; }}
         if os.path.exists(prepared_path):
             _fail("install.upgrade.prepare_armed_without_plan", "armed activation before the proposal passed")
             return
-        # The same missing plan must leave the hourly tick healthy, or a published
-        # upgrade release would fail the timer every hour until governance votes.
-        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
-        if r.returncode != 0 or "arms itself once the plan is on chain" not in (r.stdout or ""):
-            _fail("install.upgrade.tick_survives_no_plan", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
-            return
 
     with tempfile.TemporaryDirectory(prefix="prepare-mismatch-") as tmp:
         preamble, _ = _arm_harness(tmp, "upgrade-halt", '{"plan":{"name":"other","height":"99"}}', "v-test")
@@ -2862,29 +2871,19 @@ query_local_rest() {{ curl "$@"; }}
             _fail("install.upgrade.prepare_mismatch", f"rc={r.returncode} err={r.stderr}")
             return
 
-    # The whole point of the hourly tick arming: an operator who never runs a
-    # command still crosses the halt.
-    with tempfile.TemporaryDirectory(prefix="tick-arms-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="prepare-arms-") as tmp:
         preamble, prepared_path = _arm_harness(tmp, "upgrade-halt", '{"plan":{"name":"v-test","height":"4242"}}')
-        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        r = _run(["bash", "-c", preamble + "prepare\n"])
         if r.returncode != 0 or not os.path.isfile(prepared_path):
-            _fail("install.upgrade.tick_arms", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            _fail("install.upgrade.prepare_arms", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
         armed = json.loads(Path(prepared_path).read_text(encoding="utf-8"))
         if armed.get("upgrade_name") != "v-test" or armed.get("plan_height") != 4242:
-            _fail("install.upgrade.tick_arms_payload", armed)
+            _fail("install.upgrade.prepare_arms_payload", armed)
             return
-        # Re-arming every hour must be a no-op, not a rewrite storm.
-        again = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
+        again = _run(["bash", "-c", preamble + "prepare\n"])
         if again.returncode != 0 or "already armed" not in (again.stdout or ""):
-            _fail("install.upgrade.tick_arm_idempotent", f"rc={again.returncode} out={again.stdout}")
-            return
-
-    with tempfile.TemporaryDirectory(prefix="tick-ordinary-") as tmp:
-        preamble, prepared_path = _arm_harness(tmp, "ordinary", '{"plan":{"name":"v-test","height":"10"}}', "")
-        r = _run(["bash", "-c", preamble + "tick\nmaybe_arm_staged_upgrade\n"])
-        if r.returncode != 0 or os.path.exists(prepared_path):
-            _fail("install.upgrade.tick_ordinary_not_armed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            _fail("install.upgrade.prepare_arm_idempotent", f"rc={again.returncode} out={again.stdout}")
             return
 
     # An ordinary release published after arming must not repoint "staged" and
@@ -2938,7 +2937,6 @@ docker() {{ echo "docker must not run while an upgrade is armed: $*" >&2; return
 {_shell_function(UPDATE_SH, "version_at_least")}
 {_shell_function(UPDATE_SH, "canonical_hash")}
 {_shell_function(UPDATE_SH, "arm_governed_upgrade")}
-{_shell_function(UPDATE_SH, "maybe_arm_staged_upgrade")}
 {real_tick}
 tick
 """
@@ -3265,7 +3263,12 @@ def _test_card_amounts_fit() -> None:
         "Retention",
         dash.Status.WARN,
         "Below expected",
-        {"retained_blocks": 10_929, "expected_blocks": 201_600, "pruning_strategy": "custom", "pruning_keep_recent": 1000},
+        {
+            "retained_blocks": 10_929,
+            "expected_blocks": 201_600,
+            "pruning_strategy": "custom",
+            "pruning_keep_recent": 1000,
+        },
     )
     for status in (validator, retention):
         card = dash.draw_card(status.name, status.status, dash.format_card_content(status))
@@ -3350,10 +3353,7 @@ def _test_earnings_card() -> None:
         _fail("install.status.earnings_aligned", f"amounts start at columns {sorted(columns)}: {plain}")
         return
     compact = "\n".join(dash.render_compact_dashboard([earnings], 80, 24, 1))
-    if (
-        "24h  +33.4 earned  -0.5 spent" not in compact
-        or "24h  +5mm staked  30d +33.4 earned" not in compact
-    ):
+    if "24h  +33.4 earned  -0.5 spent" not in compact or "24h  +5mm staked  30d +33.4 earned" not in compact:
         _fail("install.status.earnings_compact", compact)
         return
     _pass("install.status.earnings_card")
@@ -3382,9 +3382,7 @@ def _test_staked_balance_history() -> None:
         mock.patch("indexer.chain_client.grpc.insecure_channel", return_value=channel),
         mock.patch.object(staking_query_pb2_grpc, "QueryStub", return_value=stub),
     ):
-        got = ChainClient("http://127.0.0.1:26657").get_staked_balance(
-            "mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a"
-        )
+        got = ChainClient("http://127.0.0.1:26657").get_staked_balance("mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqnrql8a")
     if got != 5_000_250_000_000:
         _fail("install.status.staked_query", f"delegated + unbonding returned {got}")
         return
@@ -3430,7 +3428,9 @@ def _test_retention_building_up() -> None:
     _pass("install.status.retention_building_up")
 
 
-def _maintenance_gate_run(tmp: str, stall_secs: int, backend_ready: bool, freeze_after: int) -> subprocess.CompletedProcess:
+def _maintenance_gate_run(
+    tmp: str, stall_secs: int, backend_ready: bool, freeze_after: int
+) -> subprocess.CompletedProcess:
     """Run the gate with curl/rm/sleep stubbed, so no wall-clock time passes."""
     fake = os.path.join(tmp, "bin")
     os.makedirs(fake, exist_ok=True)
@@ -3549,9 +3549,7 @@ def _test_status_compact_layout() -> None:
     sys.path.insert(0, os.path.join(REPO_ROOT, "scripts"))
     import status_dashboard as dash
 
-    pid_path = Path(
-        f"/tmp/mirage-status-{os.getpid()}-{os.getppid()}-{threading.get_ident()}.pid"
-    )
+    pid_path = Path(f"/tmp/mirage-status-{os.getpid()}-{os.getppid()}-{threading.get_ident()}.pid")
     try:
         created = dash.create_session_pid_file(str(pid_path))
         if created != pid_path or pid_path.read_text(encoding="utf-8").strip() != str(os.getpid()):

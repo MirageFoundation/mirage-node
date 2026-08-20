@@ -18,7 +18,7 @@ If you are a large staker, your share of each round goes down. That is the delib
 
 ### This one stops the chain
 
-Unlike recent releases, this genuinely changes consensus. A node still running v1.37.0 computes a different payout from the very same block, so a network on mixed versions would not merely disagree about rewards, it would split in two. Every validator therefore stops at one scheduled block and returns on the new version. Nodes handle this themselves now: yours pulls the new version in the background, matches it against the scheduled upgrade on the chain, and commits to switching at that exact block without anyone typing anything. The requirement is simply that your node is running during the hour before the halt. If it is switched off through that entire window, you will apply the upgrade by hand when you bring it back — and until you do, it cannot follow the chain.
+Unlike recent releases, this genuinely changes consensus. A node still running v1.37.0 computes a different payout from the very same block, so a network on mixed versions would not merely disagree about rewards, it would split in two. Every validator therefore stops at one scheduled block and returns on the new version. Nothing is downloaded in the background: after the proposal passes, each operator explicitly verifies, downloads and prepares the signed release. The node then switches to that exact prepared version automatically when it reaches the matching halt. A validator that was not prepared stays safely halted on the old version until its operator acts; it never guesses or silently crosses the boundary.
 
 ### Adjustable from here
 

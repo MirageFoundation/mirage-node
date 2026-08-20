@@ -69,7 +69,7 @@ mirage-status                  # live dashboard, Ctrl+C exits
 mirage-status --once           # one snapshot
 mirage-status --json           # machine-readable health
 mirage-update                  # activate a staged ordinary release
-mirage-update --prepare        # arm a governed halt now instead of on the next tick
+mirage-update --prepare        # verify, pull and arm a governed halt
 mirage-update --status         # active/staged/prepared, no changes
 mirage-update --rollback       # only when the signed release permits rollback
 mirage-backup                  # online backup; copy the archive off-server
@@ -86,7 +86,7 @@ docker logs -f mirage          # container stdout (bootstrap / supervisord)
 mirage-update --refresh-hosttools --image ghcr.io/miragefoundation/mirage-node@sha256:...
 ```
 
-The node checks for signed releases hourly. Ordinary releases stage and wait for `mirage-update`. Host tools on the machine are replaced from that image only when you activate, not when the hourly check stages it. Governance-halt releases need no command at all: the hourly check pulls the image while the current node keeps running and arms automatic activation as soon as the on-chain plan names that release, so the release and the proposal can land in either order. `mirage-update --prepare` runs the same arming immediately if you would rather not wait for the next tick. A staged release is refused if the network manifest went backwards a generation, or if a governance halt is within 500 blocks. Being several releases behind is not a reason for refusal: the new image applies every deploy migration the node has not run yet, so a node that missed updates catches up in one step. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
+The node never fetches or stages a release automatically. Run `mirage-update` to verify, pull and activate an ordinary release. After a software-upgrade proposal passes, run `mirage-update --prepare` to verify its signed release, pull the digest and match it to the on-chain plan. Only the local halt activator is automatic: it cannot fetch anything, and it recreates the container only from that prepared digest after the node writes the matching halt marker. A release is refused if the network manifest went backwards a generation, or if an ordinary activation is attempted within 500 blocks of a governance halt. Being several releases behind is not a reason for refusal: the new image applies every deploy migration the node has not run yet, so a node that missed updates catches up in one step. Rollback is available only when the active signed manifest explicitly marks it safe and the release is not consensus-breaking.
 
 If this seed is already a validator on a machine that is gone for good, the installer asks you to type exactly `replace`. That writes a signing watermark above the live chain height so the new host cannot double-sign. The old VM must never be started again. Replacement discards local indexer, backend, and media history; `mirage-backup` is the way to keep that data, and it does not take the validator down.
 
