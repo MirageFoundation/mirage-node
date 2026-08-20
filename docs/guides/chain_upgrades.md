@@ -93,9 +93,23 @@ Example:
 
 Notes:
 - Mirage block time is ~3s, so `T+7200` is roughly 6 hours (\(7200*3s\)).
-- The actual resolution happens at submission time (see the next step).
+- The actual resolution happens at submission time.
 
-### Step 5 — Submit the proposal (governance transaction)
+### Step 5 — Prepare every validator explicitly
+
+Before submitting the proposal, an operator must prepare each validator:
+
+```bash
+mirage-update --prepare
+```
+
+This verifies the signed manifest, pulls its digest, requires
+`activation=upgrade-halt`, and records the upgrade name. There is no background
+release fetch or automatic preparation. Confirm the result with
+`mirage-update --status`; before governance it prints
+`prepared_height: (pending governance)`.
+
+### Step 6 — Submit the proposal (governance transaction)
 
 Use the submit script:
 
@@ -114,22 +128,6 @@ Tip: do a dry-run first to confirm the final JSON that will be broadcast:
 ```bash
 cd /home/nik/projects/mirage/public/mirage-node && python3 scripts/submit_proposal.py remote scripts/proposals/proposal_upgrade.json --dry-run
 ```
-
-### Step 6 — Prepare every validator explicitly
-
-After the proposal passes, an operator must prepare each validator:
-
-```bash
-mirage-update --prepare
-```
-
-This verifies the signed manifest, pulls its digest, requires
-`activation=upgrade-halt`, and refuses to arm unless the on-chain plan name
-matches the manifest's `upgrade_name`. There is no background release fetch or
-automatic preparation.
-
-Confirm a node is armed with `mirage-update --status`, which prints
-`prepared_upgrade`, `prepared_height` and `prepared_image`.
 
 ### Step 7 — At the upgrade height: automatic activation
 

@@ -325,14 +325,9 @@ install_hosttools_from_image() {
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
 }
 
-# Record that this node intends to cross a specific governed halt onto a specific
-# image, and start the timer that performs the swap. Arming commits nothing: the
-# halt marker, the plan name, the halt height and the image digest are all
-# re-verified by activate_if_halted before the container is recreated.
-#
-# Returns 1, with the reason on stdout, when the on-chain plan is not readable
-# yet. That is the ordinary state between publishing an upgrade release and the
-# proposal passing, so the caller decides whether to retry later or fail.
+# Record that this node intends to cross a governed halt onto a specific image,
+# and start the timer that performs the swap. Before governance, plan_height is
+# zero; the chain-written halt marker supplies the height during activation.
 arm_governed_upgrade() {
   local manifest="$1" upgrade_name image release_id prepared plan plan_name plan_h
   upgrade_name=$(json_field "$manifest" upgrade_name)
@@ -348,11 +343,15 @@ arm_governed_upgrade() {
   fi
   plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
   plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
-  if [[ -z "$plan_name" || "$plan_h" -le 0 ]]; then
-    echo "no on-chain upgrade plan yet; not arming before the proposal passes"
-    return 1
+  if [[ -z "$plan_name" && "$plan_h" -ne 0 ]]; then
+    echo "ERROR: on-chain upgrade plan has height $plan_h but no name" >&2
+    exit 1
   fi
-  if [[ "$plan_name" != "$upgrade_name" ]]; then
+  if [[ -n "$plan_name" && "$plan_h" -le 0 ]]; then
+    echo "ERROR: on-chain upgrade plan '$plan_name' has invalid height $plan_h" >&2
+    exit 1
+  fi
+  if [[ -n "$plan_name" && "$plan_name" != "$upgrade_name" ]]; then
     echo "ERROR: on-chain plan '$plan_name' does not match manifest upgrade_name '$upgrade_name'" >&2
     exit 1
   fi
@@ -384,7 +383,11 @@ for path in (dest, dest2):
     os.replace(tmp, path)
 PY
   systemctl enable --now mirage-upgrade-activate.timer >/dev/null 2>&1 || true
-  echo "armed $upgrade_name at height $plan_h; activation is automatic at the governed halt"
+  if (( plan_h > 0 )); then
+    echo "prepared $upgrade_name at height $plan_h; activation is automatic at the governed halt"
+  else
+    echo "prepared $upgrade_name before governance; the matching halt marker will supply its height"
+  fi
   return 0
 }
 
@@ -588,7 +591,7 @@ PY
 import json, sys
 p = json.load(open(sys.argv[1]))
 print("prepared_upgrade:", p.get("upgrade_name"))
-print("prepared_height:", p.get("plan_height"))
+print("prepared_height:", p.get("plan_height") or "(pending governance)")
 print("prepared_image:", p.get("image"))
 print("prepared_at:", p.get("prepared_at"))
 PY
@@ -622,10 +625,7 @@ prepare() {
     exit 1
   fi
   tick
-  if ! arm_governed_upgrade "$HOME/.mirage/env/release-manifest.json"; then
-    echo "ERROR: cannot arm the governed upgrade yet; refusing to report it as prepared" >&2
-    exit 1
-  fi
+  arm_governed_upgrade "$HOME/.mirage/env/release-manifest.json"
   echo "The release is ready and will activate automatically at the governed halt."
 }
 
@@ -642,15 +642,30 @@ activate_if_halted() {
   if [[ ! -f "$marker" ]]; then
     exit 0
   fi
-  python3 - "$marker" "$name" "$height" <<'PY' || exit 0
+  local marker_values marker_name marker_height
+  marker_values=$(python3 - "$marker" <<'PY'
 import json, sys
-marker, name, height = sys.argv[1], sys.argv[2], int(sys.argv[3])
-info = json.load(open(marker))
-got_name = info.get("name") or ""
-got_h = int(info.get("height") or 0)
-if got_name != name or got_h != height:
+info = json.load(open(sys.argv[1]))
+name = info.get("name") or ""
+height = int(info.get("height") or 0)
+if not name or height <= 0:
     raise SystemExit(1)
+print(name)
+print(height)
 PY
+) || exit 0
+  marker_name=$(printf '%s\n' "$marker_values" | awk 'NR == 1')
+  marker_height=$(printf '%s\n' "$marker_values" | awk 'NR == 2')
+  if [[ "$marker_name" != "$name" ]]; then
+    exit 0
+  fi
+  if (( height > 0 && marker_height != height )); then
+    exit 0
+  fi
+  if (( height == 0 )); then
+    height=$marker_height
+    echo "prepared before governance; matched $name to halt marker at height $height"
+  fi
   local pv="$HOME/.mirage/node/data/priv_validator_state.json"
   if [[ ! -f "$pv" ]]; then
     echo "ERROR: priv_validator_state.json missing; refusing activation" >&2

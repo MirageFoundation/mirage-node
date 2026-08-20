@@ -18,7 +18,7 @@ If you are a large staker, your share of each round goes down. That is the delib
 
 ### This one stops the chain
 
-Unlike recent releases, this genuinely changes consensus. A node still running v1.37.0 computes a different payout from the very same block, so a network on mixed versions would not merely disagree about rewards, it would split in two. Every validator therefore stops at one scheduled block and returns on the new version. Nothing is downloaded in the background: after the proposal passes, each operator explicitly verifies, downloads and prepares the signed release. The node then switches to that exact prepared version automatically when it reaches the matching halt. A validator that was not prepared stays safely halted on the old version until its operator acts; it never guesses or silently crosses the boundary.
+Unlike recent releases, this genuinely changes consensus. A node still running v1.37.0 computes a different payout from the very same block, so a network on mixed versions would not merely disagree about rewards, it would split in two. Every validator therefore stops at one scheduled block and returns on the new version. Nothing is downloaded in the background: before the proposal is submitted, each operator explicitly verifies, downloads and prepares the signed release. The node then switches to that exact prepared version automatically when it reaches the matching halt. A validator that was not prepared stays safely halted on the old version until its operator acts; it never guesses or silently crosses the boundary.
 
 ### Adjustable from here
 

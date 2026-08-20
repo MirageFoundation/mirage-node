@@ -2857,11 +2857,12 @@ query_local_rest() {{ curl "$@"; }}
     with tempfile.TemporaryDirectory(prefix="prepare-noplan-") as tmp:
         preamble, prepared_path = _arm_harness(tmp, "upgrade-halt", '{"plan":null}')
         r = _run(["bash", "-c", preamble + "prepare\n"])
-        if r.returncode == 0 or "cannot arm the governed upgrade yet" not in (r.stderr or ""):
-            _fail("install.upgrade.prepare_before_proposal", f"rc={r.returncode} err={r.stderr}")
+        if r.returncode != 0 or "prepared v-test before governance" not in (r.stdout or ""):
+            _fail("install.upgrade.prepare_before_proposal", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
-        if os.path.exists(prepared_path):
-            _fail("install.upgrade.prepare_armed_without_plan", "armed activation before the proposal passed")
+        prepared = json.loads(Path(prepared_path).read_text(encoding="utf-8"))
+        if prepared.get("plan_height") != 0:
+            _fail("install.upgrade.prepare_pending_height", prepared)
             return
 
     with tempfile.TemporaryDirectory(prefix="prepare-mismatch-") as tmp:
@@ -3018,6 +3019,10 @@ activate_if_halted
             json.dumps({"name": "v-test", "height": 50}),
             encoding="utf-8",
         )
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"upgrade_name": "v-test", "plan_height": 0, "image": "img@sha256:" + ("c" * 64)}),
+            encoding="utf-8",
+        )
         # A jailed or unregistered node never signs the halt block. The marker is
         # the authoritative proof it reached the halt, so it must still activate
         # instead of being stranded on the pre-upgrade binary forever.
@@ -3026,7 +3031,12 @@ activate_if_halted
             encoding="utf-8",
         )
         r = _run(["bash", "-c", base])
-        if r.returncode != 0 or not os.path.isfile(launch_log) or "did not sign the halt block" not in (r.stdout or ""):
+        if (
+            r.returncode != 0
+            or not os.path.isfile(launch_log)
+            or "matched v-test to halt marker at height 50" not in (r.stdout or "")
+            or "did not sign the halt block" not in (r.stdout or "")
+        ):
             _fail("install.upgrade.activate_never_signed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
         Path(launch_log).unlink()
