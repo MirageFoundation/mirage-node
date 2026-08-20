@@ -263,6 +263,13 @@ const formatTopicStatus = useCallback((topic) => {
 
 ### Release Publishing — LOCAL, NOT CI
 
+- **"Create a release" means a node can update onto it.** The finish line is not
+  a git tag: it is a signed manifest on `prod` that a node picks up by running
+  `mirage-update` (ordinary releases) or `mirage-upgrade` (releases activated by
+  a governance halt). A tagged release with no signed manifest for that
+  `VERSION`, or one whose `release_id` is not strictly greater than the previous
+  manifest's, is not a release — nodes reject it and nothing can update. Always
+  finish the manifest, and say which of the two commands applies.
 - **The normal release path is local.** Build and push the image with the existing
   local GHCR login, generate the candidate manifest, sign it with
   `.release_signing.pem`, commit/push the signed manifest, run the tests relevant
