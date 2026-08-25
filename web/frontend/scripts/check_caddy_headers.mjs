@@ -26,6 +26,11 @@ const CADDYFILE = resolve(here, '../../../deploy/templates/caddy/Caddyfile');
 // is not fingerprinted and must revalidate.
 const REQUIRED = [
     ['/pow/* cache policy', /@pow path \/pow\/\*[\s\S]{0,200}?header @pow Cache-Control "no-cache"/],
+    // The header whose absence let the wallet be served over cleartext: HTTP is
+    // not a secure context, so crypto.subtle is gone and the vault cannot open.
+    // The `protocol https` gate is asserted too, because dropping it is the
+    // regression that would advertise HSTS from an IP-only node with no cert.
+    ['Strict-Transport-Security', /@tls protocol https\s+header @tls Strict-Transport-Security "max-age=31536000; includeSubDomains"/],
     ['X-Frame-Options', /X-Frame-Options\s+"DENY"/],
     ['X-Content-Type-Options', /X-Content-Type-Options\s+"nosniff"/],
     ['Referrer-Policy', /Referrer-Policy\s+"strict-origin-when-cross-origin"/],
