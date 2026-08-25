@@ -28,6 +28,19 @@ ${DOMAIN:-:80} ${ORIGIN_DOMAIN} {
 		}
 	}
 
+	# Caddy automates certificates and the :80 -> :443 redirect but has never sent
+	# HSTS on its own, and since the Bunny cutover :80 for real users is answered
+	# by the edge, not by us — so a user typing "mirage.talk" got a working page
+	# over cleartext. That is not just a padlock: HTTP is not a secure context,
+	# so crypto.subtle and WebAuthn are absent and SeedVault cannot open a wallet
+	# at all. Gated on the request actually being TLS so an IP-only :80 node does
+	# not advertise a policy it cannot honor. includeSubDomains covers
+	# origin.<domain> without touching renewal — ACME HTTP-01 is fetched by Let's
+	# Encrypt's validators, which do not consult HSTS. No preload token: that is
+	# a months-long commitment and belongs in a deliberate submission, not here.
+	@tls protocol https
+	header @tls Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
 	# Maintenance mode: when /etc/caddy/.maintenance exists, serve upgrade page for ALL routes.
 	# Created by entrypoint at startup, removed when backend is ready.
 	@maintenance file {
