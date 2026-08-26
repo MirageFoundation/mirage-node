@@ -435,6 +435,7 @@ def canon_base_subscribe(
     level: int,
     target: str = "",
     nonce: int = 0,
+    period_count: int = 1,
 ) -> bytes:
     return canon_shared.canon_base_subscribe(
         pub_dec,
@@ -444,6 +445,7 @@ def canon_base_subscribe(
         int(level),
         target=str(target or ""),
         nonce=int(nonce),
+        period_count=int(period_count),
     )
 
 
