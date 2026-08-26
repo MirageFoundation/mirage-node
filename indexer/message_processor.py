@@ -1822,6 +1822,7 @@ class MessageProcessor:
             banner = profile_data.get("banner", "") or ""
             flair = profile_data.get("flair", "") or ""
             reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
+            effective_paid = bool(profile_data.get("effective_paid", False))
 
             self.db.upsert_profile_full(
                 owner,
@@ -1836,12 +1837,14 @@ class MessageProcessor:
                 flair,
                 ts,
                 reserve_funds=reserve_funds,
+                effective_paid=effective_paid,
             )
             self.log_yaml(
                 "User subscribed",
                 {
                     "owner": owner,
                     "level": level,
+                    "effective_paid": effective_paid,
                     "subscription_expiry": subscription_expiry,
                     "auto_renew": auto_renew,
                     "timestamp": int(ts),
@@ -1880,6 +1883,7 @@ class MessageProcessor:
             banner = profile_data.get("banner", "") or ""
             flair = profile_data.get("flair", "") or ""
             reserve_funds = int(profile_data.get("reserve_funds", 0) or 0)
+            effective_paid = bool(profile_data.get("effective_paid", False))
 
             self.db.upsert_profile_full(
                 owner,
@@ -1894,6 +1898,7 @@ class MessageProcessor:
                 flair,
                 ts,
                 reserve_funds=reserve_funds,
+                effective_paid=effective_paid,
             )
             self.log_yaml(
                 "User set auto_renewal",

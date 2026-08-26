@@ -3105,11 +3105,16 @@ def _build_user_status(addr: str) -> dict:
     reserve_funds = 0
     inbox_last_viewed_at = 0
     referral_precheck_enabled = False
+    effective_paid = False
 
     with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+            """
+            SELECT username, level, created_at, subscription_expiry, auto_renew,
+                   reserve_funds, COALESCE(effective_paid, FALSE)
+            FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1
+            """,
             (addr,),
         )
         row = cur.fetchone()
@@ -3118,6 +3123,11 @@ def _build_user_status(addr: str) -> dict:
             user_level = int(row[1]) if row[1] is not None else 0
             profile_registered_at = int(row[2]) if row[2] is not None else None
             subscription_expiry = int(row[3]) if row[3] is not None else 0
+            auto_renew = bool(row[4]) if row[4] is not None else False
+            reserve_funds = int(row[5]) if row[5] is not None else 0
+            effective_paid = bool(row[6])
+            if effective_paid and user_level < 1:
+                user_level = 1
 
     addr_lower = addr.lower()
     with connect_backend_db() as conn_ib:
@@ -3129,24 +3139,6 @@ def _build_user_status(addr: str) -> dict:
         row_ib = cur_ib.fetchone()
         if row_ib and row_ib[0] is not None:
             inbox_last_viewed_at = int(row_ib[0])
-        cur_ib.execute(
-            "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
-            (addr_lower,),
-        )
-        row_ref = cur_ib.fetchone()
-        if row_ref and row_ref[0] is not None:
-            referral_precheck_enabled = bool(row_ref[0])
-
-    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn2:
-        cur2 = conn2.cursor()
-        cur2.execute(
-            "SELECT auto_renew, reserve_funds FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-            (addr,),
-        )
-        row2 = cur2.fetchone()
-        if row2:
-            auto_renew = bool(row2[0]) if row2[0] is not None else False
-            reserve_funds = int(row2[1]) if row2[1] is not None else 0
 
     balance = int(_get_balance(addr))
 
@@ -3188,6 +3180,7 @@ def _build_user_status(addr: str) -> dict:
         "recent_votes": recent_votes,
         "inbox_last_viewed_at": inbox_last_viewed_at,
         "referral_precheck_enabled": referral_precheck_enabled,
+        "effective_paid": effective_paid,
     }
 
 
@@ -3203,7 +3196,13 @@ def get_user_status():
         if _is_catching_up():
             return api_error_code("node_catching_up", 503)
         resp = _build_user_status(addr)
-        log_event(rid, "get_user_status.ok", user_level=resp.get("user_level", 0))
+        log_event(
+            rid,
+            "get_user_status.ok",
+            user_level=resp.get("user_level", 0),
+            effective_paid=bool(resp.get("effective_paid", False)),
+            subscription_expiry=resp.get("subscription_expiry", 0),
+        )
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_user_status.err", error=str(e))
@@ -8538,335 +8537,46 @@ def _get_stats_analytics(rid: int):
 
 
 def _get_stats_rewards(rid: int):
-    """Return comprehensive reward statistics."""
-    from routes.quests import get_distributor
-
-    try:
-        ts = int(time.time())
-
-        # Get pool balance
-        distributor = get_distributor()
-        pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
-
-        with connect_backend_db() as bconn:
-            bcur = bconn.cursor()
-
-            # Get overall stats
-            bcur.execute(
-                """
-                SELECT 
-                    COUNT(*) as total_rewards,
-                    COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
-                    COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
-                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
-                    ELSE 0 END), 0) as total_amount,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
-                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
-                    ELSE 0 END), 0) as claimed_amount,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
-                    MIN(created_at) as first_reward_at,
-                    MAX(created_at) as last_reward_at
-                FROM pending_rewards
-            """
-            )
-            summary_row = bcur.fetchone()
-
-            summary = {
-                "total_rewards": summary_row[0] or 0,
-                "claimed_count": summary_row[1] or 0,
-                "pending_count": summary_row[2] or 0,
-                "total_amount": summary_row[3] or 0,
-                "claimed_amount": summary_row[4] or 0,
-                "pending_amount": summary_row[5] or 0,
-                "first_reward_at": summary_row[6],
-                "last_reward_at": summary_row[7],
-                "pool_balance": pool_balance,
-                "quest_payouts_enabled": distributor.is_configured(),
-            }
-
-            # Calculate daily rate (last 7 days)
-            week_ago = ts - (7 * 86400)
-            bcur.execute(
-                """
-                SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
-                    COALESCE(payout_amount, (reward_data->>'amount')::bigint)
-                ELSE 0 END), 0)
-                FROM pending_rewards
-                WHERE created_at >= %s
-            """,
-                (week_ago,),
-            )
-            week_total = bcur.fetchone()[0] or 0
-            summary["daily_rate"] = week_total // 7
-
-            # Get per-user reward stats (without profile join)
-            bcur.execute(
-                """
-                SELECT 
-                    owner,
-                    COUNT(*) as reward_count,
-                    COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
-                    COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
-                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
-                    ELSE 0 END), 0) as total_earned,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
-                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
-                    ELSE 0 END), 0) as claimed_amount,
-                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
-                    MIN(created_at) as first_reward_at,
-                    MAX(created_at) as last_reward_at
-                FROM pending_rewards
-                GROUP BY owner
-                ORDER BY total_earned DESC
-            """
-            )
-            user_rows = bcur.fetchall()
-
-        # Enrich with profile info from indexer
-        owner_addrs = list({(r[0] or "").lower() for r in user_rows if r[0]})
-        username_map: dict[str, str] = {}
-        created_at_map: dict[str, int] = {}
-        if owner_addrs:
-            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-                cur = conn.cursor()
-                ph = ",".join(["%s"] * len(owner_addrs))
-                cur.execute(
-                    f"SELECT LOWER(owner), COALESCE(username, ''), created_at FROM profiles WHERE LOWER(owner) IN ({ph})",
-                    owner_addrs,
-                )
-                for owner_lc, uname, p_created_at in cur.fetchall():
-                    username_map[owner_lc] = uname
-                    if p_created_at is not None:
-                        created_at_map[owner_lc] = int(p_created_at)
-
-        users = []
-        for row in user_rows:
-            owner = row[0]
-            owner_lc = (owner or "").lower()
-            first_reward_at = row[7]
-            last_reward_at = row[8]
-            total_earned = row[4] or 0
-
-            if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
-                days_active = max(1, (last_reward_at - first_reward_at) // 86400)
-                earnings_per_day = total_earned // days_active
-            else:
-                earnings_per_day = total_earned
-
-            users.append(
-                {
-                    "address": owner,
-                    "username": username_map.get(owner_lc),
-                    "reward_count": row[1] or 0,
-                    "claimed_count": row[2] or 0,
-                    "pending_count": row[3] or 0,
-                    "total_earned": total_earned,
-                    "claimed_amount": row[5] or 0,
-                    "pending_amount": row[6] or 0,
-                    "first_reward_at": first_reward_at,
-                    "last_reward_at": last_reward_at,
-                    "account_created_at": created_at_map.get(owner_lc),
-                    "earnings_per_day": earnings_per_day,
-                }
-            )
-
-        log_event(rid, "get_stats.rewards.ok", user_count=len(users))
-        return jsonify({"summary": summary, "users": users})
-
-    except Exception as e:
-        log_event(rid, "get_stats.rewards.err", error=str(e))
-        return safe_error(e)
+    """Reward tables were dropped with quests in v1.39.0."""
+    log_event(rid, "get_stats.rewards.retired")
+    return jsonify(
+        {
+            "summary": {
+                "total_rewards": 0,
+                "claimed_count": 0,
+                "pending_count": 0,
+                "total_amount": 0,
+                "claimed_amount": 0,
+                "pending_amount": 0,
+                "first_reward_at": None,
+                "last_reward_at": None,
+                "pool_balance": 0,
+                "quest_payouts_enabled": False,
+                "daily_rate": 0,
+            },
+            "users": [],
+        }
+    )
 
 
 def _get_stats_rewards_history(rid: int):
-    """Return paginated reward history."""
-    try:
-        offset = int(request.args.get("offset", 0))
-        limit = min(int(request.args.get("limit", 50)), 100)
-
-        with connect_backend_db() as bconn:
-            bcur = bconn.cursor()
-            bcur.execute(
-                """
-                SELECT 
-                    owner,
-                    reward_type,
-                    reward_data,
-                    reason,
-                    created_at,
-                    claimed_at,
-                    payout_amount
-                FROM pending_rewards
-                ORDER BY created_at DESC
-                LIMIT %s OFFSET %s
-            """,
-                (limit + 1, offset),
-            )
-            reward_rows = bcur.fetchall()
-
-        has_more = len(reward_rows) > limit
-        if has_more:
-            reward_rows = reward_rows[:limit]
-
-        owner_addrs = list({(r[0] or "").lower() for r in reward_rows if r[0]})
-        username_map: dict[str, str] = {}
-        if owner_addrs:
-            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-                cur = conn.cursor()
-                ph = ",".join(["%s"] * len(owner_addrs))
-                cur.execute(
-                    f"SELECT LOWER(owner), COALESCE(username, '') FROM profiles WHERE LOWER(owner) IN ({ph})",
-                    owner_addrs,
-                )
-                for owner_lc, uname in cur.fetchall():
-                    username_map[owner_lc] = uname
-
-        rewards = []
-        for row in reward_rows:
-            reward_data = row[2] if isinstance(row[2], dict) else {}
-            base_amount = reward_data.get("amount", 0)
-            payout_amount = row[6]
-            display_amount = payout_amount if payout_amount is not None else base_amount
-            owner_lc = (row[0] or "").lower()
-            rewards.append(
-                {
-                    "address": row[0],
-                    "username": username_map.get(owner_lc),
-                    "type": row[1],
-                    "amount": display_amount,
-                    "reason": row[3],
-                    "created_at": row[4],
-                    "claimed_at": row[5],
-                    "claimed": row[5] is not None,
-                }
-            )
-
-        log_event(rid, "get_stats.rewards_history.ok", count=len(rewards), offset=offset)
-        return jsonify({"rewards": rewards, "has_more": has_more})
-
-    except Exception as e:
-        log_event(rid, "get_stats.rewards_history.err", error=str(e))
-        return safe_error(e)
+    """Reward tables were dropped with quests in v1.39.0."""
+    log_event(rid, "get_stats.rewards_history.retired")
+    return jsonify({"rewards": [], "has_more": False})
 
 
 def _get_stats_signups(rid: int):
-    """Return recent signups via invite codes with referrer info."""
-    try:
-        with connect_backend_db() as bconn:
-            bcur = bconn.cursor()
-            bcur.execute(
-                """
-                SELECT code, used_by, owner, used_at, created_at
-                FROM invite_codes
-                WHERE used_by IS NOT NULL
-                ORDER BY used_at DESC NULLS LAST
-                LIMIT 100
-                """
-            )
-            ic_rows = bcur.fetchall()
-
-            bcur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NOT NULL")
-            total_used = bcur.fetchone()[0] or 0
-            bcur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NULL")
-            total_available = bcur.fetchone()[0] or 0
-            bcur.execute("SELECT COUNT(DISTINCT owner) FROM invite_codes WHERE used_by IS NOT NULL")
-            unique_referrers = bcur.fetchone()[0] or 0
-
-            bcur.execute(
-                """
-                SELECT owner, COUNT(*) as invite_count
-                FROM invite_codes
-                WHERE used_by IS NOT NULL
-                GROUP BY owner
-                ORDER BY invite_count DESC
-                LIMIT 10
-                """
-            )
-            top_referrer_rows = bcur.fetchall()
-
-        all_addrs = set()
-        for row in ic_rows:
-            if row[1]:
-                all_addrs.add(row[1].lower())
-            if row[2]:
-                all_addrs.add(row[2].lower())
-        for row in top_referrer_rows:
-            if row[0]:
-                all_addrs.add(row[0].lower())
-
-        profile_map: dict[str, dict] = {}
-        if all_addrs:
-            addr_list = list(all_addrs)
-            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-                cur = conn.cursor()
-                ph = ",".join(["%s"] * len(addr_list))
-                cur.execute(
-                    f"""SELECT LOWER(owner), username, avatar, level, subscription_expiry, created_at
-                        FROM profiles WHERE LOWER(owner) IN ({ph})""",
-                    addr_list,
-                )
-                for owner_lc, uname, avatar, lvl, sub_exp, created_at in cur.fetchall():
-                    profile_map[owner_lc] = {
-                        "username": uname or None,
-                        "avatar": avatar or None,
-                        "level": int(lvl) if lvl is not None else 0,
-                        "subscription_expiry": int(sub_exp) if sub_exp is not None else 0,
-                        "created_at": int(created_at) if created_at is not None else None,
-                    }
-
-        now = int(time.time())
-        signups = []
-        for code, used_by, invited_by, used_at, code_created_at in ic_rows:
-            sp = profile_map.get((used_by or "").lower(), {})
-            rp = profile_map.get((invited_by or "").lower(), {})
-            signups.append(
-                {
-                    "code": code,
-                    "signup": {
-                        "address": used_by,
-                        "username": sp.get("username"),
-                        "avatar": sp.get("avatar"),
-                        "level": sp.get("level", 0),
-                        "is_subscriber": (sp.get("subscription_expiry", 0) or 0) > now,
-                        "created_at": sp.get("created_at") or used_at,
-                    },
-                    "referrer": {
-                        "address": invited_by,
-                        "username": rp.get("username"),
-                        "avatar": rp.get("avatar"),
-                        "level": rp.get("level", 0),
-                    },
-                    "used_at": used_at,
-                }
-            )
-
-        top_referrers = []
-        for r_owner, invite_count in top_referrer_rows:
-            rp = profile_map.get((r_owner or "").lower(), {})
-            top_referrers.append(
-                {
-                    "address": r_owner,
-                    "invite_count": invite_count,
-                    "username": rp.get("username"),
-                    "avatar": rp.get("avatar"),
-                }
-            )
-
-        log_event(rid, "get_stats.signups.ok", total_signups=len(signups))
-        return jsonify(
-            {
-                "signups": signups,
-                "total_used": total_used,
-                "total_available": total_available,
-                "unique_referrers": unique_referrers,
-                "top_referrers": top_referrers,
-            }
-        )
-    except Exception as e:
-        log_event(rid, "get_stats.signups.err", error=str(e))
-        return safe_error(e)
+    """Invite codes were dropped with referrals in v1.39.0."""
+    log_event(rid, "get_stats.signups.retired")
+    return jsonify(
+        {
+            "signups": [],
+            "total_used": 0,
+            "total_available": 0,
+            "unique_referrers": 0,
+            "top_referrers": [],
+        }
+    )
 
 
 def _get_stats_subscribers(rid: int):

@@ -2059,6 +2059,7 @@ class DatabaseManager:
         flair: str,
         updated_at: int,
         reserve_funds: int = 0,
+        effective_paid: bool = False,
     ) -> None:
         """Insert or update a profile with all fields."""
         username = self._strip_nul(username)
@@ -2071,8 +2072,9 @@ class DatabaseManager:
                 cur.execute(
                     """
                     INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
-                                         auto_renew, biography, avatar, banner, flair, updated_at, reserve_funds)
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                         auto_renew, biography, avatar, banner, flair, updated_at,
+                                         reserve_funds, effective_paid)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
                       level=EXCLUDED.level,
@@ -2088,7 +2090,8 @@ class DatabaseManager:
                       banner=EXCLUDED.banner,
                       flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
-                      reserve_funds=EXCLUDED.reserve_funds
+                      reserve_funds=EXCLUDED.reserve_funds,
+                      effective_paid=EXCLUDED.effective_paid
                     """,
                     (
                         owner,
@@ -2103,6 +2106,7 @@ class DatabaseManager:
                         flair or "",
                         int(updated_at),
                         int(reserve_funds),
+                        bool(effective_paid),
                     ),
                 )
 
