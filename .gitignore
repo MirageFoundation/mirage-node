@@ -108,6 +108,9 @@ scripts/*
 !scripts/replay_divergence.sh
 !scripts/tests/
 !scripts/tests/**
+# The re-include above is the last matching rule for this subtree, so it also
+# defeats the global __pycache__ ignore. Restate it here.
+scripts/tests/**/__pycache__/
 
 cursor.md
 .cursor/
