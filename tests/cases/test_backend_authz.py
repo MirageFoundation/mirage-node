@@ -143,6 +143,20 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/core/enable_agent": ENVELOPE,
     "/api/core/follow_topic": ENVELOPE,
     "/api/core/follow_user": ENVELOPE,
+    "/api/core/join_community": ENVELOPE,
+    "/api/core/leave_community": ENVELOPE,
+    "/api/core/block_community": ENVELOPE,
+    "/api/core/unblock_community": ENVELOPE,
+    "/api/core/create_community": ENVELOPE,
+    "/api/core/set_community_metadata": ENVELOPE,
+    "/api/core/transfer_community": ENVELOPE,
+    "/api/core/create_curation_team": ENVELOPE,
+    "/api/core/set_curation_preference": ENVELOPE,
+    "/api/core/claim_creator_rewards": ENVELOPE,
+    "/api/communities": PUBLIC,
+    "/api/communities/<slug>": PUBLIC,
+    "/api/communities/<slug>/teams": PUBLIC,
+    "/api/creator/earnings": PUBLIC,
     "/api/core/post": ENVELOPE,
     "/api/core/report": ENVELOPE,
     "/api/core/send_tokens": ENVELOPE,
@@ -189,7 +203,7 @@ _REQUIRED: Dict[str, Set[str]] = {
     SIGNED_ADMIN: {"sig", "level"},
 }
 
-_ROUTE_FILES = ("public.py", "core.py", "quests.py")
+_ROUTE_FILES = ("public.py", "core.py", "quests.py", "communities.py")
 
 
 def _markers_of(fn: ast.FunctionDef) -> Set[str]:
@@ -375,6 +389,14 @@ def test_admin_authz(backend):
 
 
 def test_reward_claim_authz(backend):
+    """Rewards claim was removed with quests in v1.39.0."""
+    code, resp = _post(f"{backend}/api/rewards/claim", {"owner": "x"})
+    if code == 410:
+        _pass("reward_claim_authz.gone")
+    else:
+        _fail("reward_claim_authz.gone", f"code={code} resp={resp}")
+    return
+
     """C-2: the money path must be authenticated and must not pay twice.
 
     /api/rewards/claim takes `owner` from the request body, so it always
@@ -582,10 +604,6 @@ _PUBLIC_BY_DESIGN = (
     ("get_preferences", "/api/get_preferences", "address"),
     ("get_blocked_users", "/api/get_blocked_users", "address"),
     ("get_user_blocked", "/api/get_user_blocked", "address"),
-    ("referrals_summary", "/api/referrals/summary", "address"),
-    ("referrals_precheck", "/api/referrals/precheck", "address"),
-    ("rewards_summary", "/api/rewards/summary", "owner"),
-    ("rewards_achievements", "/api/rewards/achievements", "owner"),
     ("bootstrap", "/api/bootstrap", "address"),
 )
 
@@ -612,28 +630,21 @@ def test_cross_user_reads(backend):
                 f"expected public read (200), got {code}: {resp}",
             )
 
-    # Invite codes: feature off → empty list, no codes and no 404. Installed
-    # clients poll this route on every Invites screen open; a 404 broke them for
-    # a read that has nothing to disclose while the feature is off.
+    # Invite codes were retired in v1.39.0.
     code, resp = _get(f"{backend}/api/get_invite_codes", params={"address": victim})
-    if code == 200 and (resp or {}).get("codes") == [] and (resp or {}).get("total") == 0:
-        _pass("cross_user_read.get_invite_codes_empty_while_disabled", code=code)
-    elif code == 200:
-        _fail(
-            "cross_user_read.get_invite_codes_empty_while_disabled",
-            f"expected an empty code list while REGISTRATION_INVITE_CODE_REQUIRED=false; got {resp}",
-        )
+    if code == 410:
+        _pass("cross_user_read.get_invite_codes_gone", code=code)
     else:
         _fail(
-            "cross_user_read.get_invite_codes_empty_while_disabled",
-            f"invite codes must serve an empty list (200) while the feature is off; got {code}: {resp}",
+            "cross_user_read.get_invite_codes_gone",
+            f"invite codes must 410 after v1.39.0; got {code}: {resp}",
         )
 
     code, resp = _post(f"{backend}/api/validate_invite_code", {"code": "ABCD-EFGH"})
-    if code == 404:
-        _pass("cross_user_read.validate_invite_code_disabled", code=code)
+    if code == 410:
+        _pass("cross_user_read.validate_invite_code_gone", code=code)
     else:
         _fail(
-            "cross_user_read.validate_invite_code_disabled",
-            f"validate_invite_code must 404 while feature off; got {code}: {resp}",
+            "cross_user_read.validate_invite_code_gone",
+            f"validate_invite_code must 410 after v1.39.0; got {code}: {resp}",
         )

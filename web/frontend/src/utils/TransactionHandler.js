@@ -1384,8 +1384,9 @@ class TransactionHandler {
         this._notifyFollowListeners();
 
         const baseTx = {
-            action: 'follow_topic',
+            action: 'join_community',
             userId: publicKey,
+            community: topicTrimmed,
             topic: topicTrimmed,
         };
 
@@ -1423,8 +1424,9 @@ class TransactionHandler {
         this._notifyFollowListeners();
 
         const baseTx = {
-            action: 'unfollow_topic',
+            action: 'leave_community',
             userId: publicKey,
+            community: topicTrimmed,
             topic: topicTrimmed,
         };
 
@@ -2319,11 +2321,11 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
-            else if (transaction.action === "follow_topic") {
+            else if (transaction.action === "follow_topic" || transaction.action === "join_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
-                    action: transaction.action,
-                    topic: transaction.topic,
+                    action: 'join_community',
+                    community: (transaction.community || transaction.topic || "").toLowerCase(),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2331,11 +2333,11 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
-            else if (transaction.action === "unfollow_topic") {
+            else if (transaction.action === "unfollow_topic" || transaction.action === "leave_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
-                    action: transaction.action,
-                    topic: transaction.topic,
+                    action: 'leave_community',
+                    community: (transaction.community || transaction.topic || "").toLowerCase(),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -3304,6 +3306,111 @@ class TransactionHandler {
         );
     }
 
+    // Build canonical bytes for MsgJoinCommunity (community at tag 100, no target)
+    canonicalJoinCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, community, nonce }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgJoinCommunity\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);
+        const tag100 = Uint8Array.from([100]);
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
+            tag100, encStr(community || ""),
+        );
+    }
+
+    canonicalLeaveCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, community, nonce }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgLeaveCommunity\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);
+        const tag100 = Uint8Array.from([100]);
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
+            tag100, encStr(community || ""),
+        );
+    }
+
     // Build canonical bytes for MsgFollowTopic
     canonicalFollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
@@ -3941,8 +4048,8 @@ class TransactionHandler {
             else if (action === 'set_agents') msgName = 'MsgSetAgents';
             else if (action === 'follow_user') msgName = 'MsgFollowUser';
             else if (action === 'unfollow_user') msgName = 'MsgUnfollowUser';
-            else if (action === 'follow_topic') msgName = 'MsgFollowTopic';
-            else if (action === 'unfollow_topic') msgName = 'MsgUnfollowTopic';
+            else if (action === 'follow_topic' || action === 'join_community') msgName = 'MsgJoinCommunity';
+            else if (action === 'unfollow_topic' || action === 'leave_community') msgName = 'MsgLeaveCommunity';
             else if (action === 'block_post') msgName = 'MsgBlockPost';
             else if (action === 'unblock_post') msgName = 'MsgUnblockPost';
             else if (action === 'block_user') msgName = 'MsgBlockUser';
@@ -4185,18 +4292,16 @@ class TransactionHandler {
                     envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unfollow_user';
-            } else if (msgName === 'MsgFollowTopic') {
+            } else if (msgName === 'MsgJoinCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const targetLower = signerAddress.toLowerCase();
-                const topicLower = (transaction.topic || "").toLowerCase();
-                const canon = this.canonicalFollowTopic({
+                const communityLower = (transaction.community || transaction.topic || "").toLowerCase();
+                const canon = this.canonicalJoinCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
-                    target: targetLower,
-                    topic: topicLower,
+                    community: communityLower,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -4207,26 +4312,23 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    target: targetLower,
-                    topic: topicLower,
+                    community: communityLower,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                endpoint = 'core/follow_topic';
-            } else if (msgName === 'MsgUnfollowTopic') {
+                endpoint = 'core/join_community';
+            } else if (msgName === 'MsgLeaveCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const targetLower = signerAddress.toLowerCase();
-                const topicLower = (transaction.topic || "").toLowerCase();
-                const canon = this.canonicalUnfollowTopic({
+                const communityLower = (transaction.community || transaction.topic || "").toLowerCase();
+                const canon = this.canonicalLeaveCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
-                    target: targetLower,
-                    topic: topicLower,
+                    community: communityLower,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -4237,14 +4339,13 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    target: targetLower,
-                    topic: topicLower,
+                    community: communityLower,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                endpoint = 'core/unfollow_topic';
+                endpoint = 'core/leave_community';
             } else if (msgName === 'MsgBlockPost') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalBlockPost({
@@ -5430,13 +5531,12 @@ class TransactionHandler {
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.user || "").toLowerCase()),
                 );
-            } else if (action === 'follow_topic') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgFollowTopic\x00");
+            } else if (action === 'follow_topic' || action === 'join_community') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgJoinCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -5444,16 +5544,14 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr(signerAddress.toLowerCase()),
-                    tag101, encStr((transaction.topic || "").toLowerCase()),
+                    tag100, encStr((transaction.community || transaction.topic || "").toLowerCase()),
                 );
-            } else if (action === 'unfollow_topic') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnfollowTopic\x00");
+            } else if (action === 'unfollow_topic' || action === 'leave_community') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgLeaveCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -5461,8 +5559,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr(signerAddress.toLowerCase()),
-                    tag101, encStr((transaction.topic || "").toLowerCase()),
+                    tag100, encStr((transaction.community || transaction.topic || "").toLowerCase()),
                 );
             } else if (action === 'block_post') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockPost\x00");
@@ -5720,7 +5817,7 @@ class TransactionHandler {
                 }
                 baseBytes = concat(...parts);
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, subscribe, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, join_community, leave_community, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, subscribe, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

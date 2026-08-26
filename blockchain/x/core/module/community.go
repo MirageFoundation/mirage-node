@@ -225,9 +225,6 @@ func (am AppModule) BlockCommunity(ctx context.Context, req *types.MsgBlockCommu
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetTarget()) != "" {
-		return nil, fmt.Errorf("target must be empty; community is in field 101")
-	}
 	core, err := am.requireUsername(sdkCtx, owner, "BlockCommunity")
 	if err != nil {
 		return nil, err

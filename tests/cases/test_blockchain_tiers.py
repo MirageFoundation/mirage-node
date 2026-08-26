@@ -357,30 +357,29 @@ def test_tier_features(backend: str) -> None:
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
     # 15.1 Verify all tier configs are accessible and have correct values
-    for level in [0, 1, 10]:
+    for level in [0, 1]:
         tier = _get_tier_config(level)
-        max_enabled = _tier_int(tier, "max_enabled_agents")
         max_fu = _tier_int(tier, "max_followed_users")
-        max_ft = _tier_int(tier, "max_followed_topics")
+        max_jc = _tier_int(tier, "max_joined_communities")
         max_bu = _tier_int(tier, "max_blocked_users")
         max_bp = _tier_int(tier, "max_blocked_posts")
-        max_bt = _tier_int(tier, "max_blocked_topics")
+        max_bc = _tier_int(tier, "max_blocked_communities")
         max_title = _tier_int(tier, "max_title_length")
         max_content = _tier_int(tier, "max_content_length")
         editing = _tier_int(tier, "editing_time_mins")
 
         if level == 0:
-            if max_enabled == 5 and max_fu == 25 and max_ft == 25:
-                _pass(f"tierfeature.level{level}_list_limits_5_25_25")
+            if max_fu == 25 and max_jc == 25:
+                _pass(f"tierfeature.level{level}_list_limits_25_25")
             else:
                 _fail(
-                    f"tierfeature.level{level}_list_limits_5_25_25",
-                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                    f"tierfeature.level{level}_list_limits_25_25",
+                    f"fu={max_fu} jc={max_jc}",
                 )
-            if max_bu == 25 and max_bp == 25 and max_bt == 25:
+            if max_bu == 25 and max_bp == 25 and max_bc == 25:
                 _pass(f"tierfeature.level{level}_blocked_limits_25")
             else:
-                _fail(f"tierfeature.level{level}_blocked_limits_25", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+                _fail(f"tierfeature.level{level}_blocked_limits_25", f"bu={max_bu} bp={max_bp} bc={max_bc}")
             if max_title == 150:
                 _pass(f"tierfeature.level{level}_max_title_150")
             else:
@@ -394,17 +393,17 @@ def test_tier_features(backend: str) -> None:
             else:
                 _fail(f"tierfeature.level{level}_editing_10m", f"got={editing}")
         else:
-            if max_enabled == 50 and max_fu == 500 and max_ft == 500:
-                _pass(f"tierfeature.level{level}_list_limits_50_500_500")
+            if max_fu == 500 and max_jc == 500:
+                _pass(f"tierfeature.level{level}_list_limits_500_500")
             else:
                 _fail(
-                    f"tierfeature.level{level}_list_limits_50_500_500",
-                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                    f"tierfeature.level{level}_list_limits_500_500",
+                    f"fu={max_fu} jc={max_jc}",
                 )
-            if max_bu == 500 and max_bp == 500 and max_bt == 500:
+            if max_bu == 500 and max_bp == 500 and max_bc == 500:
                 _pass(f"tierfeature.level{level}_blocked_limits_500")
             else:
-                _fail(f"tierfeature.level{level}_blocked_limits_500", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+                _fail(f"tierfeature.level{level}_blocked_limits_500", f"bu={max_bu} bp={max_bp} bc={max_bc}")
             if max_title == 300:
                 _pass(f"tierfeature.level{level}_max_title_300")
             else:
@@ -421,15 +420,13 @@ def test_tier_features(backend: str) -> None:
     # 15.2 Verify boolean flags
     tier0 = _get_tier_config(0)
     tier1 = _get_tier_config(1)
-    tier10 = _get_tier_config(10)
 
-    can_be_agent_0 = tier0.get("can_be_agent", False)
-    can_be_agent_1 = tier1.get("can_be_agent", False)
-    can_be_agent_10 = tier10.get("can_be_agent", False)
-    if not can_be_agent_0 and not can_be_agent_1 and can_be_agent_10:
-        _pass("tierfeature.can_be_agent_only_level10")
+    can_be_agent_0 = bool(tier0.get("can_be_agent", False))
+    can_be_agent_1 = bool(tier1.get("can_be_agent", False))
+    if not can_be_agent_0 and not can_be_agent_1:
+        _pass("tierfeature.can_be_agent_removed")
     else:
-        _fail("tierfeature.can_be_agent_only_level10", f"t0={can_be_agent_0} t1={can_be_agent_1} t10={can_be_agent_10}")
+        _fail("tierfeature.can_be_agent_removed", f"t0={can_be_agent_0} t1={can_be_agent_1}")
 
     can_remove_anon_0 = tier0.get("can_remove_anon", False)
     can_remove_anon_1 = tier1.get("can_remove_anon", False)

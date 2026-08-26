@@ -438,10 +438,10 @@ def test_profile_fields(backend: str):
     code, agent_profile = _get(f"{backend}/api/get_profile", {"address": agent1_addr})
     if code == 200:
         agent_level = agent_profile.get("level")
-        if agent_level is not None and int(agent_level) == 10:
-            _pass("profile.agent1_level_10")
+        if int(agent_level) == 1:
+            _pass("profile.agent1_level_1")
         else:
-            _fail("profile.agent1_level_10", f"level={agent_level}")
+            _fail("profile.agent1_level_1", f"level={agent_level}")
 
     # 24.4 Free level
     code, free_profile = _get(f"{backend}/api/get_profile", {"address": free_addr})
@@ -453,10 +453,10 @@ def test_profile_fields(backend: str):
             _fail("profile.free_level_0", f"level={free_level}")
 
     # 24.5 Verify enabled_agents field exists in profile
-    if "enabled_agents" in (profile or {}):
-        _pass("profile.has_enabled_agents_field")
+    if "joined_communities" in (profile or {}):
+        _pass("profile.has_joined_communities_field")
     else:
-        _pass("profile.enabled_agents_in_followed_data")
+        _fail("profile.has_joined_communities_field", "missing")
 
     # 24.6 Verify is_moderator is NOT in profile
     if "is_moderator" not in (profile or {}):

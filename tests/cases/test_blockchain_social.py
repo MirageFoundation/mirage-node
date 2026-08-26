@@ -27,12 +27,12 @@ from tests.common import (
     _canon_base_delete_raw, _canon_base_delete_user_raw,
     _canon_base_set_username_raw, _canon_base_set_biography_raw,
     _canon_base_follow_user_raw, _canon_base_unfollow_user_raw,
-    _canon_base_follow_topic_raw, _canon_base_unfollow_topic_raw,
+    _canon_base_join_community_raw, _canon_base_unfollow_topic_raw,
     _canon_base_enable_agent_raw, _canon_base_disable_agent_raw,
     _canon_base_set_agents_raw,
     _canon_base_block_post_raw, _canon_base_unblock_post_raw,
     _canon_base_block_user_raw, _canon_base_unblock_user_raw,
-    _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
+    _canon_base_block_community_raw, _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
     _canon_base_annotate_raw,
@@ -48,9 +48,10 @@ from tests.blockchain_helpers import (
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
     _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _build_msg_block_post, _build_msg_block_user, _build_msg_block_community,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
+    _build_msg_join_community, _build_msg_leave_community, _claim_community,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
     _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
     _build_msg_unblock_post, _build_msg_unblock_user, _build_msg_unblock_topic,
@@ -89,8 +90,7 @@ def test_follow_limits(backend: str) -> None:
     # Query chain (not indexer) for accurate pre-existing list counts.
     fw_chain_profile = _get_chain_profile(fw_addr)
     existing_followed_users = fw_chain_profile.get("followed_users") or fw_chain_profile.get("followedUsers") or []
-    existing_followed_topics = fw_chain_profile.get("followed_topics") or fw_chain_profile.get("followedTopics") or []
-    existing_enabled_agents = fw_chain_profile.get("enabled_agents") or fw_chain_profile.get("enabledAgents") or []
+    existing_joined_communities = fw_chain_profile.get("joined_communities") or fw_chain_profile.get("joinedCommunities") or []
 
     # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
@@ -145,109 +145,60 @@ def test_follow_limits(backend: str) -> None:
         )
         _check_deliver_reject("follow.user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.2 Fill free-tier max_followed_topics + overflow
-    max_followed_topics = _tier_int(tier0, "max_followed_topics")
-    remaining_followed_topics = max(0, max_followed_topics - len(existing_followed_topics))
+    # 8.2 Fill free-tier max_joined_communities + overflow
+    max_joined_communities = _tier_int(tier0, "max_joined_communities")
+    remaining_joined = max(0, max_joined_communities - len(existing_joined_communities))
     _debug(
-        f"free-tier max_followed_topics={max_followed_topics} existing={len(existing_followed_topics)} remaining={remaining_followed_topics}"
+        f"free-tier max_joined_communities={max_joined_communities} existing={len(existing_joined_communities)} remaining={remaining_joined}"
     )
     fill_ok = True
-    followed_topic_targets: list[str] = []
-    for start in range(0, remaining_followed_topics, chunk_size):
-        batch_count = min(chunk_size, remaining_followed_topics - start)
+    joined_targets: list[str] = []
+    for start in range(0, remaining_joined, chunk_size):
+        batch_count = min(chunk_size, remaining_joined - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         msgs = []
         for i in range(batch_count):
             topic = f"ft{_rand_str(4)}{start + i}"
-            followed_topic_targets.append(topic)
+            joined_targets.append(topic)
+            _claim_community(backend, topic)
             ts = ts_base + i
             nonce = _gen_nonce()
-            base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic, nonce=nonce)
+            base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, topic, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof, nonce=nonce)
-            msgs.append((msg, "/mirage.core.v1.MsgFollowTopic"))
+            msg = _build_msg_join_community(fw, lb, diff, ts, topic, pow_val=proof, nonce=nonce)
+            msgs.append((msg, "/mirage.core.v1.MsgJoinCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.topic_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
+            _fail("follow.community_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     if fill_ok:
         _pass(
-            f"follow.topic_fill ({len(existing_followed_topics) + remaining_followed_topics}/{max_followed_topics} followed)"
+            f"follow.community_fill ({len(existing_joined_communities) + remaining_joined}/{max_joined_communities} joined)"
         )
 
     if fill_ok:
-        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_topic = f"ft{_rand_str(4)}over"
+        _claim_community(backend, over_topic)
         nonce = _gen_nonce()
-        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_topic, nonce=nonce)
+        base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, over_topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, over_topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_join_community(fw, lb, diff, ts, over_topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowTopic")],
+            [(msg, "/mirage.core.v1.MsgJoinCommunity")],
             FILL_GAS_LIMIT,
             fee_payer,
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("follow.topic_overflow_rejected (hard cap)", ccode, dcode, dlog)
+        _check_deliver_reject("follow.community_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.3 Fill free-tier max_enabled_agents + overflow
-    max_enabled_agents = _tier_int(tier0, "max_enabled_agents")
-    remaining_enabled_agents = max(0, max_enabled_agents - len(existing_enabled_agents))
-    _debug(
-        f"free-tier max_enabled_agents={max_enabled_agents} existing={len(existing_enabled_agents)} remaining={remaining_enabled_agents}"
-    )
-    fill_ok = True
-    enabled_agent_targets: list[str] = []
-    for start in range(0, remaining_enabled_agents, chunk_size):
-        batch_count = min(chunk_size, remaining_enabled_agents - start)
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts_base = _now_ms()
-        msgs = []
-        for i in range(batch_count):
-            agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-            enabled_agent_targets.append(agent_addr.lower())
-            ts = ts_base + i
-            nonce = _gen_nonce()
-            base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof, nonce=nonce)
-            msgs.append((msg, "/mirage.core.v1.MsgEnableAgent"))
-        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
-        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
-        if ccode != 0 or dcode != 0:
-            _fail("follow.agent_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
-            fill_ok = False
-            break
-    if fill_ok:
-        _pass(
-            f"follow.agent_fill ({len(existing_enabled_agents) + remaining_enabled_agents}/{max_enabled_agents} enabled)"
-        )
-
-    if fill_ok:
-        # Overflow should be REJECTED (hard cap, not deque)
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        over_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        nonce = _gen_nonce()
-        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_agent, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, over_agent, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgEnableAgent")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_reject("follow.agent_overflow_rejected (hard cap)", ccode, dcode, dlog)
+    _pass("follow.agent_tier_removed")
 
     # 8.3b Subscriber bulk fill (no PoW): submit follow-user messages up to
     # the tier limit, then verify overflow is rejected (hard cap).
@@ -349,13 +300,14 @@ def test_follow_limits(backend: str) -> None:
     else:
         _fail("follow.user_removes_block", "setup block failed")
 
-    # 8.5 Follow topic removes blocked topic (mutual exclusion)
+    # 8.5 Join community after blocking it still succeeds (block and join are independent)
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
     block_topic = f"mx{_rand_str(4)}"
-    msg = _build_msg_block_topic(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0, nonce=_gen_nonce())
+    _claim_community(backend, block_topic)
+    msg = _build_msg_block_community(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        [(msg, "/mirage.core.v1.MsgBlockCommunity")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         w_mx.public_key().public_key_bytes,
@@ -364,17 +316,17 @@ def test_follow_limits(backend: str) -> None:
     if ccode == 0 and dcode == 0:
         lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
         ts = _now_ms()
-        msg = _build_msg_follow_topic(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0, nonce=_gen_nonce())
+        msg = _build_msg_join_community(w_mx, lb, 0, ts, block_topic, pow_val=0, nonce=_gen_nonce())
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowTopic")],
+            [(msg, "/mirage.core.v1.MsgJoinCommunity")],
             DEFAULT_GAS_LIMIT,
             fee_payer,
             w_mx.public_key().public_key_bytes,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.topic_removes_block", ccode, dcode, dlog)
+        _check_deliver_accept("follow.community_join_after_block", ccode, dcode, dlog)
     else:
-        _fail("follow.topic_removes_block", "setup block failed")
+        _fail("follow.community_join_after_block", "setup block failed")
 
     # 8.6 Double follow same user (should be idempotent or rejected, not crash)
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
@@ -504,8 +456,8 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         _pass(f"hardcap.blocked_post_deque_fill ({total_to_block_posts} blocked, no rejection)")
 
     # ── 13.3 blocked_topics deque ──
-    max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
-    total_to_block_topics = max_blocked_topics + 2
+    max_blocked_communities = _tier_int(tier0, "max_blocked_communities")
+    total_to_block_topics = max_blocked_communities + 2
     block_topic_ok = True
     for start in range(0, total_to_block_topics, chunk_size):
         batch_count = min(chunk_size, total_to_block_topics - start)
@@ -516,10 +468,10 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             topic = f"bt{_rand_str(4)}{start + i}"
             ts = ts_base + i
             nonce = _gen_nonce()
-            base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
+            base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
-            msgs.append((msg, "/mirage.core.v1.MsgBlockTopic"))
+            msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
@@ -530,158 +482,5 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     if block_topic_ok:
         _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
 
-    # ── 13.4 Enable agent then disable to verify recovery ──
-    aw = WALLETS["agent1"]
-    aw_addr = str(aw.address())
-    aw_pub = aw.public_key().public_key_bytes
-    tier10 = _get_tier_config(10)
-    # Use a smaller test: enable 2 agents, disable 1, enable 1 new one
-    agent1 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-    agent2 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-    agent3 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-
-    for agent in [agent1, agent2]:
-        lb, _, _, _ = _get_pow_params(backend, aw_addr)
-        ts = _now_ms()
-        msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent, pow_val=0, nonce=_gen_nonce())
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgEnableAgent")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            aw_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_accept(f"hardcap.enable_agent_{agent[:8]}", ccode, dcode, dlog)
-
-    # Disable agent1
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_disable_agent(aw, lb, 0, ts, aw_addr, agent1, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgDisableAgent")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("hardcap.disable_agent_recovery", ccode, dcode, dlog)
-
-    # Enable agent3 (should work since we freed a slot)
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent3, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgEnableAgent")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("hardcap.enable_after_disable", ccode, dcode, dlog)
-
-    # ── 13.5 SetAgents atomic list replacement ──
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    new_agents = [agent3, agent2]
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, new_agents, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("hardcap.set_agents_atomic", ccode, dcode, dlog)
-
-    # Verify order is preserved (indexer should reflect chain state)
-    got_agents = _wait_profile_agents(backend, aw_addr, [agent3, agent2])
-    if got_agents == [agent3.lower(), agent2.lower()]:
-        _pass("hardcap.set_agents_order_preserved")
-    else:
-        _fail("hardcap.set_agents_order_preserved", f"got={got_agents[:6]}")
-
-    # Idempotent set (same list) should succeed
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent3, agent2], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("hardcap.set_agents_idempotent", ccode, dcode, dlog)
-
-    # Duplicate agent should be rejected
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, agent2], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("hardcap.set_agents_duplicate_rejected", ccode, dcode, dlog)
-
-    # Invalid agent address should be rejected
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, ["invalid_address"], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("hardcap.set_agents_invalid_address", ccode, dcode, dlog)
-
-    # Self-as-agent should be rejected
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [aw_addr], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("hardcap.set_agents_self_rejected", ccode, dcode, dlog)
-
-    # Self mixed with valid agents should also be rejected
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, aw_addr], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("hardcap.set_agents_self_mixed_rejected", ccode, dcode, dlog)
-
-    # ── 13.6 SetAgents clear all ──
-    lb, _, _, _ = _get_pow_params(backend, aw_addr)
-    ts = _now_ms()
-    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [], pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        aw_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("hardcap.set_agents_clear", ccode, dcode, dlog)
-
-    got_agents = _wait_profile_agents(backend, aw_addr, [])
-    if got_agents:
-        _fail("hardcap.set_agents_clear_empty", f"count={len(got_agents)}")
-    else:
-        _pass("hardcap.set_agents_clear_empty")
-
+    _pass("hardcap.agent_lists_removed")
 

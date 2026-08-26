@@ -39,6 +39,7 @@ from routes.communities import communities_bp  # noqa: E402
 _GONE_PATHS = {
     "/api/get_topics",
     "/api/search_topics",
+    "/api/get_agents",
     "/api/core/follow_topic",
     "/api/core/unfollow_topic",
     "/api/core/block_topic",
@@ -53,6 +54,8 @@ _GONE_PATHS = {
     "/api/invite",
     "/api/referrals",
     "/api/get_referral",
+    "/api/get_invite_codes",
+    "/api/validate_invite_code",
 }
 
 
@@ -81,7 +84,7 @@ def create_app(init_runtime: bool = True) -> Flask:
     @app.before_request
     def _reject_retired_v139_routes():
         path = request.path.rstrip("/") or "/"
-        if path in _GONE_PATHS or path.startswith("/api/quests") or path.startswith("/api/referrals"):
+        if path in _GONE_PATHS or path.startswith("/api/quests") or path.startswith("/api/referrals") or path.startswith("/api/rewards") or path.startswith("/api/admin/rewards"):
             from error_utils import api_error_code
             return api_error_code("gone", 410)
 

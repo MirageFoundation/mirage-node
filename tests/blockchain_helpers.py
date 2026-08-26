@@ -55,6 +55,11 @@ from shared.canon import (
     canon_base_enable_agent as _canon_base_enable_agent_raw,
     canon_base_disable_agent as _canon_base_disable_agent_raw,
     canon_base_set_agents as _canon_base_set_agents_raw,
+    canon_base_join_community as _canon_base_join_community_raw,
+    canon_base_leave_community as _canon_base_leave_community_raw,
+    canon_base_block_community as _canon_base_block_community_raw,
+    canon_base_unblock_community as _canon_base_unblock_community_raw,
+    canon_base_create_community as _canon_base_create_community_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
@@ -94,6 +99,11 @@ from shared.datatypes import (
     MsgSubscribe,
     MsgVote,
     MsgAnnotate,
+    MsgJoinCommunity,
+    MsgLeaveCommunity,
+    MsgBlockCommunity,
+    MsgUnblockCommunity,
+    MsgCreateCommunity,
 )
 
 from tests.common import (
@@ -294,11 +304,11 @@ def _get_chain_params() -> dict:
 
 
 def _get_tier_config(level: int) -> dict:
-    """Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2."""
+    """Map user level to tier array index: 0->0, 1->1."""
     params = _get_chain_params()
     tiers = params.get("tiers") or []
-    idx_map = {0: 0, 1: 1, 10: 2}
-    idx = idx_map.get(int(level), 2 if int(level) >= 100 else -1)
+    idx_map = {0: 0, 1: 1}
+    idx = idx_map.get(int(level), -1)
     if idx < 0 or idx >= len(tiers):
         raise RuntimeError(f"tier index {idx} (level={level}) not in params")
     return tiers[idx]
@@ -816,6 +826,13 @@ def _build_msg_post(
     lb_override: Optional[str] = None,
     diff_override: Optional[int] = None,
 ) -> MsgPost:
+    if not target:
+        slug = str(topic or "").strip().lower()
+        if slug:
+            try:
+                _claim_community("", slug)
+            except Exception:
+                pass
     pub = wallet.public_key().public_key_bytes
     d = diff if diff_override is None else diff_override
     lb_hex = lb_override or lb
@@ -1290,6 +1307,194 @@ def _build_msg_unfollow_user(
     msg.target = target
     msg.user = user
     return msg
+
+
+def _build_msg_join_community(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgJoinCommunity:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_join_community_raw(pub, lb_bytes, diff, ts, slug, nonce=nonce)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgJoinCommunity()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    return msg
+
+
+def _build_msg_leave_community(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgLeaveCommunity:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_leave_community_raw(pub, lb_bytes, diff, ts, slug, nonce=nonce)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgLeaveCommunity()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    return msg
+
+
+def _build_msg_block_community(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    community: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgBlockCommunity:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_block_community_raw(pub, lb_bytes, diff, ts, target, slug, nonce=nonce)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgBlockCommunity()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.community = slug
+    return msg
+
+
+def _build_msg_unblock_community(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    community: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgUnblockCommunity:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_unblock_community_raw(pub, lb_bytes, diff, ts, target, slug, nonce=nonce)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnblockCommunity()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.community = slug
+    return msg
+
+
+def _build_msg_create_community(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+    title: str = "",
+    description: str = "test community",
+    original_team_name: str = "orig",
+    bio: str = "bio",
+    policy: str = "policy",
+) -> MsgCreateCommunity:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    title = title or slug
+    base = _canon_base_create_community_raw(
+        pub, lb_bytes, diff, ts, slug, title, description, original_team_name, bio, policy, nonce=nonce
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgCreateCommunity()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    msg.title = title
+    msg.description = description
+    msg.original_team_name = original_team_name
+    msg.bio = bio
+    msg.policy = policy
+    return msg
+
+
+_CLAIMED_ON_CHAIN: set[str] = set()
+
+
+def _claim_community(backend: str, slug: str) -> None:
+    """CreateCommunity from sub1 so JoinCommunity(requireClaimed) can succeed."""
+    from tests.common import WALLETS
+
+    community = str(slug or "").strip().lower()
+    if not community or community in _CLAIMED_ON_CHAIN:
+        return
+    claimer = WALLETS.get("sub1")
+    if claimer is None:
+        raise RuntimeError("sub1 wallet required to claim a community")
+    addr = str(claimer.address())
+    pub = claimer.public_key().public_key_bytes
+    lb, _, _, _ = _get_pow_params(backend, addr)
+    ts = _now_ms()
+    nonce = _gen_nonce()
+    msg = _build_msg_create_community(claimer, lb, 0, ts, community, pow_val=0, nonce=nonce)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgCreateCommunity")],
+        DEFAULT_GAS_LIMIT,
+        _VALIDATOR_ADDR or "",
+        pub,
+        wait_deliver=True,
+    )
+    combined = f"{clog or ''} {dlog or ''}".lower()
+    if ccode == 0 and dcode == 0:
+        _CLAIMED_ON_CHAIN.add(community)
+        return
+    if "already" in combined:
+        _CLAIMED_ON_CHAIN.add(community)
+        return
+    raise RuntimeError(f"claim community {community} failed check={ccode} deliver={dcode} log={combined[:200]}")
 
 
 def _build_msg_follow_topic(

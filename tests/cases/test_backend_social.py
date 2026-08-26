@@ -251,10 +251,10 @@ def test_social_graph(backend: str):
         if deliver and deliver[0] != 0:
             _fail("social.block_topic removes followed topic", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
         else:
-            if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
-                _pass("social.block_topic removes followed topic")
+            if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
+                _pass("social.block_topic keeps join")
             else:
-                _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
+                _fail("social.block_topic keeps join", f"topic={mutual_topic_fb}")
             if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
                 _pass("social.block_topic reflected in get_user_blocked (mutual)")
             else:
@@ -287,10 +287,10 @@ def test_social_graph(backend: str):
         _pass("social.follow_topic after block succeeds")
     else:
         _fail("social.follow_topic after block succeeds", f"resp={resp}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, False):
-        _pass("social.follow_topic removes blocked topic")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
+        _pass("social.follow_topic keeps block")
     else:
-        _fail("social.follow_topic removes blocked topic", f"topic={mutual_topic_bf}")
+        _fail("social.follow_topic keeps block", f"topic={mutual_topic_bf}")
     if _wait_followed_topic(backend, addr, mutual_topic_bf, True):
         _pass("social.follow_topic reflected in get_user_followed (mutual)")
     else:
@@ -509,15 +509,15 @@ def test_hard_cap_vs_deque(backend: str):
         _fail("hardcap.fetch_params", f"code={code}")
         return
     tiers = (params_resp or {}).get("tiers") or []
-    if len(tiers) < 3:
-        _fail("hardcap.tier_count", f"expected 3, got {len(tiers)}")
+    if len(tiers) != 2:
+        _fail("hardcap.tier_count", f"expected 2, got {len(tiers)}")
         return
-    _pass("hardcap.tier_count_3")
+    _pass("hardcap.tier_count_2")
 
     free_tier = tiers[0]
-    max_agents_free = int(free_tier.get("max_enabled_agents", 0))
+    max_agents_free = int(free_tier.get("max_enabled_agents", 0) or 0)
     max_fu_free = int(free_tier.get("max_followed_users", 0))
-    max_ft_free = int(free_tier.get("max_followed_topics", 0))
+    max_ft_free = int(free_tier.get("max_joined_communities") or free_tier.get("max_followed_topics") or 0)
     max_bu_free = int(free_tier.get("max_blocked_users", 0))
 
     # ── 19.1 Follow users up to free limit, then verify rejection ──
@@ -577,9 +577,9 @@ def test_hard_cap_vs_deque(backend: str):
             _pass("hardcap.fu_follow_after_unfollow (skipped — no new targets to unfollow)")
 
     # ── 19.2 Follow topics up to free limit, then verify rejection ──
-    existing_ft = len((fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
+    existing_ft = len((fu_data or {}).get("joined_communities") or (fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
     remaining_ft = max(0, max_ft_free - existing_ft)
-    _debug(f"free-tier max_followed_topics={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
+    _debug(f"free-tier max_joined_communities={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
     topic_targets: list[str] = []
     ft_fill_ok = True
     for i in range(remaining_ft):
@@ -593,78 +593,84 @@ def test_hard_cap_vs_deque(backend: str):
             ft_fill_ok = False
             break
         if (i + 1) % 10 == 0:
-            print(f"    [{i+1}/{remaining_ft}] followed topics…")
+            print(f"    [{i+1}/{remaining_ft}] joined communities…")
     if ft_fill_ok:
         _pass(f"hardcap.ft_fill ({remaining_ft} new + {existing_ft} existing = {max_ft_free})")
 
-        actual_ft = _wait_list_count(backend, free_addr, "followed_topics", max_ft_free, timeout=30.0)
-        _debug(f"followed_topics after fill: {actual_ft}/{max_ft_free}")
+        actual_ft = _wait_list_count(backend, free_addr, "joined_communities", max_ft_free, timeout=30.0)
+        _debug(f"joined_communities after fill: {actual_ft}/{max_ft_free}")
 
         overflow_topic = f"hctover{_rand_str(4)}"
         resp = _do_follow_topic(backend, free_wallet, overflow_topic, follow=True, skip_pow=False)
         time.sleep(4)
         code_check, check_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
-        post_count = len((check_data or {}).get("followed_topics") or []) if code_check == 200 else 0
+        post_count = len((check_data or {}).get("joined_communities") or []) if code_check == 200 else 0
         if post_count <= max_ft_free:
             _pass("hardcap.ft_overflow_rejected")
         else:
             _fail("hardcap.ft_overflow_rejected", f"count={post_count} > limit={max_ft_free}")
 
-    # ── 19.3 Enable agents up to free limit, then verify rejection ──
-    code_ea, ea_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
-    existing_ea = len((ea_data or {}).get("enabled_agents") or []) if code_ea == 200 else 0
-    remaining_ea = max(0, max_agents_free - existing_ea)
-    _debug(f"free-tier max_enabled_agents={max_agents_free} existing={existing_ea} remaining={remaining_ea}")
-    agent_targets: list[str] = []
-    ea_fill_ok = True
-    for i in range(remaining_ea):
-        agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        agent_targets.append(agent)
-        resp = _do_enable_agent(backend, free_wallet, agent, enable=True, skip_pow=False)
-        txh = str(resp.get("tx_hash", "")).lower()
-        if not txh:
-            err = str(resp.get("error", ""))[:100]
-            _fail(f"hardcap.ea_fill_{i}", err)
-            ea_fill_ok = False
-            break
-        if (i + 1) % 10 == 0:
-            print(f"    [{i+1}/{remaining_ea}] enabled agents…")
-    if ea_fill_ok:
-        _pass(f"hardcap.ea_fill ({remaining_ea} new + {existing_ea} existing = {max_agents_free})")
-
-        actual_ea = _wait_list_count(backend, free_addr, "enabled_agents", max_agents_free, timeout=30.0)
-        _debug(f"enabled_agents after fill: {actual_ea}/{max_agents_free}")
-
-        overflow_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
-        time.sleep(4)
-        code_check, check_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
-        post_count = len((check_data or {}).get("enabled_agents") or []) if code_check == 200 else 0
-        if post_count <= max_agents_free:
-            _pass("hardcap.ea_overflow_rejected")
-        else:
-            _fail("hardcap.ea_overflow_rejected", f"count={post_count} > limit={max_agents_free}")
-
-        # Disable one and re-enable should succeed
-        if agent_targets:
-            resp = _do_enable_agent(backend, free_wallet, agent_targets[0], enable=False, skip_pow=False)
-            # Wait for the disable to propagate (poll until agent count drops)
-            for _wait in range(15):
-                time.sleep(1)
-                wcode, wdata = _get(f"{backend}/api/get_profile", {"address": free_addr})
-                if wcode == 200:
-                    cur_count = len((wdata or {}).get("enabled_agents") or [])
-                    if cur_count < max_agents_free:
-                        break
-            resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
+    # ── 19.3 Agents were removed in v1.39.0 ──
+    if max_agents_free == 0:
+        _pass("hardcap.enabled_agents_removed")
+        code_ea, ea_data = 200, {}
+        existing_ea = 0
+        remaining_ea = 0
+        agent_targets = []
+        ea_fill_ok = False
+    else:
+        code_ea, ea_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
+        existing_ea = len((ea_data or {}).get("enabled_agents") or []) if code_ea == 200 else 0
+        remaining_ea = max(0, max_agents_free - existing_ea)
+        _debug(f"free-tier max_enabled_agents={max_agents_free} existing={existing_ea} remaining={remaining_ea}")
+        agent_targets: list[str] = []
+        ea_fill_ok = True
+        for i in range(remaining_ea):
+            agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            agent_targets.append(agent)
+            resp = _do_enable_agent(backend, free_wallet, agent, enable=True, skip_pow=False)
             txh = str(resp.get("tx_hash", "")).lower()
-            tx_code = int(resp.get("code", 0) or 0)
-            if txh and tx_code == 0:
-                _pass("hardcap.ea_enable_after_disable")
+            if not txh:
+                err = str(resp.get("error", ""))[:100]
+                _fail(f"hardcap.ea_fill_{i}", err)
+                ea_fill_ok = False
+                break
+            if (i + 1) % 10 == 0:
+                print(f"    [{i+1}/{remaining_ea}] enabled agents…")
+        if ea_fill_ok:
+            _pass(f"hardcap.ea_fill ({remaining_ea} new + {existing_ea} existing = {max_agents_free})")
+
+            actual_ea = _wait_list_count(backend, free_addr, "enabled_agents", max_agents_free, timeout=30.0)
+            _debug(f"enabled_agents after fill: {actual_ea}/{max_agents_free}")
+
+            overflow_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
+            time.sleep(4)
+            code_check, check_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
+            post_count = len((check_data or {}).get("enabled_agents") or []) if code_check == 200 else 0
+            if post_count <= max_agents_free:
+                _pass("hardcap.ea_overflow_rejected")
             else:
-                _fail("hardcap.ea_enable_after_disable", f"txh={txh} code={tx_code}")
-        else:
-            _pass("hardcap.ea_enable_after_disable (skipped — no new targets to disable)")
+                _fail("hardcap.ea_overflow_rejected", f"count={post_count} > limit={max_agents_free}")
+
+            if agent_targets:
+                resp = _do_enable_agent(backend, free_wallet, agent_targets[0], enable=False, skip_pow=False)
+                for _wait in range(15):
+                    time.sleep(1)
+                    wcode, wdata = _get(f"{backend}/api/get_profile", {"address": free_addr})
+                    if wcode == 200:
+                        cur_count = len((wdata or {}).get("enabled_agents") or [])
+                        if cur_count < max_agents_free:
+                            break
+                resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
+                txh = str(resp.get("tx_hash", "")).lower()
+                tx_code = int(resp.get("code", 0) or 0)
+                if txh and tx_code == 0:
+                    _pass("hardcap.ea_enable_after_disable")
+                else:
+                    _fail("hardcap.ea_enable_after_disable", f"txh={txh} code={tx_code}")
+            else:
+                _pass("hardcap.ea_enable_after_disable (skipped — no new targets to disable)")
 
     # ── 19.4 blocked_users: deque (should never reject) ──
     _debug(f"free-tier max_blocked_users={max_bu_free}")

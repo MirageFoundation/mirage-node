@@ -18,6 +18,7 @@ from tests.common import (
     _pass,
     _fail,
     _debug,
+    _get,
     _check_local_docker,
     docker_python,
     resolve_db_name,
@@ -58,8 +59,23 @@ def _psql(db_name: str, sql: str) -> tuple[int, str]:
     return _docker_exec(f'su - postgres -c "psql -d {db_name} -tAc \\"{sql}\\" 2>&1"', timeout=15)
 
 
+def _assert_payouts_gone(backend: str, name: str) -> None:
+    code, _ = _get(f"{backend}/api/rewards/summary")
+    if code == 410:
+        _pass(f"{name}.gone")
+    else:
+        _fail(f"{name}.gone", f"code={code}")
+
+
 def test_payout_schema(backend: str):
-    """The payout journal exists, is additive, and initializing twice is safe."""
+    """Payout journal was removed with quests in v1.39.0."""
+    code, _ = _get(f"{backend}/api/rewards/summary")
+    if code == 410:
+        _pass("payout_schema.gone")
+    else:
+        _fail("payout_schema.gone", f"code={code}")
+    return
+
     del backend
 
     if not _check_local_docker():
@@ -135,6 +151,9 @@ def test_payout_schema(backend: str):
 
 
 def test_payout_transport(backend: str):
+    _assert_payouts_gone(backend, "payout_transport")
+    return
+
     """Payouts are signed in-process and broadcast over REST, never via the CLI."""
     del backend
 
@@ -253,6 +272,9 @@ def test_payout_transport(backend: str):
 
 
 def test_payout_reconciliation(backend: str):
+    _assert_payouts_gone(backend, "payout_reconciliation")
+    return
+
     """A reserved payout survives a restart and settles exactly once."""
     del backend
 
@@ -334,6 +356,9 @@ def test_payout_reconciliation(backend: str):
 
 
 def test_payout_release_rules(backend: str):
+    _assert_payouts_gone(backend, "payout_release_rules")
+    return
+
     """Rows come back only when the signed tx is proven dead."""
     del backend
 
@@ -431,6 +456,9 @@ def test_payout_release_rules(backend: str):
 
 
 def test_payout_claim_gate(backend: str):
+    _assert_payouts_gone(backend, "payout_claim_gate")
+    return
+
     """An unresolved payout blocks the next claim instead of paying again."""
     del backend
 

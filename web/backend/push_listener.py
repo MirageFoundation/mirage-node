@@ -6,12 +6,9 @@ import os
 import threading
 import time
 
-from auto_agents import merge_auto_enabled_agents
 from db import connect_backend_db, connect_db
 from logging_utils import logger
 from settings import (
-    IGNORE_AGENT_BLOCKED_POSTS,
-    IGNORE_AGENT_BLOCKED_USERS,
     TRENDING_PUSH_ENABLED,
     require_bool_env,
 )
@@ -898,19 +895,9 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
     cand_authors = list({c["author"] for c in candidates})
     cand_topics = list({c["topic"] for c in candidates if c["topic"]})
 
-    icur.execute("SELECT LOWER(agent) FROM enabled_agents WHERE LOWER(owner) = %s", (owner_lc,))
-    agents = merge_auto_enabled_agents(
-        icur,
-        [str(r[0] or "").strip().lower() for r in icur.fetchall() if r[0]],
-    )
-
-    post_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_POSTS else [])
-    user_owners = [owner_lc] + (agents if not IGNORE_AGENT_BLOCKED_USERS else [])
-    topic_owners = [owner_lc] + agents
-
     icur.execute(
-        "SELECT DISTINCT LOWER(target) FROM blocked_posts " "WHERE LOWER(owner) = ANY(%s) AND LOWER(target) = ANY(%s)",
-        (post_owners, cand_txs),
+        "SELECT DISTINCT LOWER(target) FROM blocked_posts WHERE LOWER(owner) = %s AND LOWER(target) = ANY(%s)",
+        (owner_lc, cand_txs),
     )
     blocked_posts = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
 
@@ -918,14 +905,14 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
     if cand_authors:
         icur.execute(
             "SELECT DISTINCT LOWER(target) FROM blocked_users "
-            "WHERE LOWER(owner) = ANY(%s) AND LOWER(target) = ANY(%s)",
-            (user_owners, cand_authors),
+            "WHERE LOWER(owner) = %s AND LOWER(target) = ANY(%s)",
+            (owner_lc, cand_authors),
         )
         blocked_authors = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
 
     icur.execute(
-        "SELECT DISTINCT LOWER(target) FROM blocked_topics WHERE LOWER(owner) = ANY(%s)",
-        (topic_owners,),
+        "SELECT DISTINCT LOWER(target) FROM blocked_communities WHERE LOWER(owner) = %s",
+        (owner_lc,),
     )
     raw_blocked_topics = [str(r[0] or "").strip().lower() for r in icur.fetchall()]
     blocked_topic_set: set[str] = set()

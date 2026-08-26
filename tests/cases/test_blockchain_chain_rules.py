@@ -52,7 +52,7 @@ from tests.common import (
     _canon_base_set_biography_raw,
     _canon_base_follow_user_raw,
     _canon_base_unfollow_user_raw,
-    _canon_base_follow_topic_raw,
+    _canon_base_join_community_raw,
     _canon_base_unfollow_topic_raw,
     _canon_base_enable_agent_raw,
     _canon_base_disable_agent_raw,
@@ -61,7 +61,7 @@ from tests.common import (
     _canon_base_unblock_post_raw,
     _canon_base_block_user_raw,
     _canon_base_unblock_user_raw,
-    _canon_base_block_topic_raw,
+    _canon_base_block_community_raw,
     _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw,
     _canon_base_subscribe_raw,
@@ -104,7 +104,7 @@ from tests.blockchain_helpers import (
     _build_msg_annotate,
     _build_msg_block_post,
     _build_msg_block_user,
-    _build_msg_block_topic,
+    _build_msg_block_community,
     _build_msg_subscribe,
     _build_msg_follow_user,
     _build_msg_unfollow_user,
@@ -115,7 +115,7 @@ from tests.blockchain_helpers import (
     _build_msg_set_agents,
     _build_msg_unblock_post,
     _build_msg_unblock_user,
-    _build_msg_unblock_topic,
+    _build_msg_unblock_community,
     _build_msg_set_auto_renewal,
     _check_reject,
     _check_accept,
@@ -259,8 +259,8 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
     victim_addr = str(victim.address())
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
     ts = _now_ms()
-    topic = f"c1{_rand_str(4)}"
-    msg = _build_msg_follow_topic(wallet, lb, 0, ts, str(wallet.address()), topic, pow_val=0, nonce=_gen_nonce())
+    user = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_follow_user(wallet, lb, 0, ts, str(wallet.address()), user, pow_val=0, nonce=_gen_nonce())
     # Name victim as both authority and fee.payer (single required signer slot).
     msg.authority = victim_addr
     signer_pub = wallet.public_key().public_key_bytes
@@ -268,7 +268,7 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
     steal = gas * 1000  # meets floor if it were accepted
 
     tx_bytes = _bh._build_tx_bytes(
-        [(msg, "/mirage.core.v1.MsgFollowTopic")],
+        [(msg, "/mirage.core.v1.MsgFollowUser")],
         gas,
         fee_payer=victim_addr,
         signer_pubkey=signer_pub,
@@ -280,12 +280,12 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
     _check_reject("c1.unsigned_fee_payer_rejected", code, log, "pubkey")
 
     # Empty fee.payer + foreign SignerInfo pubkey (same class: unverified outer identity).
-    msg2 = _build_msg_follow_topic(
-        wallet, lb, 0, ts, str(wallet.address()), f"c1e{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    msg2 = _build_msg_follow_user(
+        wallet, lb, 0, ts, str(wallet.address()), str(LocalWallet(PrivateKey(), prefix="mirage").address()), pow_val=0, nonce=_gen_nonce()
     )
     msg2.authority = _bh._VALIDATOR_ADDR or ""
     tx_bytes2 = _bh._build_tx_bytes(
-        [(msg2, "/mirage.core.v1.MsgFollowTopic")],
+        [(msg2, "/mirage.core.v1.MsgFollowUser")],
         gas,
         fee_payer="",  # empty → SDK falls back to first signer (authority)
         signer_pubkey=signer_pub,  # attacker's pubkey, not validator's
@@ -314,12 +314,12 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
         _fail("c1.forged_signature_rejected", f"victim underfunded: {balance_before} < {expected_fee}")
         return
 
-    msg4 = _build_msg_follow_topic(
-        wallet, lb, 0, ts, str(wallet.address()), f"c1f{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    msg4 = _build_msg_follow_user(
+        wallet, lb, 0, ts, str(wallet.address()), str(LocalWallet(PrivateKey(), prefix="mirage").address()), pow_val=0, nonce=_gen_nonce()
     )
     msg4.authority = fv_addr
     tx_bytes4 = _bh._build_tx_bytes(
-        [(msg4, "/mirage.core.v1.MsgFollowTopic")],
+        [(msg4, "/mirage.core.v1.MsgFollowUser")],
         gas,
         fee_payer=fv_addr,
         signer_pubkey=fv_pub,  # victim's real pubkey — matches the required signer
@@ -357,11 +357,11 @@ def test_c1_unauthorized_gas_payer(backend: str) -> None:
         return
     high_gas = (relay_max // relay_min) * 2 if relay_max > 0 else gas * 5
     high_fee = high_gas * relay_min
-    msg3 = _build_msg_follow_topic(
-        wallet, lb, 0, ts, str(wallet.address()), f"c1c{_rand_str(4)}", pow_val=0, nonce=_gen_nonce()
+    msg3 = _build_msg_follow_user(
+        wallet, lb, 0, ts, str(wallet.address()), str(LocalWallet(PrivateKey(), prefix="mirage").address()), pow_val=0, nonce=_gen_nonce()
     )
     _, code3, log3, dcode3, dlog3 = _submit_tx(
-        [(msg3, "/mirage.core.v1.MsgFollowTopic")],
+        [(msg3, "/mirage.core.v1.MsgFollowUser")],
         high_gas,
         fee_payer,
         signer_pub,
@@ -485,9 +485,9 @@ def test_msg_validation(backend: str) -> None:
         "both": f"*{base}*",
     }
     for label, pat in patterns.items():
-        msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), pat, pow_val=0, nonce=_gen_nonce())
+        msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), pat, pow_val=0, nonce=_gen_nonce())
         _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockTopic")],
+            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
             DEFAULT_GAS_LIMIT,
             fee_payer,
             w2.public_key().public_key_bytes,
@@ -496,9 +496,9 @@ def test_msg_validation(backend: str) -> None:
         _check_deliver_accept(f"msg.block_topic_wildcard_{label}", ccode, dcode, dlog)
 
     # 6.3b MsgBlockTopic invalid wildcard
-    msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), "*", pow_val=0, nonce=_gen_nonce())
+    msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), "*", pow_val=0, nonce=_gen_nonce())
     _, ccode, clog, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        [(msg, "/mirage.core.v1.MsgBlockCommunity")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         w2.public_key().public_key_bytes,
@@ -633,7 +633,7 @@ def test_msg_validation(backend: str) -> None:
     tier0 = _get_tier_config(0)
     max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
     max_blocked_users = _tier_int(tier0, "max_blocked_users")
-    max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
+    max_blocked_communities = _tier_int(tier0, "max_blocked_communities")
 
     bw = WALLETS["free"]
     bw_addr = str(bw.address())
@@ -756,20 +756,20 @@ def test_msg_validation(backend: str) -> None:
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
 
     # ── blocked topics fill + overflow ───────────────────────────
-    _debug(f"free-tier max_blocked_topics={max_blocked_topics}")
+    _debug(f"free-tier max_blocked_communities={max_blocked_communities}")
     fill_ok = True
     blocked_topic_targets: list[str] = []
-    for i in range(max_blocked_topics):
+    for i in range(max_blocked_communities):
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
         topic = f"t{_rand_str(6)}{i}"
         blocked_topic_targets.append(topic)
         nonce = _gen_nonce()
-        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockTopic")],
+            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
             FILL_GAS_LIMIT,
             fee_payer,
             bw_pub,
@@ -780,18 +780,18 @@ def test_msg_validation(backend: str) -> None:
             fill_ok = False
             break
     else:
-        _pass(f"msg.block_topic_fill ({max_blocked_topics} blocked)")
+        _pass(f"msg.block_topic_fill ({max_blocked_communities} blocked)")
 
     if fill_ok:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
         over_topic = f"t{_rand_str(6)}over"
         nonce = _gen_nonce()
-        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockTopic")],
+            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
             FILL_GAS_LIMIT,
             fee_payer,
             bw_pub,
@@ -800,9 +800,9 @@ def test_msg_validation(backend: str) -> None:
         _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
         chain_profile = _get_chain_profile(bw_addr)
         got = [
-            str(v).lower() for v in (chain_profile.get("blocked_topics") or chain_profile.get("blockedTopics") or [])
+            str(v).lower() for v in (chain_profile.get("blocked_communities") or chain_profile.get("blockedCommunities") or [])
         ]
-        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_topics:]
+        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_communities:]
         _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
 
     # 6.11 Unblock post (happy path: block then unblock)
@@ -859,20 +859,20 @@ def test_msg_validation(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, str(w2.address()))
     ts = _now_ms()
     block_topic_target = f"ub{_rand_str(4)}"
-    msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0, nonce=_gen_nonce())
+    msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        [(msg, "/mirage.core.v1.MsgBlockCommunity")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         w2.public_key().public_key_bytes,
         wait_deliver=True,
     )
     if ccode == 0 and dcode == 0:
-        msg = _build_msg_unblock_topic(
+        msg = _build_msg_unblock_community(
             w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0, nonce=_gen_nonce()
         )
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgUnblockTopic")],
+            [(msg, "/mirage.core.v1.MsgUnblockCommunity")],
             DEFAULT_GAS_LIMIT,
             fee_payer,
             w2.public_key().public_key_bytes,

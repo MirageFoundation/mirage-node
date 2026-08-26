@@ -448,35 +448,6 @@ class DatabaseManager:
                     "ON profiles(LOWER(username)) WHERE deleted_at IS NULL"
                 )
 
-                # enabled_agents (was followed_mods; moderator->agent refactor)
-                # Migration first: rename followed_mods -> enabled_agents if it exists
-                cur.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'followed_mods')
-                           AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'enabled_agents') THEN
-                            ALTER TABLE followed_mods RENAME TO enabled_agents;
-                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enabled_agents' AND column_name = 'moderator') THEN
-                                ALTER TABLE enabled_agents RENAME COLUMN moderator TO agent;
-                            END IF;
-                        END IF;
-                    END $$;
-                    """
-                )
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS enabled_agents (
-                        owner TEXT NOT NULL,
-                        agent TEXT NOT NULL,
-                        position INTEGER NOT NULL DEFAULT 0,
-                        PRIMARY KEY (owner, agent)
-                    )
-                    """
-                )
-                cur.execute("ALTER TABLE enabled_agents ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_enabled_agents_agent_lower ON enabled_agents(LOWER(agent))")
-
                 # followed_users (for v1.5 social graph)
                 cur.execute(
                     """
@@ -790,29 +761,6 @@ class DatabaseManager:
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_mentions_post ON mentions(post_txhash)")
 
-                # ========== Agent Edits Table ==========
-                # agent_edits: per-agent overlay edits on posts (MsgAnnotate)
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS agent_edits (
-                        post_txhash TEXT NOT NULL,
-                        agent_address TEXT NOT NULL,
-                        edit_txhash TEXT NOT NULL,
-                        topic TEXT,
-                        title TEXT,
-                        content TEXT,
-                        tag TEXT,
-                        media TEXT,
-                        appendix TEXT,
-                        edited_at BIGINT NOT NULL,
-                        PRIMARY KEY (post_txhash, agent_address)
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_post ON agent_edits(post_txhash)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_agent ON agent_edits(LOWER(agent_address))")
-                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_edits_txhash ON agent_edits(edit_txhash)")
-
                 # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
     def get_meta(self, key: str) -> str | None:
@@ -1047,6 +995,7 @@ class DatabaseManager:
         root_topic: Optional[str] = None,
         root_post_id: Optional[str] = None,
         media: Optional[list[str]] = None,
+        protocol_version: int = 0,
     ) -> None:
         """Insert or update a post."""
         import json as _json
@@ -1083,9 +1032,10 @@ class DatabaseManager:
                         root_post_id,
                         media,
                         relayer,
-                        media_meta
+                        media_meta,
+                        protocol_version
                     )
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
                       community=EXCLUDED.community,
@@ -1102,7 +1052,8 @@ class DatabaseManager:
                       root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id),
                       media=EXCLUDED.media,
                       relayer=EXCLUDED.relayer,
-                      media_meta=EXCLUDED.media_meta
+                      media_meta=EXCLUDED.media_meta,
+                      protocol_version=EXCLUDED.protocol_version
                     """,
                     (
                         txhash,
@@ -1122,6 +1073,7 @@ class DatabaseManager:
                         media_json,
                         relayer,
                         media_meta_json,
+                        int(protocol_version),
                     ),
                 )
 
@@ -2158,13 +2110,27 @@ class DatabaseManager:
         """Batch upsert profiles in a single connection.
 
         Each tuple: (owner, username, level, created_at, subscription_expiry,
-                      auto_renew, biography, avatar, banner, flair, reserve_funds)
+                      auto_renew, biography, avatar, banner, flair, reserve_funds,
+                      effective_paid)
         """
         if not profiles:
             return
         rows = []
         for p in profiles:
-            owner, username, level, created_at, sub_exp, auto_renew, bio, avatar, banner, flair, reserve_funds = p
+            (
+                owner,
+                username,
+                level,
+                created_at,
+                sub_exp,
+                auto_renew,
+                bio,
+                avatar,
+                banner,
+                flair,
+                reserve_funds,
+                effective_paid,
+            ) = p
             rows.append(
                 (
                     owner,
@@ -2179,6 +2145,7 @@ class DatabaseManager:
                     self._strip_nul(flair) or "",
                     int(updated_at),
                     int(reserve_funds),
+                    bool(effective_paid),
                 )
             )
         with self._connect() as conn:
@@ -2186,8 +2153,9 @@ class DatabaseManager:
                 cur.executemany(
                     """
                     INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
-                                         auto_renew, biography, avatar, banner, flair, updated_at, reserve_funds)
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                         auto_renew, biography, avatar, banner, flair, updated_at,
+                                         reserve_funds, effective_paid)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
                       level=EXCLUDED.level,
@@ -2203,7 +2171,8 @@ class DatabaseManager:
                       banner=EXCLUDED.banner,
                       flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
-                      reserve_funds=EXCLUDED.reserve_funds
+                      reserve_funds=EXCLUDED.reserve_funds,
+                      effective_paid=EXCLUDED.effective_paid
                     """,
                     rows,
                 )

@@ -38,6 +38,8 @@ from shared.datatypes import (
     MsgLeaveCommunity,
     MsgCreateCommunity,
     MsgClaimCreatorRewards,
+    MsgBlockCommunity,
+    MsgUnblockCommunity,
 )
 from indexer.address_utils import addr_from_pubkey, derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import get_vote_weight
@@ -293,13 +295,15 @@ class MessageProcessor:
             self._handle_leave_community(type_url, value, ts, height)
         elif type_url == "/mirage.core.v1.MsgCreateCommunity":
             self._handle_create_community(type_url, value, ts, height)
+        elif type_url == "/mirage.core.v1.MsgBlockCommunity":
+            self._handle_block_community(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgUnblockCommunity":
+            self._handle_unblock_community(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgClaimCreatorRewards":
             self._handle_claim_creator_rewards(type_url, value, tx_hash, ts, height)
         elif type_url in (
             "/mirage.core.v1.MsgSetCommunityMetadata",
             "/mirage.core.v1.MsgTransferCommunity",
-            "/mirage.core.v1.MsgBlockCommunity",
-            "/mirage.core.v1.MsgUnblockCommunity",
             "/mirage.core.v1.MsgCreateCurationTeam",
             "/mirage.core.v1.MsgSetCurationTeamProfile",
             "/mirage.core.v1.MsgInviteCurator",
@@ -353,6 +357,7 @@ class MessageProcessor:
         relayer = str(msg_dict.get("authority", "") or "").strip().lower()
 
         topic = str(msg_dict.get("community", "") or msg_dict.get("topic", "") or "")
+        protocol_version = int(msg_dict.get("protocol_version", 0) or 0)
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
         target = str(msg_dict.get("target", "") or "").lower()
@@ -402,6 +407,7 @@ class MessageProcessor:
             root_topic=root_topic,
             root_post_id=root_post_id,
             media=media,
+            protocol_version=protocol_version,
         )
 
         # Update user topic stats for new posts (not edits). Required projection: any
@@ -1030,7 +1036,8 @@ class MessageProcessor:
         )
 
     def _handle_annotate(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
-        """Handle MsgAnnotate — store agent overlay edit in agent_edits table."""
+        logger.debug("historical_annotate ignored type_url=%s tx=%s", type_url, tx_hash)
+        return
         try:
             parsed = MsgAnnotate()
             parsed.ParseFromString(value)
@@ -1312,28 +1319,11 @@ class MessageProcessor:
             raise
 
     def _refresh_enabled_agents(self, addr: str, ts: int):
-        """Query full profile via gRPC and replace enabled_agents in DB."""
+        """Agents were removed in v1.39.0. Keep the helper so absent-profile tests stay no-ops."""
         profile = self.chain.query_profile_full(addr)
         if profile is None:
             logger.warning("profile_absent enabled_agents: skipping refresh for %s", addr)
-            return
-        if "enabled_agents" not in profile:
-            raise RuntimeError(f"missing enabled_agents for {addr}")
-        agents = profile["enabled_agents"]
-        if not isinstance(agents, list):
-            raise RuntimeError(f"invalid enabled_agents for {addr}")
-        logger.debug("refresh_enabled_agents addr=%s agents=%d", addr, len(agents))
-        self.db.set_enabled_agents(addr, agents)
-        self.db.update_profile_timestamp(addr, ts)
-        self.log_yaml(
-            "Updated enabled agents",
-            {
-                "address": addr,
-                "timestamp": int(ts),
-                "time_iso": self.iso_timestamp(ts),
-                "agents": agents,
-            },
-        )
+        return
 
     def _refresh_followed_users(self, addr: str, ts: int):
         """Query full profile via gRPC and replace followed_users in DB."""
@@ -1360,26 +1350,26 @@ class MessageProcessor:
         )
 
     def _refresh_followed_topics(self, addr: str, ts: int):
-        """Query full profile via gRPC and replace followed_topics in DB."""
+        """Query full profile via gRPC and replace joined communities in DB."""
         profile = self.chain.query_profile_full(addr)
         if profile is None:
-            logger.warning("profile_absent followed_topics: skipping refresh for %s", addr)
+            logger.warning("profile_absent joined_communities: skipping refresh for %s", addr)
             return
-        if "followed_topics" not in profile:
-            raise RuntimeError(f"missing followed_topics for {addr}")
-        topics = profile["followed_topics"]
+        if "joined_communities" not in profile:
+            raise RuntimeError(f"missing joined_communities for {addr}")
+        topics = profile["joined_communities"]
         if not isinstance(topics, list):
-            raise RuntimeError(f"invalid followed_topics for {addr}")
-        logger.debug("refresh_followed_topics addr=%s topics=%d", addr, len(topics))
+            raise RuntimeError(f"invalid joined_communities for {addr}")
+        logger.debug("refresh_joined_communities addr=%s communities=%d", addr, len(topics))
         self.db.set_followed_topics(addr, topics)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
-            "Updated followed topics",
+            "Updated joined communities",
             {
                 "address": addr,
                 "timestamp": int(ts),
                 "time_iso": self.iso_timestamp(ts),
-                "topics": topics,
+                "communities": topics,
             },
         )
 
@@ -1583,6 +1573,38 @@ class MessageProcessor:
             logger.error("Error handling MsgBlockTopic: %s", e, exc_info=True)
 
             raise
+
+    def _handle_block_community(self, type_url: str, value: bytes, ts: int):
+        parsed = MsgBlockCommunity()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        community = str(msg_dict.get("community", "")).strip().lower()
+        if not owner or not community:
+            logger.warning("Rejected block_community: missing owner or community")
+            return
+        self.db.block_topic(owner, community, blocked_at=int(ts))
+        removed = self.db.unfollow_topics_matching(owner, community)
+        if removed > 0:
+            logger.debug(
+                "block_community removed join(s) owner=%s pattern=%s removed=%d",
+                owner,
+                community,
+                removed,
+            )
+        logger.info("block_community owner=%s community=%s", owner, community)
+
+    def _handle_unblock_community(self, type_url: str, value: bytes, ts: int):
+        parsed = MsgUnblockCommunity()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        community = str(msg_dict.get("community", "")).strip().lower()
+        if not owner or not community:
+            logger.warning("Rejected unblock_community: missing owner or community")
+            return
+        self.db.unblock_topic(owner, community)
+        logger.info("unblock_community owner=%s community=%s", owner, community)
 
     def _handle_unblock_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnblockTopic."""

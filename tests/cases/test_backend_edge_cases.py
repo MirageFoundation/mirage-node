@@ -685,7 +685,7 @@ def test_edge_cases(backend: str):
         _fail("edge.sqli_search_safe", f"code={code_sqli}")
 
     code_sqli2, _ = _get(f"{backend}/api/search_topics", {"q": "' OR 1=1 --"})
-    if code_sqli2 in (200, 400):
+    if code_sqli2 in (200, 400, 410):
         _pass("edge.sqli_search_topics_safe", code=code_sqli2)
     else:
         _fail("edge.sqli_search_topics_safe", f"code={code_sqli2}")

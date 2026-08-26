@@ -47,6 +47,10 @@ from tests.common import (
     _canon_base_award_raw,
     _canon_base_annotate_raw,
     _canon_base_create_community_raw,
+    _canon_base_join_community_raw,
+    _canon_base_leave_community_raw,
+    _canon_base_block_community_raw,
+    _canon_base_unblock_community_raw,
     canon_signed_with_pow,
     canon_attribution,
     sign_canonical,
@@ -635,17 +639,20 @@ def _do_follow_user_with_nonce(
 
 
 def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
-    """Follow or unfollow a topic."""
+    """Join or leave a community (legacy helper name used by existing tests)."""
+    slug = (topic or "").strip().lower()
+    if follow:
+        _ensure_community_claimed(backend, slug)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
-    canon_fn = _canon_base_follow_topic_raw if follow else _canon_base_unfollow_topic_raw
-    endpoint = "follow_topic" if follow else "unfollow_topic"
+    canon_fn = _canon_base_join_community_raw if follow else _canon_base_leave_community_raw
+    endpoint = "join_community" if follow else "leave_community"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, topic, nonce)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, slug, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -659,12 +666,11 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
         "timestamp": ts,
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
-        "target": addr,
-        "topic": topic,
+        "community": slug,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
-    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
 
@@ -746,17 +752,18 @@ def _do_block_with_nonce(
 
 
 def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
-    """Block or unblock a topic."""
+    """Block or unblock a community (legacy helper name used by existing tests)."""
+    slug = (topic or "").strip().lower()
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
-    canon_fn = _canon_base_block_topic_raw if block else _canon_base_unblock_topic_raw
-    endpoint = "block_topic" if block else "unblock_topic"
+    canon_fn = _canon_base_block_community_raw if block else _canon_base_unblock_community_raw
+    endpoint = "block_community" if block else "unblock_community"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic, nonce)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, slug, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -770,12 +777,13 @@ def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_p
         "timestamp": ts,
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
-        "topic": topic,
+        "target": addr,
+        "community": slug,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
-    print(f"    [debug] {endpoint} topic={topic} difficulty={d}")
-    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    print(f"    [debug] {endpoint} community={slug} difficulty={d}")
+    _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
 
@@ -1053,7 +1061,7 @@ def _wait_list_count(
     until count <= expected (after unfollow/disable).
     Returns the actual count observed.
     """
-    endpoint = "get_user_followed" if list_key.startswith("followed_") else "get_profile"
+    endpoint = "get_user_followed" if list_key.startswith("followed_") or list_key == "joined_communities" else "get_profile"
     deadline = time.perf_counter() + timeout
     actual = 0
     while time.perf_counter() < deadline:
@@ -1210,14 +1218,14 @@ def _wait_blocked_topic_state(
         # Check indexed DB first (fast, eventually consistent)
         code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
         if code == 200:
-            blocked = (data or {}).get("blocked_topics") or []
+            blocked = (data or {}).get("blocked_communities") or (data or {}).get("blocked_topics") or []
             present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
             if present == expect_present:
                 return True
         # Fall back to chain profile (authoritative, always current)
         code2, profile = _get(f"{backend}/api/get_profile", {"address": address})
         if code2 == 200:
-            chain_blocked = (profile or {}).get("blocked_topics") or []
+            chain_blocked = (profile or {}).get("blocked_communities") or (profile or {}).get("blocked_topics") or []
             present2 = any(str(t or "").strip().lower() == topic_lower for t in chain_blocked)
             if present2 == expect_present:
                 return True
@@ -1241,7 +1249,7 @@ def _wait_followed_topic(
     while time.perf_counter() < deadline:
         code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
         if code == 200:
-            topics = (data or {}).get("followed_topics") or []
+            topics = (data or {}).get("joined_communities") or (data or {}).get("followed_topics") or []
             present = any(str(t or "").strip().lower() == topic_lower for t in topics)
             if present == expect_present:
                 return True

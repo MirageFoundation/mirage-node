@@ -1468,6 +1468,7 @@ class Indexer:
                     str(p.get("banner", "") or ""),
                     str(p.get("flair", "") or ""),
                     int(p.get("reserve_funds", 0) or 0),
+                    bool(p.get("effective_paid", False)),
                 )
             )
 
@@ -1476,14 +1477,13 @@ class Indexer:
 
             for p in profiles:
                 owner = str(p.get("owner", "")).strip().lower()
-                self.db.set_enabled_agents(owner, [str(a).lower() for a in p.get("enabled_agents") or []])
                 self.db.set_followed_users(owner, [str(u).lower() for u in p.get("followed_users") or []])
-                self.db.set_followed_topics(owner, [str(t) for t in p.get("followed_topics") or []])
+                self.db.set_followed_topics(owner, [str(t) for t in p.get("joined_communities") or []])
                 for target in p.get("blocked_users") or []:
                     self.db.block_user(owner, str(target).lower(), now)
                 for target in p.get("blocked_posts") or []:
                     self.db.block_post(owner, str(target).lower(), now)
-                for target in p.get("blocked_topics") or []:
+                for target in p.get("blocked_communities") or []:
                     self.db.block_topic(owner, str(target), now)
 
             absent = self._soft_delete_absent_owners(chain_owners, now)
@@ -1539,12 +1539,11 @@ class Indexer:
             with self.db._connect() as conn:
                 with conn.cursor() as cur:
                     for table in (
-                        "enabled_agents",
                         "followed_users",
-                        "followed_topics",
+                        "community_curation_preferences",
                         "blocked_users",
                         "blocked_posts",
-                        "blocked_topics",
+                        "blocked_communities",
                     ):
                         cur.execute(f"DELETE FROM {table} WHERE LOWER(owner) = LOWER(%s)", (owner,))
             logger.debug("profile_sync.soft_deleted owner=%s", owner)

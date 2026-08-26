@@ -113,6 +113,23 @@ from tests.cases.test_backend_accounts import _ensure_subscriber
 
 
 def test_agents(backend: str):
+    """Agent enablement was removed in v1.39.0."""
+    for path, label in (
+        ("/api/core/enable_agent", "enable_agent"),
+        ("/api/core/disable_agent", "disable_agent"),
+        ("/api/core/set_agents", "set_agents"),
+    ):
+        code, _ = _post(f"{backend}{path}", {})
+        if code == 410:
+            _pass(f"agents.{label}_gone")
+        else:
+            _fail(f"agents.{label}_gone", f"code={code}")
+    code, _ = _get(f"{backend}/api/get_agents")
+    if code == 410:
+        _pass("agents.get_agents_gone")
+    else:
+        _fail("agents.get_agents_gone", f"code={code}")
+    return
 
     sub1 = WALLETS["sub1"]
     sub2 = WALLETS["sub2"]
@@ -346,8 +363,13 @@ def test_agents(backend: str):
 
 
 def test_agent_behavior(backend: str):
-    """Test agent block propagation: when a user enables an agent, the agent's
-    blocks (posts, users, topics) should also apply to the user's feed."""
+    """Agent block propagation was removed in v1.39.0."""
+    code, _ = _post(f"{backend}/api/core/enable_agent", {})
+    if code == 410:
+        _pass("agent_behavior.gone")
+    else:
+        _fail("agent_behavior.gone", f"code={code}")
+    return
 
     agent = WALLETS["agent1"]
     user = WALLETS["sub1"]

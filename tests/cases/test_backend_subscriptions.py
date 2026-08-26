@@ -478,10 +478,10 @@ def test_tier_config_api(backend: str):
     _pass("tierapi.fetch_params")
 
     tiers = (params_resp or {}).get("tiers") or []
-    if len(tiers) != 3:
-        _fail("tierapi.exactly_3_tiers", f"got {len(tiers)}")
+    if len(tiers) != 2:
+        _fail("tierapi.exactly_2_tiers", f"got {len(tiers)}")
         return
-    _pass("tierapi.exactly_3_tiers")
+    _pass("tierapi.exactly_2_tiers")
 
     # Free tier (index 0)
     free = tiers[0]
@@ -491,12 +491,11 @@ def test_tier_config_api(backend: str):
         _fail("tierapi.free_period_fee_0", f"got={free.get('period_fee')}")
 
     free_expected = {
-        "max_enabled_agents": 5,
         "max_followed_users": 25,
-        "max_followed_topics": 25,
+        "max_joined_communities": 25,
         "max_blocked_users": 25,
         "max_blocked_posts": 25,
-        "max_blocked_topics": 25,
+        "max_blocked_communities": 25,
     }
     for field, expected in free_expected.items():
         val = int(free.get(field, 0))
@@ -546,12 +545,11 @@ def test_tier_config_api(backend: str):
         _fail("tierapi.sub_period_fee_100B", f"got={sub.get('period_fee')}")
 
     sub_expected = {
-        "max_enabled_agents": 50,
         "max_followed_users": 500,
-        "max_followed_topics": 500,
+        "max_joined_communities": 500,
         "max_blocked_users": 500,
         "max_blocked_posts": 500,
-        "max_blocked_topics": 500,
+        "max_blocked_communities": 500,
     }
     for field, expected in sub_expected.items():
         val = int(sub.get(field, 0))
@@ -580,10 +578,10 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.sub_vote_weight_1.33", f"got={sub.get('vote_weight')}")
 
-    if not sub.get("can_be_agent", True):
-        _pass("tierapi.sub_can_be_agent_false")
+    if not sub.get("can_be_agent", False):
+        _pass("tierapi.sub_can_be_agent_absent_or_false")
     else:
-        _fail("tierapi.sub_can_be_agent_false", f"got={sub.get('can_be_agent')}")
+        _fail("tierapi.sub_can_be_agent_absent_or_false", f"got={sub.get('can_be_agent')}")
 
     for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         if sub.get(flag, False):
@@ -591,23 +589,7 @@ def test_tier_config_api(backend: str):
         else:
             _fail(f"tierapi.sub_{flag}_true", f"got={sub.get(flag)}")
 
-    # Agent tier (index 2)
-    agent = tiers[2]
-    if int(agent.get("period_fee", -1)) == 500_000_000_000:
-        _pass("tierapi.agent_period_fee_200B")
-    else:
-        _fail("tierapi.agent_period_fee_200B", f"got={agent.get('period_fee')}")
-
-    if agent.get("can_be_agent", False):
-        _pass("tierapi.agent_can_be_agent_true")
-    else:
-        _fail("tierapi.agent_can_be_agent_true", f"got={agent.get('can_be_agent')}")
-
-    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
-        if agent.get(flag, False):
-            _pass(f"tierapi.agent_{flag}_true")
-        else:
-            _fail(f"tierapi.agent_{flag}_true", f"got={agent.get(flag)}")
+    _pass("tierapi.agent_tier_removed")
 
 
 # =========================================================================
@@ -673,7 +655,7 @@ def test_subscribe_gift_agent(backend: str):
         before_exp = int(before.get("subscription_expiry", 0) or 0)
         _debug(f"subscribe.gift_agent.before agent1 exp={before_exp} level={before.get('user_level')}")
 
-        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         err = str(resp.get("error", "")) if resp else ""
         if err:
@@ -711,7 +693,7 @@ def test_subscribe_gift_agent(backend: str):
     # 26.3 Gift level 10 again — should extend expiry further
     try:
         before_exp2 = after_exp
-        resp = _do_subscribe(backend, agent2_wallet, 10, target=agent1_addr)
+        resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         err = str(resp.get("error", "")) if resp else ""
         if err:

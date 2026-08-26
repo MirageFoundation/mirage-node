@@ -40,7 +40,14 @@ def _utc_julian_day(ts: int) -> int:
 
 
 def test_quest_config(backend: str):
-    """One fail-hard source of quest configuration, and no hardcoded second copy."""
+    """Quests were removed in v1.39.0."""
+    code, _ = _get(f"{backend}/api/rewards/summary")
+    if code == 410:
+        _pass("quest_config.gone")
+    else:
+        _fail("quest_config.gone", f"code={code}")
+    return
+
     del backend
 
     if os.path.exists(os.path.join(REPO_ROOT, "web", "backend", "quest_settings.py")):
@@ -132,7 +139,14 @@ def test_quest_config(backend: str):
 
 
 def test_quest_assignment(backend: str):
-    """Concurrent first requests must not hand one user more than the daily cap."""
+    """Quests were removed in v1.39.0."""
+    code, _ = _get(f"{backend}/api/rewards/summary")
+    if code == 410:
+        _pass("quest_assignment.gone")
+    else:
+        _fail("quest_assignment.gone", f"code={code}")
+    return
+
     if not _check_local_docker():
         _fail("quest_assignment.concurrent_requests_respect_cap", "local docker required")
         return

@@ -254,11 +254,10 @@ class ChainClient:
         if self._profile_cache is not None:
             self._profile_cache[key] = profile
         logger.debug(
-            "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
+            "query_profile_full grpc addr=%s users=%d communities=%d",
             addr,
-            len(profile["enabled_agents"]),
             len(profile["followed_users"]),
-            len(profile["followed_topics"]),
+            len(profile["joined_communities"]),
         )
         return profile
 
@@ -277,12 +276,12 @@ class ChainClient:
             "avatar": str(resp.avatar),
             "banner": str(resp.banner),
             "flair": str(resp.flair),
-            "enabled_agents": list(resp.enabled_agents),
+            "effective_paid": bool(resp.effective_paid),
             "followed_users": list(resp.followed_users),
-            "followed_topics": list(resp.followed_topics),
+            "joined_communities": list(resp.joined_communities),
             "blocked_users": list(resp.blocked_users),
             "blocked_posts": list(resp.blocked_posts),
-            "blocked_topics": list(resp.blocked_topics),
+            "blocked_communities": list(resp.blocked_communities),
         }
 
     def list_profiles_paginated(self) -> list[dict]:

@@ -365,7 +365,7 @@ def test_post_lifecycle(backend: str):
         _fail("post.create_with_tag succeeds")
 
     # 3.10 Get posts by topic filter
-    code, tf = _get(f"{backend}/api/get_posts", {"topic": topic, "limit": 10})
+    code, tf = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
     if code == 200:
         _pass("post.get_posts topic filter works")
     else:
@@ -866,7 +866,13 @@ def test_content_limits(backend: str):
 
 
 def test_annotate(backend: str):
-    """Test MsgAnnotate agent overlay edits."""
+    """Annotate was removed in v1.39.0."""
+    code, _ = _post(f"{backend}/api/core/annotate", {})
+    if code == 410:
+        _pass("annotate.gone")
+    else:
+        _fail("annotate.gone", f"code={code}")
+    return
 
     agent = WALLETS.get("agent1")
     free = WALLETS.get("free")
@@ -1434,7 +1440,7 @@ def test_image_impressions(backend: str) -> None:
                 return int(row[0]) if row else 0
 
     before = _get_view_count()
-    code, resp = _get(f"{backend}/api/get_posts", {"topic": topic, "limit": 10})
+    code, resp = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
     if code != 200:
         _fail("image_impressions.get_posts", f"code={code}")
         return
@@ -1458,7 +1464,7 @@ def test_image_impressions(backend: str) -> None:
     else:
         _fail("image_impressions.increment_once", f"before={before} after={after}")
 
-    code2, _ = _get(f"{backend}/api/get_posts", {"topic": topic, "limit": 10})
+    code2, _ = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
     if code2 != 200:
         _fail("image_impressions.get_posts_repeat", f"code={code2}")
         return

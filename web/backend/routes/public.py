@@ -41,8 +41,6 @@ from user_last_seen import update_user_last_seen
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
-    IGNORE_AGENT_BLOCKED_POSTS,
-    IGNORE_AGENT_BLOCKED_USERS,
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
     OPEN_BROWSING_ENABLED,
@@ -62,7 +60,6 @@ from datetime import datetime as dt
 import math
 from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urlencode, urlparse
-from auto_agents import merge_auto_enabled_agents
 from chain import (
     classify_reject as _classify_reject,
     get_block_time_seconds as _get_block_time_seconds,
@@ -207,7 +204,8 @@ def _db_get_profile_scalars(addr: str) -> dict | None:
         cur = conn.cursor()
         cur.execute(
             """SELECT owner, username, level, created_at, subscription_expiry,
-                      auto_renew, biography, avatar, banner, flair, reserve_funds
+                      auto_renew, biography, avatar, banner, flair, reserve_funds,
+                      effective_paid
                FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1""",
             (addr,),
         )
@@ -226,6 +224,7 @@ def _db_get_profile_scalars(addr: str) -> dict | None:
             "banner": row[8] or "",
             "flair": row[9] or "",
             "reserve_funds": int(row[10]) if row[10] is not None else 0,
+            "effective_paid": bool(row[11]) if row[11] is not None else False,
         }
 
 
@@ -665,58 +664,23 @@ def _youtube_video_id_from_url(url: str) -> str | None:
 # Note: thumbnail discovery moved to the indexer. No public endpoint is exposed.
 
 
-def _get_enabled_agents(cur, address: str) -> list[str]:
-    """Get list of agent addresses served as enabled for the viewer."""
-    if not address:
-        return []
-    cur.execute(
-        "SELECT agent FROM enabled_agents WHERE LOWER(owner) = LOWER(%s) ORDER BY position ASC",
-        (address.lower(),),
-    )
-    return merge_auto_enabled_agents(cur, [row[0].lower() for row in cur.fetchall()])
-
-
 def _get_blocked_posts(cur, address: str) -> set[str]:
-    """Get all post txhashes blocked by the viewer and their enabled agents."""
+    """Get all post txhashes blocked by the viewer."""
     if not address:
         return set()
 
-    blocked_posts = set()
-
-    # Get viewer's own blocked posts
     cur.execute("SELECT target FROM blocked_posts WHERE owner = %s", (address.lower(),))
-    blocked_posts.update(row[0].lower() for row in cur.fetchall())
-
-    # Get blocked posts from enabled agents (unless IGNORE_AGENT_BLOCKED_POSTS is enabled)
-    if not IGNORE_AGENT_BLOCKED_POSTS:
-        agents = _get_enabled_agents(cur, address)
-        for agent_address in agents:
-            cur.execute("SELECT target FROM blocked_posts WHERE owner = %s", (agent_address.lower(),))
-            blocked_posts.update(row[0].lower() for row in cur.fetchall())
-
-    return blocked_posts
+    return {row[0].lower() for row in cur.fetchall()}
 
 
 def _get_blocked_users(cur, address: str) -> set[str]:
-    """Get all user addresses blocked by the viewer and their enabled agents."""
+    """Get all user addresses blocked by the viewer."""
     if not address:
         return set()
 
-    blocked_users = set()
-
-    # Get viewer's own blocked users
     cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (address.lower(),))
-    blocked_users.update(row[0].lower() for row in cur.fetchall())
-
-    # Get blocked users from enabled agents (unless IGNORE_AGENT_BLOCKED_USERS is enabled)
-    if not IGNORE_AGENT_BLOCKED_USERS:
-        agents = _get_enabled_agents(cur, address)
-        for agent_address in agents:
-            cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (agent_address.lower(),))
-            blocked_users.update(row[0].lower() for row in cur.fetchall())
-
+    blocked_users = {row[0].lower() for row in cur.fetchall()}
     blocked_users.discard(address.lower())
-
     return blocked_users
 
 
@@ -770,145 +734,7 @@ def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tup
 
 
 def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
-    """Overlay agent edits onto a list of post dicts for this viewer.
-    Replacement fields: topic, title, content, tag, media (first non-None in priority order).
-    Appendix: collect ALL non-empty appendices in agent priority order.
-    """
-    if not posts:
-        return posts
-    viewer_lower = (viewer or "").strip().lower()
-    is_guest = _is_guest(viewer)
-
-    eligible_posts = posts
-
-    # A signed-out visitor has no agent list of their own, but AUTO_ENABLED_AGENTS
-    # is configured to apply to every user. Returning early here meant the tag an
-    # auto-enabled agent had put on a post was never overlaid for guests, so the
-    # tag filter downstream judged the post by its own empty tag and published it
-    # on the anonymous frontpage untagged.
-    agents = merge_auto_enabled_agents(cur, []) if is_guest else _get_enabled_agents(cur, viewer)
-    logger.debug(
-        "apply_agent_edits: viewer=%s guest=%s raw_agents=%s post_count=%d",
-        viewer_lower or "(anonymous)",
-        is_guest,
-        agents,
-        len(posts),
-    )
-    if agents and not is_guest:
-        agents = [a for a in agents if a.lower() != viewer_lower]
-
-    post_ids = [p.get("post_id", "").lower() for p in eligible_posts if p.get("post_id")]
-    if not post_ids:
-        return posts
-    post_ph = ",".join(["%s"] * len(post_ids))
-
-    if not is_guest:
-        cur.execute(
-            f"""SELECT 1 FROM agent_edits
-                WHERE post_txhash IN ({post_ph})
-                  AND LOWER(agent_address) = %s
-                LIMIT 1""",
-            post_ids + [viewer_lower],
-        )
-        if cur.fetchone():
-            agents.insert(0, viewer_lower)
-    if not agents:
-        logger.debug("apply_agent_edits: no agents for viewer=%s, skipping overlay", viewer_lower)
-        return posts
-
-    import json as _json
-
-    # Batch fetch all edits for these posts from enabled agents
-    agent_ph = ",".join(["%s"] * len(agents))
-    cur.execute(
-        f"""SELECT post_txhash, agent_address, topic, title, content, tag, media, appendix
-            FROM agent_edits
-            WHERE post_txhash IN ({post_ph})
-              AND LOWER(agent_address) IN ({agent_ph})""",
-        [p for p in post_ids] + [a.lower() for a in agents],
-    )
-    rows = cur.fetchall()
-    logger.debug(
-        "apply_agent_edits: viewer=%s agents=%d posts=%d rows=%d",
-        viewer_lower,
-        len(agents),
-        len(post_ids),
-        len(rows),
-    )
-    if not rows:
-        return posts
-
-    # Group by post
-    edits_by_post: dict[str, dict[str, dict]] = {}
-    for post_tx, agent_addr, ae_topic, ae_title, ae_content, ae_tag, ae_media_raw, ae_appendix in rows:
-        ptx = (post_tx or "").lower()
-        if ptx not in edits_by_post:
-            edits_by_post[ptx] = {}
-        try:
-            ae_media = _json.loads(ae_media_raw) if ae_media_raw is not None else None
-            if ae_media is not None and not isinstance(ae_media, list):
-                ae_media = None
-        except Exception:
-            ae_media = None
-        edits_by_post[ptx][(agent_addr or "").lower()] = {
-            "topic": ae_topic,
-            "title": ae_title,
-            "content": ae_content,
-            "tag": _normalize_api_tag(ae_tag) if ae_tag is not None else None,
-            "media": ae_media,
-            "appendix": ae_appendix,
-        }
-
-    # Resolve agent addresses -> usernames in one batch query
-    all_agent_addrs = list({a.lower() for edits in edits_by_post.values() for a in edits})
-    agent_username_map: dict[str, str] = {}
-    if all_agent_addrs:
-        addr_ph = ",".join(["%s"] * len(all_agent_addrs))
-        cur.execute(
-            f"SELECT LOWER(owner), username FROM profiles WHERE LOWER(owner) IN ({addr_ph}) AND username != '' AND deleted_at IS NULL",
-            all_agent_addrs,
-        )
-        for row in cur.fetchall():
-            agent_username_map[row[0]] = row[1]
-
-    # Apply per post
-    agent_order = [a.lower() for a in agents]
-    for post in eligible_posts:
-        pid = (post.get("post_id") or "").lower()
-        if pid not in edits_by_post:
-            continue
-        agent_edits = edits_by_post[pid]
-        applied = {}
-        appendices = []
-        for agent_addr in agent_order:
-            edit = agent_edits.get(agent_addr)
-            if not edit:
-                continue
-            for field in ("topic", "title", "content", "tag", "media"):
-                if field not in applied and edit.get(field) is not None:
-                    # Stash the original value so the frontend can offer a
-                    # "Show original" toggle. We only need title/content for
-                    # that UI today, but the field could be expanded later.
-                    if field in ("title", "content"):
-                        orig_key = "original_" + field
-                        if orig_key not in post:
-                            post[orig_key] = post.get(field)
-                    post[field] = edit[field]
-                    applied[field] = agent_addr
-            if edit.get("appendix"):
-                appendices.append(
-                    {
-                        "agent": agent_addr,
-                        "agent_username": agent_username_map.get(agent_addr, ""),
-                        "text": edit["appendix"],
-                    }
-                )
-        if "media" in applied:
-            post["media_meta"] = _extract_media_meta(post["media"])
-        if applied or appendices:
-            post["agent_edited"] = True
-            post["agent_edits_meta"] = applied
-            post["appendices"] = appendices
+    """Agent overlays were removed in v1.39.0."""
     return posts
 
 
@@ -3392,6 +3218,7 @@ def _build_user_followed(addr: str) -> dict:
     /api/bootstrap.
     """
     followed_users: list = []
+    joined_communities: list = []
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -3401,12 +3228,18 @@ def _build_user_followed(addr: str) -> dict:
             (addr,),
         )
         followed_users = [row[0] for row in cur.fetchall()]
+        cur.execute(
+            "SELECT community FROM community_curation_preferences WHERE LOWER(owner)=LOWER(%s) ORDER BY community",
+            (addr,),
+        )
+        joined_communities = [row[0] for row in cur.fetchall()]
         conn.close()
     except Exception:
         pass
 
     return {
         "followed_users": followed_users,
+        "joined_communities": joined_communities,
     }
 
 
@@ -3423,9 +3256,8 @@ def get_user_followed():
         log_event(
             rid,
             "get_user_followed.ok",
-            agents=len(resp.get("enabled_agents", [])),
-            topics=len(resp.get("followed_topics", [])),
             users=len(resp.get("followed_users", [])),
+            communities=len(resp.get("joined_communities", [])),
         )
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
@@ -3510,7 +3342,7 @@ def _build_user_blocked(addr: str) -> dict:
     """
     blocked_posts: list = []
     blocked_users: list = []
-    blocked_topics: list = []
+    blocked_communities: list = []
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -3520,7 +3352,7 @@ def _build_user_blocked(addr: str) -> dict:
         cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
         blocked_users = [row[0] for row in cur.fetchall()]
         cur.execute("SELECT target FROM blocked_communities WHERE LOWER(owner)=LOWER(%s)", (addr,))
-        blocked_topics = [row[0] for row in cur.fetchall()]
+        blocked_communities = [row[0] for row in cur.fetchall()]
         conn.close()
     except Exception:
         pass
@@ -3528,7 +3360,7 @@ def _build_user_blocked(addr: str) -> dict:
     return {
         "blocked_posts": blocked_posts,
         "blocked_users": blocked_users,
-        "blocked_topics": blocked_topics,
+        "blocked_communities": blocked_communities,
     }
 
 
@@ -4452,9 +4284,6 @@ def bootstrap():
         resp["invite_codes"] = None
 
     if address:
-        # Lazy import to avoid module-load ordering issues with routes.quests.
-        from routes.quests import _build_rewards_summary
-
         resp["user_status"] = _safe("user_status", lambda: _build_user_status(address))
         resp["user_followed"] = _safe("user_followed", lambda: _build_user_followed(address))
         resp["user_blocked"] = _safe("user_blocked", lambda: _build_user_blocked(address))
@@ -4473,10 +4302,6 @@ def bootstrap():
                 resp["invite_codes"] = _safe("invite_codes", lambda: _build_invite_codes(signed_addr))
             else:
                 log_event(rid, "bootstrap.invite_codes.unsigned_or_invalid")
-        resp["rewards_summary"] = _safe(
-            "rewards_summary",
-            lambda: _build_rewards_summary(address.lower()),
-        )
 
     resp["view"] = _safe(
         "view",
@@ -5638,8 +5463,8 @@ def get_posts():
     page = _clamp_page(page)
     offset = (page - 1) * limit
     community = request.args.get("community", default=None, type=str)
-    if community is None:
-        community = request.args.get("topic", default=None, type=str)
+    if request.args.get("topic") is not None:
+        return jsonify({"error": "topic is retired; use community"}), 400
     topic = community
     address = request.args.get("address", default="", type=str)
 

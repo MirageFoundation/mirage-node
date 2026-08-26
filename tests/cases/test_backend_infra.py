@@ -149,28 +149,28 @@ def test_params(backend: str):
     else:
         _fail("params.pow_difficulty >= 0 (step format)", f"got {pd}")
 
-    # 1.4b tier limits for max_blocked_topics (requires v1.13.0 upgrade)
+    # 1.4b two-tier max_blocked_communities
     tiers = data.get("tiers") or []
-    expected_blocked = [10, 125, 500, 1000]
-    if len(tiers) >= 4:
-        got_blocked = [int((tiers[i] or {}).get("max_blocked_topics", -1)) for i in range(4)]
+    expected_blocked = [25, 500]
+    if len(tiers) == 2:
+        got_blocked = [int((tiers[i] or {}).get("max_blocked_communities", -1)) for i in range(2)]
         if got_blocked == expected_blocked:
-            _pass("params.max_blocked_topics tier limits", values=got_blocked)
+            _pass("params.max_blocked_communities tier limits", values=got_blocked)
         else:
-            _fail("params.max_blocked_topics tier limits", f"got {got_blocked}")
+            _fail("params.max_blocked_communities tier limits", f"got {got_blocked}")
     else:
-        _pass("params.max_blocked_topics tier limits (skipped, pre-v1.13.0)", tiers_len=len(tiers))
+        _fail("params.max_blocked_communities tier limits", f"tiers_len={len(tiers)}")
 
-    # 1.4c tier limits for max_biography_length (requires v1.18.0 upgrade)
-    expected_bio = [0, 512, 512]
-    if len(tiers) >= 3:
-        got_bio = [int((tiers[i] or {}).get("max_biography_length", -1)) for i in range(3)]
+    # 1.4c two-tier max_biography_length
+    expected_bio = [0, 512]
+    if len(tiers) == 2:
+        got_bio = [int((tiers[i] or {}).get("max_biography_length", -1)) for i in range(2)]
         if got_bio == expected_bio:
             _pass("params.max_biography_length tier limits", values=got_bio)
         else:
             _fail("params.max_biography_length tier limits", f"got {got_bio}")
     else:
-        _pass("params.max_biography_length tier limits (skipped, pre-v1.18.0)", tiers_len=len(tiers))
+        _fail("params.max_biography_length tier limits", f"tiers_len={len(tiers)}")
 
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")
@@ -213,20 +213,19 @@ def test_params(backend: str):
     else:
         _fail("params.award_configs defaults present", "award_configs missing or empty")
 
-    # 1.6b subscription_reserve_bps is 9500 (exact: it is an integer field now,
-    # so a tolerance would only hide the rounding drift the field exists to stop)
+    # 1.6b subscription_reserve_bps is 0 after v1.39.0 (no relay reserve)
     reserve_bps = cfg.get("subscription_reserve_bps") if isinstance(cfg, dict) else None
     if reserve_bps is None:
-        _fail("params.subscription_reserve_bps_9500", "missing")
+        _fail("params.subscription_reserve_bps_0", "missing")
     else:
         try:
             reserve_val = int(reserve_bps)
-            if reserve_val == 9500:
-                _pass("params.subscription_reserve_bps_9500", value=reserve_val)
+            if reserve_val == 0:
+                _pass("params.subscription_reserve_bps_0", value=reserve_val)
             else:
-                _fail("params.subscription_reserve_bps_9500", f"got {reserve_bps}")
+                _fail("params.subscription_reserve_bps_0", f"got {reserve_bps}")
         except Exception as e:
-            _fail("params.subscription_reserve_bps_9500", str(e))
+            _fail("params.subscription_reserve_bps_0", str(e))
 
     # 1.7 get_node_config returns valid
     code3b, ncfg = _get(f"{backend}/api/get_node_config")
@@ -348,13 +347,13 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.logged_in user_status valid", f"got_keys={list((us or {}).keys())[:8]}")
 
     uf = body2.get("user_followed")
-    if isinstance(uf, dict) and {"enabled_agents", "followed_topics", "followed_users"} <= set(uf.keys()):
+    if isinstance(uf, dict) and {"joined_communities", "followed_users"} <= set(uf.keys()):
         _pass("bootstrap.logged_in user_followed valid")
     else:
         _fail("bootstrap.logged_in user_followed valid", f"got_keys={list((uf or {}).keys())[:8]}")
 
     ub = body2.get("user_blocked")
-    if isinstance(ub, dict) and {"blocked_posts", "blocked_users", "blocked_topics"} <= set(ub.keys()):
+    if isinstance(ub, dict) and {"blocked_posts", "blocked_users", "blocked_communities"} <= set(ub.keys()):
         _pass("bootstrap.logged_in user_blocked valid")
     else:
         _fail("bootstrap.logged_in user_blocked valid", f"got_keys={list((ub or {}).keys())[:8]}")
@@ -372,18 +371,18 @@ def test_bootstrap(backend: str):
         else:
             _pass("bootstrap.logged_in omits invite_codes when feature off")
 
-    # rewards_summary may be the disabled stub if QUESTS_ENABLED=false.
+    # rewards_summary is retired with quests
     rs = body2.get("rewards_summary")
-    if isinstance(rs, dict) and "daily_quests" in rs and "pending_rewards" in rs:
-        _pass("bootstrap.logged_in rewards_summary valid")
+    if rs is None:
+        _pass("bootstrap.logged_in rewards_summary omitted")
     else:
-        _fail("bootstrap.logged_in rewards_summary valid", f"got_keys={list((rs or {}).keys())[:8]}")
+        _fail("bootstrap.logged_in rewards_summary omitted", f"got={type(rs).__name__}")
 
     # ----- Cross-check: per-endpoint /api/get_user_followed shape matches the bootstrap section -----
     code3, ufp = _get(f"{backend}/api/get_user_followed", {"address": addr})
     if code3 == 200 and isinstance(ufp, dict):
         # bootstrap section omits the injected balance, so compare lists only.
-        for k in ("enabled_agents", "followed_topics", "followed_users"):
+        for k in ("joined_communities", "followed_users"):
             if (uf or {}).get(k, []) == ufp.get(k, []):
                 continue
             _fail(f"bootstrap.user_followed.{k} matches per-endpoint", "lists differ")
@@ -430,20 +429,19 @@ def test_bootstrap(backend: str):
 
 def test_search(backend: str):
 
-    # 8.1 get_topics returns list
+    # 8.1 get_topics is retired
     code, topics = _get(f"{backend}/api/get_topics")
-    if code == 200:
-        t_list = topics.get("topics") or topics.get("data") or []
-        _pass("search.get_topics returns 200", count=len(t_list))
+    if code == 410:
+        _pass("search.get_topics gone")
     else:
-        _fail("search.get_topics returns 200", f"code={code}")
+        _fail("search.get_topics gone", f"code={code}")
 
-    # 8.2 search_topics
+    # 8.2 search_topics is retired
     code, st = _get(f"{backend}/api/search_topics", {"q": "test"})
-    if code == 200:
-        _pass("search.search_topics returns 200")
+    if code == 410:
+        _pass("search.search_topics gone")
     else:
-        _fail("search.search_topics returns 200", f"code={code}")
+        _fail("search.search_topics gone", f"code={code}")
 
     # 8.3 search general
     code, sr = _get(f"{backend}/api/search", {"q": "test", "limit": 5})
@@ -453,7 +451,7 @@ def test_search(backend: str):
         _fail("search.general_search returns 200", f"code={code}")
 
     # 8.4 get_posts with topic filter
-    code, fp = _get(f"{backend}/api/get_posts", {"topic": "test", "limit": 5})
+    code, fp = _get(f"{backend}/api/get_posts", {"community": "test", "limit": 5})
     if code == 200:
         _pass("search.get_posts_by_topic returns 200")
     else:
@@ -662,6 +660,7 @@ def test_tx_status_non_post_vote(backend: str):
         return
 
     # If invite codes are required, grab an existing unused code.
+    # v1.39.0 retired invite routes (410); skip lookup when gone.
     invite_code = ""
     try:
         _code, ncfg = _get(f"{backend}/api/get_node_config")
@@ -676,8 +675,12 @@ def test_tx_status_non_post_vote(backend: str):
                     addrs.append(str(w.address()))
                 except Exception:
                     pass
+            saw_gone = False
             for addr in addrs:
                 code, data = _get(f"{backend}/api/get_invite_codes", {"address": addr})
+                if code == 410:
+                    saw_gone = True
+                    continue
                 if code != 200:
                     continue
                 codes = (data or {}).get("codes") or []
@@ -685,7 +688,7 @@ def test_tx_status_non_post_vote(backend: str):
                 if unused and unused.get("code"):
                     invite_code = str(unused["code"])
                     break
-            if not invite_code:
+            if not invite_code and not saw_gone:
                 _fail("tx_status_npv.invite_code_missing", "invite code required but none available")
                 return
     except Exception as e:
@@ -990,17 +993,17 @@ def test_tx_status_matrix(backend: str):
     if unfollow_txh:
         _check("unfollow_user", unfollow_txh, "unfollow_user")
 
-    # 4. follow_topic (sub1 — higher limits)
+    # 4. join_community (sub1 — higher limits)
     ftopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=True, skip_pow=True)
-    ftopic_txh = _extract_tx_hash("follow_topic", ftopic_resp)
+    ftopic_txh = _extract_tx_hash("join_community", ftopic_resp)
     if ftopic_txh:
-        _check("follow_topic", ftopic_txh, "follow_topic")
+        _check("join_community", ftopic_txh, "join_community")
 
-    # 5. unfollow_topic (clean up follow)
+    # 5. leave_community (clean up join)
     utopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=False, skip_pow=True)
-    utopic_txh = _extract_tx_hash("unfollow_topic", utopic_resp)
+    utopic_txh = _extract_tx_hash("leave_community", utopic_resp)
     if utopic_txh:
-        _check("unfollow_topic", utopic_txh, "unfollow_topic")
+        _check("leave_community", utopic_txh, "leave_community")
 
     # 6. send_tokens
     send_resp = _do_send_tokens(backend, sub1, free_addr, 1, skip_pow=True)
