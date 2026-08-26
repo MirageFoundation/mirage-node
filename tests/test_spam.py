@@ -383,6 +383,7 @@ class SpamWorker:
                 "topic": topic,
                 "title": title,
                 "content": content,
+                "protocol_version": 1,
             }
 
             start = time.perf_counter()
@@ -566,6 +567,7 @@ class SpamWorker:
                 "topic": "",
                 "title": "",
                 "content": content,
+                "protocol_version": 1,
             }
 
             start = time.perf_counter()

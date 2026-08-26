@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Curation lens resolver. Every content query must call resolve_visibility."""
 
 from __future__ import annotations

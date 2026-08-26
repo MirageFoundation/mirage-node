@@ -292,12 +292,6 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
             >
                 Network
             </MenuItem>
-            <MenuItem
-                to="/referrals"
-                onClick={() => handleItemClick('/referrals')}
-            >
-                Referrals
-            </MenuItem>
             {isAdmin && (
                 <>
                     <MenuDivider />

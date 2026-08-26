@@ -1072,8 +1072,19 @@ func (am AppModule) GetDifficulty(ctx context.Context, _ *types.QueryDifficultyR
 	msgCount := am.k.GetPoWMessageCount(sdkCtx, params)
 	calmSeq := am.k.GetConsecutiveLowUsage(sdkCtx)
 
-	// Get latest block hash from header
-	latestHash := strings.ToLower(hex.EncodeToString(sdkCtx.BlockHeader().LastBlockId.Hash))
+	// The newest entry of the on-chain rolling window, not
+	// BlockHeader().LastBlockId, which ABCI 2.0 leaves empty in a query context
+	// (see RecordRecentBlockHash). Serving that empty string made every caller
+	// of this query — `miraged q core difficulty` included — unable to build an
+	// envelope, since last_block_hash is what the PoW ante checks.
+	recent, err := am.k.GetRecentBlockHashes(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	latestHash := ""
+	if len(recent) > 0 {
+		latestHash = strings.ToLower(recent[0])
+	}
 	currentHeight := sdkCtx.BlockHeight()
 
 	return &types.QueryDifficultyResponse{

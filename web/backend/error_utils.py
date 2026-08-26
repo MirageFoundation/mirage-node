@@ -88,6 +88,7 @@ ERRORS = {
     "upgrade_required": "client upgrade required",
     "gone": "this API has been removed",
     "internal_error": "internal server error",
+    "indexer_unavailable": "indexer DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",
     # PoW
     "insufficient_pow_precheck": "insufficient pow (precheck)",
@@ -97,6 +98,10 @@ ERRORS = {
     "pow_required": "proof of work required",
     "invalid_pow_fields": "invalid pow fields",
     "invalid_last_block_hash": "invalid last_block_hash",
+    # Request shape
+    "invalid_input": "invalid input",
+    "invalid_input_type": "invalid input type",
+    "invalid_base64": "invalid base64 encoding",
     # Content / posts
     "title_too_long": "title exceeds limit",
     "content_too_long": "content exceeds limit",
@@ -153,7 +158,8 @@ ERRORS = {
     "invalid_user_level": "invalid user level",
     # Subscription
     "not_subscriber": "active subscription required",
-    "invalid_level": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)",
+    "invalid_level": "invalid level (must be 1; use set_auto_renewal to change auto-renewal)",
+    "invalid_period_count": "period_count must be in [1,12]",
     "insufficient_balance": "insufficient balance",
     "admin_insufficient_balance": "admin insufficient balance",
     "insufficient_funds": "insufficient funds",
@@ -218,6 +224,19 @@ ERRORS = {
     "media_store_failed": "media upload service error",
     "media_unknown_provider": "unknown media provider configured",
     "media_edge_unauthorized": "edge registration signature invalid",
+    # Communities / curation
+    "community_required": "community required",
+    "target_and_community_required": "target and community required",
+    "community_and_new_founder_required": "community and new_founder required",
+    "community_and_name_required": "community and name required",
+    "invalid_curation_mode": "invalid mode",
+    "invalid_pinned_team_id": "invalid pinned_team_id",
+    "epoch_ids_required": "epoch_ids required",
+    "too_many_epoch_ids": "at most 30 epoch_ids",
+    "epoch_ids_not_increasing": "epoch_ids must be strictly increasing",
+    "topic_retired": "topic is retired; use community",
+    "invalid_pow_difficulty": "invalid pow_difficulty",
+    "invalid_pow": "invalid pow",
     # Chain rejects (from classify_reject)
     "transaction_rejected": "transaction rejected",
     "out_of_gas": "out of gas",

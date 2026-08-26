@@ -93,6 +93,7 @@ from tests.blockchain_helpers import (
     _submit_tx,
     _sign_relay,
     _build_msg_post,
+    _shared_community,
     _build_msg_vote,
     _build_msg_set_username,
     _build_msg_set_biography,
@@ -217,22 +218,33 @@ def test_authority(backend: str) -> None:
 
 
 def test_fee(backend: str) -> None:
-    wallet = WALLETS["sub1"]
+    # The fee floor must be probed with an unpaid signer. A Subscriber relay is
+    # deliberately zero-fee eligible (subscriberZeroFeeChecker), and its gas is
+    # taken from the reserve instead, so submitting these as sub1 would be
+    # asserting the opposite of the intended rule.
+    wallet = WALLETS["free"]
     lb, _, _, _ = _get_pow_params(backend, str(wallet.address()))
-    ts = _now_ms()
     fee_payer = _bh._VALIDATOR_ADDR or ""
     signer_pub = wallet.public_key().public_key_bytes
-    msg = _build_msg_post(wallet, lb, 0, ts, f"fee{_rand_str(4)}", "Title", "content", pow_val=0, nonce=_gen_nonce())
+    community = _shared_community()
+
+    def _fee_post():
+        # A fresh nonce per submission: the fee decorator runs before the PoW
+        # decorator, so a rejected tx must not have burned the nonce that the
+        # next case needs.
+        return _build_msg_post(
+            wallet, lb, 0, _now_ms(), community, "Title", "content", pow_val=0, nonce=_gen_nonce()
+        )
 
     # 4.1 Zero fee
     _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=0
+        [(_fee_post(), "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=0
     )
     _check_reject("fee.zero_fee_rejected", code, log, "insufficient fee")
 
     # 4.2 Wrong denom
     _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgPost")],
+        [(_fee_post(), "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         signer_pub,
@@ -243,7 +255,7 @@ def test_fee(backend: str) -> None:
 
     # 4.3 Insufficient fee amount
     _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=1
+        [(_fee_post(), "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=1
     )
     _check_reject("fee.insufficient_fee_rejected", code, log, "insufficient fee")
 
@@ -1194,7 +1206,7 @@ def test_msg_format(backend: str) -> None:
     ]
     for tag, label in bad_tags:
         msg = _build_msg_post(
-            w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content", tag=tag, pow_val=0, nonce=_gen_nonce()
+            w1, lb, 0, ts, _shared_community(), "Title", "content", tag=tag, pow_val=0, nonce=_gen_nonce()
         )
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],
@@ -1215,7 +1227,7 @@ def test_msg_format(backend: str) -> None:
         ("emoji", "Title🙂", "content 🙂"),
     ]
     for label, title, content in unicode_cases:
-        msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", title, content, pow_val=0, nonce=_gen_nonce())
+        msg = _build_msg_post(w1, lb, 0, ts, _shared_community(), title, content, pow_val=0, nonce=_gen_nonce())
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],
             DEFAULT_GAS_LIMIT,
@@ -1251,7 +1263,7 @@ def test_msg_format(backend: str) -> None:
         lb,
         0,
         ts,
-        f"fmt{_rand_str(4)}",
+        _shared_community(),
         "Title",
         "content",
         media=["http://insecure.com/img.jpg"],
@@ -1270,7 +1282,7 @@ def test_msg_format(backend: str) -> None:
     # >10 media items
     many_media = [f"https://example.com/{i}.jpg" for i in range(12)]
     msg = _build_msg_post(
-        w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content", media=many_media, pow_val=0, nonce=_gen_nonce()
+        w1, lb, 0, ts, _shared_community(), "Title", "content", media=many_media, pow_val=0, nonce=_gen_nonce()
     )
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
@@ -1284,7 +1296,7 @@ def test_msg_format(backend: str) -> None:
     # >2048 char URL
     long_url = "https://example.com/" + "a" * 2040
     msg = _build_msg_post(
-        w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content", media=[long_url], pow_val=0, nonce=_gen_nonce()
+        w1, lb, 0, ts, _shared_community(), "Title", "content", media=[long_url], pow_val=0, nonce=_gen_nonce()
     )
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
@@ -1299,7 +1311,7 @@ def test_msg_format(backend: str) -> None:
     tier1 = _get_tier_config(1)
     max_title = _tier_int(tier1, "max_title_length")
     big_title = "T" * (max_title + 25)
-    msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", big_title, "content", pow_val=0, nonce=_gen_nonce())
+    msg = _build_msg_post(w1, lb, 0, ts, _shared_community(), big_title, "content", pow_val=0, nonce=_gen_nonce())
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,

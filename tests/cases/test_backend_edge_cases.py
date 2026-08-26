@@ -102,6 +102,7 @@ def test_edge_cases(backend: str):
             "title": title,
             "content": content,
             "tag": tag,
+            "protocol_version": 1,
         }
         return _post(f"{backend}/api/core/post", payload)
 
@@ -183,6 +184,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "Old ts",
         "content": "body",
+        "protocol_version": 1,
     }
     code_old, resp_old = _post(f"{backend}/api/core/post", payload_old)
     _expect_reject_or_submit(
@@ -215,6 +217,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "future ts",
         "content": "body",
+        "protocol_version": 1,
     }
     code_fut, resp_fut = _post(f"{backend}/api/core/post", payload_fut)
     _expect_reject_or_submit(
@@ -258,6 +261,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "bad pk",
         "content": "body",
+        "protocol_version": 1,
     }
     code_bad, resp_bad = _post(f"{backend}/api/core/post", payload_bad)
     _expect_reject_4xx("edge.invalid_pubkey_rejected", code_bad, resp_bad)
@@ -287,6 +291,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "mismatch",
         "content": "body",
+        "protocol_version": 1,
     }
     code_mis, resp_mis = _post(f"{backend}/api/core/post", payload_mis)
     _expect_reject_4xx("edge.signature_mismatch_rejected", code_mis, resp_mis)
@@ -315,6 +320,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "stale lb",
         "content": "body",
+        "protocol_version": 1,
     }
     code_stale, resp_stale = _post(f"{backend}/api/core/post", payload_stale)
     _expect_reject_4xx("edge.stale_block_hash_rejected", code_stale, resp_stale)
@@ -341,6 +347,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "legacy no nonce",
         "content": "body",
+        "protocol_version": 1,
     }
     code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
     _expect_reject_4xx("edge.missing_envelope_nonce_rejected", code_no_nonce, resp_no_nonce)
@@ -363,6 +370,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "zero nonce",
         "content": "body",
+        "protocol_version": 1,
     }
     code_zero, resp_zero = _post(f"{backend}/api/core/post", payload_zero_nonce)
     _expect_reject_4xx("edge.zero_envelope_nonce_rejected", code_zero, resp_zero)
@@ -395,6 +403,7 @@ def test_edge_cases(backend: str):
             "topic": "test",
             "title": "bad nonce",
             "content": "body",
+            "protocol_version": 1,
         }
         code_bad, resp_bad = _post(f"{backend}/api/core/post", bad_payload)
         _expect_reject_4xx(test_name, code_bad, resp_bad)
@@ -425,6 +434,7 @@ def test_edge_cases(backend: str):
             "topic": "test",
             "title": "coercible nonce",
             "content": "body",
+            "protocol_version": 1,
         }
         code_ok, resp_ok = _post(f"{backend}/api/core/post", ok_payload)
         err_msg = str(resp_ok.get("error", ""))
@@ -457,6 +467,7 @@ def test_edge_cases(backend: str):
         "topic": "test",
         "title": "nonce present",
         "content": "body",
+        "protocol_version": 1,
     }
     code_with_nonce, resp_with_nonce = _post(f"{backend}/api/core/post", payload_with_nonce)
     if code_with_nonce == 200:
@@ -484,6 +495,7 @@ def test_edge_cases(backend: str):
             "topic": "test",
             "title": "field test",
             "content": "body",
+            "protocol_version": 1,
         }
 
     # --- 9.20a: timestamp ---
@@ -782,6 +794,7 @@ def test_edge_cases(backend: str):
                 "title": "Valid tag",
                 "content": "body",
                 "tag": tag,
+                "protocol_version": 1,
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
             txh = str((resp or {}).get("tx_hash", "") or "").lower()
@@ -868,6 +881,7 @@ def test_edge_cases(backend: str):
             "title": "Title",
             "content": "body",
             "media": bad_media,
+            "protocol_version": 1,
         }
         code, resp = _post(f"{backend}/api/core/post", payload)
         _expect_reject_4xx(f"edge.{label}_rejected", code, resp)
@@ -997,6 +1011,7 @@ def test_frontend_bypass(backend: str):
                 "title": "Tag test",
                 "content": "body",
                 "tag": tag,
+                "protocol_version": 1,
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
             _expect_reject_or_submit(

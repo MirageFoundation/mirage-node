@@ -170,14 +170,12 @@ const PAGE_TITLES = {
     '/inbox': 'inbox',
     '/profile': 'profile',
     '/settings': 'settings',
-    '/topics': 'topics',
+    '/communities': 'communities',
     '/subscription': 'subscription',
     '/network': 'network',
     '/stats': 'stats',
-    '/agents': 'agents',
     '/blocks': 'blocks',
     '/follows': 'follows',
-    '/referrals': 'referrals',
     '/reports': 'reports',
     '/search': 'search',
 };
@@ -221,9 +219,7 @@ function ShellUserMenu({ state }) {
         path.startsWith('/subscription') ||
         path === '/follows' ||
         path === '/blocks' ||
-        path === '/agents' ||
         path === '/network' ||
-        path === '/referrals' ||
         path === '/reports' ||
         path === '/sign_out';
 

@@ -589,6 +589,13 @@ def test_hard_cap_vs_deque(backend: str):
         txh = str(resp.get("tx_hash", "")).lower()
         if not txh:
             err = str(resp.get("error", ""))[:100]
+            # `existing_ft` came from an indexer read that can trail the joins
+            # already on chain, so the cap can arrive before the loop expects it.
+            # Hitting it early is the condition this section is filling toward,
+            # not a failure — the overflow assertion below is what matters.
+            if "rejected" in err.lower() or "cap reached" in err.lower():
+                _debug(f"hardcap.ft_fill reached cap early at i={i}: {err}")
+                break
             _fail(f"hardcap.ft_fill_{i}", err)
             ft_fill_ok = False
             break
@@ -735,7 +742,7 @@ def test_indexer_deque_storage(backend: str):
                 if kind == "users":
                     indexer_vals = [str(u).lower() for u in ((blocked_data or {}).get("blocked_users") or [])]
                 else:
-                    indexer_vals = [str(t).lower() for t in ((blocked_data or {}).get("blocked_topics") or [])]
+                    indexer_vals = [str(t).lower() for t in ((blocked_data or {}).get("blocked_communities") or [])]
                 last_total = len(indexer_vals)
                 last_matched = sum(1 for item in expected if item in indexer_vals)
                 if last_matched >= min_match:

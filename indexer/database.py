@@ -1077,79 +1077,6 @@ class DatabaseManager:
                     ),
                 )
 
-    def upsert_agent_edit(
-        self,
-        post_txhash: str,
-        agent_address: str,
-        edit_txhash: str,
-        edited_at: int,
-        topic: Optional[str] = None,
-        title: Optional[str] = None,
-        content: Optional[str] = None,
-        tag: Optional[str] = None,
-        media: Optional[list[str]] = None,
-        appendix: Optional[str] = None,
-    ) -> None:
-        """Insert or update an agent edit overlay. None = no change for that field."""
-        import json as _json
-
-        media_json = _json.dumps(media) if media is not None else None
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO agent_edits(
-                        post_txhash, agent_address, edit_txhash,
-                        topic, title, content, tag, media, appendix, edited_at
-                    )
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(post_txhash, agent_address) DO UPDATE SET
-                        edit_txhash = EXCLUDED.edit_txhash,
-                        topic = COALESCE(EXCLUDED.topic, agent_edits.topic),
-                        title = COALESCE(EXCLUDED.title, agent_edits.title),
-                        content = COALESCE(EXCLUDED.content, agent_edits.content),
-                        tag = COALESCE(EXCLUDED.tag, agent_edits.tag),
-                        media = COALESCE(EXCLUDED.media, agent_edits.media),
-                        appendix = COALESCE(EXCLUDED.appendix, agent_edits.appendix),
-                        edited_at = EXCLUDED.edited_at
-                    """,
-                    (
-                        post_txhash.lower(),
-                        agent_address.lower(),
-                        edit_txhash.lower(),
-                        self._strip_nul(topic),
-                        self._strip_nul(title),
-                        self._strip_nul(content),
-                        self._strip_nul(tag),
-                        self._strip_nul(media_json),
-                        self._strip_nul(appendix),
-                        int(edited_at),
-                    ),
-                )
-
-    def get_agent_edits_for_posts(
-        self,
-        post_txhashes: list[str],
-        agent_addresses: list[str],
-    ) -> list[tuple]:
-        """Fetch agent edits for a batch of posts from specific agents.
-        Returns rows of (post_txhash, agent_address, topic, title, content, tag, media, appendix).
-        """
-        if not post_txhashes or not agent_addresses:
-            return []
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                post_ph = ",".join(["%s"] * len(post_txhashes))
-                agent_ph = ",".join(["%s"] * len(agent_addresses))
-                cur.execute(
-                    f"""SELECT post_txhash, agent_address, topic, title, content, tag, media, appendix
-                        FROM agent_edits
-                        WHERE post_txhash IN ({post_ph})
-                          AND LOWER(agent_address) IN ({agent_ph})""",
-                    [p.lower() for p in post_txhashes] + [a.lower() for a in agent_addresses],
-                )
-                return cur.fetchall()
-
     def insert_mentions(
         self,
         post_txhash: str,
@@ -2209,17 +2136,6 @@ class DatabaseManager:
                     (int(deleted_at), int(deleted_at), owner),
                 )
                 return cur.rowcount
-
-    def set_enabled_agents(self, owner: str, agents: list[str]) -> None:
-        """Set enabled agents for an owner (full replace from chain state)."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM enabled_agents WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                for pos, agent_addr in enumerate(agents):
-                    cur.execute(
-                        "INSERT INTO enabled_agents(owner, agent, position) VALUES(%s, %s, %s) ON CONFLICT DO NOTHING",
-                        (owner, agent_addr, pos),
-                    )
 
     def set_followed_users(self, owner: str, users: list[str]) -> None:
         """Set followed users for an owner (full replace from chain state)."""

@@ -244,7 +244,7 @@ function MobileBottomNav({ state }) {
     const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
     const isCreateActive = pathname === '/create_post';
     const isInboxActive = pathname === '/inbox';
-    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/agents', '/referrals', '/blocks']);
+    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/blocks']);
 
     const currentTopic = React.useMemo(() => {
         try {

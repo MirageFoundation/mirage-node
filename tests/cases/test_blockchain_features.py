@@ -89,6 +89,7 @@ from tests.blockchain_helpers import (
     _submit_tx,
     _sign_relay,
     _build_msg_post,
+    _shared_community,
     _build_msg_vote,
     _build_msg_set_username,
     _build_msg_set_biography,
@@ -393,246 +394,6 @@ def test_biography(backend: str) -> None:
 def test_annotate_chain(backend: str) -> None:
     """MsgAnnotate was retired in v1.39.0."""
     _pass("annotate_chain.retired")
-    return
-
-    """Chain-level tests for MsgAnnotate validation."""
-
-    agent = WALLETS.get("agent1")
-    free = WALLETS.get("free")
-    if not agent or not free:
-        _fail("annotate_chain.setup", "wallets not available")
-        return
-
-    fee_payer = _bh._VALIDATOR_ADDR or ""
-    signer_pub = agent.public_key().public_key_bytes
-
-    # Get chain params
-    lb, diff, _, _ = _get_pow_params(backend, str(agent.address()))
-    ts = _now_ms()
-
-    # First create a post to annotate (via backend for convenience)
-    from tests.backend_helpers import _do_post, _wait_indexed
-
-    txh = _do_post(backend, free, "test", f"ChainAnnotateTarget {_rand_str(6)}", "content")
-    if not txh:
-        _fail("annotate_chain.create_target")
-        return
-    _wait_indexed(backend, str(free.address()), txh)
-    _pass("annotate_chain.create_target")
-
-    # 1. Non-agent submitting annotate should fail
-    msg = _build_msg_annotate(free, lb, 0, ts, ".", ".", ".", ".", txh, appendix="hacker note", nonce=_gen_nonce())
-    tx_hash, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        free.public_key().public_key_bytes,
-    )
-    _check_reject("annotate_chain.non_agent_rejected", code, log, "agent tier", tx_hash)
-
-    # 2. Agent with valid sentinel should succeed
-    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="valid note", nonce=_gen_nonce())
-    _, code, log, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("annotate_chain.agent_annotate_ok", code, dcode, dlog)
-
-    # 3. Invalid relay signature should fail
-    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="bad sig", nonce=_gen_nonce())
-    msg.envelope_signature = b"\x00" * 64
-    _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-    )
-    _check_reject("annotate_chain.bad_signature", code, log, "relay signature")
-
-    # 4. Annotate should reject PoW fields
-    msg = _build_msg_annotate(agent, lb, 1, ts, ".", ".", ".", ".", txh, appendix="pow", nonce=_gen_nonce())
-    _, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-    )
-    _check_reject("annotate_chain.pow_rejected", code, log, "pow")
-
-    # 5. Invalid override should fail (rejected at DeliverTx, not CheckTx)
-    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", "invalid", appendix="note", nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("annotate_chain.invalid_override", ccode, dcode, dlog)
-
-    # 6. Title exceeding MaxTitleLength should be rejected
-    tier_agent = _get_tier_config(10)
-    max_title = _tier_int(tier_agent, "max_title_length")
-    over_title = "A" * (max_title + 1)
-    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", over_title, ".", ".", txh, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("annotate_chain.title_too_long", ccode, dcode, dlog)
-
-    # 7. Content exceeding MaxContentLength should be rejected
-    max_content = _tier_int(tier_agent, "max_content_length")
-    over_content = "B" * (max_content + 1)
-    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", ".", over_content, ".", txh, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("annotate_chain.content_too_long", ccode, dcode, dlog)
-
-    # 8. Appendix exceeding MaxContentLength should be rejected
-    over_appendix = "C" * (max_content + 1)
-    msg = _build_msg_annotate(
-        agent, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix=over_appendix, nonce=_gen_nonce()
-    )
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("annotate_chain.appendix_too_long", ccode, dcode, dlog)
-
-    # 9. Title exactly at limit should succeed
-    exact_title = "D" * max_title
-    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", exact_title, ".", ".", txh, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("annotate_chain.title_at_limit_ok", ccode, dcode, dlog)
-
-    # 10. Subscriber (level 1) submitting annotate should fail
-    sub = WALLETS.get("sub1")
-    if sub:
-        msg = _build_msg_annotate(
-            sub, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="sub note", nonce=_gen_nonce()
-        )
-        tx_hash, code, log, _, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgAnnotate")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            sub.public_key().public_key_bytes,
-        )
-        _check_reject("annotate_chain.subscriber_rejected", code, log, "agent tier", tx_hash)
-
-    # 11. No-username wallet submitting annotate should fail
-    noname_wallet = LocalWallet(PrivateKey(), prefix="mirage")
-    msg = _build_msg_annotate(
-        noname_wallet, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="x", nonce=_gen_nonce()
-    )
-    tx_hash, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgAnnotate")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        noname_wallet.public_key().public_key_bytes,
-    )
-    _check_reject("annotate_chain.no_username_rejected", code, log, "username", tx_hash)
-
-    # 12. EnableAgent self-enable (agent == owner) — chain should reject
-    agent_addr = str(agent.address())
-    msg = _build_msg_enable_agent(agent, lb, 0, _now_ms(), agent_addr, agent_addr, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgEnableAgent")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    if ccode != 0 or (dcode is not None and dcode != 0):
-        _pass("annotate_chain.self_enable_rejected")
-    else:
-        _fail("annotate_chain.self_enable_rejected", f"BUG: EnableAgent allows self-enable (SetAgents rejects it)")
-
-    # 13. SetAgents with more than tier max should be rejected
-    max_agents = _tier_int(tier_agent, "max_enabled_agents")
-    over_agents = [str(LocalWallet(PrivateKey(), prefix="mirage").address()) for _ in range(max_agents + 1)]
-    msg = _build_msg_set_agents(agent, lb, 0, _now_ms(), agent_addr, over_agents, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT * 5,
-        fee_payer,
-        signer_pub,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("annotate_chain.set_agents_over_max", ccode, dcode, dlog)
-
-    # 14. EnableAgent without username should fail
-    noname_wallet2 = LocalWallet(PrivateKey(), prefix="mirage")
-    noname_addr = str(noname_wallet2.address())
-    random_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-    lb2, diff2, base_bits2, pow_factor2 = _get_pow_params(backend, noname_addr)
-    ts2 = _now_ms()
-    nonce2 = _gen_nonce()
-    base2 = _canon_base_enable_agent_raw(
-        noname_wallet2.public_key().public_key_bytes,
-        _lb_bytes(lb2),
-        diff2,
-        ts2,
-        noname_addr,
-        random_agent,
-        nonce=nonce2,
-    )
-    proof2 = _compute_pow_quiet(base2, diff2, base_bits2, pow_factor2, lb2)
-    msg = _build_msg_enable_agent(
-        noname_wallet2, lb2, diff2, ts2, noname_addr, random_agent, pow_val=proof2, nonce=nonce2
-    )
-    tx_hash, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgEnableAgent")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        noname_wallet2.public_key().public_key_bytes,
-    )
-    _check_reject("annotate_chain.enable_no_username", code, log, "username", tx_hash)
-
-    # 15. SetAgents without username should fail
-    lb3, diff3, base_bits3, pow_factor3 = _get_pow_params(backend, noname_addr)
-    ts3 = _now_ms()
-    nonce3 = _gen_nonce()
-    base3 = _canon_base_set_agents_raw(
-        noname_wallet2.public_key().public_key_bytes,
-        _lb_bytes(lb3),
-        diff3,
-        ts3,
-        noname_addr,
-        [random_agent],
-        nonce=nonce3,
-    )
-    proof3 = _compute_pow_quiet(base3, diff3, base_bits3, pow_factor3, lb3)
-    msg = _build_msg_set_agents(
-        noname_wallet2, lb3, diff3, ts3, noname_addr, [random_agent], pow_val=proof3, nonce=nonce3
-    )
-    tx_hash, code, log, _, _ = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetAgents")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        noname_wallet2.public_key().public_key_bytes,
-    )
-    _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
 def test_security(backend: str) -> None:
@@ -640,23 +401,22 @@ def test_security(backend: str) -> None:
 
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
-    # 1. Verify LevelToTierIndex correctness via chain config endpoint
-    #    Agent (level 10) must have a valid tier config (not be skipped)
+    # 1. Verify LevelToTierIndex correctness via chain config endpoint.
+    #    The Agent tier is gone, so only free (0) and subscriber (1) remain and
+    #    no tier may still advertise can_be_agent.
     try:
         _, params = _get(f"{backend}/api/get_chain_config")
         params = params or {}
         tiers = params.get("tiers", [])
-        if len(tiers) != 3:
-            _fail("security.tier_count", f"expected 3 tiers, got {len(tiers)}")
+        if len(tiers) != 2:
+            _fail("security.tier_count", f"expected 2 tiers, got {len(tiers)}")
         else:
             _pass("security.tier_count")
 
-        # Level 10 (Agent) must map to tier index 2 which has can_be_agent=True
-        agent_tier = tiers[2] if len(tiers) > 2 else {}
-        if agent_tier.get("can_be_agent"):
-            _pass("security.agent_tier_valid")
+        if any(t.get("can_be_agent") for t in tiers):
+            _fail("security.agent_tier_removed", f"can_be_agent still set: {[t.get('can_be_agent') for t in tiers]}")
         else:
-            _fail("security.agent_tier_valid", f"tier[2].can_be_agent={agent_tier.get('can_be_agent')}")
+            _pass("security.agent_tier_removed")
     except Exception as e:
         _fail("security.params_check", str(e))
 
@@ -691,7 +451,7 @@ def test_security(backend: str) -> None:
         ts = _now_ms()
 
         msg = _build_msg_post(
-            agent, lb, 0, ts, f"sec{_rand_str(4)}", "Security Test", "v1.17.0 test", pow_val=0, nonce=_gen_nonce()
+            agent, lb, 0, ts, _shared_community(), "Security Test", "v1.17.0 test", pow_val=0, nonce=_gen_nonce()
         )
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],

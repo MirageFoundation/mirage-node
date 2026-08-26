@@ -1037,118 +1037,6 @@ class MessageProcessor:
 
     def _handle_annotate(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         logger.debug("historical_annotate ignored type_url=%s tx=%s", type_url, tx_hash)
-        return
-        try:
-            parsed = MsgAnnotate()
-            parsed.ParseFromString(value)
-            agent = addr_from_pubkey(parsed.envelope_pubkey)
-            if not agent:
-                raise RuntimeError(f"Rejected annotate {tx_hash}: invalid envelope_pubkey")
-            override = str(parsed.override or "").strip().lower()
-
-            if not override or len(override) != 64:
-                raise RuntimeError(f"Rejected annotate {tx_hash}: invalid override {override!r}")
-            existing = self.db.get_post(override)
-            if not existing:
-                # As with votes, the chain does not require the override to exist.
-                logger.warning("Skipping annotate %s: override %s is not in the index", tx_hash, override)
-                return
-
-            # Enforce agent tier
-            agent_level = self.db.get_user_level(agent)
-            if agent_level < 10:
-                logger.warning("Rejected annotate %s: not agent tier (level=%d)", tx_hash, agent_level)
-                return
-
-            # Sentinel "." means no change (store None); empty string means clear
-            SENTINEL = "."
-
-            def resolve_field(val):
-                if val == SENTINEL:
-                    return None
-                return val
-
-            topic_raw = str(parsed.topic or "")
-            title_raw = str(parsed.title or "")
-            content_raw = str(parsed.content or "")
-            tag_raw = str(parsed.tag or "")
-            appendix_raw = str(parsed.appendix or "")
-
-            topic = resolve_field(topic_raw)
-            title = resolve_field(title_raw)
-            content = resolve_field(content_raw)
-            tag = resolve_field(tag_raw)
-            if tag is not None:
-                tag_norm = tag.strip().lower()
-                tag = DatabaseManager._TAG_ALIASES.get(tag_norm, tag_norm)
-                if tag != tag_norm:
-                    logger.debug("Tag alias normalized on annotate: %s -> %s", tag_norm, tag)
-            appendix = resolve_field(appendix_raw)
-
-            # Media: ["."] means no change; [] means clear; list means replace
-            raw_media = list(parsed.media or [])
-            if len(raw_media) == 1 and raw_media[0] == SENTINEL:
-                media = None
-            else:
-                media = raw_media
-
-            logger.debug(
-                "MsgAnnotate parsed: tx=%s agent=%s override=%s title_len=%d content_len=%d appendix_len=%d media_count=%d",
-                tx_hash,
-                agent,
-                override,
-                len(title_raw),
-                len(content_raw),
-                len(appendix_raw),
-                len(raw_media),
-            )
-
-            # For comments (target present in DB), ignore topic/title overrides
-            _, _, _, existing_target, _, _, _, _ = existing
-            is_comment = bool(existing_target)
-            if is_comment:
-                topic = None
-                title = None
-
-            logger.info(
-                "MsgAnnotate upsert: agent=%s override=%s topic=%s title=%s appendix=%s media_count=%s",
-                agent,
-                override,
-                topic,
-                title,
-                appendix,
-                len(media) if media is not None else "none",
-            )
-
-            self.db.upsert_agent_edit(
-                post_txhash=override,
-                agent_address=agent,
-                edit_txhash=tx_hash,
-                edited_at=int(ts),
-                topic=topic,
-                title=title,
-                content=content,
-                tag=tag,
-                media=media,
-                appendix=appendix,
-            )
-
-            self.log_yaml(
-                "Agent annotate",
-                {
-                    "height": int(height),
-                    "txhash": (tx_hash or "").lower(),
-                    "timestamp": int(ts),
-                    "time_iso": self.iso_timestamp(ts),
-                    "agent": agent,
-                    "override": override,
-                    "is_comment": is_comment,
-                },
-            )
-        except Exception as e:
-            logger.error("Error handling MsgAnnotate %s: %s", tx_hash, e, exc_info=True)
-
-            raise
 
     def _handle_award(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgAward — store one award per owner+target."""
@@ -1583,15 +1471,10 @@ class MessageProcessor:
         if not owner or not community:
             logger.warning("Rejected block_community: missing owner or community")
             return
+        # Blocking is a read filter, not a membership change: the chain's
+        # AddBlockedCommunity leaves joins untouched, so the indexer must not
+        # drop them either or its view diverges from chain state.
         self.db.block_topic(owner, community, blocked_at=int(ts))
-        removed = self.db.unfollow_topics_matching(owner, community)
-        if removed > 0:
-            logger.debug(
-                "block_community removed join(s) owner=%s pattern=%s removed=%d",
-                owner,
-                community,
-                removed,
-            )
         logger.info("block_community owner=%s community=%s", owner, community)
 
     def _handle_unblock_community(self, type_url: str, value: bytes, ts: int):

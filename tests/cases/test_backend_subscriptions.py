@@ -129,11 +129,11 @@ def test_subscriber(backend: str):
     except Exception as e:
         _fail("tiers.free_user_level", str(e))
 
-    # 7.2 Verify subscription levels (sub1,sub2=level 1, agent1=level 10)
+    # 7.2 Verify subscription levels. Level 1 is the only paid level now.
     for level, name, w, a in [
         (1, "sub1", sub1_wallet, sub1_addr),
         (1, "sub2", sub2_wallet, sub2_addr),
-        (10, "agent1", agent1_wallet, agent1_addr),
+        (1, "agent1", agent1_wallet, agent1_addr),
     ]:
         try:
             st = get_user_status(backend, a)
@@ -289,6 +289,7 @@ def test_subscriber(backend: str):
                 "topic": "test",
                 "title": f"{name} pow",
                 "content": "body",
+                "protocol_version": 1,
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
             if code < 400:
@@ -372,6 +373,7 @@ def test_subscriber(backend: str):
             "topic": "test",
             "title": "no pow",
             "content": "body",
+            "protocol_version": 1,
         }
         code2, resp2 = _post(f"{backend}/api/core/post", payload2)
         if code2 >= 400:
@@ -525,7 +527,6 @@ def test_tier_config_api(backend: str):
         _fail("tierapi.free_vote_weight_1.0", f"got={free.get('vote_weight')}")
 
     for flag in [
-        "can_be_agent",
         "can_remove_anon",
         "can_have_biography",
         "can_have_avatar",
@@ -598,11 +599,9 @@ def test_tier_config_api(backend: str):
 
 
 def test_subscribe_gift_validation(backend: str):
-    """Test backend-level gift validation: invalid target, higher-tier rejection."""
+    """Test backend-level gift validation: invalid target."""
 
     sub1_wallet = WALLETS["sub1"]
-    agent1_wallet = WALLETS["agent1"]
-    agent1_addr = str(agent1_wallet.address())
 
     # 25.1 Invalid target address should be rejected
     try:
@@ -618,23 +617,9 @@ def test_subscribe_gift_validation(backend: str):
     except Exception as e:
         _fail("subscribe.invalid_target_rejected", str(e))
 
-    # 25.2 Gift level 1 to agent1 (level 10) should be rejected at backend
-    try:
-        agent1_status = get_user_status(backend, agent1_addr)
-        if int(agent1_status.get("user_level", 0) or 0) < 10:
-            _skip("subscribe.gift_higher_tier_rejected", "agent1 is not level 10")
-        else:
-            resp = _do_subscribe(backend, sub1_wallet, 1, target=agent1_addr)
-            err = str(resp.get("error", "")).lower() if resp else ""
-            txh = str(resp.get("tx_hash", "")).lower() if resp else ""
-            if "gift rejected" in err and not txh:
-                _pass("subscribe.gift_higher_tier_rejected")
-            elif not txh and ("reject" in err or "level" in err):
-                _pass("subscribe.gift_higher_tier_rejected")
-            else:
-                _fail("subscribe.gift_higher_tier_rejected", f"txh={txh} err={err[:200]}")
-    except Exception as e:
-        _fail("subscribe.gift_higher_tier_rejected", str(e))
+    # 25.2 There is no tier above Subscriber, so a gift can never be rejected
+    # for targeting a higher tier. Gifting an existing subscriber extends them,
+    # which test_subscribe_gift_agent asserts.
 
 
 # =========================================================================
@@ -719,20 +704,6 @@ def test_subscribe_gift_agent(backend: str):
             _fail("subscribe.gift_agent_extends_again", f"no txh or error: {resp}")
     except Exception as e:
         _fail("subscribe.gift_agent_extends_again", str(e))
-
-    # 26.4 Gift level 1 to agent1 (level 10) — should be rejected
-    try:
-        resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
-        err = str(resp.get("error", "")).lower() if resp else ""
-        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
-        if "gift rejected" in err and not txh:
-            _pass("subscribe.gift_lower_tier_rejected")
-        elif not txh and ("reject" in err or "level" in err):
-            _pass("subscribe.gift_lower_tier_rejected")
-        else:
-            _fail("subscribe.gift_lower_tier_rejected", f"txh={txh} err={err[:200]}")
-    except Exception as e:
-        _fail("subscribe.gift_lower_tier_rejected", str(e))
 
 
 # =========================================================================

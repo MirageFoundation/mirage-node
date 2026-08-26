@@ -43,6 +43,7 @@ from tests.blockchain_helpers import (
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
     _broadcast_tx_sync, _wait_for_tx_result, _submit_tx, _sign_relay,
     _build_msg_post, _build_msg_vote, _build_msg_set_username,
+    _shared_community,
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
     _build_msg_edit, _build_msg_annotate,
@@ -77,13 +78,12 @@ def test_relay_sig(backend: str) -> None:
     wallet = WALLETS["sub1"]
     other = WALLETS["sub2"]
     lb, diff, _, _ = _get_pow_params(backend, str(wallet.address()))
-    ts = _now_ms()
     fee_payer = _bh._VALIDATOR_ADDR or ""
     signer_pub = wallet.public_key().public_key_bytes
 
     # 1.1 Tampered content
     msg = _build_msg_post(
-        wallet, lb, 0, ts, f"sig{_rand_str(4)}", "Title", "clean content", pow_val=0, nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), _shared_community(), "Title", "clean content", pow_val=0, nonce=_gen_nonce()
     )
     msg.content = "tampered content"
     _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
@@ -94,8 +94,8 @@ def test_relay_sig(backend: str) -> None:
         wallet,
         lb,
         0,
-        ts,
-        f"sig{_rand_str(4)}",
+        _now_ms(),
+        _shared_community(),
         "Title",
         "content",
         pow_val=0,
@@ -108,7 +108,7 @@ def test_relay_sig(backend: str) -> None:
     # 1.3 Expired timestamp
     ts_old = _now_ms() - (3600 * 1000)
     msg = _build_msg_post(
-        wallet, lb, 0, ts_old, f"sig{_rand_str(4)}", "Title", "content", pow_val=0, nonce=_gen_nonce()
+        wallet, lb, 0, ts_old, _shared_community(), "Title", "content", pow_val=0, nonce=_gen_nonce()
     )
     _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.expired_timestamp", code, log, "too old")
@@ -116,14 +116,14 @@ def test_relay_sig(backend: str) -> None:
     # 1.4 Future timestamp
     ts_future = _now_ms() + (120 * 1000)
     msg = _build_msg_post(
-        wallet, lb, 0, ts_future, f"sig{_rand_str(4)}", "Title", "content", pow_val=0, nonce=_gen_nonce()
+        wallet, lb, 0, ts_future, _shared_community(), "Title", "content", pow_val=0, nonce=_gen_nonce()
     )
     _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.future_timestamp", code, log, "future")
 
     # 1.5 Missing/empty signature — chain may treat empty sig as "no relay envelope"
     msg = _build_msg_post(
-        wallet, lb, 0, ts, f"sig{_rand_str(4)}", "Title", "content", pow_val=0, sig_override=b"", nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), _shared_community(), "Title", "content", pow_val=0, sig_override=b"", nonce=_gen_nonce()
     )
     txh, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     if code != 0:
@@ -137,8 +137,8 @@ def test_relay_sig(backend: str) -> None:
         wallet,
         lb,
         0,
-        ts,
-        f"sig{_rand_str(4)}",
+        _now_ms(),
+        _shared_community(),
         "Title",
         "content",
         pow_val=0,
@@ -149,9 +149,9 @@ def test_relay_sig(backend: str) -> None:
     _check_reject("relay_sig.truncated_signature", code, log, "invalid relay fields")
 
     # 1.7 Cross-message replay (post signature on vote)
-    post = _build_msg_post(wallet, lb, 0, ts, f"sig{_rand_str(4)}", "Title", "content", pow_val=0, nonce=_gen_nonce())
+    post = _build_msg_post(wallet, lb, 0, _now_ms(), _shared_community(), "Title", "content", pow_val=0, nonce=_gen_nonce())
     sig = post.envelope_signature
-    vote = _build_msg_vote(wallet, lb, 0, ts, _rand_hex(64), 1, pow_val=0, sig_override=sig, nonce=_gen_nonce())
+    vote = _build_msg_vote(wallet, lb, 0, _now_ms(), _rand_hex(64), 1, pow_val=0, sig_override=sig, nonce=_gen_nonce())
     _, code, log, _, _ = _submit_tx([(vote, "/mirage.core.v1.MsgVote")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.cross_message_replay", code, log, "invalid relay signature")
 
@@ -159,14 +159,14 @@ def test_relay_sig(backend: str) -> None:
     award_target = _rand_hex(64)
     award_type = "quality_post"
     _debug(f"award relay target={award_target} type={award_type}")
-    msg = _build_msg_award(wallet, lb, 0, ts, award_target, award_type, pow_val=0, nonce=_gen_nonce())
+    msg = _build_msg_award(wallet, lb, 0, _now_ms(), award_target, award_type, pow_val=0, nonce=_gen_nonce())
     msg.award_type = "based"
     _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgAward")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.award_tamper", code, log, "invalid relay signature")
 
     # 1.9 MsgAward truncated signature
     msg = _build_msg_award(
-        wallet, lb, 0, ts, _rand_hex(64), "quality_post", pow_val=0, sig_override=b"\x01" * 32, nonce=_gen_nonce()
+        wallet, lb, 0, _now_ms(), _rand_hex(64), "quality_post", pow_val=0, sig_override=b"\x01" * 32, nonce=_gen_nonce()
     )
     _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgAward")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.award_truncated_signature", code, log)

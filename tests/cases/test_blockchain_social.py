@@ -103,23 +103,42 @@ def test_follow_limits(backend: str) -> None:
     chunk_size = 25
     for start in range(0, remaining_followed_users, chunk_size):
         batch_count = min(chunk_size, remaining_followed_users - start)
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts_base = _now_ms()
-        msgs: list[tuple[object, str]] = []
-        for i in range(batch_count):
-            target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-            followed_user_targets.append(target_addr.lower())
-            ts = ts_base + i
-            nonce = _gen_nonce()
-            base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof, nonce=nonce)
-            msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
-        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
-        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
+
+        def _build_and_submit(count: int):
+            # Every envelope in the batch is signed over its own timestamp, so
+            # the whole build+simulate+submit round has to finish inside
+            # max_envelope_age. It does not always: a slow simulate is enough to
+            # age the first envelope out, and the tx then fails as a batch. The
+            # batch is rebuilt with fresh params rather than retried as-is,
+            # because re-submitting the same envelopes cannot make them younger.
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+            ts_base = _now_ms()
+            built: list[tuple[object, str]] = []
+            targets: list[str] = []
+            for i in range(count):
+                target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+                targets.append(target_addr.lower())
+                ts = ts_base + i
+                nonce = _gen_nonce()
+                base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr, nonce=nonce)
+                proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+                msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof, nonce=nonce)
+                built.append((msg, "/mirage.core.v1.MsgFollowUser"))
+            sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(built) * 3))
+            try:
+                sim_gas = int(_simulate_tx_gas(built, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
+            except Exception as sim_err:
+                return targets, None, None, str(sim_err)
+            _, ccode, _, dcode, dlog = _submit_tx(built, sim_gas, fee_payer, fw_pub, wait_deliver=True)
+            return targets, ccode, dcode, dlog or ""
+
+        targets, ccode, dcode, dlog = _build_and_submit(batch_count)
+        if "envelope_timestamp too old" in (dlog or ""):
+            _debug(f"follow.user_fill rebuilding chunk_start={start}: {dlog[:120]}")
+            targets, ccode, dcode, dlog = _build_and_submit(batch_count)
+        followed_user_targets.extend(targets)
         if ccode != 0 or dcode != 0:
-            _fail("follow.user_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
+            _fail("follow.user_fill", f"chunk_start={start} check={ccode} deliver={dcode} log={(dlog or '')[:160]}")
             fill_ok = False
             break
     if fill_ok:

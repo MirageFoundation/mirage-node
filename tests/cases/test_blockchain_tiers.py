@@ -55,7 +55,7 @@ from tests.blockchain_helpers import (
     _build_msg_set_auto_renewal,
     _check_reject, _check_accept, _check_deliver_reject, _check_deliver_accept,
     _min_gas_price_umirage, _get_grpc_target,
-    DEFAULT_GAS_LIMIT, FILL_GAS_LIMIT, FILL_GAS_BUFFER,
+    DEFAULT_GAS_LIMIT, SUBSCRIBE_GAS_LIMIT, FILL_GAS_LIMIT, FILL_GAS_BUFFER,
     COMET_RPC_URL, ESTIMATED_CHECKTX_TOTAL,
     _validate_validator_funds, _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
@@ -78,7 +78,7 @@ def test_tier_enforcement(backend: str) -> None:
 
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
-    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2"), (10, "agent1")]:
+    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2")]:
         w = WALLETS[wallet_name]
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(w.address()))
         ts = _now_ms()
@@ -138,79 +138,28 @@ def test_tier_enforcement(backend: str) -> None:
 
 
 def test_subscribe_validation(backend: str) -> None:
-    """Test that only levels 1 and 10 can be subscribed to."""
+    """Test that level 1 is the only subscribable level."""
 
     fee_payer = _bh._VALIDATOR_ADDR or ""
     fw = WALLETS["free"]
     fw_addr = str(fw.address())
     fw_pub = fw.public_key().public_key_bytes
 
-    # 14.1 Invalid levels should be rejected
-    for invalid_level in [0, 2, 3, 4, 5, 6, 7, 8, 9, 11, 50, 99, 100]:
+    # 14.1 Invalid levels should be rejected. 10 is included now that the Agent
+    # tier is gone.
+    for invalid_level in [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 50, 99, 100]:
         lb, _, _, _ = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         msg = _build_msg_subscribe(fw, lb, 0, ts, invalid_level, pow_val=0, nonce=_gen_nonce())
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgSubscribe")],
-            DEFAULT_GAS_LIMIT,
+            SUBSCRIBE_GAS_LIMIT,
             fee_payer,
             fw_pub,
             wait_deliver=True,
         )
         _check_deliver_reject(f"subscribe.invalid_level_{invalid_level}", ccode, dcode, dlog)
 
-
-
-
-def test_subscribe_gift_rejects_higher_tier(backend: str) -> None:
-    """Gift should be rejected when recipient tier is higher than requested."""
-    fee_payer = _bh._VALIDATOR_ADDR or ""
-    giver = WALLETS["sub1"]
-    recipient = WALLETS["agent1"]
-    recipient_addr = str(recipient.address())
-
-    try:
-        profile = _get_chain_profile(recipient_addr)
-        level = int(profile.get("level", 0) or 0)
-    except Exception as e:
-        _fail("subscribe.gift_reject_higher_tier", str(e))
-        return
-
-    if level < 10:
-        lb, _, _, _ = _get_pow_params(backend, recipient_addr)
-        ts = _now_ms()
-        msg = _build_msg_subscribe(recipient, lb, 0, ts, 10, pow_val=0, nonce=_gen_nonce())
-        _, _, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgSubscribe")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            recipient.public_key().public_key_bytes,
-            wait_deliver=True,
-        )
-        if dcode == 0:
-            time.sleep(2)
-        try:
-            profile = _get_chain_profile(recipient_addr)
-            level = int(profile.get("level", 0) or 0)
-        except Exception as e:
-            _fail("subscribe.gift_reject_higher_tier", str(e))
-            return
-
-    if level < 10:
-        _skip("subscribe.gift_reject_higher_tier", "recipient is not tier 10")
-        return
-
-    lb, _, _, _ = _get_pow_params(backend, str(giver.address()))
-    ts = _now_ms()
-    msg = _build_msg_subscribe(giver, lb, 0, ts, 1, target=recipient_addr, pow_val=0, nonce=_gen_nonce())
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSubscribe")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        giver.public_key().public_key_bytes,
-        wait_deliver=True,
-    )
-    _check_deliver_reject("subscribe.gift_reject_higher_tier", ccode, dcode, dlog)
 
 
 def test_subscribe_gift_extends_expiry(backend: str) -> None:
@@ -240,7 +189,7 @@ def test_subscribe_gift_extends_expiry(backend: str) -> None:
             msg = _build_msg_subscribe(recipient, lb, 0, ts, 1, pow_val=0, nonce=_gen_nonce())
             _, ccode, _, dcode, dlog = _submit_tx(
                 [(msg, "/mirage.core.v1.MsgSubscribe")],
-                DEFAULT_GAS_LIMIT,
+                SUBSCRIBE_GAS_LIMIT,
                 fee_payer,
                 recipient.public_key().public_key_bytes,
                 wait_deliver=True,
@@ -297,7 +246,7 @@ def test_subscribe_gift_extends_expiry(backend: str) -> None:
         msg = _build_msg_subscribe(giver, lb, 0, ts, 1, target=recipient_addr, pow_val=0, nonce=_gen_nonce())
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgSubscribe")],
-            DEFAULT_GAS_LIMIT,
+            SUBSCRIBE_GAS_LIMIT,
             fee_payer,
             giver.public_key().public_key_bytes,
             wait_deliver=True,
@@ -430,46 +379,42 @@ def test_tier_features(backend: str) -> None:
 
     can_remove_anon_0 = tier0.get("can_remove_anon", False)
     can_remove_anon_1 = tier1.get("can_remove_anon", False)
-    can_remove_anon_10 = tier10.get("can_remove_anon", False)
-    if not can_remove_anon_0 and can_remove_anon_1 and can_remove_anon_10:
+    if not can_remove_anon_0 and can_remove_anon_1:
         _pass("tierfeature.can_remove_anon")
     else:
-        _fail("tierfeature.can_remove_anon", f"t0={can_remove_anon_0} t1={can_remove_anon_1} t10={can_remove_anon_10}")
+        _fail("tierfeature.can_remove_anon", f"t0={can_remove_anon_0} t1={can_remove_anon_1}")
 
     for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         v0 = tier0.get(flag, False)
         v1 = tier1.get(flag, False)
-        v10 = tier10.get(flag, False)
-        if not v0 and v1 and v10:
+        if not v0 and v1:
             _pass(f"tierfeature.{flag}")
         else:
-            _fail(f"tierfeature.{flag}", f"t0={v0} t1={v1} t10={v10}")
+            _fail(f"tierfeature.{flag}", f"t0={v0} t1={v1}")
 
     # 15.3 vote_weight
     vw0 = float(tier0.get("vote_weight", 0))
     vw1 = float(tier1.get("vote_weight", 0))
-    vw10 = float(tier10.get("vote_weight", 0))
-    if abs(vw0 - 1.0) < 0.01 and abs(vw1 - 1.33) < 0.01 and abs(vw10 - 1.33) < 0.01:
+    if abs(vw0 - 1.0) < 0.01 and abs(vw1 - 1.33) < 0.01:
         _pass("tierfeature.vote_weights")
     else:
-        _fail("tierfeature.vote_weights", f"vw0={vw0} vw1={vw1} vw10={vw10}")
+        _fail("tierfeature.vote_weights", f"vw0={vw0} vw1={vw1}")
 
     # 15.4 period_fee
     pf0 = int(tier0.get("period_fee", -1))
     pf1 = int(tier1.get("period_fee", -1))
-    pf10 = int(tier10.get("period_fee", -1))
-    if pf0 == 0 and pf1 == 100_000_000_000 and pf10 == 500_000_000_000:
+    if pf0 == 0 and pf1 == 100_000_000_000:
         _pass("tierfeature.period_fees")
     else:
-        _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1} pf10={pf10}")
+        _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1}")
 
-    # 15.5 Only 3 tiers exist
+    # 15.5 Only the free and subscriber tiers exist; the Agent tier is gone.
     params = _get_chain_params()
     num_tiers = len(params.get("tiers") or [])
-    if num_tiers == 3:
-        _pass("tierfeature.exactly_3_tiers")
+    if num_tiers == 2:
+        _pass("tierfeature.exactly_2_tiers")
     else:
-        _fail("tierfeature.exactly_3_tiers", f"got {num_tiers}")
+        _fail("tierfeature.exactly_2_tiers", f"got {num_tiers}")
 
     # 15.6 Free user content limit is enforced at chain
     fw = WALLETS["free"]
@@ -506,87 +451,3 @@ def test_tier_features(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_accept("tierfeature.sub_content_1050_accepted", ccode, dcode, dlog)
-
-
-def test_subscribe_gift_agent_extends_expiry(backend: str) -> None:
-    """Gift level 10 (Agent) should extend expiry and keep auto_renew unchanged."""
-    fee_payer = _bh._VALIDATOR_ADDR or ""
-    giver = WALLETS["agent2"]
-    recipient = WALLETS["agent1"]
-    recipient_addr = str(recipient.address())
-
-    try:
-        params = _get_chain_params()
-        period_minutes = int(params.get("subscription_period", 0) or 0)
-        if period_minutes <= 0:
-            _fail("subscribe.gift_agent_extends_expiry", f"subscription_period={period_minutes}")
-            return
-    except Exception as e:
-        _fail("subscribe.gift_agent_extends_expiry", str(e))
-        return
-
-    try:
-        profile = _get_chain_profile(recipient_addr)
-        level = int(profile.get("level", 0) or 0)
-        if level < 10:
-            _skip("subscribe.gift_agent_extends_expiry", f"agent1 is not level 10 (level={level})")
-            return
-    except Exception as e:
-        _fail("subscribe.gift_agent_extends_expiry", str(e))
-        return
-
-    try:
-        before = _get_chain_profile(recipient_addr)
-        before_exp = int(before.get("subscription_expiry", 0) or 0)
-        auto_before = bool(before.get("auto_renew", False))
-        _debug(
-            f"subscribe.gift_agent_extends_expiry.before addr={recipient_addr} exp={before_exp} "
-            f"auto={auto_before} period_min={period_minutes}"
-        )
-        if before_exp <= 0:
-            _fail("subscribe.gift_agent_extends_expiry", f"before_exp={before_exp}")
-            return
-    except Exception as e:
-        _fail("subscribe.gift_agent_extends_expiry", str(e))
-        return
-
-    try:
-        lb, _, _, _ = _get_pow_params(backend, str(giver.address()))
-        ts = _now_ms()
-        msg = _build_msg_subscribe(giver, lb, 0, ts, 10, target=recipient_addr, pow_val=0, nonce=_gen_nonce())
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgSubscribe")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            giver.public_key().public_key_bytes,
-            wait_deliver=True,
-        )
-        _check_deliver_accept("subscribe.gift_agent_extends_expiry", ccode, dcode, dlog)
-    except Exception as e:
-        _fail("subscribe.gift_agent_extends_expiry", str(e))
-        return
-
-    deadline = time.time() + 30
-    after_exp = before_exp
-    auto_after = auto_before
-    while time.time() < deadline:
-        after = _get_chain_profile(recipient_addr)
-        after_exp = int(after.get("subscription_expiry", 0) or 0)
-        auto_after = bool(after.get("auto_renew", False))
-        if after_exp > before_exp:
-            break
-        time.sleep(2)
-
-    _debug(
-        f"subscribe.gift_agent_extends_expiry.after addr={recipient_addr} exp={after_exp} auto={auto_after}"
-    )
-
-    if after_exp <= before_exp:
-        _fail("subscribe.gift_agent_extends_expiry", f"before={before_exp} after={after_exp}")
-    elif auto_after != auto_before:
-        _fail("subscribe.gift_agent_auto_renew_unchanged", f"before={auto_before} after={auto_after}")
-    elif after_exp < before_exp + period_minutes * 60:
-        _fail("subscribe.gift_agent_extends_expiry", f"delta={after_exp - before_exp} expected>={period_minutes * 60}")
-    else:
-        _pass("subscribe.gift_agent_extends_expiry")
-        _pass("subscribe.gift_agent_auto_renew_unchanged")

@@ -69,9 +69,18 @@ const ERROR_MAP = {
     indexer_unavailable: "Data service is temporarily unavailable.",
     internal_error: "Something went wrong. Please try again.",
     debug_localhost_only: "Debug endpoints are only available on localhost.",
+    upgrade_required: "This app version is out of date. Please refresh or update.",
+    gone: "That feature is no longer available.",
+
+    // Request shape
+    invalid_input: "That request wasn't valid. Please try again.",
+    invalid_input_type: "That request wasn't valid. Please try again.",
+    invalid_base64: "That request wasn't valid. Please try again.",
 
     // PoW
     insufficient_pow_precheck: "Proof-of-work is insufficient. Please try again.",
+    invalid_pow_difficulty: "Invalid proof-of-work difficulty.",
+    invalid_pow: "Invalid proof-of-work value.",
     pow_not_allowed_agents: "Proof-of-work is not allowed for agents.",
     pow_not_allowed_for_award: "Proof-of-work is not allowed for awards.",
     pow_not_allowed_for_set_auto_renewal: "Proof-of-work is not allowed for auto-renewal.",
@@ -106,6 +115,18 @@ const ERROR_MAP = {
     comment_id_required: "Comment ID is required.",
     invalid_hash: "Invalid or missing hash.",
     target_must_be_mirage1: "Target must be a valid mirage1 address.",
+
+    // Communities / curation
+    community_required: "A community is required.",
+    target_and_community_required: "Both a target and a community are required.",
+    community_and_new_founder_required: "A community and a new founder are required.",
+    community_and_name_required: "A community and a name are required.",
+    invalid_curation_mode: "Invalid curation mode.",
+    invalid_pinned_team_id: "Invalid pinned team.",
+    epoch_ids_required: "At least one epoch is required.",
+    too_many_epoch_ids: "You can claim at most 30 epochs at a time.",
+    epoch_ids_not_increasing: "Epochs must be listed in increasing order.",
+    topic_retired: "Topics are now communities. Please refresh.",
 
     // Media
     media_not_list: "Media must be provided as a list.",
@@ -173,6 +194,7 @@ const ERROR_MAP = {
     // Subscription
     not_subscriber: "This action requires an active subscription.",
     invalid_level: "Invalid subscription level.",
+    invalid_period_count: "Choose between 1 and 12 subscription periods.",
     insufficient_balance: "Insufficient balance to complete this transaction.",
     admin_insufficient_balance: "Your account balance is too low to cover the transaction fee.",
     insufficient_funds: "Node does not have enough gas for this transaction.",

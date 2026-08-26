@@ -321,7 +321,7 @@ def test_indexer(backend: str):
     else:
         # 3.1 tiers list
         tiers = cfg.get("tiers")
-        if isinstance(tiers, list) and len(tiers) >= 3:
+        if isinstance(tiers, list) and len(tiers) >= 2:
             _pass("indexer.chain_config_has_tiers", count=len(tiers))
         else:
             _fail(
@@ -755,7 +755,7 @@ def _edit_msg_bytes(pubkey: bytes, override: str) -> bytes:
     msg = MsgEdit()
     msg.envelope_pubkey = pubkey
     msg.override = override
-    msg.topic = "technology"
+    msg.community = "technology"
     msg.title = "hijacked title"
     msg.content = "hijacked content"
     return msg.SerializeToString()

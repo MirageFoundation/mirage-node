@@ -820,7 +820,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT p.txhash, p.owner, COALESCE(p.title, ''), COALESCE(p.topic, ''),
+            SELECT p.txhash, p.owner, COALESCE(p.title, ''), COALESCE(p.community, ''),
                    COUNT(DISTINCT LOWER(c.owner)) AS unique_commenters
             FROM posts p
             JOIN posts c
@@ -832,7 +832,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
               AND p.created_at > %s
               AND p.comment_count >= %s
               AND COALESCE(p.target, '') = ''
-            GROUP BY p.txhash, p.owner, p.title, p.topic, p.created_at
+            GROUP BY p.txhash, p.owner, p.title, p.community, p.created_at
             HAVING COUNT(DISTINCT LOWER(c.owner)) >= %s
             ORDER BY (COUNT(DISTINCT LOWER(c.owner)) / (1 + ((%s - p.created_at) / 3600.0))) DESC
             LIMIT %s

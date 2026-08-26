@@ -29,7 +29,6 @@ from tests.common import (
     _lb_bytes,
     WALLETS,
     FAUCET_AMOUNTS,
-    INDEX_TIMEOUT_SEC,
     _COLOR_GREEN,
     _COLOR_RED,
     _COLOR_YELLOW,
@@ -264,7 +263,6 @@ def test_account(backend: str):
         _fail("account.profile_referral ignores malformed referrer", f"resp={malformed_resp}")
 
     referred_wallet = _generate_wallet()
-    referred_addr = str(referred_wallet.address()).lower()
     referred_resp = _do_set_username_raw(
         backend,
         referred_wallet,
@@ -276,24 +274,18 @@ def test_account(backend: str):
         return
     _pass("account.profile_referral registration succeeds", referrer=referrer_name)
 
-    summary = None
-    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
-    while time.perf_counter() < deadline:
-        summary_code, candidate = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
-        if summary_code == 200 and any(
-            str(item.get("address", "")).lower() == referred_addr for item in (candidate.get("referrals") or [])
-        ):
-            summary = candidate
-            break
-        time.sleep(0.5)
-    if summary:
-        _pass("account.profile_referral appears in referral stats")
+    # v1.39 pays nothing for a referral and dropped the tables behind the stats,
+    # so the whole /api/referrals surface is retired. A node that still answers
+    # it is serving an endpoint whose storage no longer exists.
+    summary_code, _ = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
+    if summary_code == 410:
+        _pass("account.profile_referral referral stats retired")
     else:
-        _fail("account.profile_referral appears in referral stats", f"address={referred_addr}")
+        _fail("account.profile_referral referral stats retired", f"code={summary_code}")
 
     # Attribution fields ride outside the chain envelope, so they carry their own
     # signature. A network position that can rewrite the body must not be able to
-    # redirect the referral reward, nor strip the signature to dodge the check.
+    # redirect attribution, nor strip the signature to dodge the check.
     unsigned_wallet = _generate_wallet()
     unsigned_resp = _do_set_username_raw(
         backend,
@@ -324,6 +316,9 @@ def test_account(backend: str):
     else:
         _fail("account.profile_referral rejects swapped referrer", f"resp={tampered_resp}")
 
+    # A second signup naming the same referrer must still register: with no
+    # reward attached there is nothing to ration, so the old per-client gate is
+    # gone and repeat attribution is not an error.
     duplicate_wallet = _generate_wallet()
     duplicate_resp = _do_set_username_raw(
         backend,
@@ -331,23 +326,10 @@ def test_account(backend: str):
         f"duplicate-{_rand_str(6)}",
         referrer_username=referrer_name,
     )
-    if not duplicate_resp.get("tx_hash"):
-        _fail("account.profile_referral client gate allows registration", f"resp={duplicate_resp}")
-        return
-    _pass("account.profile_referral client gate allows registration")
-
-    duplicate_addr = str(duplicate_wallet.address()).lower()
-    summary_code, summary_after_gate = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
-    if summary_code != 200:
-        _fail("account.profile_referral client gate suppresses attribution", f"code={summary_code}")
-        return
-    duplicate_attributed = any(
-        str(item.get("address", "")).lower() == duplicate_addr for item in (summary_after_gate.get("referrals") or [])
-    )
-    if not duplicate_attributed:
-        _pass("account.profile_referral client gate suppresses attribution")
+    if duplicate_resp.get("tx_hash"):
+        _pass("account.profile_referral repeat referrer allowed")
     else:
-        _fail("account.profile_referral client gate suppresses attribution", f"address={duplicate_addr}")
+        _fail("account.profile_referral repeat referrer allowed", f"resp={duplicate_resp}")
 
 
 # =========================================================================

@@ -326,7 +326,11 @@ _UNAUTHENTICATED = (400, 401)
 
 
 def _admin_probe(backend: str):
-    """The four endpoints that derive authority from a client-supplied string."""
+    """The endpoints that derive authority from a client-supplied string.
+
+    The reward suspend/unsuspend probes were dropped with the reward endpoints
+    themselves in v1.39.0; they now answer 410 and have no authority to leak.
+    """
     victim = str(_generate_wallet().address())
     return [
         (
@@ -336,20 +340,6 @@ def _admin_probe(backend: str):
         (
             "resolve_report",
             lambda: _post(f"{backend}/api/core/resolve_report", {"address": victim, "id": 1}),
-        ),
-        (
-            "rewards_suspend",
-            lambda: _post(
-                f"{backend}/api/admin/rewards/suspend",
-                {"admin": victim, "target": victim, "duration_days": 1, "reason": "authz test"},
-            ),
-        ),
-        (
-            "rewards_unsuspend",
-            lambda: _post(
-                f"{backend}/api/admin/rewards/unsuspend",
-                {"admin": victim, "target": victim},
-            ),
         ),
     ]
 
@@ -395,204 +385,6 @@ def test_reward_claim_authz(backend):
         _pass("reward_claim_authz.gone")
     else:
         _fail("reward_claim_authz.gone", f"code={code} resp={resp}")
-    return
-
-    """C-2: the money path must be authenticated and must not pay twice.
-
-    /api/rewards/claim takes `owner` from the request body, so it always
-    requires a proof that verifies for that owner: a missing proof and one that
-    fails verification are both 401. The grace window that served them was
-    removed in v1.34.0. Concurrent claims must not double-pay.
-    """
-    from cosmpy.aerial.wallet import LocalWallet
-    from cosmpy.crypto.keypairs import PrivateKey
-    from shared.client import sign_canonical
-
-    victim_wallet = LocalWallet(PrivateKey(), prefix="mirage")
-    victim = str(victim_wallet.address()).lower()
-    other_wallet = LocalWallet(PrivateKey(), prefix="mirage")
-
-    def _sign_claim(wallet: LocalWallet, owner: str) -> dict:
-        ts = _now_ms()
-        nonce = _fresh_nonce()
-        payload = f"rewards_claim:{owner.lower()}:{ts}:{nonce}"
-        sig = sign_canonical(wallet, payload.encode("utf-8"))
-        return {
-            "pubkey": _b64(wallet.public_key().public_key_bytes),
-            "signature": _b64(sig),
-            "timestamp": ts,
-            "envelope_nonce": str(nonce),
-            "owner": owner,
-        }
-
-    # 1. A proof signed by a different address must be refused. The grace window
-    #    that used to serve these was removed in v1.34.0.
-    forged = _sign_claim(other_wallet, victim)
-    code, resp = _post(f"{backend}/api/rewards/claim", forged)
-    if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
-        _skip("reward_claim.cross_address_rejected", f"rewards not configured: {resp}")
-    elif code in _UNAUTHENTICATED:
-        _pass("reward_claim.cross_address_rejected", code=code)
-    else:
-        _fail(
-            "reward_claim.cross_address_rejected",
-            f"C-2: claim signed by a different address was processed (code={code}). resp={resp}",
-        )
-
-    # 1a. The owner's own key signing a payload the backend does not expect —
-    #     the scheme installed mobile builds used. Verification fails, so this
-    #     is a 401 now that the grace window is gone.
-    legacy_scheme = _sign_claim(victim_wallet, victim)
-    legacy_payload = f"claim_rewards:{victim}:{legacy_scheme['timestamp']}"
-    legacy_scheme["signature"] = _b64(sign_canonical(victim_wallet, legacy_payload.encode("utf-8")))
-    legacy_scheme["envelope_nonce"] = str(_fresh_nonce())
-    code, resp = _post(f"{backend}/api/rewards/claim", legacy_scheme)
-    if code == 503 and str((resp or {}).get("error_code") or "") == "not_configured":
-        _skip("reward_claim.legacy_scheme_signature", f"rewards not configured: {resp}")
-    elif code in _UNAUTHENTICATED:
-        _pass("reward_claim.legacy_scheme_signature", code=code)
-    else:
-        _fail(
-            "reward_claim.legacy_scheme_signature",
-            f"unverifiable signature accepted (code={code}). resp={resp}",
-        )
-
-    # 1b. A correctly signed claim must clear the auth gate (even if there is
-    #     nothing to pay — that returns success=false / no_rewards at 200).
-    # Single-shot POST: _post retries 503 with the same body, and a signed
-    # envelope_nonce is single-use once auth has run.
-    signed = _sign_claim(victim_wallet, victim)
-    r = requests.post(f"{backend}/api/rewards/claim", json=signed, timeout=20)
-    try:
-        resp = r.json()
-    except ValueError:
-        resp = {}
-    code = r.status_code
-    if code == 200:
-        _pass("reward_claim.signed_accepted", code=code, success=(resp or {}).get("success"))
-    elif code == 503:
-        err = str((resp or {}).get("error_code") or "")
-        if err == "not_configured":
-            # Config check runs before auth — does not prove the signature path.
-            _skip("reward_claim.signed_accepted", f"rewards not configured: {resp}")
-        else:
-            # Post-auth payout failure (pool empty, tx retry, etc.) — auth cleared.
-            _pass("reward_claim.signed_accepted", code=code, note=err or "payout unavailable")
-    elif code in _UNAUTHENTICATED:
-        _fail(
-            "reward_claim.signed_accepted",
-            f"correctly signed claim was rejected as unauthenticated (code={code}). resp={resp}",
-        )
-    else:
-        _fail("reward_claim.signed_accepted", f"unexpected code={code}: {resp}")
-
-    # 2. Unsigned claim must be refused outright.
-    code, resp = _post(f"{backend}/api/rewards/claim", {"owner": victim})
-    if code in _UNAUTHENTICATED:
-        _pass("reward_claim.unsigned_rejected", code=code)
-    elif code == 503:
-        _skip("reward_claim.unsigned_rejected", f"rewards not configured: {resp}")
-    else:
-        _fail(
-            "reward_claim.unsigned_rejected",
-            f"C-2: unsigned claim was processed (code={code}). resp={resp}",
-        )
-
-    # 3. Source guard: no path may reintroduce the removed grace window.
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    quests_src = open(os.path.join(root, "web", "backend", "routes", "quests.py"), encoding="utf-8").read()
-    settings_src = open(os.path.join(root, "web", "backend", "settings.py"), encoding="utf-8").read()
-    leftovers = [
-        name
-        for name, src in (("routes/quests.py", quests_src), ("settings.py", settings_src))
-        if "legacy_unsigned" in src.lower() or "LEGACY_UNSIGNED_UNTIL" in src
-    ]
-    if leftovers:
-        _fail(
-            "reward_claim.grace_window_removed",
-            f"the unsigned-claim grace window is referenced again in {', '.join(leftovers)}",
-        )
-    else:
-        _pass("reward_claim.grace_window_removed")
-
-    # 4. Double-pay race under the advisory lock. Each concurrent claim is signed
-    #    with its own nonce: an unsigned probe only worked while the grace period
-    #    was open, so this check silently stopped running the day it closed, and
-    #    the whole race went untested.
-    code, summary = _get(f"{backend}/api/rewards/summary", params={"owner": victim})
-    if code != 200 or not isinstance(summary, dict):
-        _fail("reward_claim.no_double_pay", f"rewards summary unavailable: code={code}")
-        return
-    if summary.get("disabled"):
-        _skip("reward_claim.no_double_pay", "quests disabled on this node")
-        return
-
-    quests = summary.get("daily_quests") or []
-    if not quests:
-        _fail("reward_claim.no_double_pay", "quests enabled but no daily quests to complete")
-        return
-
-    # The summary emits the quest identifier as "id" (quests.py:503); reading
-    # "quest_id" here silently produced None, so the seeding POST was rejected as
-    # "quest_id required" and this check skipped even when quests were enabled.
-    quest_id = quests[0].get("id")
-    if not quest_id:
-        _fail("reward_claim.no_double_pay", f"quest object has no id: {quests[0]!r}")
-        return
-    code, resp = _post(f"{backend}/api/rewards/debug/complete", {"owner": victim, "quest_id": quest_id})
-    if code != 200:
-        _skip(
-            "reward_claim.no_double_pay",
-            f"cannot seed a pending reward (debug complete -> {code}); needs BACKEND_DEBUG=true",
-        )
-        return
-
-    code, summary = _get(f"{backend}/api/rewards/summary", params={"owner": victim})
-    pending = (summary or {}).get("pending_rewards") or []
-    if not pending:
-        _fail("reward_claim.no_double_pay", "quest completed but no pending reward materialized")
-        return
-    _debug(f"reward_claim: seeded {len(pending)} pending reward(s) for {victim}")
-
-    def claim(_i):
-        r = requests.post(f"{backend}/api/rewards/claim", json=_sign_claim(victim_wallet, victim), timeout=30)
-        try:
-            return r.status_code, r.json()
-        except ValueError:
-            return r.status_code, {}
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(claim, range(4)))
-
-    committed = [
-        (code, body)
-        for code, body in results
-        if isinstance(body, dict)
-        and (
-            (code == 200 and body.get("success") is True and body.get("rewards"))
-            or (code == 202 and body.get("error_code") == "payout_pending" and body.get("tx_hash"))
-        )
-    ]
-    tx_hashes = {str(body.get("tx_hash")).lower() for _code, body in committed if body.get("tx_hash")}
-    # CheckTx success is deliberately a 202 until DeliverTx confirms. Multiple
-    # callers may observe the same in-flight hash; only distinct payout hashes
-    # would prove that the same reward rows were reserved twice.
-    if committed and len(tx_hashes) == 1:
-        _pass("reward_claim.no_double_pay", committed=len(committed), attempts=len(results))
-    elif not committed:
-        _fail(
-            "reward_claim.no_double_pay",
-            f"C-2 unproven: a pending reward was seeded but none of {len(results)} concurrent claims "
-            f"reserved a payout, so the double-pay race never ran. Needs QUESTS_PAYOUTS_ENABLED=true and a "
-            f"funded QUESTS_REWARDS_POOL_ADDRESS. responses={[(c, (b or {}).get('error_code') or (b or {}).get('error')) for c, b in results]}",
-        )
-    else:
-        _fail(
-            "reward_claim.no_double_pay",
-            f"C-2: concurrent claims produced {len(tx_hashes)} payout hashes for the same "
-            f"pending rows; the claim must be taken atomically under a per-owner advisory lock. "
-            f"tx_hashes={sorted(tx_hashes)}",
-        )
 
 
 # Reads that were overstated as H-2 private. Kept here as a documentation

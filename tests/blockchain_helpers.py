@@ -121,6 +121,9 @@ from tests.common import (
 
 COMET_RPC_URL = "http://127.0.0.1:26657"
 DEFAULT_GAS_LIMIT = 200000
+# A paid subscribe writes a creator-pool tranche schedule spanning up to 12 UTC
+# epochs, so it costs more than the generic per-msg limit.
+SUBSCRIBE_GAS_LIMIT = 500000
 FILL_GAS_LIMIT = 1000000
 FILL_GAS_BUFFER = 1.3
 ESTIMATED_CHECKTX_TOTAL = 230
@@ -829,10 +832,7 @@ def _build_msg_post(
     if not target:
         slug = str(topic or "").strip().lower()
         if slug:
-            try:
-                _claim_community("", slug)
-            except Exception:
-                pass
+            _claim_community("", slug)
     pub = wallet.public_key().public_key_bytes
     d = diff if diff_override is None else diff_override
     lb_hex = lb_override or lb
@@ -1462,10 +1462,29 @@ def _build_msg_create_community(
 
 
 _CLAIMED_ON_CHAIN: set[str] = set()
+_SHARED_COMMUNITY: str = ""
+
+
+def _shared_community() -> str:
+    """One claimed community, reused by tests that don't assert on the slug.
+
+    Root posts now require a claimed community, so a test that mints a fresh
+    random slug pays for a CreateCommunity tx and its block wait before its own
+    submission. Tests checking signatures, nonces, memos or field formats do not
+    care where the post lands, and paying that cost per post pushed their
+    envelope timestamps past the chain's 60s window.
+    """
+    global _SHARED_COMMUNITY
+    if not _SHARED_COMMUNITY:
+        slug = f"shared{_rand_str(6)}"
+        _claim_community("", slug)
+        _SHARED_COMMUNITY = slug
+    return _SHARED_COMMUNITY
 
 
 def _claim_community(backend: str, slug: str) -> None:
     """CreateCommunity from sub1 so JoinCommunity(requireClaimed) can succeed."""
+    import tests.common as _common
     from tests.common import WALLETS
 
     community = str(slug or "").strip().lower()
@@ -1476,7 +1495,7 @@ def _claim_community(backend: str, slug: str) -> None:
         raise RuntimeError("sub1 wallet required to claim a community")
     addr = str(claimer.address())
     pub = claimer.public_key().public_key_bytes
-    lb, _, _, _ = _get_pow_params(backend, addr)
+    lb, _, _, _ = _get_pow_params(backend or _common.SUITE_BACKEND, addr)
     ts = _now_ms()
     nonce = _gen_nonce()
     msg = _build_msg_create_community(claimer, lb, 0, ts, community, pow_val=0, nonce=nonce)

@@ -79,6 +79,11 @@ from shared.canon import (  # noqa: E402
 DEFAULT_BACKEND = "http://127.0.0.1:80"
 INDEX_TIMEOUT_SEC = 45.0
 
+# Backend URL the running suite was invoked with. run_suite() sets this so
+# helpers reached from deep inside a message builder (which never receives the
+# URL as an argument) can still make backend calls.
+SUITE_BACKEND: str = DEFAULT_BACKEND
+
 WALLETS: dict[str, LocalWallet] = {}
 FAUCET_AMOUNTS: dict[str, int] = {}
 
@@ -1064,6 +1069,8 @@ def run_suite(
     parser.add_argument("--category", "-c", default=None, help=f"Run single category: {', '.join(categories.keys())}")
     args = parser.parse_args()
     backend = args.backend.rstrip("/")
+    global SUITE_BACKEND
+    SUITE_BACKEND = backend
     if args.category:
         cats = [c.strip() for c in args.category.split(",")]
         for category in cats:

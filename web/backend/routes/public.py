@@ -16,7 +16,6 @@ Endpoints:
   (raw, no viewer-specific filtering) for external bot scanning.
 """
 
-import bisect
 import copy
 import json
 import logging
@@ -47,7 +46,6 @@ from settings import (
     MEDIA_UPLOADS_ENABLED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
-    AUTO_ENABLED_AGENTS,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
     ANDROID_BANNER_ENABLED,
@@ -58,7 +56,6 @@ import time
 import calendar
 from datetime import datetime as dt
 import math
-from client_ip import get_trusted_client_ip, hash_client_ip
 from urllib.parse import urlencode, urlparse
 from chain import (
     classify_reject as _classify_reject,
@@ -731,11 +728,6 @@ def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tup
         if topic_matches_pattern(topic, pat):
             return True
     return False
-
-
-def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
-    """Agent overlays were removed in v1.39.0."""
-    return posts
 
 
 def _blocked_topics_sql(
@@ -2960,7 +2952,7 @@ def get_tx_status():
             else:
                 # Check posts table
                 cur.execute(
-                    "SELECT txhash, topic, title, COALESCE(relayer, '') FROM posts WHERE LOWER(txhash) = %s",
+                    "SELECT txhash, community, title, COALESCE(relayer, '') FROM posts WHERE LOWER(txhash) = %s",
                     (tx_hash,),
                 )
                 post_row = cur.fetchone()
@@ -3261,75 +3253,6 @@ def get_user_followed():
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_followed.err", error=str(e))
-        return safe_error(e)
-
-
-@public_bp.route("/api/get_agents")
-def get_agents():
-    """Get all active Agent-tier profiles (level=10, subscription not expired, not deleted)."""
-    rid = next_request_id()
-    log_event(rid, "get_agents.begin")
-    try:
-        now = int(time.time())
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT p.owner, p.username, p.biography, p.avatar,
-                       GREATEST(
-                           COALESCE(ae.last_edit, 0),
-                           COALESCE(bp.last_block, 0),
-                           COALESCE(bu.last_block, 0),
-                           COALESCE(bt.last_block, 0)
-                       ) AS last_active
-                FROM profiles p
-                LEFT JOIN (
-                    SELECT agent_address, MAX(edited_at) AS last_edit
-                    FROM agent_edits
-                    GROUP BY agent_address
-                ) ae ON LOWER(ae.agent_address) = LOWER(p.owner)
-                LEFT JOIN (
-                    SELECT owner, MAX(blocked_at) AS last_block
-                    FROM blocked_posts
-                    GROUP BY owner
-                ) bp ON LOWER(bp.owner) = LOWER(p.owner)
-                LEFT JOIN (
-                    SELECT owner, MAX(blocked_at) AS last_block
-                    FROM blocked_users
-                    GROUP BY owner
-                ) bu ON LOWER(bu.owner) = LOWER(p.owner)
-                LEFT JOIN (
-                    SELECT owner, MAX(blocked_at) AS last_block
-                    FROM blocked_communities
-                    GROUP BY owner
-                ) bt ON LOWER(bt.owner) = LOWER(p.owner)
-                WHERE p.level = 10
-                  AND p.subscription_expiry > %s
-                  AND p.deleted_at IS NULL
-                ORDER BY last_active DESC NULLS LAST
-                """,
-                (now,),
-            )
-            rows = cur.fetchall()
-        finally:
-            conn.close()
-
-        agents = [
-            {
-                "address": row[0],
-                "username": row[1] or "",
-                "biography": row[2] or "",
-                "avatar": row[3] or "",
-                "last_active": row[4] if row[4] and row[4] > 0 else None,
-            }
-            for row in rows
-        ]
-
-        log_event(rid, "get_agents.ok", count=len(agents))
-        return jsonify({"agents": agents})
-    except Exception as e:
-        log_event(rid, "get_agents.err", error=str(e))
         return safe_error(e)
 
 
@@ -4014,7 +3937,6 @@ def _build_node_config() -> dict:
         "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
         "android_banner_enabled": ANDROID_BANNER_ENABLED,
         "ios_banner_enabled": IOS_BANNER_ENABLED,
-        "auto_enabled_agents": list(AUTO_ENABLED_AGENTS),
     }
 
     _NODE_CONFIG_CACHE = dict(resp)
@@ -4214,7 +4136,6 @@ def _build_bootstrap_view(
             )
         if resp.get("posts"):
             _enrich_media_meta(cur, resp["posts"])
-            _apply_agent_edits(cur, resp["posts"], addr)
             resp["posts"] = _filter_posts_by_allowed_tags(
                 resp["posts"],
                 allowed_tags,
@@ -4240,8 +4161,7 @@ def bootstrap():
 
     Returns node_config + chain_config (always) plus, when ?address=<addr> is
     provided, user_status, user_followed, user_blocked, and rewards_summary.
-    The invite_codes section is included only when REGISTRATION_INVITE_CODE_REQUIRED
-    is true. Optional `view=` embeds the initial screen payload
+    Optional `view=` embeds the initial screen payload
     (feed / thread / inbox) so cold start is a single round trip.
     """
     rid = next_request_id()
@@ -4274,33 +4194,10 @@ def bootstrap():
         "rewards_summary": None,
         "view": None,
     }
-    # invite_codes omitted entirely while the feature is off (flag authoritative).
-    # When on, the section is only filled if the request carries a valid signed
-    # read — unused codes are bearer credentials and must not ride an unsigned
-    # bootstrap. Unsigned callers still get the rest of bootstrap; they hydrate
-    # codes via signed GET /api/get_invite_codes.
-    if REGISTRATION_INVITE_CODE_REQUIRED:
-        resp["invite_codes"] = None
-
     if address:
         resp["user_status"] = _safe("user_status", lambda: _build_user_status(address))
         resp["user_followed"] = _safe("user_followed", lambda: _build_user_followed(address))
         resp["user_blocked"] = _safe("user_blocked", lambda: _build_user_blocked(address))
-        if REGISTRATION_INVITE_CODE_REQUIRED:
-            from routes.core import _require_signed_read
-
-            sig_data = {
-                "address": address,
-                "pubkey": request.args.get("pubkey", default="", type=str),
-                "signature": request.args.get("signature", default="", type=str),
-                "timestamp": request.args.get("timestamp"),
-                "envelope_nonce": request.args.get("envelope_nonce"),
-            }
-            signed_addr, aerr = _require_signed_read(sig_data, "get_invite_codes", address)
-            if aerr is None:
-                resp["invite_codes"] = _safe("invite_codes", lambda: _build_invite_codes(signed_addr))
-            else:
-                log_event(rid, "bootstrap.invite_codes.unsigned_or_invalid")
 
     resp["view"] = _safe(
         "view",
@@ -4820,18 +4717,18 @@ def search_topics():
                 GROUP BY LOWER(TRIM(p.community))
             )
             SELECT
-                tb.topic,
+                tb.community,
                 tb.post_count,
                 COALESCE(tcs.dominant_tag, '') AS dominant_tag,
                 COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio,
                 CASE
-                    WHEN tb.topic = %s THEN 0
-                    WHEN tb.topic LIKE %s THEN 1
+                    WHEN tb.community = %s THEN 0
+                    WHEN tb.community LIKE %s THEN 1
                     ELSE 2
                 END AS relevance
             FROM topic_base tb
-            LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.topic
-            ORDER BY relevance ASC, post_count DESC, topic ASC
+            LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
+            ORDER BY relevance ASC, post_count DESC, community ASC
             LIMIT %s
             OFFSET %s
             """,
@@ -5055,17 +4952,17 @@ def search():
                       AND LOWER(p.community) LIKE %s
                       {deleted_clause}
                     GROUP BY LOWER(TRIM(p.community))
-                    ORDER BY post_count DESC, topic ASC
+                    ORDER BY post_count DESC, community ASC
                     LIMIT %s
                     OFFSET %s
                 )
                 SELECT
-                    tb.topic,
+                    tb.community,
                     tb.post_count,
                     COALESCE(tcs.dominant_tag, '') AS dominant_tag,
                     COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
                 FROM topic_base tb
-                LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.topic
+                LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
                 """,
                 (min_topic, max_topic, f"{like_query}%", limit + 1, offset),
             )
@@ -5122,17 +5019,17 @@ def search():
                           AND LOWER(p.community) LIKE %s
                           {deleted_clause}
                         GROUP BY LOWER(TRIM(p.community))
-                        ORDER BY post_count DESC, topic ASC
+                        ORDER BY post_count DESC, community ASC
                         LIMIT %s
                         OFFSET %s
                     )
                     SELECT
-                        tb.topic,
+                        tb.community,
                         tb.post_count,
                         COALESCE(tcs.dominant_tag, '') AS dominant_tag,
                         COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
                     FROM topic_base tb
-                    LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.topic
+                    LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
                     """,
                     (min_topic, max_topic, f"%{like_query}%", limit + 1, offset),
                 )
@@ -5565,16 +5462,11 @@ def get_posts():
             feed_ms = round((time.monotonic() - _t_feed) * 1000, 2)
 
             enrich_ms = 0.0
-            agent_edits_ms = 0.0
             filter_ms = 0.0
             if resp.get("posts"):
                 _t = time.monotonic()
                 _enrich_media_meta(cur, resp["posts"])
                 enrich_ms = round((time.monotonic() - _t) * 1000, 2)
-
-                _t = time.monotonic()
-                _apply_agent_edits(cur, resp["posts"], address)
-                agent_edits_ms = round((time.monotonic() - _t) * 1000, 2)
 
                 _t = time.monotonic()
                 resp["posts"] = _filter_posts_by_allowed_tags(
@@ -5604,7 +5496,6 @@ def get_posts():
                     seen_ms=seen_ms,
                     feed_ms=feed_ms,
                     enrich_ms=enrich_ms,
-                    agent_edits_ms=agent_edits_ms,
                     filter_ms=filter_ms,
                     total_ms=total_ms,
                     returned=len(resp.get("posts") or []),
@@ -5919,7 +5810,6 @@ def get_posts():
 
         if result:
             _enrich_media_meta(cur, result)
-            _apply_agent_edits(cur, result, address)
             result = _filter_posts_by_allowed_tags(
                 result,
                 allowed_tags,
@@ -6047,7 +5937,6 @@ def get_user_posts():
             )
             root_posts = [{"post_id": pid, "tag": _normalize_api_tag(tag or "")} for pid, tag in cur.fetchall()]
             if root_posts:
-                _apply_agent_edits(cur, root_posts, viewer)
                 root_tag_map = {p["post_id"]: p.get("tag", "") or "" for p in root_posts}
         post_ids = [r[0].lower() for r in rows]
         vote_totals: Dict[str, int] = {}
@@ -6301,7 +6190,6 @@ def get_user_posts():
             )
         if result:
             _enrich_media_meta(cur, result)
-            _apply_agent_edits(cur, result, viewer)
             result = _filter_user_posts_by_allowed_tags(
                 result,
                 allowed_tags,
@@ -6696,9 +6584,9 @@ def _fetch_post(
 # and the ancestor CTE must produce rows in exactly this order (depth, when
 # present, is appended as index 19 and is NOT part of this constant).
 _POST_ROW_COLUMNS = """
-    st.txhash, st.owner, st.created_at, st.topic, st.title, st.content,
-    st.tag, st.root_topic, st.root_post_id, st.target, st.thumbnail,
-    st.edited, st.edited_at,
+    st.txhash, st.owner, st.created_at, st.community, st.title, st.content,
+    st.tag, st.root_community, st.root_post_id, st.target, st.thumbnail_url,
+    (COALESCE(st.edited_at, 0) > 0) AS edited, st.edited_at,
     COALESCE(pr.username, '') as username,
     COALESCE(pr.level, 0) as author_level,
     st.media,
@@ -7218,7 +7106,6 @@ def _build_thread(
     _collect_posts(children, thread_posts)
     overlay_posts = thread_posts + ancestors
     _enrich_media_meta(cur, overlay_posts)
-    _apply_agent_edits(cur, overlay_posts, address)
     _track_image_impressions(thread_posts, rid, context="get_comments")
 
     return {
@@ -7461,7 +7348,7 @@ def get_inbox():
                     COALESCE(pr.level, 0) as actor_level,
                     '' as item_award_type,
                     'reply' as item_type,
-                    COALESCE(r.root_topic, r.topic, '') as item_topic,
+                    COALESCE(r.root_community, r.community, '') as item_topic,
                     COALESCE(pr.created_at, 0) as actor_created_at
                 FROM posts r
                 INNER JOIN posts p ON p.txhash = r.target
@@ -7589,7 +7476,7 @@ def get_inbox():
                 cur.execute(
                     f"""
                     SELECT LOWER(txhash), COALESCE(title, ''), COALESCE(content, ''), LOWER(owner),
-                           COALESCE(topic, '')
+                           COALESCE(community, '')
                     FROM posts WHERE LOWER(txhash) IN ({placeholders}) AND deleted = FALSE
                     """,
                     trending_tx_hashes,
@@ -9039,13 +8926,13 @@ def get_stats():
             # Most active topics (top 5)
             cur.execute(
                 """
-                SELECT topic, COUNT(*) as count
+                SELECT community, COUNT(*) as count
                 FROM posts
-                WHERE topic IS NOT NULL
-                  AND LENGTH(topic) > 0
+                WHERE community IS NOT NULL
+                  AND LENGTH(community) > 0
                   AND COALESCE(target,'') = ''
                   AND deleted = FALSE
-                GROUP BY topic
+                GROUP BY community
                 ORDER BY count DESC
                 LIMIT 5
                 """
@@ -9104,592 +8991,4 @@ def get_stats():
 
 
 # ── Referral link endpoints ──────────────────────────────────────────────────
-
-
-@public_bp.route("/api/referrals/precheck", methods=["GET"])
-def referrals_precheck():
-    """Check if a referrer username is valid and has available invite codes."""
-    rid = next_request_id()
-    if not REGISTRATION_INVITE_CODE_REQUIRED:
-        return jsonify({"valid": False, "error": "invite codes not required on this node"})
-
-    username = request.args.get("username", "").strip()
-    if not username:
-        return jsonify({"valid": False, "error": "username required"}), 400
-
-    log_event(rid, "referrals.precheck.begin", username=username)
-    try:
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT owner FROM profiles WHERE LOWER(username) = LOWER(%s) LIMIT 1",
-                (username,),
-            )
-            row = cur.fetchone()
-            if not row:
-                log_event(rid, "referrals.precheck.not_found", username=username)
-                return jsonify({"valid": False, "error": "referrer not found"})
-
-            address = row[0].lower()
-
-        with connect_backend_db() as bconn:
-            bcur = bconn.cursor()
-            bcur.execute(
-                "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
-                (address,),
-            )
-            row = bcur.fetchone()
-            if not row or row[0] is not True:
-                log_event(rid, "referrals.precheck.not_opted_in", username=username, address=address)
-                return jsonify({"valid": False, "error": "referrer has not enabled referral links"})
-
-            bcur.execute(
-                "SELECT COUNT(*) FROM invite_codes WHERE LOWER(owner) = %s AND used_by IS NULL",
-                (address,),
-            )
-            available = bcur.fetchone()[0] or 0
-
-        if available == 0:
-            log_event(rid, "referrals.precheck.no_codes", username=username, address=address)
-            return jsonify({"valid": False, "error": "referrer has no available codes"})
-
-        client_hash = hash_client_ip(get_trusted_client_ip())
-        if client_hash:
-            with connect_backend_db() as bconn2:
-                with bconn2.cursor() as bcur2:
-                    bcur2.execute(
-                        "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
-                        (client_hash, address),
-                    )
-                    if bcur2.fetchone():
-                        log_event(rid, "referrals.precheck.client_gate", username=username, address=address)
-                        return jsonify({"valid": False, "error": "already used this referrer"})
-
-        log_event(rid, "referrals.precheck.ok", username=username, available=available)
-        return jsonify({"valid": True, "available": available})
-    except Exception as e:
-        log_event(rid, "referrals.precheck.err", error=str(e))
-        return safe_error(e)
-
-
-@public_bp.route("/api/referrals/precheck_opt_in", methods=["POST"])
-def referrals_precheck_opt_in():
-    """Allow a user to opt in/out of referral precheck availability."""
-    rid = next_request_id()
-    data = request.get_json(silent=True) or {}
-    pub_b64 = str(data.get("pubkey", "")).strip()
-    sig_b64 = str(data.get("signature", "")).strip()
-    address = (data.get("address") or "").strip()
-    enabled = data.get("enabled", None)
-    if "timestamp" not in data:
-        return jsonify({"error": "timestamp required"}), 400
-    try:
-        timestamp = int(data.get("timestamp"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "invalid timestamp"}), 400
-    if not isinstance(enabled, bool):
-        return api_error_code("enabled_must_be_boolean")
-
-    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
-
-    nonce, err = _parse_envelope_nonce(data)
-    if err is not None:
-        return err[0], err[1]
-    if not (pub_b64 and sig_b64):
-        return jsonify({"error": "missing required fields"}), 400
-
-    try:
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-    except Exception:
-        return jsonify({"error": "invalid relay fields"}), 400
-    if len(sig_dec) == 65:
-        sig_dec = sig_dec[:64]
-    if len(pub_dec) != 33 or len(sig_dec) != 64:
-        return jsonify({"error": "invalid relay fields"}), 400
-
-    user_addr = derive_address_from_pubkey(pub_dec)
-    if not user_addr:
-        return jsonify({"error": "invalid pubkey"}), 400
-    if address and address.lower() != user_addr.lower():
-        return jsonify({"error": "address does not match pubkey"}), 400
-
-    enabled_flag = "1" if enabled else "0"
-    signed_payload = f"referrals_precheck_opt_in:{user_addr.lower()}:{enabled_flag}:{timestamp}:{nonce}"
-    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
-        return jsonify({"error": "invalid signature"}), 400
-    ok, err = _guard_push_request(user_addr, "referrals_precheck_opt_in", timestamp, nonce)
-    if not ok:
-        return err[0], err[1]
-
-    now_ts = int(time.time())
-    try:
-        with connect_backend_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO referral_user_settings (owner, precheck_enabled, updated_at)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (owner) DO UPDATE
-                    SET precheck_enabled = EXCLUDED.precheck_enabled,
-                        updated_at = EXCLUDED.updated_at
-                    """,
-                    (user_addr.lower(), enabled, now_ts),
-                )
-        log_event(rid, "referrals.precheck_opt_in.ok", user=user_addr, enabled=enabled)
-        return jsonify({"ok": True, "precheck_enabled": enabled, "updated_at": now_ts})
-    except Exception as e:
-        log_event(rid, "referrals.precheck_opt_in.err", error=str(e))
-        return safe_error(e)
-
-
-REFERRAL_ACTIVE_THRESHOLD = 10
-REFERRAL_ACTIVE_DEFINITION = "At least 10 posts or comments in the week"
-
-
-def _iso_week_bounds(week_str: str):
-    """Parse 'YYYY-Www' and return (week_start_ts, week_end_ts) in UTC.
-
-    week_start = Monday 00:00:00 UTC, week_end = Sunday 23:59:59 UTC.
-    Raises ValueError on bad format.
-    """
-    from datetime import datetime, timezone, timedelta
-
-    if not re.match(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$", week_str):
-        raise ValueError(f"bad ISO week format: {week_str}")
-    monday = datetime.strptime(week_str + "-1", "%G-W%V-%u").replace(tzinfo=timezone.utc)
-    sunday = monday + timedelta(days=6, hours=23, minutes=59, seconds=59)
-    return int(monday.timestamp()), int(sunday.timestamp())
-
-
-def _current_iso_week() -> str:
-    """Return the current UTC ISO week as 'YYYY-Www'."""
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    return now.strftime("%G-W%V")
-
-
-@public_bp.route("/api/referrals/summary", methods=["GET"])
-def referrals_summary():
-    """Return referred users with weekly activity counts for the authenticated referrer.
-
-    Query params:
-      address (required) - referrer wallet address
-      week    (optional) - ISO week string YYYY-Www (default: current UTC week)
-      limit   (optional) - page size, max 200 (default 50)
-      offset  (optional) - pagination offset (default 0)
-    """
-    rid = next_request_id()
-    address = request.args.get("address", "").strip().lower()
-    if not address:
-        return api_error_code("address_required")
-
-    week_str = request.args.get("week", "").strip()
-    if not week_str:
-        week_str = _current_iso_week()
-
-    limit = request.args.get("limit", 50, type=int)
-    offset = request.args.get("offset", 0, type=int)
-    if limit is None:
-        limit = 50
-    if offset is None:
-        offset = 0
-    limit = min(max(1, limit), 200)
-    offset = max(0, offset)
-
-    log_event(rid, "referrals.summary.begin", address=address, week=week_str, limit=limit, offset=offset)
-
-    try:
-        week_start, week_end = _iso_week_bounds(week_str)
-    except ValueError:
-        return api_error_code("invalid_week_format", 400)
-
-    log_event(rid, "referrals.summary.week_parsed", week=week_str, week_start=week_start, week_end=week_end)
-
-    try:
-        # ── Fetch all referred addresses (for history) and paginated slice ──
-        with connect_backend_db() as bconn:
-            bcur = bconn.cursor()
-            bcur.execute(
-                "SELECT COUNT(*) FROM referral_links WHERE LOWER(referrer_address) = %s AND referred_at <= %s",
-                (address, week_end),
-            )
-            total = int(bcur.fetchone()[0] or 0)
-
-            bcur.execute(
-                """
-                SELECT user_address, referred_at
-                FROM referral_links
-                WHERE LOWER(referrer_address) = %s AND referred_at <= %s
-                ORDER BY referred_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                (address, week_end, limit, offset),
-            )
-            page_referrals = bcur.fetchall()
-
-            bcur.execute(
-                "SELECT user_address, referred_at FROM referral_links WHERE LOWER(referrer_address) = %s",
-                (address,),
-            )
-            all_referrals = bcur.fetchall()
-
-        referred_at_by_owner = {}
-        missing_referred = []
-        for addr, referred_at in all_referrals:
-            if not isinstance(referred_at, (int, float)) or referred_at <= 0:
-                missing_referred.append(addr)
-                continue
-            referred_at_by_owner[addr] = int(referred_at)
-        if missing_referred:
-            log_event(
-                rid,
-                "referrals.summary.missing_referred_at",
-                address=address,
-                missing_count=len(missing_referred),
-            )
-            return api_error_code("referral_data_incomplete", 500)
-
-        all_addrs = list(referred_at_by_owner.keys())
-        page_addrs = [r[0] for r in page_referrals]
-        referred_at_map = {r[0]: r[1] for r in page_referrals}
-
-        # ── Empty-referrals fast path ──
-        if not all_addrs:
-            log_event(rid, "referrals.summary.empty", address=address)
-            return jsonify(
-                {
-                    "referrals": [],
-                    "total": 0,
-                    "week": week_str,
-                    "week_start": week_start,
-                    "week_end": week_end,
-                    "active_threshold": REFERRAL_ACTIVE_THRESHOLD,
-                    "active_definition": REFERRAL_ACTIVE_DEFINITION,
-                    "active_count": 0,
-                    "active_history": [],
-                    "limit": limit,
-                    "offset": offset,
-                    "has_more": False,
-                }
-            )
-
-        referred_ts = sorted(referred_at_by_owner.values())
-        earliest_referred = int(referred_ts[0])
-
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-
-            # ── Per-user counts for the selected week (page only) ──
-            post_counts = {}
-            comment_counts = {}
-            usernames = {}
-            if page_addrs:
-                cur.execute(
-                    """
-                    SELECT owner, COUNT(*) FROM posts
-                    WHERE owner = ANY(%s)
-                      AND deleted = FALSE
-                      AND COALESCE(target, '') = ''
-                      AND created_at >= %s AND created_at <= %s
-                    GROUP BY owner
-                    """,
-                    (page_addrs, week_start, week_end),
-                )
-                post_counts = {r[0]: r[1] for r in cur.fetchall()}
-
-                cur.execute(
-                    """
-                    SELECT owner, COUNT(*) FROM posts
-                    WHERE owner = ANY(%s)
-                      AND deleted = FALSE
-                      AND LENGTH(COALESCE(target, '')) > 0
-                      AND created_at >= %s AND created_at <= %s
-                    GROUP BY owner
-                    """,
-                    (page_addrs, week_start, week_end),
-                )
-                comment_counts = {r[0]: r[1] for r in cur.fetchall()}
-
-                cur.execute(
-                    "SELECT owner, username FROM profiles WHERE owner = ANY(%s)",
-                    (page_addrs,),
-                )
-                usernames = {r[0]: r[1] for r in cur.fetchall()}
-
-            # ── Weekly active history (all referrals, all weeks) ──
-            cur.execute(
-                """
-                SELECT
-                    TO_CHAR(date_trunc('week', to_timestamp(created_at) AT TIME ZONE 'UTC'), 'IYYY-"W"IW') AS wk,
-                    owner,
-                    SUM(CASE WHEN COALESCE(target, '') = '' THEN 1 ELSE 0 END) AS post_count,
-                    SUM(CASE WHEN LENGTH(COALESCE(target, '')) > 0 THEN 1 ELSE 0 END) AS comment_count
-                FROM posts
-                WHERE owner = ANY(%s)
-                  AND deleted = FALSE
-                  AND created_at >= %s
-                GROUP BY wk, owner
-                """,
-                (all_addrs, earliest_referred),
-            )
-            weekly_user_counts: dict[str, dict[str, int]] = {}
-            weekly_totals: dict[str, dict[str, int]] = {}
-            week_bounds_cache: dict[str, int] = {}
-            for wk, owner, post_cnt, comment_cnt in cur.fetchall():
-                referred_at = referred_at_by_owner.get(owner)
-                if not referred_at:
-                    continue
-                if wk not in week_bounds_cache:
-                    _, wk_end = _iso_week_bounds(wk)
-                    week_bounds_cache[wk] = wk_end
-                wk_end = week_bounds_cache[wk]
-                if wk_end < referred_at:
-                    continue
-                posts = int(post_cnt or 0)
-                comments = int(comment_cnt or 0)
-                total_actions = posts + comments
-                weekly_user_counts.setdefault(wk, {})[owner] = total_actions
-                totals = weekly_totals.setdefault(
-                    wk,
-                    {"posts": 0, "comments": 0, "total_actions": 0},
-                )
-                totals["posts"] += posts
-                totals["comments"] += comments
-                totals["total_actions"] += total_actions
-
-        # ── Build per-user results for the page ──
-        results = []
-        for addr in page_addrs:
-            posts = post_counts.get(addr, 0)
-            comments = comment_counts.get(addr, 0)
-            total_actions = posts + comments
-            is_active = total_actions >= REFERRAL_ACTIVE_THRESHOLD
-            results.append(
-                {
-                    "address": addr,
-                    "username": usernames.get(addr, ""),
-                    "referred_at": referred_at_map.get(addr, 0),
-                    "posts": posts,
-                    "comments": comments,
-                    "total_actions": total_actions,
-                    "active": is_active,
-                }
-            )
-
-        # ── Build active_history: count of active users per week ──
-        from datetime import datetime, timezone, timedelta
-
-        first_monday = datetime.utcfromtimestamp(earliest_referred).replace(tzinfo=timezone.utc)
-        first_monday = first_monday - timedelta(days=first_monday.weekday())
-        first_monday = first_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        now_utc = datetime.now(timezone.utc)
-        current_monday = now_utc - timedelta(days=now_utc.weekday())
-        current_monday = current_monday.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        active_history = []
-        cursor_monday = first_monday
-        while cursor_monday <= current_monday:
-            wk_label = cursor_monday.strftime("%G-W%V")
-            user_counts = weekly_user_counts.get(wk_label, {})
-            active_users = sum(1 for cnt in user_counts.values() if cnt >= REFERRAL_ACTIVE_THRESHOLD)
-            totals = weekly_totals.get(wk_label, {"posts": 0, "comments": 0, "total_actions": 0})
-            wk_start = int(cursor_monday.timestamp())
-            wk_end = int((cursor_monday + timedelta(days=6, hours=23, minutes=59, seconds=59)).timestamp())
-            total_referrals = bisect.bisect_right(referred_ts, wk_end)
-            active_history.append(
-                {
-                    "week": wk_label,
-                    "week_start": wk_start,
-                    "week_end": wk_end,
-                    "active_count": active_users,
-                    "posts": totals["posts"],
-                    "comments": totals["comments"],
-                    "total_actions": totals["total_actions"],
-                    "total_referrals": total_referrals,
-                }
-            )
-            cursor_monday += timedelta(weeks=1)
-
-        # Also compute full active_count for the selected week across ALL referrals
-        selected_user_counts = weekly_user_counts.get(week_str, {})
-        full_active_count = sum(1 for cnt in selected_user_counts.values() if cnt >= REFERRAL_ACTIVE_THRESHOLD)
-
-        has_more = (offset + len(results)) < total
-        log_event(
-            rid,
-            "referrals.summary.ok",
-            address=address,
-            week=week_str,
-            page_count=len(results),
-            active_count=full_active_count,
-            history_weeks=len(active_history),
-            has_more=has_more,
-        )
-        return jsonify(
-            {
-                "referrals": results,
-                "total": total,
-                "week": week_str,
-                "week_start": week_start,
-                "week_end": week_end,
-                "active_threshold": REFERRAL_ACTIVE_THRESHOLD,
-                "active_definition": REFERRAL_ACTIVE_DEFINITION,
-                "active_count": full_active_count,
-                "active_history": active_history,
-                "limit": limit,
-                "offset": offset,
-                "has_more": has_more,
-            }
-        )
-    except Exception as e:
-        log_event(rid, "referrals.summary.err", error=str(e))
-        return safe_error(e)
-
-
-# =============================================================================
-# Invite Code System (mirage.talk / localhost only)
-# =============================================================================
-
-
-def _build_invite_codes(address: str) -> dict:
-    """Pure helper: build the invite-codes payload for a given address.
-
-    Caller must ensure address is non-empty. Does NOT inject balance.
-    Used by /api/get_invite_codes and /api/bootstrap.
-    """
-    conn = connect_backend_db()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT code, used_by, created_at, used_at
-        FROM invite_codes
-        WHERE LOWER(owner) = LOWER(%s)
-        ORDER BY created_at ASC
-        """,
-        (address,),
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    codes = []
-    for row in rows:
-        codes.append(
-            {
-                "code": row[0],
-                "used_by": row[1],
-                "created_at": row[2],
-                "used_at": row[3],
-                "is_used": row[1] is not None,
-            }
-        )
-
-    available_count = sum(1 for c in codes if not c["is_used"])
-    return {"codes": codes, "total": len(codes), "available": available_count}
-
-
-@public_bp.route("/api/get_invite_codes")
-def get_invite_codes():
-    """Get all invite codes owned by the given address.
-
-    Feature-gated by REGISTRATION_INVITE_CODE_REQUIRED. When false (fleet-wide
-    default), returns an empty list: no codes are issued while the feature is
-    off, so there is nothing to disclose, and installed clients that still poll
-    this route render an empty Invites screen instead of erroring. When true,
-    requires a signed read — unused codes are bearer credentials. If this
-    feature is ever re-enabled, keep the signature requirement; do not serve
-    codes for an unsigned address query.
-    """
-    rid = next_request_id()
-    if not REGISTRATION_INVITE_CODE_REQUIRED:
-        log_event(rid, "invite.get_codes.disabled")
-        return jsonify({"codes": [], "total": 0, "available": 0})
-
-    address = request.args.get("address", "", type=str).strip()
-    if not address:
-        return jsonify({"error": "address required"}), 400
-
-    from routes.core import _require_signed_read
-
-    data = {
-        "address": address,
-        "pubkey": request.args.get("pubkey", default="", type=str),
-        "signature": request.args.get("signature", default="", type=str),
-        "timestamp": request.args.get("timestamp"),
-        "envelope_nonce": request.args.get("envelope_nonce"),
-    }
-    addr, aerr = _require_signed_read(data, "get_invite_codes", address)
-    if aerr is not None:
-        return aerr
-
-    try:
-        resp = _build_invite_codes(addr)
-        log_event(
-            rid,
-            "invite.get_codes.ok",
-            address=addr[:12],
-            total=resp.get("total", 0),
-            available=resp.get("available", 0),
-        )
-        return jsonify(_inject_balance(resp, addr))
-    except Exception as e:
-        log_event(rid, "invite.get_codes.err", error=str(e))
-        return safe_error(e)
-
-
-@public_bp.route("/api/validate_invite_code", methods=["POST"])
-def validate_invite_code():
-    """Validate that an invite code exists and is unused.
-
-    Gated by this node's own REGISTRATION_INVITE_CODE_REQUIRED. When false,
-    returns 404. There is no host check: `Host` is client-supplied, so a
-    hostname allowlist decided nothing an attacker could not flip by sending a
-    different header, while making the real gate look stronger than it is.
-    Never returns the code owner's address — that disclosure is a leak if the
-    feature is re-enabled.
-    """
-    rid = next_request_id()
-
-    if not REGISTRATION_INVITE_CODE_REQUIRED:
-        log_event(rid, "invite.validate.disabled")
-        return api_error_code("not_found", 404)
-
-    data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip().upper()
-
-    if not code or len(code) != 9 or code[4] != "-":
-        return jsonify({"valid": False, "error": "invalid code format"}), 400
-
-    try:
-        conn = connect_backend_db()
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
-            (code,),
-        )
-        row = cur.fetchone()
-        conn.close()
-
-        if not row:
-            log_event(rid, "invite.validate.notfound", code=code)
-            return jsonify({"valid": False, "error": "invalid invite code"})
-
-        _owner, used_by = row
-        if used_by:
-            log_event(rid, "invite.validate.used", code=code)
-            return jsonify({"valid": False, "error": "this invite code has already been used"})
-
-        log_event(rid, "invite.validate.ok", code=code)
-        # Deliberately omit owner — unused codes are bearer credentials; naming
-        # the issuer turns this endpoint into an unauthenticated oracle.
-        return jsonify({"valid": True})
-    except Exception as e:
-        log_event(rid, "invite.validate.err", error=str(e))
-        return safe_error(e, context="validate_invite_code")
-
-
 __all__ = ["public_bp"]

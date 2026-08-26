@@ -149,8 +149,13 @@ def test_params(backend: str):
     else:
         _fail("params.pow_difficulty >= 0 (step format)", f"got {pd}")
 
-    # 1.4b two-tier max_blocked_communities
-    tiers = data.get("tiers") or []
+    # 1.4b two-tier max_blocked_communities. Tier config lives on
+    # get_chain_config; get_parameters carries only the PoW envelope inputs.
+    _cc_code, chain_config = _get(f"{backend}/api/get_chain_config")
+    if _cc_code != 200:
+        _fail("params.get_chain_config returns valid data", f"code={_cc_code}")
+        return
+    tiers = (chain_config or {}).get("tiers") or []
     expected_blocked = [25, 500]
     if len(tiers) == 2:
         got_blocked = [int((tiers[i] or {}).get("max_blocked_communities", -1)) for i in range(2)]

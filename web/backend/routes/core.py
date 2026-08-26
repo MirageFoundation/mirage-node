@@ -32,7 +32,7 @@ import threading
 from typing import Any, Dict
 
 from flask import Blueprint, g, jsonify, request, has_request_context
-from client_ip import get_trusted_client_ip as _get_trusted_client_ip, hash_client_ip as _hash_client_ip
+from client_ip import get_trusted_client_ip as _get_trusted_client_ip
 from settings import (
     ACHIEVEMENTS_ENABLED,
     QUESTS_ENABLED,
@@ -101,7 +101,6 @@ from logging_utils import log_event, next_request_id, logger
 from error_utils import IndexerUnavailable, api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
-from quest_assignment import _locked_transaction
 from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
@@ -175,7 +174,6 @@ def get_balance(address) -> int:
 
 
 import hashlib
-import json
 import socket
 
 from psycopg.types.json import Jsonb
@@ -294,123 +292,6 @@ def _log_user_action(username: str, client_ip: str, action: str, target: str, tx
         target,
         tx_hash,
     )
-
-
-def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
-    """
-    Process invite quest completion when a new user sets their username.
-
-    Checks if:
-    1. New user used an invite code
-    2. Referrer has invite_recruit quest assigned for today and not completed
-
-    If both conditions are met:
-    - Marks referrer's invite_recruit quest as completed
-    - Creates pending reward for referrer (10k MIRAGE, no multiplier)
-    - Creates invite_referred quest for new user (completed) with pending reward
-    """
-    now_ts = int(time.time())
-    day_utc = _get_utc_julian_day(now_ts)
-
-    # Step 1 is keyed on the new user, so it is not contended and needs no lock.
-    with connect_backend_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT owner, code FROM invite_codes
-                WHERE LOWER(used_by) = LOWER(%s)
-                ORDER BY used_at DESC
-                LIMIT 1
-                """,
-                (new_user_addr,),
-            )
-            invite_row = cur.fetchone()
-
-    if not invite_row:
-        log_event(rid, "invite_quest.no_invite_code", new_user=new_user_addr)
-        return
-
-    referrer_addr, invite_code = invite_row
-    referrer_addr = referrer_addr.lower()
-    log_event(rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code)
-
-    # Steps 2-6 are a read-decide-write on the referrer's quest row, and the
-    # contention is between two *different* new users redeeming codes from the same
-    # referrer: both used to read the quest as incomplete and both paid out. The
-    # lock is keyed on the referrer for that reason, and shares quest_assignment's
-    # key so it also serializes against assignment and completion of the same row.
-    with _locked_transaction(f"quest_assignment:{referrer_addr}") as cur:
-        # Step 2: Check if referrer has invite_recruit quest for today, not completed
-        cur.execute(
-            """
-            SELECT quest_id, completed_at FROM user_daily_quests
-            WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
-            """,
-            (referrer_addr, day_utc),
-        )
-        quest_row = cur.fetchone()
-
-        if not quest_row:
-            log_event(rid, "invite_quest.referrer_no_quest", referrer=referrer_addr, day_utc=day_utc)
-            return
-
-        _, completed_at = quest_row
-        if completed_at is not None:
-            log_event(rid, "invite_quest.referrer_quest_already_completed", referrer=referrer_addr)
-            return
-
-        log_event(rid, "invite_quest.completing", referrer=referrer_addr, new_user=new_user_addr)
-
-        # Step 3: Mark referrer's invite_recruit quest as completed
-        cur.execute(
-            """
-            UPDATE user_daily_quests
-            SET progress = 1, completed_at = %s
-            WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
-            """,
-            (now_ts, referrer_addr, day_utc),
-        )
-
-        # Step 4: Insert pending reward for referrer (10k MIRAGE = 10,000,000,000 umirage)
-        # Referrer reward DOES get multiplier (apply_multiplier: True)
-        reward_amount_umirage = 10000 * 1_000_000  # 10k MIRAGE
-        # ON CONFLICT for the same reason as every other pending_rewards insert:
-        # without it a collision inside the same second raised mid-sequence, after
-        # step 3 had already marked the quest complete, so the referee's reward at
-        # step 6 was never written and step 2 short-circuits every retry.
-        cur.execute(
-            """
-            INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-            VALUES (%s, 'mirage', %s, 'quest:invite_recruit', %s)
-            ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
-            """,
-            (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": True}), now_ts),
-        )
-        log_event(rid, "invite_quest.referrer_reward_created", referrer=referrer_addr, amount=reward_amount_umirage)
-
-        # Step 5: Insert invite_referred quest for new user (already completed)
-        cur.execute(
-            """
-            INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
-            VALUES (%s, %s, 'invite_referred', 1, '{}', %s)
-            ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
-            """,
-            (new_user_addr, day_utc, now_ts),
-        )
-
-        # Step 6: Insert pending reward for new user (10k MIRAGE)
-        # New user reward does NOT get multiplier (they're new, multiplier would be 1x anyway)
-        cur.execute(
-            """
-            INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
-            VALUES (%s, 'mirage', %s, 'quest:invite_referred', %s)
-            ON CONFLICT (owner, reward_type, reason, created_at) DO NOTHING
-            """,
-            (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts),
-        )
-        log_event(rid, "invite_quest.referee_reward_created", new_user=new_user_addr, amount=reward_amount_umirage)
-
-        log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
 
 
 def _parse_envelope_nonce(data: dict):
@@ -677,6 +558,13 @@ def _classify_exception(err_str: str):
     if "simulate_gas http 400" in low:
         return "transaction rejected", 400
     if "simulate_gas http 4" in low:
+        return "transaction rejected", 400
+    # The tx-service REST returns 500 for a message that failed to execute during
+    # simulation, but a deterministic handler rejection ("joined communities cap
+    # reached", "community X is not claimed", ...) is the user's error, not ours.
+    # Reporting it as 500 also hid it from the error registry, since a 500 body
+    # carries no code the client can branch on.
+    if "failed to execute message" in low:
         return "transaction rejected", 400
     return "internal server error", 500
 
@@ -1208,90 +1096,9 @@ def core_set_username():
                         referrer=referrer_username,
                         user=user_addr,
                     )
-                client_hash = _hash_client_ip(_get_trusted_client_ip())
-                if referrer_address and client_hash:
-                    with connect_backend_db() as bconn:
-                        with bconn.cursor() as bcur:
-                            bcur.execute(
-                                "SELECT 1 FROM referral_links WHERE client_hash = %s AND referrer_address = %s",
-                                (client_hash, referrer_address),
-                            )
-                            if bcur.fetchone():
-                                log_event(
-                                    rid,
-                                    "set_username.referral_client_gate",
-                                    referrer=referrer_address,
-                                    user=user_addr,
-                                )
-                                if REGISTRATION_INVITE_CODE_REQUIRED:
-                                    return api_error_code("referrer_already_used")
-                                log_event(
-                                    rid,
-                                    "set_username.profile_referral_skipped",
-                                    reason="client_gate",
-                                    referrer=referrer_address,
-                                    user=user_addr,
-                                )
-                                referrer_address = ""
             except Exception as ref_err:
                 log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
                 return api_error_code("referrer_check_failed", 500)
-
-        if REGISTRATION_INVITE_CODE_REQUIRED and is_new_user:
-            if has_direct_code:
-                try:
-                    with connect_backend_db() as conn:
-                        cur = conn.cursor()
-                        cur.execute(
-                            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
-                            (invite_code,),
-                        )
-                        row = cur.fetchone()
-                        if not row:
-                            log_event(rid, "set_username.invite_code_invalid", code=invite_code, user=user_addr)
-                            return api_error_code("invite_code_invalid")
-                        owner, used_by = row
-                        if used_by:
-                            log_event(
-                                rid,
-                                "set_username.invite_code_already_used",
-                                code=invite_code,
-                                user=user_addr,
-                                used_by=used_by,
-                            )
-                            return api_error_code("invite_code_used")
-                        log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
-                except Exception as invite_check_err:
-                    log_event(rid, "set_username.invite_code_check_error", error=str(invite_check_err))
-                    return api_error_code("invite_code_check_failed", 500)
-            elif referrer_address:
-                try:
-                    with connect_backend_db() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                "SELECT precheck_enabled FROM referral_user_settings WHERE owner = %s",
-                                (referrer_address,),
-                            )
-                            settings_row = cur.fetchone()
-                            cur.execute(
-                                "SELECT 1 FROM invite_codes WHERE LOWER(owner) = %s AND used_by IS NULL LIMIT 1",
-                                (referrer_address,),
-                            )
-                            available_code = cur.fetchone()
-                    if not settings_row or settings_row[0] is not True or not available_code:
-                        log_event(
-                            rid,
-                            "set_username.referrer_cannot_invite",
-                            referrer=referrer_address,
-                            user=user_addr,
-                        )
-                        return api_error_code("invite_code_required")
-                except Exception as ref_invite_err:
-                    log_event(rid, "set_username.referrer_invite_check_error", error=str(ref_invite_err))
-                    return api_error_code("invite_code_check_failed", 500)
-            else:
-                log_event(rid, "set_username.invite_code_required", user=user_addr, username=username)
-                return api_error_code("invite_code_required")
 
         msg = MsgSetUsername()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -1330,147 +1137,12 @@ def core_set_username():
             }
             return _tx_error(rid, "core/set_username", "MsgSetUsername", code, tx_hash, raw_log, extra)
 
-        # ── Post-tx: profile-share referral attribution ──
+        # v1.39 pays no referral or signup reward, so there is nothing to persist
+        # for an attributed signup: referral_links, referral_user_settings and
+        # invite_codes are all dropped. The resolved referrer is logged above and
+        # that is the whole of the retained attribution.
         if referrer_address and is_new_user and code == 0:
-            try:
-                now_ts = int(time.time())
-                conn = connect_backend_db()
-                conn.autocommit = False
-                try:
-                    with conn.cursor() as cur:
-                        if REGISTRATION_INVITE_CODE_REQUIRED:
-                            cur.execute(
-                                """
-                                UPDATE invite_codes SET used_by = %s, used_at = %s
-                                WHERE code = (
-                                    SELECT code FROM invite_codes
-                                    WHERE LOWER(owner) = %s AND used_by IS NULL
-                                    LIMIT 1
-                                )
-                                RETURNING code
-                                """,
-                                (user_addr.lower(), now_ts, referrer_address),
-                            )
-                            row = cur.fetchone()
-                            if not row:
-                                raise RuntimeError("validated referral invite code is no longer available")
-                            log_event(
-                                rid,
-                                "set_username.referral_code_applied",
-                                code=row[0],
-                                referrer=referrer_address,
-                                user=user_addr,
-                            )
-                        client_hash = _hash_client_ip(_get_trusted_client_ip())
-                        cur.execute(
-                            """
-                            INSERT INTO referral_links (user_address, referrer_address, referred_at, client_hash)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (user_address) DO NOTHING
-                            """,
-                            (user_addr.lower(), referrer_address, now_ts, client_hash),
-                        )
-                    conn.commit()
-                    log_event(
-                        rid,
-                        "set_username.profile_referral_recorded",
-                        referrer=referrer_address,
-                        user=user_addr,
-                    )
-                except Exception:
-                    conn.rollback()
-                    raise
-                finally:
-                    conn.close()
-            except Exception as ref_err:
-                log_event(rid, "set_username.profile_referral_error", error=str(ref_err))
-
-        # ── Post-tx: record referral from direct address (legacy path) ──
-        elif is_new_user and not referrer_address:
-            referrer = str(data.get("referrer", "")).strip().lower()
-            if referrer and referrer.startswith("mirage1") and len(referrer) >= 39:
-                if referrer != user_addr.lower():
-                    try:
-                        now_ts = int(time.time())
-                        with connect_backend_db() as conn:
-                            with conn.cursor() as cur:
-                                cur.execute(
-                                    """
-                                    INSERT INTO referral_links (user_address, referrer_address, referred_at)
-                                    VALUES (%s, %s, %s)
-                                    ON CONFLICT (user_address) DO NOTHING
-                                    """,
-                                    (user_addr.lower(), referrer, now_ts),
-                                )
-                        log_event(rid, "set_username.referral_recorded", user=user_addr, referrer=referrer)
-                    except Exception as ref_err:
-                        log_event(rid, "set_username.referral_error", error=str(ref_err))
-
-        # Mark direct invite code as used (must happen BEFORE quest completion check)
-        if is_new_user and has_direct_code and code == 0 and not referrer_address:
-            try:
-                now_ts = int(time.time())
-                with connect_backend_db() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE invite_codes 
-                            SET used_by = %s, used_at = %s 
-                            WHERE UPPER(code) = %s AND used_by IS NULL
-                            RETURNING owner
-                            """,
-                            (user_addr.lower(), now_ts, invite_code),
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            owner = row[0]
-                            log_event(rid, "set_username.invite_code_used", code=invite_code, user=user_addr)
-                            # Bridge invite-code redemption → referral_links so the
-                            # /api/referrals/summary endpoint (which only reads
-                            # referral_links) reflects direct-code redemptions,
-                            # not just username-based referrals. Historically
-                            # path-3 only updated invite_codes and this bridge
-                            # was missing, so direct-code referrers appeared as
-                            # zero-referral accounts.
-                            client_hash = _hash_client_ip(_get_trusted_client_ip())
-                            cur.execute(
-                                """
-                                INSERT INTO referral_links (user_address, referrer_address, referred_at, client_hash)
-                                VALUES (%s, %s, %s, %s)
-                                ON CONFLICT (user_address) DO NOTHING
-                                """,
-                                (user_addr.lower(), owner, now_ts, client_hash),
-                            )
-                        else:
-                            log_event(rid, "set_username.invite_code_already_used_or_invalid", code=invite_code)
-            except Exception as ic_err:
-                log_event(rid, "set_username.invite_code_error", error=str(ic_err))
-
-        # Ensure referral settings row exists for this user (default: disabled)
-        try:
-            now_ts = int(time.time())
-            with connect_backend_db() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO referral_user_settings (owner, precheck_enabled, updated_at)
-                        VALUES (%s, FALSE, %s)
-                        ON CONFLICT (owner) DO NOTHING
-                        """,
-                        (user_addr.lower(), now_ts),
-                    )
-        except Exception as settings_err:
-            log_event(rid, "set_username.referral_settings_init_error", error=str(settings_err))
-
-        # Check for invite quest completion (referrer has invite_recruit, new user used their code)
-        # Registration only. The invite_codes redemption row is permanent, so running
-        # this for an already-registered user re-pays both sides 10k MIRAGE every time
-        # the referrer is re-assigned the quest — a username change is enough to trigger it.
-        if is_new_user and code == 0:
-            try:
-                _process_invite_quest_completion(rid, user_addr.lower())
-            except Exception as invite_err:
-                log_event(rid, "set_username.invite_quest_error", error=str(invite_err))
+            log_event(rid, "set_username.profile_referral_attributed", referrer=referrer_address, user=user_addr)
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
@@ -3514,7 +3186,7 @@ def core_edit():
         if err is not None:
             return err[0], err[1]
         target = str(data.get("target", "")).strip()
-        topic = str(data.get("topic", "")).strip()
+        topic = str(data.get("community") or data.get("topic") or "").strip()
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
@@ -3569,7 +3241,7 @@ def core_edit():
                 return jsonify({"error": "backend not initialized"}), 503
             if len(topic) > max_topic:
                 return jsonify({"error": "topic too long"}), 400
-            if not re.fullmatch(r"[a-z0-9]+", topic):
+            if not _is_valid_community_slug(topic):
                 return jsonify({"error": "invalid topic format"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
@@ -3945,6 +3617,16 @@ def _normalize_tag(tag: str) -> str:
     return _TAG_ALIASES.get(t, t)
 
 
+# Mirrors types.ValidateCommunitySlug in blockchain/x/core/types/community_validate.go.
+# The chain accepts single internal hyphens, so a stricter rule here rejects slugs
+# the chain would have taken.
+_COMMUNITY_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+def _is_valid_community_slug(slug: str) -> bool:
+    return bool(_COMMUNITY_SLUG_RE.fullmatch(slug)) and "--" not in slug
+
+
 def _has_unsafe_chars(*values: str) -> bool:
     """Return True if any value contains NUL, control chars (except tab/newline/CR), or DEL."""
     for v in values:
@@ -4063,7 +3745,7 @@ def core_post():
                 return jsonify({"error": "topic too short"}), 400
             if len(topic) > max_topic:
                 return jsonify({"error": "topic too long"}), 400
-            if not re.fullmatch(r"[a-z0-9]+", topic):
+            if not _is_valid_community_slug(topic):
                 return jsonify({"error": "invalid topic format"}), 400
 
         try:

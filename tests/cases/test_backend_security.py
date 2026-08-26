@@ -160,6 +160,7 @@ def test_security(backend: str):
             "topic": topic_a,
             "title": "Original",
             "content": "HACKED content",
+            "protocol_version": 1,
         }
         _code, resp = _post(f"{backend}/api/core/post", payload)
         err = str(resp.get("error", "")).lower()
@@ -209,6 +210,7 @@ def test_security(backend: str):
             "topic": topic2,
             "title": "Second",
             "content": "second content",
+            "protocol_version": 1,
         }
         _code, resp = _post(f"{backend}/api/core/post", payload)
         _expect_http_error("attack.pow_proof_reuse_rejected", resp, 400, "insufficient pow (precheck)")
@@ -889,6 +891,7 @@ def test_validation(backend: str):
                 "title": "Tag test",
                 "content": "body",
                 "tag": tag,
+                "protocol_version": 1,
             }
             _code, resp = _post(f"{backend}/api/core/post", payload)
             _expect_http_error(f"validation.tag_{label}_rejected", resp, 400, expected)
@@ -1053,6 +1056,15 @@ def test_relay_signing(backend: str):
     relay_max = int(chain_params.get("relay_max_gas_fee") or 0)
     gas = int(fee.get("gas_limit") or 0)
     amounts = fee.get("amount") or []
+    # sub1 is a subscriber, and the backend broadcasts subscriber relays with a
+    # zero fee: the subscription already paid for the throughput. The gas limit
+    # must still be set, since that is what bounds the tx.
+    if not amounts:
+        if relay_min > 0 and gas > 0:
+            _pass("relay_signing.fee_within_bounds")
+        else:
+            _fail("relay_signing.fee_within_bounds", f"subscriber relay with relay_min={relay_min} gas={gas}")
+        return
     if relay_min <= 0 or gas <= 0 or len(amounts) != 1:
         _fail(
             "relay_signing.fee_within_bounds",

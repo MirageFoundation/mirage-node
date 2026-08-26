@@ -954,7 +954,6 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             <MenuItem to="/agents" onClick={() => handleItemClick('/agents')}>Agents</MenuItem>
             <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuItem to="/network" onClick={() => handleItemClick('/network')}>Network</MenuItem>
-            <MenuItem to="/referrals" onClick={() => handleItemClick('/referrals')}>Referrals</MenuItem>
             {isAdmin && (
                 <>
                     <MenuDivider />
