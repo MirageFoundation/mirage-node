@@ -117,16 +117,18 @@ func signedFieldsByMessage(t *testing.T, file *ast.File) map[string]map[string]b
 				if !ok {
 					return true
 				}
-				fn, ok := call.Fun.(*ast.Ident)
-				if !ok || fn.Name != "verifyRelaySignature" {
+				fnName := ""
+				switch fun := call.Fun.(type) {
+				case *ast.Ident:
+					fnName = fun.Name
+				case *ast.SelectorExpr:
+					fnName = fun.Sel.Name
+				}
+				if fnName != "verifyRelaySignature" && fnName != "authEnvelope" && fnName != "standardPoW" {
 					return true
 				}
-				// The closure is the last argument.
-				lit, ok := call.Args[len(call.Args)-1].(*ast.FuncLit)
-				if !ok {
-					return true
-				}
-				ast.Inspect(lit, func(node ast.Node) bool {
+				// Collect m.X fields from the whole call (envelope args plus the fill closure).
+				ast.Inspect(call, func(node ast.Node) bool {
 					s, ok := node.(*ast.SelectorExpr)
 					if !ok {
 						return true

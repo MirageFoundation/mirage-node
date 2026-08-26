@@ -121,13 +121,14 @@ def canon_base_post(
     difficulty: int,
     timestamp: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     tag: str = "",
     pow_val: int = 0,
     media: list[str] | None = None,
     nonce: int = 0,
+    protocol_version: int = 1,
 ) -> bytes:
     out = bytearray(_prefix("MsgPost"))
     out += _enc_bytes(2, pubkey)
@@ -138,12 +139,13 @@ def canon_base_post(
     out += _enc_u64(6, timestamp)
     out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
-    out += _enc_str(101, topic or "")
+    out += _enc_str(101, community or "")
     out += _enc_str(102, title)
     out += _enc_str(103, content)
     out += _enc_str(104, tag)
     for m in media or []:
         out += _enc_str(105, m)
+    out += _enc_u64(106, protocol_version)
     return bytes(out)
 
 
@@ -153,7 +155,7 @@ def canon_base_edit(
     difficulty: int,
     timestamp: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     tag: str,
@@ -168,7 +170,7 @@ def canon_base_edit(
     out += _enc_u64(6, timestamp)
     out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
-    out += _enc_str(101, topic or "")
+    out += _enc_str(101, community or "")
     out += _enc_str(102, title)
     out += _enc_str(103, content)
     out += _enc_str(104, tag)
@@ -571,6 +573,7 @@ def canon_base_subscribe(
     level: int,
     target: str = "",
     nonce: int = 0,
+    period_count: int = 1,
 ) -> bytes:
     out = bytearray(_prefix("MsgSubscribe"))
     out += _enc_bytes(2, pubkey)
@@ -581,6 +584,7 @@ def canon_base_subscribe(
     out += _enc_u64(100, level)
     if target:
         out += _enc_str(101, target)
+    out += _enc_u64(102, period_count)
     return bytes(out)
 
 
@@ -619,6 +623,201 @@ def canon_base_award(
     out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, award_type)
+    return bytes(out)
+
+
+def _canon_envelope(name: str, pubkey: bytes, last_block_hash: bytes, difficulty: int, timestamp: int, nonce: int) -> bytearray:
+    out = bytearray(_prefix(name))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_u64(7, nonce)
+    return out
+
+
+def canon_base_join_community(pubkey, last_block_hash, difficulty, timestamp, community, nonce=0):
+    out = _canon_envelope("MsgJoinCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    return bytes(out)
+
+
+def canon_base_leave_community(pubkey, last_block_hash, difficulty, timestamp, community, nonce=0):
+    out = _canon_envelope("MsgLeaveCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    return bytes(out)
+
+
+def canon_base_block_community(pubkey, last_block_hash, difficulty, timestamp, target, community, nonce=0):
+    out = _canon_envelope("MsgBlockCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, target)
+    out += _enc_str(101, community)
+    return bytes(out)
+
+
+def canon_base_unblock_community(pubkey, last_block_hash, difficulty, timestamp, target, community, nonce=0):
+    out = _canon_envelope("MsgUnblockCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, target)
+    out += _enc_str(101, community)
+    return bytes(out)
+
+
+def canon_base_create_community(pubkey, last_block_hash, difficulty, timestamp, community, title, description, original_team_name, bio, policy, nonce=0):
+    out = _canon_envelope("MsgCreateCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_str(101, title)
+    out += _enc_str(102, description)
+    out += _enc_str(103, original_team_name)
+    out += _enc_str(104, bio)
+    out += _enc_str(105, policy)
+    return bytes(out)
+
+
+def canon_base_set_community_metadata(pubkey, last_block_hash, difficulty, timestamp, community, title, description, nonce=0):
+    out = _canon_envelope("MsgSetCommunityMetadata", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_str(101, title)
+    out += _enc_str(102, description)
+    return bytes(out)
+
+
+def canon_base_transfer_community(pubkey, last_block_hash, difficulty, timestamp, community, new_founder, nonce=0):
+    out = _canon_envelope("MsgTransferCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_str(101, new_founder)
+    return bytes(out)
+
+
+def canon_base_create_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, name, bio, policy, nonce=0):
+    out = _canon_envelope("MsgCreateCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_str(101, name)
+    out += _enc_str(102, bio)
+    out += _enc_str(103, policy)
+    return bytes(out)
+
+
+def canon_base_set_curation_preference(pubkey, last_block_hash, difficulty, timestamp, community, mode, pinned_team_id, nonce=0):
+    out = _canon_envelope("MsgSetCurationPreference", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(mode))
+    out += _enc_u64(102, int(pinned_team_id))
+    return bytes(out)
+
+
+def canon_base_set_curation_team_profile(pubkey, last_block_hash, difficulty, timestamp, community, team_id, name, bio, policy, nonce=0):
+    out = _canon_envelope("MsgSetCurationTeamProfile", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, name)
+    out += _enc_str(103, bio)
+    out += _enc_str(104, policy)
+    return bytes(out)
+
+
+def canon_base_invite_curator(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, nonce=0):
+    out = _canon_envelope("MsgInviteCurator", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    return bytes(out)
+
+
+def canon_base_revoke_curator_invite(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, nonce=0):
+    out = _canon_envelope("MsgRevokeCuratorInvite", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    return bytes(out)
+
+
+def canon_base_accept_curator_invite(pubkey, last_block_hash, difficulty, timestamp, community, team_id, nonce=0):
+    out = _canon_envelope("MsgAcceptCuratorInvite", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    return bytes(out)
+
+
+def canon_base_decline_curator_invite(pubkey, last_block_hash, difficulty, timestamp, community, team_id, nonce=0):
+    out = _canon_envelope("MsgDeclineCuratorInvite", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    return bytes(out)
+
+
+def canon_base_leave_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, team_id, nonce=0):
+    out = _canon_envelope("MsgLeaveCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    return bytes(out)
+
+
+def canon_base_remove_curator(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, nonce=0):
+    out = _canon_envelope("MsgRemoveCurator", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    return bytes(out)
+
+
+def canon_base_transfer_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, team_id, new_owner, nonce=0):
+    out = _canon_envelope("MsgTransferCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, new_owner)
+    return bytes(out)
+
+
+def canon_base_delete_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, team_id, nonce=0):
+    out = _canon_envelope("MsgDeleteCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    return bytes(out)
+
+
+def canon_base_set_curation_post_hidden(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, hidden, nonce=0):
+    out = _canon_envelope("MsgSetCurationPostHidden", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    if hidden:
+        out += _enc_u64(103, 1)
+    return bytes(out)
+
+
+def canon_base_set_curation_user_hidden(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, hidden, nonce=0):
+    out = _canon_envelope("MsgSetCurationUserHidden", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    if hidden:
+        out += _enc_u64(103, 1)
+    return bytes(out)
+
+
+def canon_base_set_curation_thread_locked(pubkey, last_block_hash, difficulty, timestamp, community, team_id, root_hash, locked, nonce=0):
+    out = _canon_envelope("MsgSetCurationThreadLocked", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, root_hash)
+    if locked:
+        out += _enc_u64(103, 1)
+    return bytes(out)
+
+
+def canon_base_set_curation_subscriber_only(pubkey, last_block_hash, difficulty, timestamp, community, team_id, enabled, nonce=0):
+    out = _canon_envelope("MsgSetCurationSubscriberOnly", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    if enabled:
+        out += _enc_u64(102, 1)
+    return bytes(out)
+
+
+def canon_base_claim_creator_rewards(pubkey, last_block_hash, difficulty, timestamp, epoch_ids, nonce=0):
+    out = _canon_envelope("MsgClaimCreatorRewards", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    for eid in epoch_ids:
+        out += _enc_u64(100, int(eid))
     return bytes(out)
 
 

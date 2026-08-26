@@ -28,27 +28,25 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 // TierConfig defines the configuration for a membership tier.
 type TierConfig struct {
 	// uint64 fields
-	PeriodFee         uint64 `protobuf:"varint,1,opt,name=period_fee,json=periodFee,proto3" json:"period_fee,omitempty"`
-	MaxEnabledAgents  uint64 `protobuf:"varint,2,opt,name=max_enabled_agents,json=maxEnabledAgents,proto3" json:"max_enabled_agents,omitempty"`
-	MaxFollowedUsers  uint64 `protobuf:"varint,3,opt,name=max_followed_users,json=maxFollowedUsers,proto3" json:"max_followed_users,omitempty"`
-	MaxFollowedTopics uint64 `protobuf:"varint,4,opt,name=max_followed_topics,json=maxFollowedTopics,proto3" json:"max_followed_topics,omitempty"`
-	MaxBlockedUsers   uint64 `protobuf:"varint,5,opt,name=max_blocked_users,json=maxBlockedUsers,proto3" json:"max_blocked_users,omitempty"`
-	MaxBlockedPosts   uint64 `protobuf:"varint,6,opt,name=max_blocked_posts,json=maxBlockedPosts,proto3" json:"max_blocked_posts,omitempty"`
-	MaxBlockedTopics  uint64 `protobuf:"varint,7,opt,name=max_blocked_topics,json=maxBlockedTopics,proto3" json:"max_blocked_topics,omitempty"`
-	MaxTitleLength    uint64 `protobuf:"varint,8,opt,name=max_title_length,json=maxTitleLength,proto3" json:"max_title_length,omitempty"`
-	MaxContentLength  uint64 `protobuf:"varint,9,opt,name=max_content_length,json=maxContentLength,proto3" json:"max_content_length,omitempty"`
-	EditingTimeMins   uint64 `protobuf:"varint,10,opt,name=editing_time_mins,json=editingTimeMins,proto3" json:"editing_time_mins,omitempty"`
+	PeriodFee             uint64 `protobuf:"varint,1,opt,name=period_fee,json=periodFee,proto3" json:"period_fee,omitempty"`
+	MaxFollowedUsers      uint64 `protobuf:"varint,3,opt,name=max_followed_users,json=maxFollowedUsers,proto3" json:"max_followed_users,omitempty"`
+	MaxJoinedCommunities  uint64 `protobuf:"varint,4,opt,name=max_joined_communities,json=maxJoinedCommunities,proto3" json:"max_joined_communities,omitempty"`
+	MaxBlockedUsers       uint64 `protobuf:"varint,5,opt,name=max_blocked_users,json=maxBlockedUsers,proto3" json:"max_blocked_users,omitempty"`
+	MaxBlockedPosts       uint64 `protobuf:"varint,6,opt,name=max_blocked_posts,json=maxBlockedPosts,proto3" json:"max_blocked_posts,omitempty"`
+	MaxBlockedCommunities uint64 `protobuf:"varint,7,opt,name=max_blocked_communities,json=maxBlockedCommunities,proto3" json:"max_blocked_communities,omitempty"`
+	MaxTitleLength        uint64 `protobuf:"varint,8,opt,name=max_title_length,json=maxTitleLength,proto3" json:"max_title_length,omitempty"`
+	MaxContentLength      uint64 `protobuf:"varint,9,opt,name=max_content_length,json=maxContentLength,proto3" json:"max_content_length,omitempty"`
+	EditingTimeMins       uint64 `protobuf:"varint,10,opt,name=editing_time_mins,json=editingTimeMins,proto3" json:"editing_time_mins,omitempty"`
 	// double fields
-	VoteWeight float64 `protobuf:"fixed64,13,opt,name=vote_weight,json=voteWeight,proto3" json:"vote_weight,omitempty"`
-	// bool fields
-	CanBeAgent       bool `protobuf:"varint,15,opt,name=can_be_agent,json=canBeAgent,proto3" json:"can_be_agent,omitempty"`
-	CanRemoveAnon    bool `protobuf:"varint,16,opt,name=can_remove_anon,json=canRemoveAnon,proto3" json:"can_remove_anon,omitempty"`
-	CanHaveBiography bool `protobuf:"varint,17,opt,name=can_have_biography,json=canHaveBiography,proto3" json:"can_have_biography,omitempty"`
-	CanHaveAvatar    bool `protobuf:"varint,18,opt,name=can_have_avatar,json=canHaveAvatar,proto3" json:"can_have_avatar,omitempty"`
-	CanHaveBanner    bool `protobuf:"varint,19,opt,name=can_have_banner,json=canHaveBanner,proto3" json:"can_have_banner,omitempty"`
-	CanHaveFlair     bool `protobuf:"varint,20,opt,name=can_have_flair,json=canHaveFlair,proto3" json:"can_have_flair,omitempty"`
+	VoteWeight       float64 `protobuf:"fixed64,13,opt,name=vote_weight,json=voteWeight,proto3" json:"vote_weight,omitempty"`
+	CanRemoveAnon    bool    `protobuf:"varint,16,opt,name=can_remove_anon,json=canRemoveAnon,proto3" json:"can_remove_anon,omitempty"`
+	CanHaveBiography bool    `protobuf:"varint,17,opt,name=can_have_biography,json=canHaveBiography,proto3" json:"can_have_biography,omitempty"`
+	CanHaveAvatar    bool    `protobuf:"varint,18,opt,name=can_have_avatar,json=canHaveAvatar,proto3" json:"can_have_avatar,omitempty"`
+	CanHaveBanner    bool    `protobuf:"varint,19,opt,name=can_have_banner,json=canHaveBanner,proto3" json:"can_have_banner,omitempty"`
+	CanHaveFlair     bool    `protobuf:"varint,20,opt,name=can_have_flair,json=canHaveFlair,proto3" json:"can_have_flair,omitempty"`
 	// max_biography_length is the max biography length for this tier (0 = disabled)
-	MaxBiographyLength uint64 `protobuf:"varint,21,opt,name=max_biography_length,json=maxBiographyLength,proto3" json:"max_biography_length,omitempty"`
+	MaxBiographyLength     uint64 `protobuf:"varint,21,opt,name=max_biography_length,json=maxBiographyLength,proto3" json:"max_biography_length,omitempty"`
+	MaxCurationMemberships uint64 `protobuf:"varint,22,opt,name=max_curation_memberships,json=maxCurationMemberships,proto3" json:"max_curation_memberships,omitempty"`
 }
 
 func (m *TierConfig) Reset()         { *m = TierConfig{} }
@@ -91,13 +89,6 @@ func (m *TierConfig) GetPeriodFee() uint64 {
 	return 0
 }
 
-func (m *TierConfig) GetMaxEnabledAgents() uint64 {
-	if m != nil {
-		return m.MaxEnabledAgents
-	}
-	return 0
-}
-
 func (m *TierConfig) GetMaxFollowedUsers() uint64 {
 	if m != nil {
 		return m.MaxFollowedUsers
@@ -105,9 +96,9 @@ func (m *TierConfig) GetMaxFollowedUsers() uint64 {
 	return 0
 }
 
-func (m *TierConfig) GetMaxFollowedTopics() uint64 {
+func (m *TierConfig) GetMaxJoinedCommunities() uint64 {
 	if m != nil {
-		return m.MaxFollowedTopics
+		return m.MaxJoinedCommunities
 	}
 	return 0
 }
@@ -126,9 +117,9 @@ func (m *TierConfig) GetMaxBlockedPosts() uint64 {
 	return 0
 }
 
-func (m *TierConfig) GetMaxBlockedTopics() uint64 {
+func (m *TierConfig) GetMaxBlockedCommunities() uint64 {
 	if m != nil {
-		return m.MaxBlockedTopics
+		return m.MaxBlockedCommunities
 	}
 	return 0
 }
@@ -159,13 +150,6 @@ func (m *TierConfig) GetVoteWeight() float64 {
 		return m.VoteWeight
 	}
 	return 0
-}
-
-func (m *TierConfig) GetCanBeAgent() bool {
-	if m != nil {
-		return m.CanBeAgent
-	}
-	return false
 }
 
 func (m *TierConfig) GetCanRemoveAnon() bool {
@@ -210,6 +194,13 @@ func (m *TierConfig) GetMaxBiographyLength() uint64 {
 	return 0
 }
 
+func (m *TierConfig) GetMaxCurationMemberships() uint64 {
+	if m != nil {
+		return m.MaxCurationMemberships
+	}
+	return 0
+}
+
 // Params defines the parameters for the module.
 type Params struct {
 	// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty).
@@ -233,12 +224,12 @@ type Params struct {
 	PowDifficultyAllowance uint64 `protobuf:"varint,10,opt,name=pow_difficulty_allowance,json=powDifficultyAllowance,proto3" json:"pow_difficulty_allowance,omitempty"`
 	// max_username_size is the maximum username length
 	MaxUsernameSize uint64 `protobuf:"varint,34,opt,name=max_username_size,json=maxUsernameSize,proto3" json:"max_username_size,omitempty"`
-	// max_topic_size is the maximum topic length
-	MaxTopicSize uint64 `protobuf:"varint,35,opt,name=max_topic_size,json=maxTopicSize,proto3" json:"max_topic_size,omitempty"`
+	// max_community_size is the maximum community slug length
+	MaxCommunitySize uint64 `protobuf:"varint,35,opt,name=max_community_size,json=maxCommunitySize,proto3" json:"max_community_size,omitempty"`
 	// min_username_size is the minimum username length
 	MinUsernameSize uint64 `protobuf:"varint,36,opt,name=min_username_size,json=minUsernameSize,proto3" json:"min_username_size,omitempty"`
-	// min_topic_size is the minimum topic length
-	MinTopicSize uint64 `protobuf:"varint,37,opt,name=min_topic_size,json=minTopicSize,proto3" json:"min_topic_size,omitempty"`
+	// min_community_size is the minimum community slug length
+	MinCommunitySize uint64 `protobuf:"varint,37,opt,name=min_community_size,json=minCommunitySize,proto3" json:"min_community_size,omitempty"`
 	// mint_dynamic_credit_cap caps per-interval relay credits per validator.
 	// Zero disables credit weighting; the dynamic pool then falls back to stake weighting.
 	MintDynamicCreditCap uint64 `protobuf:"varint,38,opt,name=mint_dynamic_credit_cap,json=mintDynamicCreditCap,proto3" json:"mint_dynamic_credit_cap,omitempty"`
@@ -249,8 +240,8 @@ type Params struct {
 	// tiers defines the tier configurations, indexed by user-level-to-tier mapping.
 	// The exact level -> tier-index mapping is defined by LevelToTierIndex in
 	// x/core/types/params.go: level 0 (Free) -> 0, level 1 (Subscriber) -> 1,
-	// level 10 (Agent) -> 2, level >= 100 (Admin) -> 2 (inherits Agent tier).
-	// Levels 2-9 are reserved for future subscription tiers and currently invalid.
+	// level >= 100 (Admin) -> 1 (inherits Subscriber limits).
+	// Levels 2-9 and 10 are invalid after v1.39.0.
 	Tiers []*TierConfig `protobuf:"bytes,41,rep,name=tiers,proto3" json:"tiers,omitempty"`
 	// subscription_reserve_percent is superseded by subscription_reserve_bps and
 	// MUST be 0. It is kept only so stored Params blobs written before v1.34.0
@@ -286,7 +277,29 @@ type Params struct {
 	// not exceed 1; the remainder stays stake-weighted.
 	// Zero is valid so Params blobs written before v1.38.0 still decode.
 	// Default: 0.20 (20% floor).
-	MintFloorSplit float64 `protobuf:"fixed64,55,opt,name=mint_floor_split,json=mintFloorSplit,proto3" json:"mint_floor_split,omitempty"`
+	MintFloorSplit                      float64 `protobuf:"fixed64,55,opt,name=mint_floor_split,json=mintFloorSplit,proto3" json:"mint_floor_split,omitempty"`
+	SubscriptionCreatorBps              uint64  `protobuf:"varint,56,opt,name=subscription_creator_bps,json=subscriptionCreatorBps,proto3" json:"subscription_creator_bps,omitempty"`
+	MaxCuratorsPerTeam                  uint64  `protobuf:"varint,57,opt,name=max_curators_per_team,json=maxCuratorsPerTeam,proto3" json:"max_curators_per_team,omitempty"`
+	MaxPendingCuratorInvitesPerTeam     uint64  `protobuf:"varint,58,opt,name=max_pending_curator_invites_per_team,json=maxPendingCuratorInvitesPerTeam,proto3" json:"max_pending_curator_invites_per_team,omitempty"`
+	MaxPendingCuratorInvitesPerUser     uint64  `protobuf:"varint,59,opt,name=max_pending_curator_invites_per_user,json=maxPendingCuratorInvitesPerUser,proto3" json:"max_pending_curator_invites_per_user,omitempty"`
+	MaxCommunityTitleLength             uint64  `protobuf:"varint,60,opt,name=max_community_title_length,json=maxCommunityTitleLength,proto3" json:"max_community_title_length,omitempty"`
+	MaxCommunityDescriptionLength       uint64  `protobuf:"varint,61,opt,name=max_community_description_length,json=maxCommunityDescriptionLength,proto3" json:"max_community_description_length,omitempty"`
+	MaxCurationTeamNameLength           uint64  `protobuf:"varint,62,opt,name=max_curation_team_name_length,json=maxCurationTeamNameLength,proto3" json:"max_curation_team_name_length,omitempty"`
+	MaxCurationTeamBioLength            uint64  `protobuf:"varint,63,opt,name=max_curation_team_bio_length,json=maxCurationTeamBioLength,proto3" json:"max_curation_team_bio_length,omitempty"`
+	MaxCurationTeamPolicyLength         uint64  `protobuf:"varint,64,opt,name=max_curation_team_policy_length,json=maxCurationTeamPolicyLength,proto3" json:"max_curation_team_policy_length,omitempty"`
+	SubscriptionTransitionsPerBlock     uint64  `protobuf:"varint,65,opt,name=subscription_transitions_per_block,json=subscriptionTransitionsPerBlock,proto3" json:"subscription_transitions_per_block,omitempty"`
+	CurationPruneKeysPerBlock           uint64  `protobuf:"varint,66,opt,name=curation_prune_keys_per_block,json=curationPruneKeysPerBlock,proto3" json:"curation_prune_keys_per_block,omitempty"`
+	CreatorEpochClosuresPerBlock        uint64  `protobuf:"varint,67,opt,name=creator_epoch_closures_per_block,json=creatorEpochClosuresPerBlock,proto3" json:"creator_epoch_closures_per_block,omitempty"`
+	CreatorSettlementRecordsPerBlock    uint64  `protobuf:"varint,68,opt,name=creator_settlement_records_per_block,json=creatorSettlementRecordsPerBlock,proto3" json:"creator_settlement_records_per_block,omitempty"`
+	CreatorPruneKeysPerBlock            uint64  `protobuf:"varint,69,opt,name=creator_prune_keys_per_block,json=creatorPruneKeysPerBlock,proto3" json:"creator_prune_keys_per_block,omitempty"`
+	CreatorClaimWindowDays              uint64  `protobuf:"varint,70,opt,name=creator_claim_window_days,json=creatorClaimWindowDays,proto3" json:"creator_claim_window_days,omitempty"`
+	MaxCreatorClaimEpochs               uint64  `protobuf:"varint,71,opt,name=max_creator_claim_epochs,json=maxCreatorClaimEpochs,proto3" json:"max_creator_claim_epochs,omitempty"`
+	MaxCreatorEngagementsPerEpoch       uint64  `protobuf:"varint,72,opt,name=max_creator_engagements_per_epoch,json=maxCreatorEngagementsPerEpoch,proto3" json:"max_creator_engagements_per_epoch,omitempty"`
+	CreatorEpochExpiriesPerBlock        uint64  `protobuf:"varint,73,opt,name=creator_epoch_expiries_per_block,json=creatorEpochExpiriesPerBlock,proto3" json:"creator_epoch_expiries_per_block,omitempty"`
+	SubscriptionEarlyRenewalDays        uint64  `protobuf:"varint,74,opt,name=subscription_early_renewal_days,json=subscriptionEarlyRenewalDays,proto3" json:"subscription_early_renewal_days,omitempty"`
+	SubscriptionRenewalAttemptsPerBlock uint64  `protobuf:"varint,75,opt,name=subscription_renewal_attempts_per_block,json=subscriptionRenewalAttemptsPerBlock,proto3" json:"subscription_renewal_attempts_per_block,omitempty"`
+	SubscriberDailyRelayLimit           uint64  `protobuf:"varint,76,opt,name=subscriber_daily_relay_limit,json=subscriberDailyRelayLimit,proto3" json:"subscriber_daily_relay_limit,omitempty"`
+	MaxSubscriptionPeriodsPerPurchase   uint64  `protobuf:"varint,77,opt,name=max_subscription_periods_per_purchase,json=maxSubscriptionPeriodsPerPurchase,proto3" json:"max_subscription_periods_per_purchase,omitempty"`
 }
 
 func (m *Params) Reset()         { *m = Params{} }
@@ -392,9 +405,9 @@ func (m *Params) GetMaxUsernameSize() uint64 {
 	return 0
 }
 
-func (m *Params) GetMaxTopicSize() uint64 {
+func (m *Params) GetMaxCommunitySize() uint64 {
 	if m != nil {
-		return m.MaxTopicSize
+		return m.MaxCommunitySize
 	}
 	return 0
 }
@@ -406,9 +419,9 @@ func (m *Params) GetMinUsernameSize() uint64 {
 	return 0
 }
 
-func (m *Params) GetMinTopicSize() uint64 {
+func (m *Params) GetMinCommunitySize() uint64 {
 	if m != nil {
-		return m.MinTopicSize
+		return m.MinCommunitySize
 	}
 	return 0
 }
@@ -498,6 +511,160 @@ func (m *Params) GetMintFloorSplit() float64 {
 	return 0
 }
 
+func (m *Params) GetSubscriptionCreatorBps() uint64 {
+	if m != nil {
+		return m.SubscriptionCreatorBps
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCuratorsPerTeam() uint64 {
+	if m != nil {
+		return m.MaxCuratorsPerTeam
+	}
+	return 0
+}
+
+func (m *Params) GetMaxPendingCuratorInvitesPerTeam() uint64 {
+	if m != nil {
+		return m.MaxPendingCuratorInvitesPerTeam
+	}
+	return 0
+}
+
+func (m *Params) GetMaxPendingCuratorInvitesPerUser() uint64 {
+	if m != nil {
+		return m.MaxPendingCuratorInvitesPerUser
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCommunityTitleLength() uint64 {
+	if m != nil {
+		return m.MaxCommunityTitleLength
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCommunityDescriptionLength() uint64 {
+	if m != nil {
+		return m.MaxCommunityDescriptionLength
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCurationTeamNameLength() uint64 {
+	if m != nil {
+		return m.MaxCurationTeamNameLength
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCurationTeamBioLength() uint64 {
+	if m != nil {
+		return m.MaxCurationTeamBioLength
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCurationTeamPolicyLength() uint64 {
+	if m != nil {
+		return m.MaxCurationTeamPolicyLength
+	}
+	return 0
+}
+
+func (m *Params) GetSubscriptionTransitionsPerBlock() uint64 {
+	if m != nil {
+		return m.SubscriptionTransitionsPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetCurationPruneKeysPerBlock() uint64 {
+	if m != nil {
+		return m.CurationPruneKeysPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetCreatorEpochClosuresPerBlock() uint64 {
+	if m != nil {
+		return m.CreatorEpochClosuresPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetCreatorSettlementRecordsPerBlock() uint64 {
+	if m != nil {
+		return m.CreatorSettlementRecordsPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetCreatorPruneKeysPerBlock() uint64 {
+	if m != nil {
+		return m.CreatorPruneKeysPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetCreatorClaimWindowDays() uint64 {
+	if m != nil {
+		return m.CreatorClaimWindowDays
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCreatorClaimEpochs() uint64 {
+	if m != nil {
+		return m.MaxCreatorClaimEpochs
+	}
+	return 0
+}
+
+func (m *Params) GetMaxCreatorEngagementsPerEpoch() uint64 {
+	if m != nil {
+		return m.MaxCreatorEngagementsPerEpoch
+	}
+	return 0
+}
+
+func (m *Params) GetCreatorEpochExpiriesPerBlock() uint64 {
+	if m != nil {
+		return m.CreatorEpochExpiriesPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetSubscriptionEarlyRenewalDays() uint64 {
+	if m != nil {
+		return m.SubscriptionEarlyRenewalDays
+	}
+	return 0
+}
+
+func (m *Params) GetSubscriptionRenewalAttemptsPerBlock() uint64 {
+	if m != nil {
+		return m.SubscriptionRenewalAttemptsPerBlock
+	}
+	return 0
+}
+
+func (m *Params) GetSubscriberDailyRelayLimit() uint64 {
+	if m != nil {
+		return m.SubscriberDailyRelayLimit
+	}
+	return 0
+}
+
+func (m *Params) GetMaxSubscriptionPeriodsPerPurchase() uint64 {
+	if m != nil {
+		return m.MaxSubscriptionPeriodsPerPurchase
+	}
+	return 0
+}
+
 // AwardConfig defines a single award type and its cost.
 type AwardConfig struct {
 	// name is the unique identifier for this award type (e.g., "quality_post")
@@ -562,80 +729,113 @@ func init() {
 func init() { proto.RegisterFile("mirage/core/v1/params.proto", fileDescriptor_c539f4235465551a) }
 
 var fileDescriptor_c539f4235465551a = []byte{
-	// 1158 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x6c, 0x96, 0xcd, 0x6e, 0x1b, 0x37,
-	0x10, 0xc7, 0xa3, 0x44, 0x71, 0x65, 0xfa, 0x4b, 0xa6, 0xdd, 0x86, 0x70, 0x1a, 0xc7, 0x70, 0x3e,
-	0xea, 0xb8, 0x89, 0x9c, 0xcf, 0xb6, 0x48, 0x50, 0xa0, 0x92, 0x1d, 0x27, 0x35, 0x12, 0xc0, 0x95,
-	0x1d, 0x04, 0xe8, 0x85, 0xa0, 0x56, 0xa3, 0x15, 0xd1, 0x5d, 0x72, 0xb3, 0xa4, 0xf5, 0x91, 0x47,
-	0xe8, 0xa9, 0x87, 0x3e, 0x40, 0x1f, 0xa1, 0x8f, 0xd1, 0x63, 0x8e, 0x3d, 0x16, 0xc9, 0xa1, 0x3d,
-	0xf7, 0x09, 0x8a, 0x21, 0xb9, 0x6b, 0xc9, 0xcd, 0xc5, 0x58, 0xff, 0xe7, 0xb7, 0xa3, 0xd9, 0xd9,
-	0xf9, 0x0f, 0x97, 0x5c, 0x4e, 0x65, 0x2e, 0x62, 0xd8, 0x89, 0x74, 0x0e, 0x3b, 0x83, 0x7b, 0x3b,
-	0x99, 0xc8, 0x45, 0x6a, 0x1a, 0x59, 0xae, 0xad, 0xa6, 0x8b, 0x3e, 0xd8, 0xc0, 0x60, 0x63, 0x70,
-	0x6f, 0x6d, 0x59, 0xa4, 0x52, 0xe9, 0x1d, 0xf7, 0xd7, 0x23, 0x6b, 0xab, 0xb1, 0x8e, 0xb5, 0xbb,
-	0xdc, 0xc1, 0x2b, 0xaf, 0x6e, 0xfe, 0x3a, 0x43, 0xc8, 0xb1, 0x84, 0x7c, 0x57, 0xab, 0x9e, 0x8c,
-	0xe9, 0x15, 0x42, 0x32, 0xc8, 0xa5, 0xee, 0xf2, 0x1e, 0x00, 0xab, 0x6c, 0x54, 0xb6, 0xaa, 0xed,
-	0x59, 0xaf, 0xec, 0x03, 0xd0, 0xdb, 0x84, 0xa6, 0x62, 0xc4, 0x41, 0x89, 0x4e, 0x02, 0x5d, 0x2e,
-	0x62, 0x50, 0xd6, 0xb0, 0xf3, 0x0e, 0xab, 0xa7, 0x62, 0xf4, 0xd4, 0x07, 0x9a, 0x4e, 0x2f, 0xe8,
-	0x9e, 0x4e, 0x12, 0x3d, 0x84, 0x2e, 0x3f, 0x31, 0x90, 0x1b, 0x76, 0xa1, 0xa4, 0xf7, 0x43, 0xe0,
-	0x15, 0xea, 0xb4, 0x41, 0x56, 0xa6, 0x68, 0xab, 0x33, 0x19, 0x19, 0x56, 0x75, 0xf8, 0xf2, 0x04,
-	0x7e, 0xec, 0x02, 0x74, 0x9b, 0xa0, 0xc8, 0x3b, 0x89, 0x8e, 0x7e, 0x2a, 0x93, 0x5f, 0x74, 0xf4,
-	0x52, 0x2a, 0x46, 0x2d, 0xaf, 0xfb, 0xdc, 0x67, 0xd8, 0x4c, 0x1b, 0x6b, 0xd8, 0xcc, 0x59, 0xf6,
-	0x10, 0xe5, 0xa2, 0xea, 0x82, 0x0d, 0x65, 0x7c, 0x52, 0x56, 0x1d, 0xe0, 0x50, 0xc5, 0x16, 0x41,
-	0x8d, 0x5b, 0x69, 0x13, 0xe0, 0x09, 0xa8, 0xd8, 0xf6, 0x59, 0xcd, 0xb1, 0x8b, 0xa9, 0x18, 0x1d,
-	0xa3, 0xfc, 0xc2, 0xa9, 0x45, 0xde, 0x48, 0x2b, 0x0b, 0xca, 0x16, 0xec, 0x6c, 0x99, 0x77, 0xd7,
-	0x07, 0x02, 0xbd, 0x4d, 0x96, 0xa1, 0x2b, 0xad, 0x54, 0x31, 0xb7, 0x32, 0x05, 0x9e, 0x4a, 0x65,
-	0x18, 0xf1, 0x15, 0x87, 0xc0, 0xb1, 0x4c, 0xe1, 0xa5, 0x54, 0x86, 0x5e, 0x25, 0x73, 0x03, 0x6d,
-	0x81, 0x0f, 0x41, 0xc6, 0x7d, 0xcb, 0x16, 0x36, 0x2a, 0x5b, 0x95, 0x36, 0x41, 0xe9, 0xb5, 0x53,
-	0xe8, 0x06, 0x99, 0x8f, 0x84, 0xe2, 0x1d, 0xf0, 0x6f, 0x8c, 0x2d, 0x6d, 0x54, 0xb6, 0x6a, 0x6d,
-	0x12, 0x09, 0xd5, 0x02, 0xf7, 0xae, 0xe8, 0x4d, 0xb2, 0x84, 0x44, 0x0e, 0xa9, 0x1e, 0x00, 0x17,
-	0x4a, 0x2b, 0x56, 0x77, 0xd0, 0x42, 0x24, 0x54, 0xdb, 0xa9, 0x4d, 0xa5, 0x15, 0x3e, 0x04, 0x72,
-	0x7d, 0x31, 0x00, 0xde, 0x91, 0x3a, 0xce, 0x45, 0xd6, 0x1f, 0xb3, 0x65, 0x87, 0xd6, 0x23, 0xa1,
-	0x9e, 0x8b, 0x01, 0xb4, 0x0a, 0xbd, 0xc8, 0xea, 0x68, 0x31, 0x10, 0x56, 0xe4, 0x8c, 0x96, 0x59,
-	0x11, 0x6d, 0x3a, 0x71, 0x8a, 0xeb, 0x08, 0xa5, 0x20, 0x67, 0x2b, 0x53, 0x5c, 0xcb, 0x89, 0xf4,
-	0x3a, 0x59, 0x2c, 0xb9, 0x5e, 0x22, 0x64, 0xce, 0x56, 0x1d, 0x36, 0x1f, 0xb0, 0x7d, 0xd4, 0xe8,
-	0x5d, 0xb2, 0xea, 0x5e, 0x60, 0x51, 0x46, 0xd1, 0xea, 0x4f, 0x5d, 0xf7, 0xf0, 0x25, 0x94, 0x15,
-	0xfa, 0x66, 0x3f, 0xae, 0xfe, 0xf3, 0xdb, 0xd5, 0xca, 0x41, 0xb5, 0x36, 0x57, 0x9f, 0x3f, 0xa8,
-	0xd6, 0xe6, 0xeb, 0x0b, 0x9b, 0xff, 0xce, 0x92, 0x99, 0x43, 0x67, 0x30, 0x7a, 0x83, 0x2c, 0xa6,
-	0x52, 0xf1, 0xae, 0xec, 0xf5, 0x64, 0x74, 0x92, 0xd8, 0x71, 0xb0, 0xc5, 0x42, 0x2a, 0xd5, 0x5e,
-	0x29, 0x62, 0x67, 0x32, 0x3d, 0xe4, 0x29, 0x18, 0x23, 0x62, 0xe0, 0x43, 0xa9, 0xba, 0x7a, 0x58,
-	0x58, 0x23, 0xd3, 0xc3, 0x97, 0x3e, 0xf0, 0xda, 0xe9, 0xf8, 0x7a, 0x27, 0xe9, 0x44, 0xa6, 0xd2,
-	0x06, 0x67, 0x2c, 0x9d, 0xc2, 0x2f, 0x50, 0xa6, 0x4f, 0xc8, 0x1a, 0xb2, 0x91, 0x48, 0x52, 0x1e,
-	0xcc, 0xd9, 0x85, 0x9e, 0x54, 0xd2, 0x4a, 0xad, 0x82, 0x3f, 0x2e, 0x65, 0x7a, 0xb8, 0x2b, 0x92,
-	0xf4, 0xd0, 0xc5, 0xf7, 0xca, 0x30, 0xfd, 0x96, 0x5c, 0x2e, 0x6f, 0x36, 0xf0, 0xe6, 0x04, 0x54,
-	0x04, 0xdc, 0xf6, 0x73, 0x30, 0x7d, 0x9d, 0x74, 0x83, 0x5f, 0x58, 0xb8, 0xfb, 0x28, 0x00, 0xc7,
-	0x45, 0x9c, 0x5e, 0x23, 0xf8, 0x98, 0x96, 0x4b, 0x65, 0x21, 0x1f, 0x88, 0x24, 0xf8, 0x60, 0x1e,
-	0xc5, 0xef, 0x83, 0x56, 0x42, 0x6f, 0x4e, 0x84, 0xb2, 0xd2, 0x8e, 0x83, 0x01, 0x1c, 0xf4, 0x43,
-	0xd0, 0xf0, 0x89, 0x9d, 0xa5, 0x78, 0x5f, 0x98, 0x7e, 0xd1, 0x1e, 0x3f, 0xfd, 0x4b, 0x2e, 0xf0,
-	0x5c, 0x98, 0x7e, 0xe8, 0xce, 0x37, 0x04, 0x2b, 0x9a, 0x68, 0x39, 0x17, 0x68, 0x7d, 0xa1, 0x22,
-	0x08, 0x1e, 0xf8, 0x2c, 0xd3, 0xc3, 0xd3, 0xe6, 0x37, 0x8b, 0x68, 0x61, 0x74, 0x5c, 0x06, 0x4a,
-	0xa4, 0xc0, 0x8d, 0x7c, 0x0b, 0x6c, 0xb3, 0x34, 0xfa, 0xab, 0xa0, 0x1f, 0xc9, 0xb7, 0x80, 0xd3,
-	0xe4, 0xac, 0x8b, 0x46, 0xf6, 0xe0, 0xb5, 0x50, 0xb7, 0x18, 0x39, 0x77, 0x3b, 0x0a, 0x33, 0x4a,
-	0x75, 0x26, 0xe3, 0xf5, 0x90, 0x51, 0xaa, 0xff, 0x65, 0x94, 0x6a, 0x32, 0xe3, 0x8d, 0xb2, 0x13,
-	0xa7, 0x19, 0x1f, 0x91, 0x4b, 0xae, 0x5d, 0xdd, 0xb1, 0x12, 0xa9, 0x8c, 0x78, 0x94, 0xa3, 0xa1,
-	0x79, 0x24, 0x32, 0x76, 0xd3, 0xe1, 0xab, 0x18, 0xde, 0xf3, 0xd1, 0x5d, 0x17, 0xdc, 0x15, 0x99,
-	0xdb, 0x1f, 0x93, 0xb7, 0x99, 0x2c, 0x91, 0x96, 0x7d, 0xe1, 0xcc, 0x5e, 0x9f, 0xb8, 0xe3, 0x08,
-	0x75, 0xba, 0x43, 0x56, 0xcc, 0x49, 0xc7, 0x44, 0xb9, 0xcc, 0x70, 0x0e, 0xc2, 0xe0, 0xb0, 0x2d,
-	0xef, 0x81, 0xc9, 0x90, 0x1f, 0x19, 0x7a, 0x97, 0x5c, 0xb4, 0x12, 0x57, 0xe8, 0xad, 0x8d, 0x0b,
-	0x5b, 0x73, 0xf7, 0xd7, 0x1a, 0xd3, 0x27, 0x4a, 0xe3, 0xf4, 0x90, 0x68, 0x7b, 0x90, 0xee, 0x91,
-	0xcf, 0xa7, 0x7e, 0x22, 0x07, 0x03, 0xf9, 0x00, 0xf0, 0xa7, 0x22, 0xdc, 0x32, 0xdb, 0x58, 0x5a,
-	0xeb, 0x3c, 0xab, 0xb4, 0xd7, 0x26, 0xb9, 0xb6, 0xc7, 0x0e, 0x3d, 0x45, 0xef, 0x90, 0x95, 0x1c,
-	0x12, 0x31, 0xc6, 0x0d, 0xc7, 0x63, 0x61, 0x78, 0x96, 0xcb, 0x08, 0xd8, 0x97, 0xde, 0x38, 0x2e,
-	0xf4, 0x52, 0xaa, 0x67, 0xc2, 0x1c, 0xa2, 0x4e, 0x6f, 0x91, 0xe5, 0x80, 0x8b, 0x91, 0xc3, 0xf1,
-	0x9c, 0xba, 0xed, 0x17, 0xae, 0x87, 0xc5, 0xe8, 0x99, 0x30, 0x78, 0x58, 0x85, 0xd5, 0x0c, 0x6a,
-	0x00, 0x89, 0xce, 0xdc, 0xee, 0x63, 0x77, 0xca, 0xd5, 0xfc, 0x34, 0xc8, 0xcd, 0x18, 0xf0, 0xe8,
-	0x39, 0x33, 0x6f, 0xc6, 0x42, 0xc6, 0x1e, 0xba, 0xde, 0x2e, 0x4f, 0x8d, 0xda, 0x91, 0x85, 0x8c,
-	0x7e, 0x47, 0x16, 0xc4, 0x50, 0xe4, 0x5d, 0x5c, 0xe6, 0x3d, 0x19, 0x1b, 0xf6, 0xc8, 0xf5, 0xec,
-	0xf2, 0xd9, 0x9e, 0x35, 0x11, 0x0a, 0x4d, 0x9b, 0x17, 0xa7, 0xff, 0x18, 0x9c, 0xf0, 0x8f, 0xf6,
-	0xae, 0x93, 0x19, 0xf6, 0x95, 0x9f, 0xf0, 0x8f, 0xf4, 0xac, 0x95, 0xf9, 0x03, 0x07, 0xc7, 0xa0,
-	0x97, 0x68, 0x9d, 0x87, 0x21, 0xf8, 0xda, 0x15, 0x8a, 0xb3, 0x67, 0xf7, 0x51, 0x76, 0x23, 0xf0,
-	0xf8, 0x0a, 0x6e, 0xb5, 0x9f, 0xff, 0xfe, 0x7d, 0x7b, 0x35, 0x7c, 0x39, 0x8c, 0xfc, 0xb7, 0x83,
-	0xdf, 0x6b, 0x07, 0xd5, 0x5a, 0xa3, 0x7e, 0xff, 0xa0, 0x5a, 0xbb, 0x5f, 0x7f, 0x70, 0x50, 0xad,
-	0x3d, 0xa8, 0x3f, 0xdc, 0x7c, 0x42, 0xe6, 0x26, 0x2a, 0xa6, 0x94, 0x54, 0x71, 0xb2, 0xdd, 0xba,
-	0x9b, 0x6d, 0xbb, 0x6b, 0xd4, 0x22, 0x6d, 0x6c, 0xd8, 0x6b, 0xee, 0xda, 0x6f, 0xcf, 0xd6, 0x9d,
-	0x3f, 0xde, 0xaf, 0x57, 0xde, 0xbd, 0x5f, 0xaf, 0xfc, 0xf5, 0x7e, 0xbd, 0xf2, 0xcb, 0x87, 0xf5,
-	0x73, 0xef, 0x3e, 0xac, 0x9f, 0xfb, 0xf3, 0xc3, 0xfa, 0xb9, 0x1f, 0x57, 0xa6, 0x7f, 0xde, 0x8e,
-	0x33, 0x30, 0x9d, 0x19, 0xf7, 0xf9, 0xf1, 0xe0, 0xbf, 0x00, 0x00, 0x00, 0xff, 0xff, 0xf4, 0xae,
-	0x79, 0xda, 0xd6, 0x08, 0x00, 0x00,
+	// 1695 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x94, 0x57, 0xcd, 0x72, 0x54, 0xc7,
+	0x15, 0x66, 0x60, 0x4c, 0x44, 0x23, 0xa1, 0xd1, 0x95, 0x80, 0xb6, 0x00, 0xa1, 0x08, 0xb0, 0x65,
+	0x62, 0x24, 0xf3, 0x63, 0x1b, 0x43, 0x8c, 0x91, 0x46, 0x12, 0x30, 0x20, 0xd7, 0x64, 0x24, 0x97,
+	0xab, 0xb2, 0xe9, 0xea, 0xb9, 0x73, 0x34, 0xd3, 0xf1, 0xbd, 0xdd, 0xd7, 0xdd, 0x3d, 0x7f, 0x7e,
+	0x84, 0xac, 0xb2, 0xce, 0x2a, 0x8f, 0x90, 0xc7, 0xc8, 0x92, 0x65, 0x96, 0x29, 0x58, 0x24, 0x8f,
+	0x90, 0x65, 0xea, 0x74, 0xf7, 0xbd, 0x73, 0x67, 0x44, 0x55, 0xca, 0x1b, 0x6a, 0x38, 0xe7, 0x3b,
+	0x5f, 0x9f, 0xfb, 0xf5, 0xf9, 0x69, 0x91, 0x6b, 0xa9, 0xd0, 0xbc, 0x0b, 0xdb, 0xb1, 0xd2, 0xb0,
+	0x3d, 0xb8, 0xbf, 0x9d, 0x71, 0xcd, 0x53, 0xb3, 0x95, 0x69, 0x65, 0x55, 0x74, 0xc9, 0x3b, 0xb7,
+	0xd0, 0xb9, 0x35, 0xb8, 0xbf, 0xba, 0xc4, 0x53, 0x21, 0xd5, 0xb6, 0xfb, 0xd7, 0x43, 0x56, 0x57,
+	0xba, 0xaa, 0xab, 0xdc, 0xcf, 0x6d, 0xfc, 0xe5, 0xad, 0x1b, 0x7f, 0x3d, 0x4f, 0xc8, 0xb1, 0x00,
+	0x5d, 0x57, 0xf2, 0x44, 0x74, 0xa3, 0x1b, 0x84, 0x64, 0xa0, 0x85, 0xea, 0xb0, 0x13, 0x00, 0x5a,
+	0x59, 0xaf, 0x6c, 0x56, 0x5b, 0x17, 0xbc, 0xe5, 0x00, 0x20, 0xfa, 0x9c, 0x44, 0x29, 0x1f, 0xb1,
+	0x13, 0x95, 0x24, 0x6a, 0x08, 0x1d, 0xd6, 0x37, 0xa0, 0x0d, 0x3d, 0xe7, 0x60, 0xb5, 0x94, 0x8f,
+	0x0e, 0x82, 0xe3, 0x07, 0xb4, 0x47, 0x8f, 0xc8, 0x15, 0x44, 0xff, 0x49, 0x09, 0x09, 0x1d, 0x16,
+	0xab, 0x34, 0xed, 0x4b, 0x61, 0x05, 0x18, 0x5a, 0x75, 0x11, 0x2b, 0x29, 0x1f, 0x35, 0x9c, 0xb3,
+	0x3e, 0xf1, 0x45, 0x77, 0xc9, 0x12, 0x46, 0xb5, 0x13, 0x15, 0xff, 0x54, 0x1c, 0xf1, 0x91, 0x0b,
+	0x58, 0x4c, 0xf9, 0x68, 0xd7, 0xdb, 0xfd, 0x09, 0x33, 0xd8, 0x4c, 0x19, 0x6b, 0xe8, 0xf9, 0x59,
+	0x6c, 0x13, 0xcd, 0xd1, 0x57, 0xe4, 0x6a, 0x19, 0x5b, 0x4e, 0xe7, 0x37, 0x2e, 0xe2, 0xf2, 0x24,
+	0xa2, 0x9c, 0xcf, 0x26, 0xc1, 0x2f, 0x63, 0x56, 0xd8, 0x04, 0x58, 0x02, 0xb2, 0x6b, 0x7b, 0x74,
+	0xce, 0x05, 0x5c, 0x4a, 0xf9, 0xe8, 0x18, 0xcd, 0x6f, 0x9c, 0x35, 0x57, 0x27, 0x56, 0xd2, 0x82,
+	0xb4, 0x39, 0xf6, 0x42, 0xa1, 0x4e, 0xdd, 0x3b, 0x02, 0xfa, 0x2e, 0x59, 0x82, 0x8e, 0xb0, 0x42,
+	0x76, 0x99, 0x15, 0x29, 0xb0, 0x54, 0x48, 0x43, 0x89, 0xcf, 0x3d, 0x38, 0x8e, 0x45, 0x0a, 0x87,
+	0x42, 0x9a, 0xe8, 0x26, 0xb9, 0x38, 0x50, 0x16, 0xd8, 0x10, 0x44, 0xb7, 0x67, 0xe9, 0xc2, 0x7a,
+	0x65, 0xb3, 0xd2, 0x22, 0x68, 0xfa, 0xd1, 0x59, 0xa2, 0x4f, 0xc8, 0x62, 0xcc, 0x25, 0xd3, 0x90,
+	0xaa, 0x01, 0x30, 0x2e, 0x95, 0xa4, 0xb5, 0xf5, 0xca, 0xe6, 0x5c, 0x6b, 0x21, 0xe6, 0xb2, 0xe5,
+	0xac, 0x3b, 0x52, 0x49, 0x4c, 0x11, 0x71, 0x3d, 0x3e, 0x00, 0xd6, 0x16, 0xaa, 0xab, 0x79, 0xd6,
+	0x1b, 0xd3, 0x25, 0x07, 0xad, 0xc5, 0x5c, 0xbe, 0xe4, 0x03, 0xd8, 0xcd, 0xed, 0x39, 0xab, 0x43,
+	0xf3, 0x01, 0xb7, 0x5c, 0xd3, 0xa8, 0x60, 0x45, 0xe8, 0x8e, 0x33, 0x4e, 0xe1, 0xda, 0x5c, 0x4a,
+	0xd0, 0x74, 0x79, 0x0a, 0xb7, 0xeb, 0x8c, 0xd1, 0x6d, 0x72, 0xa9, 0xc0, 0x9d, 0x24, 0x5c, 0x68,
+	0xba, 0xe2, 0x60, 0xf3, 0x01, 0x76, 0x80, 0xb6, 0xe8, 0x0b, 0xb2, 0xe2, 0x2e, 0x2a, 0x4f, 0x23,
+	0x17, 0xf2, 0xb2, 0xd3, 0x06, 0x25, 0x2e, 0x32, 0x0c, 0x52, 0x3e, 0x26, 0xd4, 0x09, 0xdf, 0xd7,
+	0xdc, 0x0a, 0x25, 0x59, 0x0a, 0x69, 0x1b, 0xb4, 0xe9, 0x89, 0xcc, 0xd0, 0x2b, 0x2e, 0x0a, 0x0b,
+	0xb1, 0x1e, 0xdc, 0x87, 0x13, 0xef, 0x93, 0xea, 0x7f, 0xfe, 0x76, 0xb3, 0xd2, 0xa8, 0xce, 0x9d,
+	0xad, 0x9d, 0x6b, 0x54, 0xe7, 0x2e, 0xd6, 0xe6, 0x1b, 0xd5, 0xb9, 0xf9, 0xda, 0x42, 0xa3, 0x3a,
+	0xb7, 0x58, 0xab, 0x6d, 0xfc, 0xf7, 0x32, 0x39, 0xdf, 0x74, 0x6d, 0x16, 0xdd, 0x21, 0x97, 0x52,
+	0x21, 0x59, 0x47, 0x9c, 0x9c, 0x88, 0xb8, 0x9f, 0xd8, 0x71, 0x68, 0x8e, 0x85, 0x54, 0xc8, 0xbd,
+	0xc2, 0x88, 0xfa, 0x66, 0x6a, 0xc8, 0x52, 0x30, 0x86, 0x77, 0x81, 0x0d, 0x85, 0xec, 0xa8, 0x21,
+	0x3d, 0xeb, 0x4b, 0x20, 0x53, 0xc3, 0x43, 0xef, 0xf8, 0xd1, 0xd9, 0xb1, 0x04, 0xca, 0xe8, 0x44,
+	0xa4, 0xc2, 0x86, 0x6e, 0x5a, 0x9c, 0x80, 0xdf, 0xa0, 0x39, 0x7a, 0x4a, 0x56, 0x11, 0x1b, 0xf3,
+	0x24, 0x65, 0xa1, 0x45, 0x3b, 0x70, 0x22, 0xb0, 0x48, 0x95, 0x0c, 0x0d, 0x75, 0x35, 0x53, 0xc3,
+	0x3a, 0x4f, 0xd2, 0xa6, 0xf3, 0xef, 0x15, 0xee, 0xe8, 0x5b, 0x72, 0xad, 0x08, 0x36, 0xf0, 0x73,
+	0x1f, 0x64, 0x0c, 0xcc, 0xf6, 0x34, 0x98, 0x9e, 0x4a, 0x3a, 0xa1, 0xbb, 0x68, 0x88, 0x3e, 0x0a,
+	0x80, 0xe3, 0xdc, 0x1f, 0xdd, 0x22, 0xf8, 0x99, 0x96, 0x09, 0x69, 0x41, 0x0f, 0x78, 0x12, 0x1a,
+	0x66, 0x1e, 0x8d, 0xaf, 0x82, 0xad, 0x00, 0xfd, 0xdc, 0xe7, 0xd2, 0x0a, 0x3b, 0x0e, 0x4d, 0xe2,
+	0x40, 0x7f, 0x08, 0x36, 0xfc, 0x62, 0xd7, 0x80, 0xac, 0xc7, 0x4d, 0x2f, 0x97, 0xc7, 0x77, 0xc8,
+	0xa2, 0x73, 0xbc, 0xe4, 0xa6, 0x17, 0xd4, 0x79, 0x4c, 0x30, 0xa3, 0x92, 0xe4, 0x8c, 0xe3, 0x74,
+	0xe1, 0x32, 0x86, 0xd0, 0x27, 0x57, 0x32, 0x35, 0x9c, 0x88, 0xbf, 0x93, 0x7b, 0xf3, 0xb1, 0x80,
+	0xa3, 0x43, 0xf2, 0x14, 0x98, 0x11, 0xbf, 0x00, 0xdd, 0x28, 0xc6, 0xc2, 0x0f, 0xc1, 0x7e, 0x24,
+	0x7e, 0x81, 0x49, 0xd3, 0xfa, 0x8e, 0x1f, 0x7b, 0xf0, 0xad, 0x52, 0xd3, 0x06, 0x87, 0x43, 0x23,
+	0xb3, 0x90, 0x33, 0xcc, 0xb7, 0x03, 0xb3, 0x90, 0xa7, 0x98, 0x85, 0x9c, 0x65, 0xbe, 0x13, 0x98,
+	0x85, 0x9c, 0x66, 0xfe, 0x92, 0x5c, 0x75, 0xf2, 0x75, 0xc6, 0x92, 0xa7, 0x22, 0x66, 0xb1, 0xc6,
+	0x21, 0xc0, 0x62, 0x9e, 0xd1, 0x4f, 0xc2, 0xb4, 0x14, 0xd2, 0xee, 0x79, 0x6f, 0xdd, 0x39, 0xeb,
+	0x3c, 0x0b, 0x87, 0x4c, 0xc2, 0x4c, 0x96, 0x08, 0x4b, 0x3f, 0x75, 0x03, 0xa2, 0x56, 0x8a, 0x38,
+	0x42, 0x7b, 0xb4, 0x4d, 0x96, 0x4d, 0xbf, 0x6d, 0x62, 0x2d, 0x32, 0xd7, 0x28, 0xbe, 0x90, 0xe8,
+	0xa6, 0xef, 0xac, 0xb2, 0xcb, 0x97, 0x50, 0xf4, 0x05, 0xf9, 0xc8, 0x0a, 0x1c, 0xc0, 0x9f, 0xad,
+	0x9f, 0xdb, 0xbc, 0xf8, 0x60, 0x75, 0x6b, 0x7a, 0xcf, 0x6c, 0x4d, 0x56, 0x47, 0xcb, 0x03, 0xa3,
+	0x3d, 0x72, 0x7d, 0xea, 0x08, 0x0d, 0x06, 0xf4, 0x00, 0xf0, 0xa8, 0x18, 0xa4, 0xa5, 0x77, 0x31,
+	0xb5, 0xdd, 0xb3, 0xb4, 0xd2, 0x5a, 0x2d, 0xe3, 0x5a, 0x1e, 0xd6, 0xf4, 0xa8, 0xe8, 0x1e, 0x59,
+	0xd6, 0x90, 0xf0, 0x31, 0x4e, 0x45, 0xd6, 0xe5, 0x86, 0x65, 0x5a, 0xc4, 0x40, 0x7f, 0xe7, 0xc5,
+	0x73, 0xae, 0x43, 0x21, 0x5f, 0x70, 0xd3, 0x44, 0x7b, 0xf4, 0x19, 0x59, 0x0a, 0x70, 0x3e, 0x72,
+	0x70, 0xdc, 0x5e, 0x9f, 0xfb, 0x21, 0xed, 0xc1, 0x7c, 0xf4, 0x82, 0x1b, 0x5c, 0x61, 0x61, 0x9c,
+	0x83, 0x1c, 0x40, 0xa2, 0x32, 0x60, 0xbc, 0x0b, 0xf4, 0x5e, 0x31, 0xce, 0xf7, 0x83, 0x79, 0xa7,
+	0x0b, 0xd1, 0x16, 0x59, 0x9e, 0xa9, 0x3f, 0x63, 0x21, 0xa3, 0x8f, 0x9c, 0xb6, 0x4b, 0x53, 0xa5,
+	0x77, 0x64, 0x21, 0x8b, 0x9e, 0x93, 0x05, 0x3e, 0xe4, 0x1a, 0x57, 0x0b, 0x0a, 0x62, 0xe8, 0x97,
+	0x4e, 0xb3, 0x6b, 0xb3, 0x9a, 0xed, 0x20, 0x28, 0x88, 0x36, 0xcf, 0x27, 0xff, 0x31, 0x58, 0xf1,
+	0x1f, 0xd4, 0xae, 0x9d, 0x19, 0xfa, 0x95, 0xaf, 0xf8, 0x0f, 0x68, 0xb6, 0x9b, 0xf9, 0x25, 0x85,
+	0x65, 0x70, 0x92, 0x28, 0xa5, 0x43, 0x11, 0x7c, 0xed, 0x12, 0xc5, 0xb1, 0x65, 0x0f, 0xd0, 0xec,
+	0x4b, 0x60, 0xf6, 0x8c, 0x58, 0x03, 0xb7, 0x4a, 0xbb, 0x33, 0x1e, 0x9f, 0x3e, 0xa3, 0xee, 0xdd,
+	0x78, 0xc6, 0x7d, 0x72, 0xb9, 0x98, 0xb2, 0x4a, 0x1b, 0xbc, 0x51, 0x66, 0x81, 0xa7, 0xf4, 0x9b,
+	0x62, 0x30, 0xd7, 0x83, 0xaf, 0x09, 0xfa, 0x18, 0x78, 0x1a, 0x1d, 0x92, 0xdb, 0x18, 0x92, 0x81,
+	0xec, 0xe0, 0x9e, 0x0b, 0xa1, 0x4c, 0xc8, 0x81, 0xb0, 0x50, 0x62, 0x78, 0xe2, 0x18, 0x6e, 0xa6,
+	0x7c, 0xd4, 0xf4, 0xd0, 0x40, 0xf4, 0xca, 0x03, 0x7f, 0x05, 0x1d, 0x76, 0x26, 0x7d, 0xfa, 0x7f,
+	0xe9, 0xb0, 0x51, 0x71, 0xa4, 0x4e, 0xb7, 0xfe, 0xd4, 0x8e, 0xff, 0xbd, 0x1f, 0xa9, 0xe5, 0x11,
+	0x50, 0x5e, 0xf6, 0x2f, 0xc8, 0xfa, 0x74, 0x70, 0x07, 0x26, 0xa2, 0x06, 0x8a, 0x6f, 0x1d, 0xc5,
+	0x8d, 0x32, 0xc5, 0xde, 0x04, 0x15, 0x88, 0x9e, 0x93, 0x1b, 0x53, 0xcb, 0x0b, 0x05, 0x61, 0x6e,
+	0xb8, 0x04, 0x96, 0x67, 0x8e, 0xe5, 0xe3, 0xd2, 0x06, 0x43, 0x31, 0xbe, 0xe7, 0x69, 0x9e, 0xca,
+	0x33, 0x72, 0xfd, 0x34, 0x43, 0x5b, 0xa8, 0x9c, 0xe0, 0x3b, 0x3f, 0xde, 0x67, 0x08, 0x76, 0x85,
+	0x0a, 0xf1, 0x7b, 0xe4, 0xe6, 0xe9, 0xf8, 0x4c, 0x25, 0x22, 0x2e, 0x76, 0xef, 0x73, 0x47, 0x71,
+	0x6d, 0x86, 0xa2, 0xe9, 0x30, 0x81, 0xe5, 0x35, 0xd9, 0x98, 0x2a, 0x2c, 0xab, 0xb9, 0x34, 0x6e,
+	0xfd, 0xf8, 0x9b, 0x71, 0xe3, 0x9d, 0xee, 0xf8, 0xab, 0x29, 0x23, 0x8f, 0x27, 0xc0, 0x26, 0x68,
+	0xf7, 0x02, 0x43, 0x51, 0x8a, 0x74, 0x32, 0xdd, 0x97, 0xc0, 0x7e, 0x82, 0x71, 0x99, 0x67, 0xd7,
+	0x8b, 0x92, 0x83, 0x9a, 0x88, 0x79, 0x0d, 0xe3, 0x09, 0xc3, 0x01, 0x59, 0xcf, 0x4b, 0x1b, 0x32,
+	0x15, 0xf7, 0x58, 0x9c, 0x28, 0xd3, 0xd7, 0x50, 0x26, 0xa9, 0x3b, 0x92, 0xeb, 0x01, 0xb7, 0x8f,
+	0xb0, 0x7a, 0x40, 0x15, 0x3c, 0xdf, 0x93, 0xdb, 0x39, 0x8f, 0x01, 0x6b, 0x13, 0x48, 0xf1, 0x6d,
+	0xa7, 0x21, 0x56, 0xba, 0x53, 0xe6, 0xda, 0x73, 0x5c, 0xf9, 0x99, 0x47, 0x05, 0xb4, 0xe5, 0x91,
+	0x05, 0xdf, 0x33, 0x92, 0x9f, 0xf7, 0xe1, 0x0f, 0xdb, 0xf7, 0x97, 0x15, 0x30, 0xa7, 0xbf, 0xeb,
+	0x1b, 0xf2, 0x71, 0x1e, 0x1f, 0x27, 0x5c, 0xa4, 0x61, 0x89, 0xb2, 0x0e, 0x1f, 0x1b, 0x7a, 0xe0,
+	0x1b, 0x38, 0x00, 0xea, 0xe8, 0xf7, 0xcb, 0x74, 0x8f, 0x8f, 0x4d, 0xf4, 0x75, 0x78, 0x26, 0x4d,
+	0x85, 0x3b, 0x71, 0x0c, 0x7d, 0x51, 0x3c, 0x81, 0xeb, 0xa5, 0x60, 0x27, 0x89, 0x89, 0x5e, 0x92,
+	0xdf, 0x96, 0x03, 0x41, 0x76, 0x79, 0xd7, 0x7d, 0x9c, 0x4f, 0xdc, 0x51, 0xd0, 0x97, 0x93, 0x62,
+	0x0f, 0x7a, 0x4e, 0x60, 0x4d, 0xf0, 0xea, 0x9e, 0xbe, 0x15, 0x18, 0x65, 0x42, 0x8b, 0xa9, 0x5b,
+	0x79, 0x75, 0xfa, 0x56, 0xf6, 0x03, 0xaa, 0x50, 0x61, 0x9f, 0x4c, 0x95, 0x10, 0x03, 0xae, 0x93,
+	0x31, 0xd3, 0x20, 0x61, 0xc8, 0x13, 0xaf, 0x45, 0xc3, 0xd3, 0x94, 0x61, 0xfb, 0x88, 0x6a, 0x79,
+	0x90, 0x53, 0xe4, 0x98, 0x7c, 0x3a, 0x33, 0x70, 0x3d, 0x01, 0xb7, 0x16, 0xd2, 0xcc, 0x96, 0xb3,
+	0x7a, 0xed, 0xe8, 0x6e, 0x4d, 0xcf, 0x5f, 0x87, 0xde, 0x09, 0xe0, 0x22, 0xb9, 0xef, 0x8a, 0x15,
+	0xd8, 0x06, 0xcd, 0x3a, 0x5c, 0xb8, 0xd4, 0x70, 0x3d, 0xf9, 0x17, 0xde, 0x1b, 0x5f, 0xbb, 0x13,
+	0xcc, 0x1e, 0x42, 0x5a, 0x88, 0xf0, 0x6f, 0xbd, 0x26, 0xb9, 0x83, 0x7a, 0x7f, 0x60, 0x55, 0xfb,
+	0x8c, 0xb2, 0xbe, 0x8e, 0x7b, 0xdc, 0x00, 0x3d, 0x74, 0x4c, 0x78, 0x39, 0x47, 0xa7, 0x76, 0x37,
+	0xe6, 0xd3, 0x0c, 0xc0, 0x27, 0x37, 0xf0, 0x9d, 0xfb, 0xe7, 0x7f, 0xff, 0xfd, 0xee, 0x4a, 0xf8,
+	0x2b, 0x72, 0xe4, 0xff, 0x8e, 0xf4, 0xaf, 0xdb, 0x46, 0x75, 0x6e, 0xab, 0xf6, 0xa0, 0x51, 0x9d,
+	0x7b, 0x50, 0x7b, 0xd8, 0xa8, 0xce, 0x3d, 0xac, 0x3d, 0xda, 0x78, 0x4a, 0x2e, 0x96, 0xf6, 0x54,
+	0x14, 0x91, 0x2a, 0x8e, 0x24, 0xf7, 0xe8, 0xbd, 0xd0, 0x72, 0xbf, 0xd1, 0x16, 0x2b, 0x63, 0xc3,
+	0xeb, 0xd6, 0xfd, 0xf6, 0xef, 0xe9, 0xdd, 0x7b, 0xff, 0x78, 0xb7, 0x56, 0x79, 0xfb, 0x6e, 0xad,
+	0xf2, 0xaf, 0x77, 0x6b, 0x95, 0xbf, 0xbc, 0x5f, 0x3b, 0xf3, 0xf6, 0xfd, 0xda, 0x99, 0x7f, 0xbe,
+	0x5f, 0x3b, 0xf3, 0xc7, 0xe5, 0xe9, 0xe3, 0xed, 0x38, 0x03, 0xd3, 0x3e, 0xef, 0xfe, 0x14, 0x7d,
+	0xf8, 0xbf, 0x00, 0x00, 0x00, 0xff, 0xff, 0x54, 0xa8, 0x24, 0x6a, 0xe2, 0x0e, 0x00, 0x00,
 }
 
 func (this *TierConfig) Equal(that interface{}) bool {
@@ -660,13 +860,10 @@ func (this *TierConfig) Equal(that interface{}) bool {
 	if this.PeriodFee != that1.PeriodFee {
 		return false
 	}
-	if this.MaxEnabledAgents != that1.MaxEnabledAgents {
-		return false
-	}
 	if this.MaxFollowedUsers != that1.MaxFollowedUsers {
 		return false
 	}
-	if this.MaxFollowedTopics != that1.MaxFollowedTopics {
+	if this.MaxJoinedCommunities != that1.MaxJoinedCommunities {
 		return false
 	}
 	if this.MaxBlockedUsers != that1.MaxBlockedUsers {
@@ -675,7 +872,7 @@ func (this *TierConfig) Equal(that interface{}) bool {
 	if this.MaxBlockedPosts != that1.MaxBlockedPosts {
 		return false
 	}
-	if this.MaxBlockedTopics != that1.MaxBlockedTopics {
+	if this.MaxBlockedCommunities != that1.MaxBlockedCommunities {
 		return false
 	}
 	if this.MaxTitleLength != that1.MaxTitleLength {
@@ -688,9 +885,6 @@ func (this *TierConfig) Equal(that interface{}) bool {
 		return false
 	}
 	if this.VoteWeight != that1.VoteWeight {
-		return false
-	}
-	if this.CanBeAgent != that1.CanBeAgent {
 		return false
 	}
 	if this.CanRemoveAnon != that1.CanRemoveAnon {
@@ -709,6 +903,9 @@ func (this *TierConfig) Equal(that interface{}) bool {
 		return false
 	}
 	if this.MaxBiographyLength != that1.MaxBiographyLength {
+		return false
+	}
+	if this.MaxCurationMemberships != that1.MaxCurationMemberships {
 		return false
 	}
 	return true
@@ -762,13 +959,13 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.MaxUsernameSize != that1.MaxUsernameSize {
 		return false
 	}
-	if this.MaxTopicSize != that1.MaxTopicSize {
+	if this.MaxCommunitySize != that1.MaxCommunitySize {
 		return false
 	}
 	if this.MinUsernameSize != that1.MinUsernameSize {
 		return false
 	}
-	if this.MinTopicSize != that1.MinTopicSize {
+	if this.MinCommunitySize != that1.MinCommunitySize {
 		return false
 	}
 	if this.MintDynamicCreditCap != that1.MintDynamicCreditCap {
@@ -815,6 +1012,72 @@ func (this *Params) Equal(that interface{}) bool {
 		return false
 	}
 	if this.MintFloorSplit != that1.MintFloorSplit {
+		return false
+	}
+	if this.SubscriptionCreatorBps != that1.SubscriptionCreatorBps {
+		return false
+	}
+	if this.MaxCuratorsPerTeam != that1.MaxCuratorsPerTeam {
+		return false
+	}
+	if this.MaxPendingCuratorInvitesPerTeam != that1.MaxPendingCuratorInvitesPerTeam {
+		return false
+	}
+	if this.MaxPendingCuratorInvitesPerUser != that1.MaxPendingCuratorInvitesPerUser {
+		return false
+	}
+	if this.MaxCommunityTitleLength != that1.MaxCommunityTitleLength {
+		return false
+	}
+	if this.MaxCommunityDescriptionLength != that1.MaxCommunityDescriptionLength {
+		return false
+	}
+	if this.MaxCurationTeamNameLength != that1.MaxCurationTeamNameLength {
+		return false
+	}
+	if this.MaxCurationTeamBioLength != that1.MaxCurationTeamBioLength {
+		return false
+	}
+	if this.MaxCurationTeamPolicyLength != that1.MaxCurationTeamPolicyLength {
+		return false
+	}
+	if this.SubscriptionTransitionsPerBlock != that1.SubscriptionTransitionsPerBlock {
+		return false
+	}
+	if this.CurationPruneKeysPerBlock != that1.CurationPruneKeysPerBlock {
+		return false
+	}
+	if this.CreatorEpochClosuresPerBlock != that1.CreatorEpochClosuresPerBlock {
+		return false
+	}
+	if this.CreatorSettlementRecordsPerBlock != that1.CreatorSettlementRecordsPerBlock {
+		return false
+	}
+	if this.CreatorPruneKeysPerBlock != that1.CreatorPruneKeysPerBlock {
+		return false
+	}
+	if this.CreatorClaimWindowDays != that1.CreatorClaimWindowDays {
+		return false
+	}
+	if this.MaxCreatorClaimEpochs != that1.MaxCreatorClaimEpochs {
+		return false
+	}
+	if this.MaxCreatorEngagementsPerEpoch != that1.MaxCreatorEngagementsPerEpoch {
+		return false
+	}
+	if this.CreatorEpochExpiriesPerBlock != that1.CreatorEpochExpiriesPerBlock {
+		return false
+	}
+	if this.SubscriptionEarlyRenewalDays != that1.SubscriptionEarlyRenewalDays {
+		return false
+	}
+	if this.SubscriptionRenewalAttemptsPerBlock != that1.SubscriptionRenewalAttemptsPerBlock {
+		return false
+	}
+	if this.SubscriberDailyRelayLimit != that1.SubscriberDailyRelayLimit {
+		return false
+	}
+	if this.MaxSubscriptionPeriodsPerPurchase != that1.MaxSubscriptionPeriodsPerPurchase {
 		return false
 	}
 	return true
@@ -866,6 +1129,13 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.MaxCurationMemberships != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCurationMemberships))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xb0
+	}
 	if m.MaxBiographyLength != 0 {
 		i = encodeVarintParams(dAtA, i, uint64(m.MaxBiographyLength))
 		i--
@@ -933,16 +1203,6 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x80
 	}
-	if m.CanBeAgent {
-		i--
-		if m.CanBeAgent {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
-		i--
-		dAtA[i] = 0x78
-	}
 	if m.VoteWeight != 0 {
 		i -= 8
 		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.VoteWeight))))
@@ -964,8 +1224,8 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x40
 	}
-	if m.MaxBlockedTopics != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MaxBlockedTopics))
+	if m.MaxBlockedCommunities != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxBlockedCommunities))
 		i--
 		dAtA[i] = 0x38
 	}
@@ -979,8 +1239,8 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x28
 	}
-	if m.MaxFollowedTopics != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MaxFollowedTopics))
+	if m.MaxJoinedCommunities != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxJoinedCommunities))
 		i--
 		dAtA[i] = 0x20
 	}
@@ -988,11 +1248,6 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintParams(dAtA, i, uint64(m.MaxFollowedUsers))
 		i--
 		dAtA[i] = 0x18
-	}
-	if m.MaxEnabledAgents != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MaxEnabledAgents))
-		i--
-		dAtA[i] = 0x10
 	}
 	if m.PeriodFee != 0 {
 		i = encodeVarintParams(dAtA, i, uint64(m.PeriodFee))
@@ -1022,6 +1277,160 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.MaxSubscriptionPeriodsPerPurchase != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxSubscriptionPeriodsPerPurchase))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xe8
+	}
+	if m.SubscriberDailyRelayLimit != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.SubscriberDailyRelayLimit))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xe0
+	}
+	if m.SubscriptionRenewalAttemptsPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.SubscriptionRenewalAttemptsPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xd8
+	}
+	if m.SubscriptionEarlyRenewalDays != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.SubscriptionEarlyRenewalDays))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xd0
+	}
+	if m.CreatorEpochExpiriesPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CreatorEpochExpiriesPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xc8
+	}
+	if m.MaxCreatorEngagementsPerEpoch != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCreatorEngagementsPerEpoch))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xc0
+	}
+	if m.MaxCreatorClaimEpochs != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCreatorClaimEpochs))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xb8
+	}
+	if m.CreatorClaimWindowDays != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CreatorClaimWindowDays))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xb0
+	}
+	if m.CreatorPruneKeysPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CreatorPruneKeysPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xa8
+	}
+	if m.CreatorSettlementRecordsPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CreatorSettlementRecordsPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0xa0
+	}
+	if m.CreatorEpochClosuresPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CreatorEpochClosuresPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0x98
+	}
+	if m.CurationPruneKeysPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.CurationPruneKeysPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0x90
+	}
+	if m.SubscriptionTransitionsPerBlock != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.SubscriptionTransitionsPerBlock))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0x88
+	}
+	if m.MaxCurationTeamPolicyLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCurationTeamPolicyLength))
+		i--
+		dAtA[i] = 0x4
+		i--
+		dAtA[i] = 0x80
+	}
+	if m.MaxCurationTeamBioLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCurationTeamBioLength))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xf8
+	}
+	if m.MaxCurationTeamNameLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCurationTeamNameLength))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xf0
+	}
+	if m.MaxCommunityDescriptionLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCommunityDescriptionLength))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xe8
+	}
+	if m.MaxCommunityTitleLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCommunityTitleLength))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xe0
+	}
+	if m.MaxPendingCuratorInvitesPerUser != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxPendingCuratorInvitesPerUser))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xd8
+	}
+	if m.MaxPendingCuratorInvitesPerTeam != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxPendingCuratorInvitesPerTeam))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xd0
+	}
+	if m.MaxCuratorsPerTeam != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCuratorsPerTeam))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xc8
+	}
+	if m.SubscriptionCreatorBps != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.SubscriptionCreatorBps))
+		i--
+		dAtA[i] = 0x3
+		i--
+		dAtA[i] = 0xc0
+	}
 	if m.MintFloorSplit != 0 {
 		i -= 8
 		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.MintFloorSplit))))
@@ -1128,8 +1537,8 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xb0
 	}
-	if m.MinTopicSize != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MinTopicSize))
+	if m.MinCommunitySize != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MinCommunitySize))
 		i--
 		dAtA[i] = 0x2
 		i--
@@ -1142,8 +1551,8 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xa0
 	}
-	if m.MaxTopicSize != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MaxTopicSize))
+	if m.MaxCommunitySize != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxCommunitySize))
 		i--
 		dAtA[i] = 0x2
 		i--
@@ -1259,14 +1668,11 @@ func (m *TierConfig) Size() (n int) {
 	if m.PeriodFee != 0 {
 		n += 1 + sovParams(uint64(m.PeriodFee))
 	}
-	if m.MaxEnabledAgents != 0 {
-		n += 1 + sovParams(uint64(m.MaxEnabledAgents))
-	}
 	if m.MaxFollowedUsers != 0 {
 		n += 1 + sovParams(uint64(m.MaxFollowedUsers))
 	}
-	if m.MaxFollowedTopics != 0 {
-		n += 1 + sovParams(uint64(m.MaxFollowedTopics))
+	if m.MaxJoinedCommunities != 0 {
+		n += 1 + sovParams(uint64(m.MaxJoinedCommunities))
 	}
 	if m.MaxBlockedUsers != 0 {
 		n += 1 + sovParams(uint64(m.MaxBlockedUsers))
@@ -1274,8 +1680,8 @@ func (m *TierConfig) Size() (n int) {
 	if m.MaxBlockedPosts != 0 {
 		n += 1 + sovParams(uint64(m.MaxBlockedPosts))
 	}
-	if m.MaxBlockedTopics != 0 {
-		n += 1 + sovParams(uint64(m.MaxBlockedTopics))
+	if m.MaxBlockedCommunities != 0 {
+		n += 1 + sovParams(uint64(m.MaxBlockedCommunities))
 	}
 	if m.MaxTitleLength != 0 {
 		n += 1 + sovParams(uint64(m.MaxTitleLength))
@@ -1288,9 +1694,6 @@ func (m *TierConfig) Size() (n int) {
 	}
 	if m.VoteWeight != 0 {
 		n += 9
-	}
-	if m.CanBeAgent {
-		n += 2
 	}
 	if m.CanRemoveAnon {
 		n += 3
@@ -1309,6 +1712,9 @@ func (m *TierConfig) Size() (n int) {
 	}
 	if m.MaxBiographyLength != 0 {
 		n += 2 + sovParams(uint64(m.MaxBiographyLength))
+	}
+	if m.MaxCurationMemberships != 0 {
+		n += 2 + sovParams(uint64(m.MaxCurationMemberships))
 	}
 	return n
 }
@@ -1349,14 +1755,14 @@ func (m *Params) Size() (n int) {
 	if m.MaxUsernameSize != 0 {
 		n += 2 + sovParams(uint64(m.MaxUsernameSize))
 	}
-	if m.MaxTopicSize != 0 {
-		n += 2 + sovParams(uint64(m.MaxTopicSize))
+	if m.MaxCommunitySize != 0 {
+		n += 2 + sovParams(uint64(m.MaxCommunitySize))
 	}
 	if m.MinUsernameSize != 0 {
 		n += 2 + sovParams(uint64(m.MinUsernameSize))
 	}
-	if m.MinTopicSize != 0 {
-		n += 2 + sovParams(uint64(m.MinTopicSize))
+	if m.MinCommunitySize != 0 {
+		n += 2 + sovParams(uint64(m.MinCommunitySize))
 	}
 	if m.MintDynamicCreditCap != 0 {
 		n += 2 + sovParams(uint64(m.MintDynamicCreditCap))
@@ -1399,6 +1805,72 @@ func (m *Params) Size() (n int) {
 	}
 	if m.MintFloorSplit != 0 {
 		n += 10
+	}
+	if m.SubscriptionCreatorBps != 0 {
+		n += 2 + sovParams(uint64(m.SubscriptionCreatorBps))
+	}
+	if m.MaxCuratorsPerTeam != 0 {
+		n += 2 + sovParams(uint64(m.MaxCuratorsPerTeam))
+	}
+	if m.MaxPendingCuratorInvitesPerTeam != 0 {
+		n += 2 + sovParams(uint64(m.MaxPendingCuratorInvitesPerTeam))
+	}
+	if m.MaxPendingCuratorInvitesPerUser != 0 {
+		n += 2 + sovParams(uint64(m.MaxPendingCuratorInvitesPerUser))
+	}
+	if m.MaxCommunityTitleLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxCommunityTitleLength))
+	}
+	if m.MaxCommunityDescriptionLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxCommunityDescriptionLength))
+	}
+	if m.MaxCurationTeamNameLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxCurationTeamNameLength))
+	}
+	if m.MaxCurationTeamBioLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxCurationTeamBioLength))
+	}
+	if m.MaxCurationTeamPolicyLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxCurationTeamPolicyLength))
+	}
+	if m.SubscriptionTransitionsPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.SubscriptionTransitionsPerBlock))
+	}
+	if m.CurationPruneKeysPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.CurationPruneKeysPerBlock))
+	}
+	if m.CreatorEpochClosuresPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.CreatorEpochClosuresPerBlock))
+	}
+	if m.CreatorSettlementRecordsPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.CreatorSettlementRecordsPerBlock))
+	}
+	if m.CreatorPruneKeysPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.CreatorPruneKeysPerBlock))
+	}
+	if m.CreatorClaimWindowDays != 0 {
+		n += 2 + sovParams(uint64(m.CreatorClaimWindowDays))
+	}
+	if m.MaxCreatorClaimEpochs != 0 {
+		n += 2 + sovParams(uint64(m.MaxCreatorClaimEpochs))
+	}
+	if m.MaxCreatorEngagementsPerEpoch != 0 {
+		n += 2 + sovParams(uint64(m.MaxCreatorEngagementsPerEpoch))
+	}
+	if m.CreatorEpochExpiriesPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.CreatorEpochExpiriesPerBlock))
+	}
+	if m.SubscriptionEarlyRenewalDays != 0 {
+		n += 2 + sovParams(uint64(m.SubscriptionEarlyRenewalDays))
+	}
+	if m.SubscriptionRenewalAttemptsPerBlock != 0 {
+		n += 2 + sovParams(uint64(m.SubscriptionRenewalAttemptsPerBlock))
+	}
+	if m.SubscriberDailyRelayLimit != 0 {
+		n += 2 + sovParams(uint64(m.SubscriberDailyRelayLimit))
+	}
+	if m.MaxSubscriptionPeriodsPerPurchase != 0 {
+		n += 2 + sovParams(uint64(m.MaxSubscriptionPeriodsPerPurchase))
 	}
 	return n
 }
@@ -1473,25 +1945,6 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MaxEnabledAgents", wireType)
-			}
-			m.MaxEnabledAgents = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowParams
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.MaxEnabledAgents |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
 		case 3:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MaxFollowedUsers", wireType)
@@ -1513,9 +1966,9 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 			}
 		case 4:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MaxFollowedTopics", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxJoinedCommunities", wireType)
 			}
-			m.MaxFollowedTopics = 0
+			m.MaxJoinedCommunities = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -1525,7 +1978,7 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MaxFollowedTopics |= uint64(b&0x7F) << shift
+				m.MaxJoinedCommunities |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1570,9 +2023,9 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 			}
 		case 7:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MaxBlockedTopics", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxBlockedCommunities", wireType)
 			}
-			m.MaxBlockedTopics = 0
+			m.MaxBlockedCommunities = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -1582,7 +2035,7 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MaxBlockedTopics |= uint64(b&0x7F) << shift
+				m.MaxBlockedCommunities |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1655,26 +2108,6 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 			v = uint64(encoding_binary.LittleEndian.Uint64(dAtA[iNdEx:]))
 			iNdEx += 8
 			m.VoteWeight = float64(math.Float64frombits(v))
-		case 15:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CanBeAgent", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowParams
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.CanBeAgent = bool(v != 0)
 		case 16:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field CanRemoveAnon", wireType)
@@ -1790,6 +2223,25 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.MaxBiographyLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 22:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCurationMemberships", wireType)
+			}
+			m.MaxCurationMemberships = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCurationMemberships |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -2036,9 +2488,9 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 		case 35:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MaxTopicSize", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCommunitySize", wireType)
 			}
-			m.MaxTopicSize = 0
+			m.MaxCommunitySize = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -2048,7 +2500,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MaxTopicSize |= uint64(b&0x7F) << shift
+				m.MaxCommunitySize |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -2074,9 +2526,9 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 		case 37:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MinTopicSize", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MinCommunitySize", wireType)
 			}
-			m.MinTopicSize = 0
+			m.MinCommunitySize = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -2086,7 +2538,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MinTopicSize |= uint64(b&0x7F) << shift
+				m.MinCommunitySize |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -2317,6 +2769,424 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			v = uint64(encoding_binary.LittleEndian.Uint64(dAtA[iNdEx:]))
 			iNdEx += 8
 			m.MintFloorSplit = float64(math.Float64frombits(v))
+		case 56:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionCreatorBps", wireType)
+			}
+			m.SubscriptionCreatorBps = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SubscriptionCreatorBps |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 57:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCuratorsPerTeam", wireType)
+			}
+			m.MaxCuratorsPerTeam = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCuratorsPerTeam |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 58:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxPendingCuratorInvitesPerTeam", wireType)
+			}
+			m.MaxPendingCuratorInvitesPerTeam = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxPendingCuratorInvitesPerTeam |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 59:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxPendingCuratorInvitesPerUser", wireType)
+			}
+			m.MaxPendingCuratorInvitesPerUser = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxPendingCuratorInvitesPerUser |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 60:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCommunityTitleLength", wireType)
+			}
+			m.MaxCommunityTitleLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCommunityTitleLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 61:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCommunityDescriptionLength", wireType)
+			}
+			m.MaxCommunityDescriptionLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCommunityDescriptionLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 62:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCurationTeamNameLength", wireType)
+			}
+			m.MaxCurationTeamNameLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCurationTeamNameLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 63:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCurationTeamBioLength", wireType)
+			}
+			m.MaxCurationTeamBioLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCurationTeamBioLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 64:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCurationTeamPolicyLength", wireType)
+			}
+			m.MaxCurationTeamPolicyLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCurationTeamPolicyLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 65:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionTransitionsPerBlock", wireType)
+			}
+			m.SubscriptionTransitionsPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SubscriptionTransitionsPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 66:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CurationPruneKeysPerBlock", wireType)
+			}
+			m.CurationPruneKeysPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CurationPruneKeysPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 67:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatorEpochClosuresPerBlock", wireType)
+			}
+			m.CreatorEpochClosuresPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatorEpochClosuresPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 68:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatorSettlementRecordsPerBlock", wireType)
+			}
+			m.CreatorSettlementRecordsPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatorSettlementRecordsPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 69:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatorPruneKeysPerBlock", wireType)
+			}
+			m.CreatorPruneKeysPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatorPruneKeysPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 70:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatorClaimWindowDays", wireType)
+			}
+			m.CreatorClaimWindowDays = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatorClaimWindowDays |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 71:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCreatorClaimEpochs", wireType)
+			}
+			m.MaxCreatorClaimEpochs = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCreatorClaimEpochs |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 72:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxCreatorEngagementsPerEpoch", wireType)
+			}
+			m.MaxCreatorEngagementsPerEpoch = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxCreatorEngagementsPerEpoch |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 73:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatorEpochExpiriesPerBlock", wireType)
+			}
+			m.CreatorEpochExpiriesPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatorEpochExpiriesPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 74:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionEarlyRenewalDays", wireType)
+			}
+			m.SubscriptionEarlyRenewalDays = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SubscriptionEarlyRenewalDays |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 75:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionRenewalAttemptsPerBlock", wireType)
+			}
+			m.SubscriptionRenewalAttemptsPerBlock = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SubscriptionRenewalAttemptsPerBlock |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 76:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubscriberDailyRelayLimit", wireType)
+			}
+			m.SubscriberDailyRelayLimit = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.SubscriberDailyRelayLimit |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 77:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxSubscriptionPeriodsPerPurchase", wireType)
+			}
+			m.MaxSubscriptionPeriodsPerPurchase = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxSubscriptionPeriodsPerPurchase |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipParams(dAtA[iNdEx:])

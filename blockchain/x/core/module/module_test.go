@@ -209,14 +209,14 @@ func TestApplyParamUpdatesAppliesZeroValues(t *testing.T) {
 
 func TestApplyParamUpdatesReplacesRepeatedFields(t *testing.T) {
 	base := types.DefaultParams()
-	require.Len(t, base.Tiers, 3)
+	require.Len(t, base.Tiers, 2)
 
 	replacement := types.DefaultTiers()
-	replacement[2].PeriodFee = 1
+	replacement[1].PeriodFee = 1
 	updated, _, err := applyParamUpdates(base, types.Params{Tiers: replacement}, mask("tiers"))
 	require.NoError(t, err)
-	require.Len(t, updated.Tiers, 3)
-	require.Equal(t, uint64(1), updated.Tiers[2].PeriodFee)
+	require.Len(t, updated.Tiers, 2)
+	require.Equal(t, uint64(1), updated.Tiers[1].PeriodFee)
 
 	// An empty repeated value is a real replacement request, and must then fail
 	// validation rather than be silently ignored.

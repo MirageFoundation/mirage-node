@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Post-deploy verification for the v1.38.0 mint floor upgrade.
+"""Post-deploy verification for the v1.39.0 communities upgrade.
 
-v1.38.0 is a consensus change: the mint interval splits 20% equally across
-bonded validators, 10% by relay credits alone, and 70% by stake. The checks here
-prove the governed plan actually applied and that the new split is the one the
-chain and the backend are running on. Nothing else belongs in this file — the
-release-time policy of the signed manifest is release_verify.py's job.
+v1.39.0 is a consensus change: topics become communities, Agent is removed,
+subscriptions stop using a relay reserve, and a creator pool is funded from
+new subscription fees. The checks here prove the governed plan applied and
+that the chain, indexer, and backend agree on the new parameters.
 """
 
 from __future__ import annotations
@@ -22,10 +21,8 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.38.0"
-UPGRADE_NAME = "v1.38.0"
-WANT_FLOOR_SPLIT = 0.20
-WANT_DYNAMIC_SPLIT = 0.10
+VERSION = "v1.39.0"
+UPGRADE_NAME = "v1.39.0"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 BACKEND = "http://127.0.0.1:80"
@@ -51,6 +48,15 @@ def http_json(url: str) -> dict:
         return json.loads(response.read().decode())
 
 
+def http_status(url: str) -> int:
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as e:
+        return int(e.code)
+
+
 def run(command: list[str]) -> str:
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
@@ -71,9 +77,6 @@ def check_versions() -> None:
     else:
         fail(f"frontend version={frontend!r}, expected {VERSION}")
 
-    # v1.36.0 shipped a binary reporting v1.36.0-1-gd783da08 with every suite
-    # green, because the tag had moved onto an existing commit. This is the check
-    # that caught it.
     output = run([str(ROOT / "blockchain/bin/miraged"), "version", "--long"])
     reported = next((line.split(":", 1)[1].strip() for line in output.splitlines() if line.startswith("version:")), "")
     if reported.lstrip("v") == VERSION.lstrip("v"):
@@ -83,7 +86,6 @@ def check_versions() -> None:
 
 
 def check_upgrade_applied() -> None:
-    """The governed plan must have applied and cleared, not merely been scheduled."""
     applied = http_json(f"{REST}/cosmos/upgrade/v1beta1/applied_plan/{UPGRADE_NAME}")
     height = int(applied.get("height") or applied.get("Height") or 0)
     if height > 0:
@@ -98,44 +100,28 @@ def check_upgrade_applied() -> None:
         ok("no software-upgrade plan remains scheduled")
 
 
-def check_mint_split_params() -> None:
-    """The handler must have written the live split; a wrong value mints wrong forever."""
+def check_params() -> None:
     params = http_json(f"{REST}/mirage/core/v1/params")["params"]
-
-    floor = float(params["mint_floor_split"])
-    dynamic = float(params["mint_dynamic_split"])
-    if abs(floor - WANT_FLOOR_SPLIT) < 1e-9:
-        ok(f"mint_floor_split={floor}")
+    if str(params.get("subscription_reserve_bps", "1")) == "0":
+        ok("subscription_reserve_bps=0")
     else:
-        fail(f"mint_floor_split={floor}, expected {WANT_FLOOR_SPLIT}")
-    if abs(dynamic - WANT_DYNAMIC_SPLIT) < 1e-9:
-        ok(f"mint_dynamic_split={dynamic}")
+        fail(f"subscription_reserve_bps={params.get('subscription_reserve_bps')!r}")
+    if str(params.get("subscription_creator_bps")) == "5000":
+        ok("subscription_creator_bps=5000")
     else:
-        fail(f"mint_dynamic_split={dynamic}, expected {WANT_DYNAMIC_SPLIT}")
-
-    # The stake pool is the remainder, so a sum above 1 would mint past
-    # mint_quantity on every interval.
-    if floor + dynamic <= 1:
-        ok(f"stake pool is {round((1 - floor - dynamic) * 100, 4)}% of each interval")
+        fail(f"subscription_creator_bps={params.get('subscription_creator_bps')!r}")
+    if str(params.get("subscriber_daily_relay_limit")) == "250":
+        ok("subscriber_daily_relay_limit=250")
     else:
-        fail(f"mint_floor_split + mint_dynamic_split = {floor + dynamic} exceeds 1")
-
-    # The upgrade changes how the mint is divided, not how much is minted.
-    interval = int(params["mint_interval"])
-    quantity = int(params["mint_quantity"])
-    if interval > 0 and quantity > 0:
-        ok(f"mint_interval={interval} mint_quantity={quantity} umirage")
+        fail(f"subscriber_daily_relay_limit={params.get('subscriber_daily_relay_limit')!r}")
+    tiers = params.get("tiers") or []
+    if len(tiers) == 2:
+        ok("two subscription tiers")
     else:
-        fail(f"mint_interval={interval} mint_quantity={quantity} must both be positive")
+        fail(f"tier count={len(tiers)}")
 
 
 def check_params_reach_backend() -> None:
-    """The backend reads params from the indexer DB and fails hard on a missing float.
-
-    mint_floor_split is a new field, so if the indexer's descriptor did not pick
-    it up the backend would refuse to start. Assert it landed in the row the
-    backend actually reads rather than inferring it from the chain query.
-    """
     db_url = os.environ.get("INDEXER_DB_URL", "").strip()
     if not db_url:
         fail("INDEXER_DB_URL missing from deployed environment")
@@ -150,32 +136,22 @@ def check_params_reach_backend() -> None:
         fail("indexer chain_stats has no chain_params row")
         return
     stored = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    if "mint_floor_split" not in stored:
-        fail(f"indexed chain_params has no mint_floor_split: {sorted(stored)[:12]}...")
+    if str(stored.get("subscription_reserve_bps", "1")) != "0":
+        fail(f"indexed subscription_reserve_bps={stored.get('subscription_reserve_bps')!r}")
         return
-    indexed = float(stored["mint_floor_split"])
-    if abs(indexed - WANT_FLOOR_SPLIT) < 1e-9:
-        ok(f"indexed chain_params carries mint_floor_split={indexed}")
-    else:
-        fail(f"indexed mint_floor_split={indexed}, expected {WANT_FLOOR_SPLIT}")
+    if str(stored.get("subscription_creator_bps")) != "5000":
+        fail(f"indexed subscription_creator_bps={stored.get('subscription_creator_bps')!r}")
+        return
+    ok("indexed chain_params carries v1.39.0 subscription params")
 
 
-def check_backend_mint_split() -> None:
-    """The running backend process must refresh to the indexed upgrade values."""
-    deadline = time.monotonic() + 90
-    last = None
-    while time.monotonic() < deadline:
-        try:
-            last = http_json(f"{BACKEND}/api/get_chain_config")
-            floor = float(last["mint_floor_split"])
-            dynamic = float(last["mint_dynamic_split"])
-            if abs(floor - WANT_FLOOR_SPLIT) < 1e-9 and abs(dynamic - WANT_DYNAMIC_SPLIT) < 1e-9:
-                ok(f"backend reports mint split floor={floor} dynamic={dynamic}")
-                return
-        except Exception as error:
-            last = {"error": str(error)}
-        time.sleep(5)
-    fail(f"backend did not report floor={WANT_FLOOR_SPLIT} dynamic={WANT_DYNAMIC_SPLIT}: {last}")
+def check_gone_routes() -> None:
+    for path in ("/api/get_topics", "/api/core/follow_topic"):
+        status = http_status(f"{BACKEND}{path}")
+        if status == 410:
+            ok(f"{path} -> 410")
+        else:
+            fail(f"{path} status={status}, expected 410")
 
 
 def comet_height() -> int:
@@ -216,13 +192,13 @@ def check_progress() -> None:
 
 
 def main() -> int:
-    print(f"verify_upgrade.py for {VERSION} (consensus change: mint splits 20% floor / 10% work / 70% stake)")
+    print(f"verify_upgrade.py for {VERSION} (consensus change: communities, no Agent, no relay reserve)")
     checks = (
         check_versions,
         check_upgrade_applied,
-        check_mint_split_params,
+        check_params,
         check_params_reach_backend,
-        check_backend_mint_split,
+        check_gone_routes,
         check_progress,
     )
     for check in checks:

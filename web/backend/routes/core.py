@@ -72,6 +72,29 @@ from shared.datatypes import (
     MsgSubscribe,
     MsgSetAutoRenewal,
     MsgAward,
+    MsgCreateCommunity,
+    MsgSetCommunityMetadata,
+    MsgTransferCommunity,
+    MsgJoinCommunity,
+    MsgLeaveCommunity,
+    MsgBlockCommunity,
+    MsgUnblockCommunity,
+    MsgCreateCurationTeam,
+    MsgSetCurationTeamProfile,
+    MsgInviteCurator,
+    MsgRevokeCuratorInvite,
+    MsgAcceptCuratorInvite,
+    MsgDeclineCuratorInvite,
+    MsgLeaveCurationTeam,
+    MsgRemoveCurator,
+    MsgTransferCurationTeam,
+    MsgDeleteCurationTeam,
+    MsgSetCurationPreference,
+    MsgSetCurationPostHidden,
+    MsgSetCurationUserHidden,
+    MsgSetCurationThreadLocked,
+    MsgSetCurationSubscriberOnly,
+    MsgClaimCreatorRewards,
 )
 
 from logging_utils import log_event, next_request_id, logger
@@ -116,7 +139,19 @@ from pow import (
     check_pow_target,
     decode_b64,
 )
-from shared.canon import canon_signed_with_pow
+from shared.canon import (
+    canon_signed_with_pow,
+    canon_base_join_community,
+    canon_base_leave_community,
+    canon_base_block_community,
+    canon_base_unblock_community,
+    canon_base_create_community,
+    canon_base_set_community_metadata,
+    canon_base_transfer_community,
+    canon_base_create_curation_team,
+    canon_base_set_curation_preference,
+    canon_base_claim_creator_rewards,
+)
 from tx import estimate_total_gas_limit, build_tx_bytes, build_and_broadcast_tx, simulate_gas
 from chain import (
     classify_reject,
@@ -676,10 +711,12 @@ def is_subscriber(addr: str) -> bool:
     try:
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
-            cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (addr_lc,))
+            cur.execute(
+                "SELECT COALESCE(effective_paid, FALSE) FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
+                (addr_lc,),
+            )
             row = cur.fetchone()
-            level = int(row[0]) if row and row[0] is not None else 0
-            is_sub = level >= 1
+            is_sub = bool(row[0]) if row and row[0] is not None else False
             cache[addr_lc] = (now, is_sub)
             # Bound cache size
             if len(cache) > 4096:
@@ -708,7 +745,7 @@ def _get_post_quest_info(txhash: str) -> dict | None:
         with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
             cur = conn.cursor()
             cur.execute(
-                "SELECT owner, COALESCE(root_topic, topic, ''), COALESCE(root_post_id, txhash) "
+                "SELECT owner, COALESCE(root_community, community, ''), COALESCE(root_post_id, txhash) "
                 "FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1",
                 (txhash,),
             )
@@ -1276,10 +1313,12 @@ def core_set_username():
         body_bytes = body.SerializeToString()
         content_len = len(msg.username)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -1561,10 +1600,12 @@ def core_set_biography():
         body_bytes = body.SerializeToString()
         content_len = len(msg.biography)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -1682,10 +1723,12 @@ def core_enable_agent():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -1783,10 +1826,12 @@ def core_disable_agent():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -1928,10 +1973,12 @@ def core_set_agents():
         body_bytes = body.SerializeToString()
         payload_size = sum(len(a) for a in agents)
         gas_est = int(estimate_total_gas_limit(body_bytes, payload_size))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2050,10 +2097,12 @@ def core_block_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2174,10 +2223,12 @@ def core_block_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2266,10 +2317,12 @@ def core_unblock_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2358,10 +2411,12 @@ def core_unblock_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2489,10 +2544,12 @@ def core_block_topic():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2582,10 +2639,12 @@ def core_unblock_topic():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2692,10 +2751,12 @@ def core_follow_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(user)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2806,10 +2867,12 @@ def core_unfollow_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(user)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2902,10 +2965,12 @@ def core_follow_topic():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -2991,10 +3056,12 @@ def core_unfollow_topic():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -3121,10 +3188,12 @@ def core_delete_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -3252,10 +3321,12 @@ def core_delete_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -3605,7 +3676,7 @@ def core_edit():
         msg.envelope_signature = sig_dec
         msg.target = target
         log_event(rid, "edit.debug", is_comment=is_comment, topic=topic, target=target, media_count=len(media))
-        msg.topic = topic_for_canon
+        msg.community = topic_for_canon
         msg.title = title
         msg.content = content
         msg.tag = tag
@@ -3621,10 +3692,12 @@ def core_edit():
         media_len = sum(len(m) for m in media)
         content_len = len(target) + len(topic) + len(title) + len(content) + len(tag) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -3827,10 +3900,12 @@ def core_annotate():
         media_len = sum(len(m) for m in media)
         content_len = len(topic) + len(title) + len(content) + len(tag) + len(appendix) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -3918,10 +3993,16 @@ def core_post():
             log_event(rid, "post.invalid_nonce", envelope_nonce=data.get("envelope_nonce"))
             return err[0], err[1]
         target = str(data.get("target", ""))
-        topic = str(data.get("topic", "")).strip()
+        topic = str(data.get("community") or data.get("topic") or "").strip()
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
         tag = _normalize_tag(data.get("tag", ""))
+        try:
+            protocol_version = int(data.get("protocol_version", 0))
+        except (TypeError, ValueError):
+            protocol_version = 0
+        if protocol_version != 1:
+            return api_error_code("upgrade_required", 426)
 
         if _has_unsafe_chars(topic, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
@@ -4122,10 +4203,11 @@ def core_post():
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
-        msg.topic = topic
+        msg.community = topic
         msg.title = title
         msg.content = content
         msg.tag = tag
+        msg.protocol_version = 1
         for m in media:
             msg.media.append(m)
 
@@ -4137,10 +4219,12 @@ def core_post():
         media_len = sum(len(m) for m in media)
         content_len = len(target) + len(topic) + len(title) + len(content) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -4391,10 +4475,12 @@ def core_vote():
         body_bytes = body.SerializeToString()
         content_len = len(target)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
         if code != 0:
             extra = {
                 "height": height,
@@ -4578,10 +4664,12 @@ def core_send_tokens():
         body_bytes = body.SerializeToString()
         content_len = len(target)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
 
         if code != 0:
             extra = {
@@ -4664,15 +4752,21 @@ def core_subscribe():
         if err is not None:
             return err[0], err[1]
         level = int(data.get("level", 0))
+        try:
+            period_count = int(data.get("period_count", 1))
+        except (TypeError, ValueError):
+            period_count = 0
 
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
 
-        if level not in (1, 10):
+        if level != 1:
             return (
-                jsonify({"error": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)"}),
+                jsonify({"error": "invalid level (must be 1; use set_auto_renewal to change auto-renewal)"}),
                 400,
             )
+        if period_count < 1 or period_count > 12:
+            return jsonify({"error": "period_count must be in [1,12]"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -4706,21 +4800,22 @@ def core_subscribe():
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
-            tier_idx = {0: 0, 1: 1, 10: 2}.get(level, -1)
+            tier_idx = {0: 0, 1: 1}.get(level, -1)
             if isinstance(tiers, list) and 0 <= tier_idx < len(tiers):
                 tf = tiers[tier_idx] or {}
                 period_fee = int(tf.get("period_fee", 0) or 0)
         except Exception:
             period_fee = 0
         if level > 0 and period_fee > 0:
+            needed = int(period_fee) * int(period_count)
             try:
                 bal = get_balance(user_addr)
                 have = int(bal)
             except Exception as db_err:
                 log_event(rid, "subscribe.db_error", error=str(db_err))
                 return api_error_code("indexer_unavailable", 503)
-            if have < period_fee:
-                return api_error_code("insufficient_balance", balance=have, needed=int(period_fee))
+            if have < needed:
+                return api_error_code("insufficient_balance", balance=have, needed=needed)
 
         try:
             base = canon_base_subscribe(
@@ -4731,6 +4826,7 @@ def core_subscribe():
                 level,
                 target=target if is_gift else "",
                 nonce=nonce,
+                period_count=period_count,
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -4748,6 +4844,7 @@ def core_subscribe():
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.level = level
+        msg.period_count = period_count
         if is_gift:
             msg.target = target
 
@@ -4757,10 +4854,12 @@ def core_subscribe():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
 
         if code != 0:
             extra = {
@@ -4908,10 +5007,12 @@ def core_set_auto_renewal():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
 
         if code != 0:
             extra = {
@@ -5037,10 +5138,12 @@ def core_award():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = build_and_broadcast_tx(
+            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+        )
 
         if code != 0:
             extra = {
@@ -5277,6 +5380,622 @@ def core_unregister_push_token():
         log_event(rid, "unregister_push_token.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
+
+
+def _parse_relay_envelope(data: dict):
+    pub_b64 = str(data.get("pubkey", "")).strip()
+    sig_b64 = str(data.get("signature", "")).strip()
+    last_block_hash = str(data.get("last_block_hash", "")).strip()
+    try:
+        difficulty = int(data.get("pow_difficulty", 0))
+    except (TypeError, ValueError):
+        return None, jsonify({"error": "invalid pow_difficulty"}), 400
+    try:
+        proof = int(data.get("pow", 0))
+    except (TypeError, ValueError):
+        return None, jsonify({"error": "invalid pow"}), 400
+    if "timestamp" not in data:
+        return None, jsonify({"error": "timestamp required"}), 400
+    try:
+        timestamp = int(data.get("timestamp"))
+    except (TypeError, ValueError):
+        return None, jsonify({"error": "invalid timestamp"}), 400
+    nonce, err = _parse_envelope_nonce(data)
+    if err is not None:
+        return None, err[0], err[1]
+    if not (pub_b64 and sig_b64):
+        return None, jsonify({"error": "missing required fields"}), 400
+    pub_dec = base64.b64decode(pub_b64)
+    sig_dec = base64.b64decode(sig_b64)
+    if len(sig_dec) == 65:
+        sig_dec = sig_dec[:64]
+    if len(pub_dec) != 33 or len(sig_dec) != 64:
+        return None, jsonify({"error": "invalid relay fields"}), 400
+    user_addr = derive_address_from_pubkey(pub_dec)
+    if not user_addr:
+        return None, jsonify({"error": "invalid pubkey"}), 400
+    return (
+        {
+            "pub_dec": pub_dec,
+            "sig_dec": sig_dec,
+            "last_block_hash": last_block_hash,
+            "difficulty": difficulty,
+            "proof": proof,
+            "timestamp": timestamp,
+            "nonce": nonce,
+            "user_addr": user_addr,
+        },
+        None,
+        None,
+    )
+
+
+def _broadcast_core_msg(rid: str, log_name: str, type_url: str, msg, extra_len: int, user_addr: str):
+    any_msg = AnyPB()
+    any_msg.type_url = type_url
+    any_msg.value = msg.SerializeToString()
+    body = TxBody(messages=[any_msg], memo="")
+    body_bytes = body.SerializeToString()
+    gas_est = int(estimate_total_gas_limit(body_bytes, extra_len))
+    tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+    gas_used = int(simulate_gas(tx_bytes_est))
+    gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+    tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit, zero_fee=is_subscriber(user_addr))
+    if code != 0:
+        extra = {"height": height, "user_addr": user_addr}
+        return _tx_error(rid, f"core/{log_name}", type_url.rsplit(".", 1)[-1], code, tx_hash, raw_log, extra)
+    log_event(rid, f"{log_name}.success", tx_hash=tx_hash)
+    return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+
+
+def _fill_envelope(msg, env: dict, validator_addr: str):
+    msg.authority = validator_addr
+    msg.envelope_pubkey = env["pub_dec"]
+    msg.envelope_block_hash = _hex_to_bytes(env["last_block_hash"])
+    msg.envelope_difficulty = int(env["difficulty"])
+    msg.envelope_pow = int(env["proof"])
+    msg.envelope_timestamp = env["timestamp"]
+    msg.envelope_nonce = env["nonce"]
+    msg.envelope_signature = env["sig_dec"]
+
+
+def _maybe_pow_precheck(rid, action, env, base_fn, *args):
+    if is_subscriber(env["user_addr"]):
+        return None
+    try:
+        base = base_fn(
+            env["pub_dec"], env["last_block_hash"], int(env["difficulty"]), env["timestamp"], *args, nonce=env["nonce"]
+        )
+        digest = argon2_digest(base, env["last_block_hash"], env["proof"])
+        if digest is not None:
+            effective_required = _effective_difficulty(int(env["difficulty"]))
+            if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
+    except Exception as exc:
+        _log_pow_precheck_error(rid, action, exc)
+    return None
+
+
+@core_bp.route("/api/core/join_community", methods=["POST"])
+def core_join_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        if not community:
+            return jsonify({"error": "community required"}), 400
+        pow_err = _maybe_pow_precheck(rid, "join_community", env, canon_base_join_community, community)
+        if pow_err:
+            return pow_err
+        msg = MsgJoinCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        return _broadcast_core_msg(
+            rid, "join_community", "/mirage.core.v1.MsgJoinCommunity", msg, len(community), env["user_addr"]
+        )
+    except Exception as e:
+        log_event(rid, "join_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/leave_community", methods=["POST"])
+def core_leave_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        if not community:
+            return jsonify({"error": "community required"}), 400
+        pow_err = _maybe_pow_precheck(rid, "leave_community", env, canon_base_leave_community, community)
+        if pow_err:
+            return pow_err
+        msg = MsgLeaveCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        return _broadcast_core_msg(
+            rid, "leave_community", "/mirage.core.v1.MsgLeaveCommunity", msg, len(community), env["user_addr"]
+        )
+    except Exception as e:
+        log_event(rid, "leave_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/block_community", methods=["POST"])
+def core_block_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        target = str(data.get("target", "")).strip().lower()
+        community = str(data.get("community", "")).strip().lower()
+        if not target or not community:
+            return jsonify({"error": "target and community required"}), 400
+        pow_err = _maybe_pow_precheck(rid, "block_community", env, canon_base_block_community, target, community)
+        if pow_err:
+            return pow_err
+        msg = MsgBlockCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.target = target
+        msg.community = community
+        return _broadcast_core_msg(
+            rid,
+            "block_community",
+            "/mirage.core.v1.MsgBlockCommunity",
+            msg,
+            len(target) + len(community),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "block_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/unblock_community", methods=["POST"])
+def core_unblock_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        target = str(data.get("target", "")).strip().lower()
+        community = str(data.get("community", "")).strip().lower()
+        if not target or not community:
+            return jsonify({"error": "target and community required"}), 400
+        pow_err = _maybe_pow_precheck(rid, "unblock_community", env, canon_base_unblock_community, target, community)
+        if pow_err:
+            return pow_err
+        msg = MsgUnblockCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.target = target
+        msg.community = community
+        return _broadcast_core_msg(
+            rid,
+            "unblock_community",
+            "/mirage.core.v1.MsgUnblockCommunity",
+            msg,
+            len(target) + len(community),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "unblock_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/create_community", methods=["POST"])
+def core_create_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        title = str(data.get("title", "") or "")
+        description = str(data.get("description", "") or "")
+        original_team_name = str(data.get("original_team_name", "") or "")
+        bio = str(data.get("bio", "") or "")
+        policy = str(data.get("policy", "") or "")
+        if not community:
+            return jsonify({"error": "community required"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid,
+            "create_community",
+            env,
+            canon_base_create_community,
+            community,
+            title,
+            description,
+            original_team_name,
+            bio,
+            policy,
+        )
+        if pow_err:
+            return pow_err
+        msg = MsgCreateCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        msg.title = title
+        msg.description = description
+        msg.original_team_name = original_team_name
+        msg.bio = bio
+        msg.policy = policy
+        return _broadcast_core_msg(
+            rid,
+            "create_community",
+            "/mirage.core.v1.MsgCreateCommunity",
+            msg,
+            len(community) + len(title),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "create_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/set_community_metadata", methods=["POST"])
+def core_set_community_metadata():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        title = str(data.get("title", "") or "")
+        description = str(data.get("description", "") or "")
+        if not community:
+            return jsonify({"error": "community required"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid, "set_community_metadata", env, canon_base_set_community_metadata, community, title, description
+        )
+        if pow_err:
+            return pow_err
+        msg = MsgSetCommunityMetadata()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        msg.title = title
+        msg.description = description
+        return _broadcast_core_msg(
+            rid,
+            "set_community_metadata",
+            "/mirage.core.v1.MsgSetCommunityMetadata",
+            msg,
+            len(community),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "set_community_metadata.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/transfer_community", methods=["POST"])
+def core_transfer_community():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        new_founder = str(data.get("new_founder", "")).strip().lower()
+        if not community or not new_founder:
+            return jsonify({"error": "community and new_founder required"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid, "transfer_community", env, canon_base_transfer_community, community, new_founder
+        )
+        if pow_err:
+            return pow_err
+        msg = MsgTransferCommunity()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        msg.new_founder = new_founder
+        return _broadcast_core_msg(
+            rid, "transfer_community", "/mirage.core.v1.MsgTransferCommunity", msg, len(community), env["user_addr"]
+        )
+    except Exception as e:
+        log_event(rid, "transfer_community.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/create_curation_team", methods=["POST"])
+def core_create_curation_team():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        name = str(data.get("name", "") or "")
+        bio = str(data.get("bio", "") or "")
+        policy = str(data.get("policy", "") or "")
+        if not community or not name:
+            return jsonify({"error": "community and name required"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid, "create_curation_team", env, canon_base_create_curation_team, community, name, bio, policy
+        )
+        if pow_err:
+            return pow_err
+        msg = MsgCreateCurationTeam()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        msg.name = name
+        msg.bio = bio
+        msg.policy = policy
+        return _broadcast_core_msg(
+            rid,
+            "create_curation_team",
+            "/mirage.core.v1.MsgCreateCurationTeam",
+            msg,
+            len(community) + len(name),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "create_curation_team.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/set_curation_preference", methods=["POST"])
+def core_set_curation_preference():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        community = str(data.get("community", "")).strip().lower()
+        try:
+            mode = int(data.get("mode", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid mode"}), 400
+        try:
+            pinned_team_id = int(data.get("pinned_team_id", 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pinned_team_id"}), 400
+        if not community:
+            return jsonify({"error": "community required"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid, "set_curation_preference", env, canon_base_set_curation_preference, community, mode, pinned_team_id
+        )
+        if pow_err:
+            return pow_err
+        msg = MsgSetCurationPreference()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.community = community
+        msg.mode = mode
+        msg.pinned_team_id = pinned_team_id
+        return _broadcast_core_msg(
+            rid,
+            "set_curation_preference",
+            "/mirage.core.v1.MsgSetCurationPreference",
+            msg,
+            len(community),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "set_curation_preference.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/claim_creator_rewards", methods=["POST"])
+def core_claim_creator_rewards():
+    rid = next_request_id()
+    try:
+        if is_node_catching_up():
+            return api_error_code("node_catching_up", 503)
+        data = request.get_json(force=True) or {}
+        env, err, status = _parse_relay_envelope(data)
+        if env is None:
+            return err, status
+        raw_ids = data.get("epoch_ids") or []
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return jsonify({"error": "epoch_ids required"}), 400
+        epoch_ids = [int(x) for x in raw_ids]
+        if len(epoch_ids) > 30:
+            return jsonify({"error": "at most 30 epoch_ids"}), 400
+        if epoch_ids != sorted(set(epoch_ids)) or epoch_ids != sorted(epoch_ids):
+            return jsonify({"error": "epoch_ids must be strictly increasing"}), 400
+        prev = 0
+        for eid in epoch_ids:
+            if eid <= prev:
+                return jsonify({"error": "epoch_ids must be strictly increasing"}), 400
+            prev = eid
+        pow_err = _maybe_pow_precheck(rid, "claim_creator_rewards", env, canon_base_claim_creator_rewards, epoch_ids)
+        if pow_err:
+            return pow_err
+        msg = MsgClaimCreatorRewards()
+        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+        msg.epoch_ids.extend(epoch_ids)
+        return _broadcast_core_msg(
+            rid,
+            "claim_creator_rewards",
+            "/mirage.core.v1.MsgClaimCreatorRewards",
+            msg,
+            8 * len(epoch_ids),
+            env["user_addr"],
+        )
+    except Exception as e:
+        log_event(rid, "claim_creator_rewards.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+def _curation_team_route(path, log_name, type_url, msg_cls, fields):
+    """Register a signed-relay route whose payload is community + optional team_id/target/bools."""
+
+    @core_bp.route(path, methods=["POST"], endpoint=log_name)
+    def _handler():
+        rid = next_request_id()
+        try:
+            if is_node_catching_up():
+                return api_error_code("node_catching_up", 503)
+            data = request.get_json(force=True) or {}
+            env, err, status = _parse_relay_envelope(data)
+            if env is None:
+                return err, status
+            msg = msg_cls()
+            _fill_envelope(msg, env, require_runtime().validator_payer_addr)
+            community = str(data.get("community", "")).strip().lower()
+            if "community" in fields and not community:
+                return jsonify({"error": "community required"}), 400
+            if "community" in fields:
+                msg.community = community
+            if "team_id" in fields:
+                msg.team_id = int(data.get("team_id", 0) or 0)
+            if "target" in fields:
+                msg.target = str(data.get("target", "")).strip().lower()
+            if "new_owner" in fields:
+                msg.new_owner = str(data.get("new_owner", "")).strip().lower()
+            if "name" in fields:
+                msg.name = str(data.get("name", "") or "")
+            if "bio" in fields:
+                msg.bio = str(data.get("bio", "") or "")
+            if "policy" in fields:
+                msg.policy = str(data.get("policy", "") or "")
+            if "hidden" in fields:
+                msg.hidden = bool(data.get("hidden"))
+            if "locked" in fields:
+                msg.locked = bool(data.get("locked"))
+            if "enabled" in fields:
+                msg.enabled = bool(data.get("enabled"))
+            if "root_hash" in fields:
+                msg.root_hash = str(data.get("root_hash", "") or "").strip().lower()
+            return _broadcast_core_msg(rid, log_name, type_url, msg, 64, env["user_addr"])
+        except Exception as e:
+            log_event(rid, f"{log_name}.err", error=str(e))
+            emsg, estatus = _classify_exception(str(e))
+            return jsonify({"error": emsg}), estatus
+
+    return _handler
+
+
+_curation_team_route(
+    "/api/core/set_curation_team_profile",
+    "set_curation_team_profile",
+    "/mirage.core.v1.MsgSetCurationTeamProfile",
+    MsgSetCurationTeamProfile,
+    {"community", "team_id", "name", "bio", "policy"},
+)
+_curation_team_route(
+    "/api/core/invite_curator",
+    "invite_curator",
+    "/mirage.core.v1.MsgInviteCurator",
+    MsgInviteCurator,
+    {"community", "team_id", "target"},
+)
+_curation_team_route(
+    "/api/core/revoke_curator_invite",
+    "revoke_curator_invite",
+    "/mirage.core.v1.MsgRevokeCuratorInvite",
+    MsgRevokeCuratorInvite,
+    {"community", "team_id", "target"},
+)
+_curation_team_route(
+    "/api/core/accept_curator_invite",
+    "accept_curator_invite",
+    "/mirage.core.v1.MsgAcceptCuratorInvite",
+    MsgAcceptCuratorInvite,
+    {"community", "team_id"},
+)
+_curation_team_route(
+    "/api/core/decline_curator_invite",
+    "decline_curator_invite",
+    "/mirage.core.v1.MsgDeclineCuratorInvite",
+    MsgDeclineCuratorInvite,
+    {"community", "team_id"},
+)
+_curation_team_route(
+    "/api/core/leave_curation_team",
+    "leave_curation_team",
+    "/mirage.core.v1.MsgLeaveCurationTeam",
+    MsgLeaveCurationTeam,
+    {"community", "team_id"},
+)
+_curation_team_route(
+    "/api/core/remove_curator",
+    "remove_curator",
+    "/mirage.core.v1.MsgRemoveCurator",
+    MsgRemoveCurator,
+    {"community", "team_id", "target"},
+)
+_curation_team_route(
+    "/api/core/transfer_curation_team",
+    "transfer_curation_team",
+    "/mirage.core.v1.MsgTransferCurationTeam",
+    MsgTransferCurationTeam,
+    {"community", "team_id", "new_owner"},
+)
+_curation_team_route(
+    "/api/core/delete_curation_team",
+    "delete_curation_team",
+    "/mirage.core.v1.MsgDeleteCurationTeam",
+    MsgDeleteCurationTeam,
+    {"community", "team_id"},
+)
+_curation_team_route(
+    "/api/core/set_curation_post_hidden",
+    "set_curation_post_hidden",
+    "/mirage.core.v1.MsgSetCurationPostHidden",
+    MsgSetCurationPostHidden,
+    {"community", "team_id", "target", "hidden"},
+)
+_curation_team_route(
+    "/api/core/set_curation_user_hidden",
+    "set_curation_user_hidden",
+    "/mirage.core.v1.MsgSetCurationUserHidden",
+    MsgSetCurationUserHidden,
+    {"community", "team_id", "target", "hidden"},
+)
+_curation_team_route(
+    "/api/core/set_curation_thread_locked",
+    "set_curation_thread_locked",
+    "/mirage.core.v1.MsgSetCurationThreadLocked",
+    MsgSetCurationThreadLocked,
+    {"community", "team_id", "root_hash", "locked"},
+)
+_curation_team_route(
+    "/api/core/set_curation_subscriber_only",
+    "set_curation_subscriber_only",
+    "/mirage.core.v1.MsgSetCurationSubscriberOnly",
+    MsgSetCurationSubscriberOnly,
+    {"community", "team_id", "enabled"},
+)
 
 
 __all__ = ["core_bp"]

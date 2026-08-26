@@ -12,56 +12,43 @@ import (
 
 func TestDefaultTiers(t *testing.T) {
 	tiers := DefaultTiers()
-	require.Len(t, tiers, 3, "expected 3 tiers: Free(0), Subscriber(1), Agent(2)")
+	require.Len(t, tiers, 2, "expected 2 tiers: Free(0), Subscriber(1)")
 
-	// Free tier: basic limits
 	require.Equal(t, uint64(0), tiers[0].PeriodFee)
-	require.Equal(t, uint64(25), tiers[0].MaxBlockedTopics)
-	require.False(t, tiers[0].CanBeAgent)
+	require.Equal(t, uint64(25), tiers[0].MaxBlockedCommunities)
+	require.Equal(t, uint64(0), tiers[0].MaxCurationMemberships)
 
-	// Subscriber tier
 	require.Equal(t, uint64(100_000_000_000), tiers[1].PeriodFee)
-	require.Equal(t, uint64(500), tiers[1].MaxBlockedTopics)
-	require.False(t, tiers[1].CanBeAgent)
-
-	// Agent tier
-	require.Equal(t, uint64(500_000_000_000), tiers[2].PeriodFee)
-	require.Equal(t, uint64(500), tiers[2].MaxBlockedTopics)
-	require.True(t, tiers[2].CanBeAgent)
+	require.Equal(t, uint64(500), tiers[1].MaxBlockedCommunities)
+	require.Equal(t, uint64(500), tiers[1].MaxCurationMemberships)
 }
 
 func TestLevelToTierIndex(t *testing.T) {
 	require.Equal(t, 0, LevelToTierIndex(0))
 	require.Equal(t, 1, LevelToTierIndex(1))
-	require.Equal(t, 2, LevelToTierIndex(10))
-	require.Equal(t, 2, LevelToTierIndex(100))
-	require.Equal(t, 2, LevelToTierIndex(255))
+	require.Equal(t, 1, LevelToTierIndex(100))
+	require.Equal(t, 1, LevelToTierIndex(255))
 
-	// Invalid levels return -1
 	require.Equal(t, -1, LevelToTierIndex(2))
 	require.Equal(t, -1, LevelToTierIndex(5))
 	require.Equal(t, -1, LevelToTierIndex(9))
+	require.Equal(t, -1, LevelToTierIndex(10))
 	require.Equal(t, -1, LevelToTierIndex(-1))
 }
 
 func TestGetTierConfigMapping(t *testing.T) {
 	p := DefaultParams()
 
-	// Valid levels
 	require.NotNil(t, p.GetTierConfig(0))
 	require.NotNil(t, p.GetTierConfig(1))
-	require.NotNil(t, p.GetTierConfig(10))
 	require.NotNil(t, p.GetTierConfig(100))
-
-	// Invalid levels
+	require.Nil(t, p.GetTierConfig(10))
 	require.Nil(t, p.GetTierConfig(2))
 	require.Nil(t, p.GetTierConfig(5))
 	require.Nil(t, p.GetTierConfig(9))
 	require.Nil(t, p.GetTierConfig(-1))
 
-	// Level 10 and level 100 should return the same tier config (Agent)
-	require.Equal(t, p.GetTierConfig(10), p.GetTierConfig(100))
-	require.True(t, p.GetTierConfig(10).CanBeAgent)
+	require.Equal(t, p.GetTierConfig(1), p.GetTierConfig(100))
 }
 
 func TestDefaultAwardConfigs(t *testing.T) {
@@ -219,7 +206,7 @@ func TestMintSplitsCannotExceedWholeMint(t *testing.T) {
 // the only bound standing between governance and an over-100% reserve.
 func TestSubscriptionReserveBpsIsBounded(t *testing.T) {
 	p := DefaultParams()
-	require.Equal(t, uint64(9_500), p.SubscriptionReserveBps, "default must be 95% in basis points")
+	require.Equal(t, uint64(0), p.SubscriptionReserveBps, "v1.39 default must be 0: there is no relay reserve")
 
 	p.SubscriptionReserveBps = BasisPointsDenominator
 	require.NoError(t, p.Validate(), "a full reserve is a legitimate setting")
@@ -278,10 +265,10 @@ func TestGenesisCarriesSubscriptionReserveBps(t *testing.T) {
 	var p Params
 	require.NoError(t, (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(raw), &p))
 
-	require.NotZero(t, p.SubscriptionReserveBps,
-		"genesis must set subscription_reserve_bps: zero escrows nothing and demotes every subscriber")
-	require.Equal(t, DefaultParams().SubscriptionReserveBps, p.SubscriptionReserveBps,
-		"genesis must agree with the default, and with the percent the v1.34.0 handler converts from")
+	require.Equal(t, uint64(9_500), p.SubscriptionReserveBps,
+		"historical genesis must still carry the pre-v1.39 95% reserve so InitGenesis can replay")
+	require.Zero(t, DefaultParams().SubscriptionReserveBps,
+		"v1.39 defaults have no relay reserve; the handler writes 0 at upgrade height")
 }
 
 // TestValidateGovernanceUpdateRejectsChainBreakingValues is the M-1(a)/(b)
@@ -315,9 +302,9 @@ func TestValidateGovernanceUpdateRejectsChainBreakingValues(t *testing.T) {
 		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "relay_max_gas_fee")
 	})
 
-	t.Run("zero subscription_reserve_bps inverts subscriptions", func(t *testing.T) {
+	t.Run("nonzero subscription_reserve_bps is retired", func(t *testing.T) {
 		p := DefaultParams()
-		p.SubscriptionReserveBps = 0
+		p.SubscriptionReserveBps = 9_500
 		require.NoError(t, p.Validate())
 		require.ErrorContains(t, p.ValidateGovernanceUpdate(), "subscription_reserve_bps")
 	})
@@ -375,8 +362,8 @@ func TestBlockHashWindowAcceptsTheGenesisValue(t *testing.T) {
 
 func TestParamsValidateRejectsNilEntries(t *testing.T) {
 	p := DefaultParams()
-	p.Tiers = p.Tiers[:2]
-	require.EqualError(t, p.Validate(), "tiers must contain exactly 3 entries")
+	p.Tiers = p.Tiers[:1]
+	require.EqualError(t, p.Validate(), "tiers must contain exactly 2 or 3 entries")
 
 	p = DefaultParams()
 	p.Tiers[0] = nil
@@ -398,7 +385,7 @@ func TestProfileValidateBasicRuneCounts(t *testing.T) {
 		asciiStr += "a"
 	}
 	p := Profile{Username: "testuser", Biography: asciiStr}
-	require.NoError(t, p.ValidateBasic(3, 30, 50))
+	require.NoError(t, p.ValidateBasic(3, 30))
 
 	// 512 multi-byte runes should pass (each is 3 bytes in UTF-8)
 	multiByteStr := ""
@@ -406,23 +393,23 @@ func TestProfileValidateBasicRuneCounts(t *testing.T) {
 		multiByteStr += "\u4e16" // Chinese character, 3 bytes
 	}
 	p = Profile{Username: "testuser", Biography: multiByteStr}
-	require.NoError(t, p.ValidateBasic(3, 30, 50))
+	require.NoError(t, p.ValidateBasic(3, 30))
 
 	// 513 runes should fail (regardless of byte count)
 	tooLong := multiByteStr + "\u4e16"
 	p = Profile{Username: "testuser", Biography: tooLong}
-	require.Error(t, p.ValidateBasic(3, 30, 50))
-	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "biography too long")
+	require.Error(t, p.ValidateBasic(3, 30))
+	require.Contains(t, p.ValidateBasic(3, 30).Error(), "biography too long")
 
 	// Avatar rune count
 	p = Profile{Username: "testuser", Avatar: tooLong}
-	require.Error(t, p.ValidateBasic(3, 30, 50))
-	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "avatar too long")
+	require.Error(t, p.ValidateBasic(3, 30))
+	require.Contains(t, p.ValidateBasic(3, 30).Error(), "avatar too long")
 
 	// Banner rune count
 	p = Profile{Username: "testuser", Banner: tooLong}
-	require.Error(t, p.ValidateBasic(3, 30, 50))
-	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "banner too long")
+	require.Error(t, p.ValidateBasic(3, 30))
+	require.Contains(t, p.ValidateBasic(3, 30).Error(), "banner too long")
 
 	// Flair rune count (limit 20)
 	flairOk := ""
@@ -430,34 +417,27 @@ func TestProfileValidateBasicRuneCounts(t *testing.T) {
 		flairOk += "\u4e16"
 	}
 	p = Profile{Username: "testuser", Flair: flairOk}
-	require.NoError(t, p.ValidateBasic(3, 30, 50))
+	require.NoError(t, p.ValidateBasic(3, 30))
 
 	flairTooLong := flairOk + "\u4e16"
 	p = Profile{Username: "testuser", Flair: flairTooLong}
-	require.Error(t, p.ValidateBasic(3, 30, 50))
-	require.Contains(t, p.ValidateBasic(3, 30, 50).Error(), "flair too long")
+	require.Error(t, p.ValidateBasic(3, 30))
+	require.Contains(t, p.ValidateBasic(3, 30).Error(), "flair too long")
 }
 
 func TestC1BugCondition(t *testing.T) {
 	// Reproduce the C-1 bug condition: the old code used
 	//   if core.Level <= 0 || int(core.Level) >= len(params.Tiers)
-	// With 3 tiers (indices 0,1,2), level 10 evaluates to int(10) >= 3 = true,
-	// causing Agent users to skip renewal/downgrade entirely.
-	p := DefaultParams()
+	// With 3 historical tiers (indices 0,1,2), level 10 evaluates to
+	// int(10) >= 3 = true, causing Agent users to skip renewal/downgrade.
+	p := HistoricalDefaultParams()
 	require.Len(t, p.Tiers, 3)
 
-	// Old buggy condition would skip Agent (level 10)
 	level10 := 10
 	buggySkip := level10 <= 0 || level10 >= len(p.Tiers)
 	require.True(t, buggySkip, "demonstrates the old bug: level 10 was incorrectly skipped")
 
-	// New code uses LevelToTierIndex which correctly maps level 10 → index 2
-	tierIdx := LevelToTierIndex(level10)
-	require.Equal(t, 2, tierIdx, "LevelToTierIndex(10) must return 2")
-	require.True(t, tierIdx > 0, "Agent tier index must be > 0 (not skipped)")
-
-	// Admin (level 100) also must not be skipped
-	adminIdx := LevelToTierIndex(100)
-	require.Equal(t, 2, adminIdx)
-	require.True(t, adminIdx > 0)
+	// v1.39 retired Agent: level 10 is no longer a valid subscription level.
+	require.Equal(t, -1, LevelToTierIndex(level10))
+	require.Equal(t, 1, LevelToTierIndex(100), "admin maps to the subscriber tier")
 }

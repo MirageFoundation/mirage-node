@@ -651,6 +651,7 @@ func TestSubscribeFailsOnStaleIndexDeleteFailure(t *testing.T) {
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
 		Level:          types.LevelSubscriber,
+		PeriodCount:    1,
 	})
 	require.Error(t, err, "a surviving stale index must reject the subscription")
 	require.Contains(t, err.Error(), "remove old subscription index")
@@ -680,6 +681,7 @@ func TestSubscribeFailsOnNewIndexWriteFailure(t *testing.T) {
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
 		Level:          types.LevelSubscriber,
+		PeriodCount:    1,
 	})
 	require.Error(t, err, "a paid subscription with no expiry index must not commit")
 	require.Contains(t, err.Error(), "set subscription index")
@@ -711,6 +713,7 @@ func TestSubscribeGiftRejectsReserveOverflow(t *testing.T) {
 		EnvelopePubkey: pub,
 		Target:         recipient,
 		Level:          types.LevelSubscriber,
+		PeriodCount:    1,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "addition overflows uint64")

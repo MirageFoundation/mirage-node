@@ -43,11 +43,6 @@ func (mk *govMockKeeper) BurnFromAccount(ctx sdk.Context, addr string, amount ui
 	return nil
 }
 
-// govAuthority returns the governance module address
-func govAuthority() string {
-	return authtypes.NewModuleAddress(govtypes.ModuleName).String()
-}
-
 // mintTokens is a testable implementation of the MintTokens logic
 func mintTokens(k govTokenKeeper, ctx sdk.Context, req *types.MsgMintTokens) (*types.MsgMintTokensResponse, error) {
 	if req.Authority != authtypes.NewModuleAddress(govtypes.ModuleName).String() {

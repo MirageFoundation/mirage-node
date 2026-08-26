@@ -152,12 +152,12 @@ func TestParamsBoundsRejectRunawayValues(t *testing.T) {
 
 func TestParamsRejectProfileListCounterOverflow(t *testing.T) {
 	cases := map[string]func(*TierConfig){
-		"max_enabled_agents":  func(t *TierConfig) { t.MaxEnabledAgents = MaxProfileListEntries + 1 },
-		"max_followed_users":  func(t *TierConfig) { t.MaxFollowedUsers = MaxProfileListEntries + 1 },
-		"max_followed_topics": func(t *TierConfig) { t.MaxFollowedTopics = MaxProfileListEntries + 1 },
-		"max_blocked_users":   func(t *TierConfig) { t.MaxBlockedUsers = MaxProfileListEntries + 1 },
-		"max_blocked_posts":   func(t *TierConfig) { t.MaxBlockedPosts = MaxProfileListEntries + 1 },
-		"max_blocked_topics":  func(t *TierConfig) { t.MaxBlockedTopics = MaxProfileListEntries + 1 },
+		"max_followed_users":       func(t *TierConfig) { t.MaxFollowedUsers = MaxProfileListEntries + 1 },
+		"max_joined_communities":   func(t *TierConfig) { t.MaxJoinedCommunities = MaxProfileListEntries + 1 },
+		"max_blocked_users":        func(t *TierConfig) { t.MaxBlockedUsers = MaxProfileListEntries + 1 },
+		"max_blocked_posts":        func(t *TierConfig) { t.MaxBlockedPosts = MaxProfileListEntries + 1 },
+		"max_blocked_communities":  func(t *TierConfig) { t.MaxBlockedCommunities = MaxProfileListEntries + 1 },
+		"max_curation_memberships": func(t *TierConfig) { t.MaxCurationMemberships = MaxProfileListEntries + 1 },
 	}
 
 	for name, mutate := range cases {

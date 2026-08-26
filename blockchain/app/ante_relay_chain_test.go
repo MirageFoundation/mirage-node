@@ -58,8 +58,10 @@ func TestRelayAnteDecoratorOrder(t *testing.T) {
 		// anonymous 1MB transaction of thousands of minimal relay messages made
 		// every node write thousands of log lines for free (L-6).
 		"app.LoggingDecorator",
-		"ante.DeductFeeDecorator",
+		"app.RetiredMsgDecorator",
+		"app.OnePostPerTxDecorator",
 		"app.RelaySigDecorator",
+		"ante.DeductFeeDecorator",
 		"*app.PowDecorator",
 	}
 	require.Equal(t, want, got, "relay ante chain order changed; see C-1 and M-1 before updating this test")
@@ -78,8 +80,8 @@ func TestRelayAnteDecoratorOrder(t *testing.T) {
 	// both must happen before the envelope/PoW work.
 	require.Less(t, idx("ante.SigVerificationDecorator"), idx("ante.DeductFeeDecorator"),
 		"C-1: the outer signature must be verified before the fee is deducted")
-	require.Less(t, idx("ante.DeductFeeDecorator"), idx("app.RelaySigDecorator"),
-		"C-1: gas must be paid by a proven signer before envelope verification")
+	require.Less(t, idx("app.RelaySigDecorator"), idx("ante.DeductFeeDecorator"),
+		"zero-fee exemption authenticates envelopes before skipping min-gas-price")
 	require.Less(t, idx("ante.SigVerificationDecorator"), idx("*app.PowDecorator"),
 		"C-1: the outer signature must be verified before PoW work")
 

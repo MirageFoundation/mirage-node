@@ -62,7 +62,7 @@ func validateV1340Params(params coretypes.Params) error {
 // the dynamic share, and leaking those values into v1.11.0 would rewrite state
 // sixteen upgrades before the governed activation.
 func v1_11_0DefaultParams() coretypes.Params {
-	params := coretypes.DefaultParams()
+	params := coretypes.HistoricalDefaultParams()
 	params.MintFloorSplit = 0
 	params.MintDynamicSplit = 0.5
 	return params
@@ -256,7 +256,7 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// Set default tiers if not present
 			if len(params.Tiers) == 0 {
-				params.Tiers = coretypes.DefaultTiers()
+				params.Tiers = coretypes.HistoricalDefaultTiers()
 				needsUpdate = true
 				sdkCtx.Logger().Info("v1.3.0-tiers: set default tiers", "count", len(params.Tiers))
 			}
@@ -405,12 +405,12 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// Update min_topic_size from 3 to 2
 			params := app.CoreKeeper.GetParams(sdkCtx)
-			if params.MinTopicSize > 2 {
-				params.MinTopicSize = 2
+			if params.MinCommunitySize > 2 {
+				params.MinCommunitySize = 2
 				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
 					return nil, err
 				}
-				sdkCtx.Logger().Info("v1.5.1: set min_topic_size", "value", params.MinTopicSize)
+				sdkCtx.Logger().Info("v1.5.1: set min_topic_size", "value", params.MinCommunitySize)
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.5.1 complete - tier config fix applied, min_topic_size=2")
@@ -446,8 +446,8 @@ func (app *App) RegisterUpgradeHandlers() {
 				changed = true
 				sdkCtx.Logger().Info("v1.6: set mint_interval", "value", 200)
 			}
-			if params.MaxTopicSize != 35 {
-				params.MaxTopicSize = 35
+			if params.MaxCommunitySize != 35 {
+				params.MaxCommunitySize = 35
 				changed = true
 				sdkCtx.Logger().Info("v1.6: set max_topic_size", "value", 35)
 			}
@@ -1151,10 +1151,10 @@ func (app *App) RegisterUpgradeHandlers() {
 			desiredMaxBlockedTopics := []uint64{10, 125, 500, 1000}
 			changed := false
 			for i, tier := range params.Tiers {
-				if i < len(desiredMaxBlockedTopics) && tier.MaxBlockedTopics != desiredMaxBlockedTopics[i] {
+				if i < len(desiredMaxBlockedTopics) && tier.MaxBlockedCommunities != desiredMaxBlockedTopics[i] {
 					sdkCtx.Logger().Info("v1.13.0: updating MaxBlockedTopics",
-						"tier", i, "old", tier.MaxBlockedTopics, "new", desiredMaxBlockedTopics[i])
-					tier.MaxBlockedTopics = desiredMaxBlockedTopics[i]
+						"tier", i, "old", tier.MaxBlockedCommunities, "new", desiredMaxBlockedTopics[i])
+					tier.MaxBlockedCommunities = desiredMaxBlockedTopics[i]
 					params.Tiers[i] = tier
 					changed = true
 				}
@@ -1295,7 +1295,7 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// Set new tier defaults (Free=0, Subscriber=1, Agent=10) and update reserve
 			params := app.CoreKeeper.GetParams(sdkCtx)
-			params.Tiers = coretypes.DefaultTiers()
+			params.Tiers = coretypes.HistoricalDefaultTiers()
 			params.SubscriptionReservePercent = 0.95
 			params.RelayMinGasPrice = 1000
 			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
@@ -2446,6 +2446,23 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.38.0 complete")
+			return toVM, nil
+		},
+	)
+
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.39.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.39.0 (communities, two-tier, creator pool)...")
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.39.0: RunMigrations failed: %w", err)
+			}
+			if err := app.CoreKeeper.MigrateV139(sdkCtx); err != nil {
+				return nil, fmt.Errorf("v1.39.0: %w", err)
+			}
+			sdkCtx.Logger().Info("Upgrade to v1.39.0 complete")
 			return toVM, nil
 		},
 	)

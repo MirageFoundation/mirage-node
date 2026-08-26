@@ -210,6 +210,9 @@ func mirageAnteRouter(
 			*coretypes.MsgBridgeAttestMinted:
 			return ctx, fmt.Errorf("bridge messages were removed in v1.31.0")
 		}
+		if _, ok := coretypes.RetiredMsgTypeURLs()[sdk.MsgTypeURL(m)]; ok {
+			return ctx, fmt.Errorf("retired message type %s is not accepted after v1.39.0", sdk.MsgTypeURL(m))
+		}
 		if am, ok := m.(interface{ GetAuthority() string }); ok {
 			if strings.TrimSpace(am.GetAuthority()) == govAuthority {
 				isRelayTx = false

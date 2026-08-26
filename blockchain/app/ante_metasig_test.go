@@ -220,19 +220,16 @@ func TestIsRelayMessage(t *testing.T) {
 		&coretypes.MsgPost{},
 		&coretypes.MsgVote{},
 		&coretypes.MsgSetUsername{},
-		&coretypes.MsgEnableAgent{},
-		&coretypes.MsgDisableAgent{},
-		&coretypes.MsgSetAgents{},
 		&coretypes.MsgFollowUser{},
 		&coretypes.MsgUnfollowUser{},
-		&coretypes.MsgFollowTopic{},
-		&coretypes.MsgUnfollowTopic{},
+		&coretypes.MsgJoinCommunity{},
+		&coretypes.MsgLeaveCommunity{},
 		&coretypes.MsgBlockPost{},
 		&coretypes.MsgUnblockPost{},
 		&coretypes.MsgBlockUser{},
 		&coretypes.MsgUnblockUser{},
-		&coretypes.MsgBlockTopic{},
-		&coretypes.MsgUnblockTopic{},
+		&coretypes.MsgBlockCommunity{},
+		&coretypes.MsgUnblockCommunity{},
 		&coretypes.MsgDelete{},
 		&coretypes.MsgDeleteUser{},
 		&coretypes.MsgSendTokens{},
@@ -241,10 +238,25 @@ func TestIsRelayMessage(t *testing.T) {
 		&coretypes.MsgSetAutoRenewal{},
 		&coretypes.MsgAward{},
 		&coretypes.MsgSetBiography{},
-		&coretypes.MsgAnnotate{},
+		&coretypes.MsgCreateCommunity{},
+		&coretypes.MsgClaimCreatorRewards{},
 	}
 	for _, m := range relayMsgs {
 		require.True(t, isRelayMessage(m), "expected relay: %T", m)
+	}
+
+	retiredMsgs := []sdk.Msg{
+		&coretypes.MsgEnableAgent{},
+		&coretypes.MsgDisableAgent{},
+		&coretypes.MsgSetAgents{},
+		&coretypes.MsgFollowTopic{},
+		&coretypes.MsgUnfollowTopic{},
+		&coretypes.MsgBlockTopic{},
+		&coretypes.MsgUnblockTopic{},
+		&coretypes.MsgAnnotate{},
+	}
+	for _, m := range retiredMsgs {
+		require.False(t, isRelayMessage(m), "expected retired non-relay: %T", m)
 	}
 
 	nonRelayMsgs := []sdk.Msg{

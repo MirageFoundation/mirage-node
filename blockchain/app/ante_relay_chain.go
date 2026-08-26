@@ -65,8 +65,10 @@ func relayAnteDecorators(
 		authante.NewSigGasConsumeDecorator(ak, authante.DefaultSigVerificationGasConsumer),
 		authante.NewSigVerificationDecorator(ak, signModeHandler),
 		LoggingDecorator{},
-		authante.NewDeductFeeDecorator(ak, bk, nil, nil),
+		RetiredMsgDecorator{},
+		OnePostPerTxDecorator{},
 		RelaySigDecorator{Keeper: ck},
+		authante.NewDeductFeeDecorator(ak, bk, nil, subscriberZeroFeeChecker(ck)),
 		&PowDecorator{Keeper: ck},
 	}
 }

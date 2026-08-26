@@ -31,6 +31,8 @@ _PARAMS_LEGACY_NAME_ALIASES = {
     "pow_message_limit": "pow_increase_threshold",
     "pow_difficulty_allowance": "pow_difficulty_grace_period",
     "pow_difficulty_step": "pow_factor",
+    "min_community_size": "min_topic_size",
+    "max_community_size": "max_topic_size",
 }
 
 _PARAMS_PROTO_FIELD_NAMES = {f.name for f in Params.DESCRIPTOR.fields}

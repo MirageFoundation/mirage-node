@@ -51,11 +51,12 @@ def _build_pool():
     add_f(msg, "envelope_nonce", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg, "community", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "title", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "media", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg, "protocol_version", 106, descriptor_pb2.FieldDescriptorProto.TYPE_UINT32)
 
     # MsgEdit
     msg_edit = file_proto.message_type.add()
@@ -69,7 +70,7 @@ def _build_pool():
     add_f(msg_edit, "envelope_nonce", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_edit, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_edit, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_edit, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_edit, "community", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "title", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
@@ -407,6 +408,7 @@ def _build_pool():
     add_f(msg_subscribe, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_subscribe, "level", 100, descriptor_pb2.FieldDescriptorProto.TYPE_UINT32)
     add_f(msg_subscribe, "target", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_subscribe, "period_count", 102, descriptor_pb2.FieldDescriptorProto.TYPE_UINT32)
 
     # MsgSetAutoRenewal (user-initiated toggle of auto_renew)
     msg_set_auto = file_proto.message_type.add()
@@ -425,23 +427,22 @@ def _build_pool():
     tier_config = file_proto.message_type.add()
     tier_config.name = "TierConfig"
     add_f(tier_config, "period_fee", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_enabled_agents", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_followed_users", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_followed_topics", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_joined_communities", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_users", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_posts", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_blocked_topics", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_blocked_communities", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_title_length", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_content_length", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "editing_time_mins", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "vote_weight", 13, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    add_f(tier_config, "can_be_agent", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_remove_anon", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_biography", 17, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_flair", 20, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "max_biography_length", 21, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_curation_memberships", 22, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # AwardConfig (used in Params.award_configs)
     award_config = file_proto.message_type.add()
@@ -489,9 +490,9 @@ def _build_pool():
     add_f(msg4, "block_hash_window", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_difficulty_allowance", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_username_size", 34, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "max_topic_size", 35, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_community_size", 35, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_username_size", 36, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "min_topic_size", 37, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "min_community_size", 37, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_dynamic_credit_cap", 38, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_dynamic_split", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "subscription_period", 40, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -518,6 +519,28 @@ def _build_pool():
     f_awards.type_name = ".mirage.core.v1.AwardConfig"
     add_f(msg4, "subscription_reserve_bps", 54, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_floor_split", 55, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "subscription_creator_bps", 56, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_curators_per_team", 57, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_pending_curator_invites_per_team", 58, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_pending_curator_invites_per_user", 59, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_community_title_length", 60, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_community_description_length", 61, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_curation_team_name_length", 62, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_curation_team_bio_length", 63, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_curation_team_policy_length", 64, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "subscription_transitions_per_block", 65, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "curation_prune_keys_per_block", 66, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_epoch_closures_per_block", 67, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_settlement_records_per_block", 68, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_prune_keys_per_block", 69, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_claim_window_days", 70, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_creator_claim_epochs", 71, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_creator_engagements_per_epoch", 72, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_epoch_expiries_per_block", 73, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "subscription_early_renewal_days", 74, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "subscription_renewal_attempts_per_block", 75, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "subscriber_daily_relay_limit", 76, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_subscription_periods_per_purchase", 77, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # MsgUpdateParams (authority + Params + update_mask)
     #
@@ -588,13 +611,149 @@ def _build_pool():
     add_f(msg_profile_resp, "biography", 9, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_profile_resp, "avatar", 10, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_profile_resp, "banner", 11, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_profile_resp, "enabled_agents", 12, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "followed_users", 13, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
-    add_f(msg_profile_resp, "followed_topics", 14, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "joined_communities", 14, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "blocked_users", 15, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "blocked_posts", 16, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
-    add_f(msg_profile_resp, "blocked_topics", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_communities", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
     add_f(msg_profile_resp, "flair", 18, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "effective_paid", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+
+    def add_envelope(m):
+        add_f(m, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+        add_f(m, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+        add_f(m, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+        add_f(m, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+        add_f(m, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+        add_f(m, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+        add_f(m, "envelope_nonce", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+        add_f(m, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+
+    STRING = descriptor_pb2.FieldDescriptorProto.TYPE_STRING
+    UINT64 = descriptor_pb2.FieldDescriptorProto.TYPE_UINT64
+    UINT32 = descriptor_pb2.FieldDescriptorProto.TYPE_UINT32
+    BOOL = descriptor_pb2.FieldDescriptorProto.TYPE_BOOL
+    INT64 = descriptor_pb2.FieldDescriptorProto.TYPE_INT64
+
+    def add_msg_fields(name, fields):
+        m = file_proto.message_type.add()
+        m.name = name
+        add_envelope(m)
+        for fname, num, ftype, repeated in fields:
+            add_f(m, fname, num, ftype, repeated=repeated)
+        resp = file_proto.message_type.add()
+        resp.name = name + "Response"
+
+    add_msg_fields("MsgCreateCommunity", [
+        ("community", 100, STRING, False),
+        ("title", 101, STRING, False),
+        ("description", 102, STRING, False),
+        ("original_team_name", 103, STRING, False),
+        ("bio", 104, STRING, False),
+        ("policy", 105, STRING, False),
+    ])
+    add_msg_fields("MsgSetCommunityMetadata", [
+        ("community", 100, STRING, False),
+        ("title", 101, STRING, False),
+        ("description", 102, STRING, False),
+    ])
+    add_msg_fields("MsgTransferCommunity", [
+        ("community", 100, STRING, False),
+        ("new_founder", 101, STRING, False),
+    ])
+    add_msg_fields("MsgJoinCommunity", [("community", 100, STRING, False)])
+    add_msg_fields("MsgLeaveCommunity", [("community", 100, STRING, False)])
+    add_msg_fields("MsgBlockCommunity", [
+        ("target", 100, STRING, False),
+        ("community", 101, STRING, False),
+    ])
+    add_msg_fields("MsgUnblockCommunity", [
+        ("target", 100, STRING, False),
+        ("community", 101, STRING, False),
+    ])
+    add_msg_fields("MsgCreateCurationTeam", [
+        ("community", 100, STRING, False),
+        ("name", 101, STRING, False),
+        ("bio", 102, STRING, False),
+        ("policy", 103, STRING, False),
+    ])
+    add_msg_fields("MsgSetCurationTeamProfile", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("name", 102, STRING, False),
+        ("bio", 103, STRING, False),
+        ("policy", 104, STRING, False),
+    ])
+    add_msg_fields("MsgInviteCurator", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+    ])
+    add_msg_fields("MsgRevokeCuratorInvite", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+    ])
+    add_msg_fields("MsgAcceptCuratorInvite", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+    ])
+    add_msg_fields("MsgDeclineCuratorInvite", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+    ])
+    add_msg_fields("MsgLeaveCurationTeam", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+    ])
+    add_msg_fields("MsgRemoveCurator", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+    ])
+    add_msg_fields("MsgTransferCurationTeam", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("new_owner", 102, STRING, False),
+    ])
+    add_msg_fields("MsgDeleteCurationTeam", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+    ])
+    add_msg_fields("MsgSetCurationPreference", [
+        ("community", 100, STRING, False),
+        ("mode", 101, UINT32, False),
+        ("pinned_team_id", 102, UINT64, False),
+    ])
+    add_msg_fields("MsgSetCurationPostHidden", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+        ("hidden", 103, BOOL, False),
+    ])
+    add_msg_fields("MsgSetCurationUserHidden", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+        ("hidden", 103, BOOL, False),
+    ])
+    add_msg_fields("MsgSetCurationThreadLocked", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("root_hash", 102, STRING, False),
+        ("locked", 103, BOOL, False),
+    ])
+    add_msg_fields("MsgSetCurationSubscriberOnly", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("enabled", 102, BOOL, False),
+    ])
+    claim = file_proto.message_type.add()
+    claim.name = "MsgClaimCreatorRewards"
+    add_envelope(claim)
+    add_f(claim, "epoch_ids", 100, INT64, repeated=True)
+    claim_resp = file_proto.message_type.add()
+    claim_resp.name = "MsgClaimCreatorRewardsResponse"
 
     # cosmos.base.query.v1beta1 pagination types, needed by Query/GetProfiles.
     # Field numbers must match the upstream cosmos-sdk proto exactly.
@@ -710,3 +869,26 @@ QueryProfilesRequest = _get_message_class("mirage.core.v1.QueryProfilesRequest")
 QueryProfilesResponse = _get_message_class("mirage.core.v1.QueryProfilesResponse")
 PageRequest = _get_message_class("cosmos.base.query.v1beta1.PageRequest")
 PageResponse = _get_message_class("cosmos.base.query.v1beta1.PageResponse")
+MsgCreateCommunity = _get_message_class("mirage.core.v1.MsgCreateCommunity")
+MsgSetCommunityMetadata = _get_message_class("mirage.core.v1.MsgSetCommunityMetadata")
+MsgTransferCommunity = _get_message_class("mirage.core.v1.MsgTransferCommunity")
+MsgJoinCommunity = _get_message_class("mirage.core.v1.MsgJoinCommunity")
+MsgLeaveCommunity = _get_message_class("mirage.core.v1.MsgLeaveCommunity")
+MsgBlockCommunity = _get_message_class("mirage.core.v1.MsgBlockCommunity")
+MsgUnblockCommunity = _get_message_class("mirage.core.v1.MsgUnblockCommunity")
+MsgCreateCurationTeam = _get_message_class("mirage.core.v1.MsgCreateCurationTeam")
+MsgSetCurationTeamProfile = _get_message_class("mirage.core.v1.MsgSetCurationTeamProfile")
+MsgInviteCurator = _get_message_class("mirage.core.v1.MsgInviteCurator")
+MsgRevokeCuratorInvite = _get_message_class("mirage.core.v1.MsgRevokeCuratorInvite")
+MsgAcceptCuratorInvite = _get_message_class("mirage.core.v1.MsgAcceptCuratorInvite")
+MsgDeclineCuratorInvite = _get_message_class("mirage.core.v1.MsgDeclineCuratorInvite")
+MsgLeaveCurationTeam = _get_message_class("mirage.core.v1.MsgLeaveCurationTeam")
+MsgRemoveCurator = _get_message_class("mirage.core.v1.MsgRemoveCurator")
+MsgTransferCurationTeam = _get_message_class("mirage.core.v1.MsgTransferCurationTeam")
+MsgDeleteCurationTeam = _get_message_class("mirage.core.v1.MsgDeleteCurationTeam")
+MsgSetCurationPreference = _get_message_class("mirage.core.v1.MsgSetCurationPreference")
+MsgSetCurationPostHidden = _get_message_class("mirage.core.v1.MsgSetCurationPostHidden")
+MsgSetCurationUserHidden = _get_message_class("mirage.core.v1.MsgSetCurationUserHidden")
+MsgSetCurationThreadLocked = _get_message_class("mirage.core.v1.MsgSetCurationThreadLocked")
+MsgSetCurationSubscriberOnly = _get_message_class("mirage.core.v1.MsgSetCurationSubscriberOnly")
+MsgClaimCreatorRewards = _get_message_class("mirage.core.v1.MsgClaimCreatorRewards")

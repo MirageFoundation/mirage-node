@@ -874,6 +874,7 @@ def init_backend_schema() -> None:
                     first_touch_utm_content TEXT,
                     first_touch_utm_term TEXT,
                     first_touch_ref TEXT,
+                    last_touch_ref TEXT,
                     last_touch_at BIGINT,
                     last_touch_utm_source TEXT,
                     last_touch_utm_campaign TEXT,
@@ -885,6 +886,7 @@ def init_backend_schema() -> None:
             # are unsigned, so an event carries no address of its own; this is
             # what lets a read be attributed to a logged-in user without
             # retroactively claiming the device's pre-login browsing.
+            cur.execute("ALTER TABLE stats_visitors ADD COLUMN IF NOT EXISTS last_touch_ref TEXT")
             cur.execute("ALTER TABLE stats_visitors ADD COLUMN IF NOT EXISTS address_bound_at BIGINT")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stats_visitors_address "
@@ -911,6 +913,7 @@ def init_backend_schema() -> None:
                     "first_touch_utm_content",
                     "first_touch_utm_term",
                     "first_touch_ref",
+                    "last_touch_ref",
                     "last_touch_at",
                     "last_touch_utm_source",
                     "last_touch_utm_campaign",
@@ -971,8 +974,6 @@ def init_backend_schema() -> None:
             # doesn't advance the sequences.  Reset each SERIAL sequence to
             # MAX(id) so the next INSERT without an explicit id won't collide.
             _SERIAL_TABLES = [
-                ("pending_rewards", "id"),
-                ("referral_pending_rewards", "id"),
                 ("reports", "id"),
                 ("push_tokens", "id"),
                 ("push_receipts", "id"),
@@ -988,6 +989,25 @@ def init_backend_schema() -> None:
                 new_val = cur.fetchone()[0]
                 if new_val > 1:
                     logger.info("backend.schema.seq_reset table=%s seq=%s val=%s", table, seq_name, new_val)
+
+            for gone in (
+                "invite_codes",
+                "referral_links",
+                "referral_pending_rewards",
+                "referral_user_accruals",
+                "referral_state",
+                "referral_user_settings",
+                "user_daily_quests",
+                "user_flash_quests",
+                "user_quest_state",
+                "user_achievements",
+                "pending_rewards",
+                "reward_payouts",
+                "user_unlocks",
+                "reward_suspensions",
+            ):
+                cur.execute(f"DROP TABLE IF EXISTS {gone} CASCADE")
+                logger.info("backend.schema.drop_v139 table=%s", gone)
 
         logger.debug("backend.schema.init.ok")
         logger.info("Backend schema initialized successfully")

@@ -537,7 +537,7 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
         cur.execute(
             """
             SELECT
-                LOWER(TRIM(p.topic)) AS topic,
+                LOWER(TRIM(p.community)) AS community,
                 COUNT(1) AS total_posts,
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'sensitive' THEN 1 ELSE 0 END) AS sensitive_count,
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) = 'gore' THEN 1 ELSE 0 END) AS gore_count,
@@ -546,10 +546,10 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
                 SUM(CASE WHEN LOWER(COALESCE(p.tag, '')) IN ('adult', 'porn') THEN 1 ELSE 0 END) AS adult_count
             FROM posts p
             WHERE COALESCE(p.target, '') = ''
-              AND p.topic IS NOT NULL
-              AND LOWER(TRIM(p.topic)) = ANY(%s)
+              AND p.community IS NOT NULL
+              AND LOWER(TRIM(p.community)) = ANY(%s)
               AND p.deleted = FALSE
-            GROUP BY LOWER(TRIM(p.topic))
+            GROUP BY LOWER(TRIM(p.community))
             """,
             (topics_lower,),
         )
@@ -727,15 +727,9 @@ def _get_blocked_topics(cur, address: str) -> set[str]:
 
     blocked_topics = set()
 
-    # Get viewer's own blocked topics
-    cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (address.lower(),))
+    # Get viewer's own blocked communities
+    cur.execute("SELECT target FROM blocked_communities WHERE owner = %s", (address.lower(),))
     blocked_topics.update(row[0].lower() for row in cur.fetchall())
-
-    # Get blocked topics from enabled agents
-    agents = _get_enabled_agents(cur, address)
-    for agent_address in agents:
-        cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (agent_address.lower(),))
-        blocked_topics.update(row[0].lower() for row in cur.fetchall())
 
     return blocked_topics
 
@@ -921,7 +915,7 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
 def _blocked_topics_sql(
     blocked_exact: set[str],
     blocked_patterns: tuple[str, ...],
-    topic_col: str = "p.topic",
+    topic_col: str = "p.community",
     viewer: str = "",
     owner_col: str = "p.owner",
 ) -> tuple[str, list[str]]:
@@ -1041,12 +1035,11 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
     """Fetch a user's own profile lists from the indexer DB (full history, not chain-limited)."""
     addr_lower = addr.lower()
     lists = {
-        "enabled_agents": [],
         "followed_users": [],
-        "followed_topics": [],
+        "joined_communities": [],
         "blocked_users": [],
         "blocked_posts": [],
-        "blocked_topics": [],
+        "blocked_communities": [],
         "following_count": 0,
         "follower_count": 0,
     }
@@ -1054,20 +1047,15 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
         cur = conn.cursor()
         cur.execute(
-            "SELECT agent FROM enabled_agents WHERE LOWER(owner) = %s ORDER BY position",
-            (addr_lower,),
-        )
-        lists["enabled_agents"] = [r[0] for r in cur.fetchall()]
-        cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
         )
         lists["followed_users"] = [r[0] for r in cur.fetchall()]
         cur.execute(
-            "SELECT topic FROM followed_topics WHERE LOWER(owner) = %s ORDER BY position",
+            "SELECT community FROM community_curation_preferences WHERE LOWER(owner) = %s ORDER BY community",
             (addr_lower,),
         )
-        lists["followed_topics"] = [r[0] for r in cur.fetchall()]
+        lists["joined_communities"] = [r[0] for r in cur.fetchall()]
         cur.execute(
             "SELECT target FROM blocked_users WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
@@ -1079,10 +1067,10 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         )
         lists["blocked_posts"] = [r[0] for r in cur.fetchall()]
         cur.execute(
-            "SELECT target FROM blocked_topics WHERE LOWER(owner) = %s ORDER BY position",
+            "SELECT target FROM blocked_communities WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
         )
-        lists["blocked_topics"] = [r[0] for r in cur.fetchall()]
+        lists["blocked_communities"] = [r[0] for r in cur.fetchall()]
         # Follow graph sizes (indexed on LOWER(owner) / LOWER(target)).
         cur.execute(
             "SELECT COUNT(*) FROM followed_users WHERE LOWER(owner) = %s",
@@ -1187,9 +1175,9 @@ def _load_candidate_posts(
 
     cur.execute(
         f"""
-        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+        SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') AS tag,
-               COALESCE(p.root_topic, p.topic, '') AS root_topic,
+               COALESCE(p.root_community, p.community, '') AS root_topic,
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
@@ -1267,6 +1255,7 @@ def _load_candidate_posts(
                 "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": post_ts,
                 "topic": topic_raw,
+                "community": topic_raw,
                 "topic_lower": topic_lower,
                 "root_topic": root_topic_raw,
                 "root_topic_lower": root_topic_lower,
@@ -1498,9 +1487,6 @@ def _load_following_candidates(
     Load candidate posts for the following feed.
     Returns (candidates, followed_topics, followed_users).
     """
-    cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner) = %s", (viewer_lower,))
-    followed_topics = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
-
     cur.execute("SELECT target FROM followed_users WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_users = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
 
@@ -1510,11 +1496,6 @@ def _load_following_candidates(
         ph = ",".join(["%s"] * len(followed_users))
         conditions.append(f"LOWER(p.owner) IN ({ph})")
         params.extend(list(followed_users))
-
-    if followed_topics:
-        ph = ",".join(["%s"] * len(followed_topics))
-        conditions.append(f"LOWER(p.topic) IN ({ph})")
-        params.extend(list(followed_topics))
 
     conditions.append("LOWER(p.owner) = %s")
     params.append(viewer_lower)
@@ -1527,9 +1508,9 @@ def _load_following_candidates(
 
     cur.execute(
         f"""
-        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+        SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') AS tag,
-               COALESCE(p.root_topic, p.topic, '') AS root_topic,
+               COALESCE(p.root_community, p.community, '') AS root_topic,
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
@@ -1568,7 +1549,7 @@ def _load_following_candidates(
             post["_source"] = "following"
             candidates.append(post)
 
-    return candidates, followed_topics, followed_users
+    return candidates, set(), followed_users
 
 
 def _get_following_feed(
@@ -1868,14 +1849,14 @@ def _get_home_feed_newest(
     Posts are fetched newest-first, then reordered by timestamp × N so
     previously-seen content drifts down while still appearing.
     """
-    _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+    _POST_COLS = """p.txhash, p.owner, p.created_at, p.community, p.title, p.content, p.tag,
+                   p.root_community, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
                    COALESCE(p.media, '[]') AS media,
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
+    _TOPIC_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
 
     bt_clause, bt_params = _blocked_topics_sql(
         blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
@@ -2483,14 +2464,14 @@ def _load_home_candidates(
     def _ms_since(t0: float) -> float:
         return round((_time.monotonic() - t0) * 1000, 2)
 
-    _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+    _POST_COLS = """p.txhash, p.owner, p.created_at, p.community, p.title, p.content, p.tag,
+                   p.root_community, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
                    COALESCE(p.media, '[]') AS media,
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
+    _TOPIC_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
     bt_clause, bt_params = _blocked_topics_sql(
         blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
     )
@@ -3410,20 +3391,11 @@ def _build_user_followed(addr: str) -> dict:
     standalone route's responsibility. Used by /api/get_user_followed and
     /api/bootstrap.
     """
-    enabled_agents: list = []
-    followed_topics: list = []
     followed_users: list = []
 
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
-        cur.execute(
-            "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
-            (addr,),
-        )
-        enabled_agents = [row[0] for row in cur.fetchall()]
-        cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
-        followed_topics = [row[0] for row in cur.fetchall()]
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
             (addr,),
@@ -3434,8 +3406,6 @@ def _build_user_followed(addr: str) -> dict:
         pass
 
     return {
-        "enabled_agents": enabled_agents,
-        "followed_topics": followed_topics,
         "followed_users": followed_users,
     }
 
@@ -3500,7 +3470,7 @@ def get_agents():
                 ) bu ON LOWER(bu.owner) = LOWER(p.owner)
                 LEFT JOIN (
                     SELECT owner, MAX(blocked_at) AS last_block
-                    FROM blocked_topics
+                    FROM blocked_communities
                     GROUP BY owner
                 ) bt ON LOWER(bt.owner) = LOWER(p.owner)
                 WHERE p.level = 10
@@ -3549,7 +3519,7 @@ def _build_user_blocked(addr: str) -> dict:
         blocked_posts = [row[0] for row in cur.fetchall()]
         cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
         blocked_users = [row[0] for row in cur.fetchall()]
-        cur.execute("SELECT target FROM blocked_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
+        cur.execute("SELECT target FROM blocked_communities WHERE LOWER(owner)=LOWER(%s)", (addr,))
         blocked_topics = [row[0] for row in cur.fetchall()]
         conn.close()
     except Exception:
@@ -4877,17 +4847,17 @@ def get_topics():
         # Get topics with at least min_posts
         cur.execute(
             f"""
-            SELECT p.topic, COUNT(1) as post_count
+            SELECT p.community, COUNT(1) as post_count
             FROM posts p
             WHERE COALESCE(p.target, '') = ''
               AND LENGTH(COALESCE(p.title, '')) > 0
-              AND p.topic IS NOT NULL
-              AND LENGTH(TRIM(p.topic)) >= %s
-              AND LENGTH(TRIM(p.topic)) <= %s
+              AND p.community IS NOT NULL
+              AND LENGTH(TRIM(p.community)) >= %s
+              AND LENGTH(TRIM(p.community)) <= %s
               {deleted_clause}
-            GROUP BY p.topic
+            GROUP BY p.community
             HAVING COUNT(1) >= %s
-            ORDER BY post_count DESC, p.topic ASC
+            ORDER BY post_count DESC, p.community ASC
             LIMIT %s
             """,
             (min_topic, max_topic, min_posts, limit),
@@ -4900,15 +4870,15 @@ def get_topics():
             cur.execute(
                 f"""
                 SELECT COUNT(*) FROM (
-                    SELECT p.topic
+                    SELECT p.community
                     FROM posts p
                     WHERE COALESCE(p.target, '') = ''
                       AND LENGTH(COALESCE(p.title, '')) > 0
-                      AND p.topic IS NOT NULL
-                      AND LENGTH(TRIM(p.topic)) >= %s
-                      AND LENGTH(TRIM(p.topic)) <= %s
+                      AND p.community IS NOT NULL
+                      AND LENGTH(TRIM(p.community)) >= %s
+                      AND LENGTH(TRIM(p.community)) <= %s
                       {deleted_clause}
-                    GROUP BY p.topic
+                    GROUP BY p.community
                     HAVING COUNT(1) > 0 AND COUNT(1) < %s
                 ) small_topics
                 """,
@@ -4934,13 +4904,13 @@ def get_topics():
         if topics_dict:
             cur.execute(
                 f"""
-                SELECT p.root_topic, COUNT(1) as comment_count
+                SELECT p.root_community, COUNT(1) as comment_count
                 FROM posts p
                 WHERE COALESCE(p.target, '') != ''
-                  AND p.root_topic IS NOT NULL
-                  AND LENGTH(TRIM(p.root_topic)) > 0
+                  AND p.root_community IS NOT NULL
+                  AND LENGTH(TRIM(p.root_community)) > 0
                   {deleted_clause}
-                GROUP BY p.root_topic
+                GROUP BY p.root_community
                 """
             )
             # root_topic is stored lowercase; build a lookup from the original-case topic keys
@@ -5014,16 +4984,16 @@ def search_topics():
         cur.execute(
             f"""
             WITH topic_base AS (
-                SELECT LOWER(TRIM(p.topic)) AS topic,
+                SELECT LOWER(TRIM(p.community)) AS community,
                        COUNT(1) AS post_count
                 FROM posts p
                 WHERE COALESCE(p.target, '') = ''
-                  AND p.topic IS NOT NULL
-                  AND LENGTH(TRIM(p.topic)) >= %s
-                  AND LENGTH(TRIM(p.topic)) <= %s
-                  AND LOWER(p.topic) LIKE %s
+                  AND p.community IS NOT NULL
+                  AND LENGTH(TRIM(p.community)) >= %s
+                  AND LENGTH(TRIM(p.community)) <= %s
+                  AND LOWER(p.community) LIKE %s
                   {deleted_clause}
-                GROUP BY LOWER(TRIM(p.topic))
+                GROUP BY LOWER(TRIM(p.community))
             )
             SELECT
                 tb.topic,
@@ -5209,7 +5179,7 @@ def search():
                 first_user_addr = users[0]["address"]
                 cur.execute(
                     f"""
-                    SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+                    SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                            COALESCE(pr.username, '') as username,
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
@@ -5251,16 +5221,16 @@ def search():
             cur.execute(
                 f"""
                 WITH topic_base AS (
-                    SELECT LOWER(TRIM(p.topic)) AS topic,
+                    SELECT LOWER(TRIM(p.community)) AS community,
                            COUNT(1) AS post_count
                     FROM posts p
                     WHERE COALESCE(p.target, '') = ''
-                      AND p.topic IS NOT NULL
-                      AND LENGTH(TRIM(p.topic)) >= %s
-                      AND LENGTH(TRIM(p.topic)) <= %s
-                      AND LOWER(p.topic) LIKE %s
+                      AND p.community IS NOT NULL
+                      AND LENGTH(TRIM(p.community)) >= %s
+                      AND LENGTH(TRIM(p.community)) <= %s
+                      AND LOWER(p.community) LIKE %s
                       {deleted_clause}
-                    GROUP BY LOWER(TRIM(p.topic))
+                    GROUP BY LOWER(TRIM(p.community))
                     ORDER BY post_count DESC, topic ASC
                     LIMIT %s
                     OFFSET %s
@@ -5318,16 +5288,16 @@ def search():
                 cur.execute(
                     f"""
                     WITH topic_base AS (
-                        SELECT LOWER(TRIM(p.topic)) AS topic,
+                        SELECT LOWER(TRIM(p.community)) AS community,
                                COUNT(1) AS post_count
                         FROM posts p
                         WHERE COALESCE(p.target, '') = ''
-                          AND p.topic IS NOT NULL
-                          AND LENGTH(TRIM(p.topic)) >= %s
-                          AND LENGTH(TRIM(p.topic)) <= %s
-                          AND LOWER(p.topic) LIKE %s
+                          AND p.community IS NOT NULL
+                          AND LENGTH(TRIM(p.community)) >= %s
+                          AND LENGTH(TRIM(p.community)) <= %s
+                          AND LOWER(p.community) LIKE %s
                           {deleted_clause}
-                        GROUP BY LOWER(TRIM(p.topic))
+                        GROUP BY LOWER(TRIM(p.community))
                         ORDER BY post_count DESC, topic ASC
                         LIMIT %s
                         OFFSET %s
@@ -5418,7 +5388,7 @@ def search():
             if not search_type_filter or search_type_filter == "posts":
                 cur.execute(
                     f"""
-                    SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+                    SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                            COALESCE(pr.username, '') as username,
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
@@ -5667,7 +5637,10 @@ def get_posts():
     page = request.args.get("page", 1, type=int)
     page = _clamp_page(page)
     offset = (page - 1) * limit
-    topic = request.args.get("topic", default=None, type=str)
+    community = request.args.get("community", default=None, type=str)
+    if community is None:
+        community = request.args.get("topic", default=None, type=str)
+    topic = community
     address = request.args.get("address", default="", type=str)
 
     # Parse allowed_tags: comma-separated list of tags the user wants to see.
@@ -5834,7 +5807,7 @@ def get_posts():
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
-                WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LOWER(p.community) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 """,
                 (topic,),
             )
@@ -5862,11 +5835,11 @@ def get_posts():
                 SELECT p.txhash,
                        p.owner,
                        p.created_at,
-                       p.topic,
+                       p.community,
                        p.title,
                        p.content,
                        COALESCE(p.tag, '') AS tag,
-                       COALESCE(p.root_topic, p.topic, '') AS root_topic,
+                       COALESCE(p.root_community, p.community, '') AS root_topic,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
@@ -5877,7 +5850,7 @@ def get_posts():
                       COALESCE(p.relayer, '') as relayer
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
-                WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LOWER(p.community) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
                 LIMIT %s
                 """,
@@ -5889,11 +5862,11 @@ def get_posts():
                 SELECT p.txhash,
                        p.owner,
                        p.created_at,
-                       p.topic,
+                       p.community,
                        p.title,
                        p.content,
                        COALESCE(p.tag, '') AS tag,
-                       COALESCE(p.root_topic, p.topic, '') AS root_topic,
+                       COALESCE(p.root_community, p.community, '') AS root_topic,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
@@ -6202,7 +6175,7 @@ def get_user_posts():
 
         cur.execute(
             f"""
-            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+            SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                    COALESCE(pr.username, '') as username,
                    COALESCE(p.target, '') as target,
                    (p.edited_at IS NOT NULL) as edited,
@@ -6568,8 +6541,8 @@ def get_recent_content():
                        p.owner,
                        COALESCE(pr.username, '') AS username,
                        p.created_at,
-                       COALESCE(p.topic, '') AS topic,
-                       COALESCE(p.root_topic, p.topic, '') AS root_topic,
+                       COALESCE(p.community, '') AS topic,
+                       COALESCE(p.root_community, p.community, '') AS root_topic,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(p.target, '') AS target,
                        COALESCE(p.title, '') AS title,
@@ -6764,11 +6737,11 @@ def _fetch_post(
         SELECT p.txhash,
                p.owner,
                p.created_at,
-               p.topic,
+               p.community,
                p.title,
                p.content,
                COALESCE(p.tag, '') as tag,
-               COALESCE(p.root_topic, p.topic, '') as root_topic,
+               COALESCE(p.root_community, p.community, '') as root_topic,
                COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                COALESCE(p.target, '') as target,
                COALESCE(pr.username, '') AS username,
@@ -6979,9 +6952,9 @@ def _fetch_comment_tree_batch(
     cur.execute(
         f"""
         WITH RECURSIVE subtree AS (
-            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+            SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                    COALESCE(p.tag, '') as tag,
-                   COALESCE(p.root_topic, p.topic, '') as root_topic,
+                   COALESCE(p.root_community, p.community, '') as root_topic,
                    COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                    COALESCE(p.target, '') as target,
                    COALESCE(p.thumbnail_url, '') as thumbnail,
@@ -6994,9 +6967,9 @@ def _fetch_comment_tree_batch(
             FROM posts p
             WHERE LOWER(p.txhash) = %s {deleted_clause}
             UNION ALL
-            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+            SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                    COALESCE(p.tag, '') as tag,
-                   COALESCE(p.root_topic, p.topic, '') as root_topic,
+                   COALESCE(p.root_community, p.community, '') as root_topic,
                    COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                    COALESCE(p.target, '') as target,
                    COALESCE(p.thumbnail_url, '') as thumbnail,
@@ -7211,9 +7184,9 @@ def _fetch_ancestor_chain(
               AND NOT (LOWER(p.txhash) = ANY (c.path))
               {deleted_clause}
         )
-        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+        SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') as tag,
-               COALESCE(p.root_topic, p.topic, '') as root_topic,
+               COALESCE(p.root_community, p.community, '') as root_topic,
                COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                COALESCE(p.target, '') as target,
                COALESCE(p.thumbnail_url, '') as thumbnail,
@@ -7700,7 +7673,7 @@ def get_inbox():
                     COALESCE(mpr.level, 0) as actor_level,
                     '' as item_award_type,
                     'mention' as item_type,
-                    COALESCE(mp.root_topic, mp.topic, '') as item_topic,
+                    COALESCE(mp.root_community, mp.community, '') as item_topic,
                     COALESCE(mpr.created_at, 0) as actor_created_at
                 FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
@@ -7730,7 +7703,7 @@ def get_inbox():
                     COALESCE(apr.level, 0) as actor_level,
                     a.award_type as item_award_type,
                     'award' as item_type,
-                    COALESCE(p.root_topic, p.topic, '') as item_topic,
+                    COALESCE(p.root_community, p.community, '') as item_topic,
                     COALESCE(apr.created_at, 0) as actor_created_at
                 FROM awards a
                 INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE

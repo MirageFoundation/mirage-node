@@ -115,13 +115,13 @@ class DatabaseManager:
                 )
                 cur.execute("INSERT INTO meta(key, value) VALUES('last_height','0') ON CONFLICT (key) DO NOTHING")
 
-                # posts (with tag column for v1.5, root_topic/root_post_id for v2 feeds)
+                # posts (community/root_community from v1.39.0)
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS posts (
                         txhash TEXT PRIMARY KEY,
                         owner TEXT NOT NULL,
-                        topic TEXT,
+                        community TEXT,
                         title TEXT,
                         content TEXT,
                         target TEXT,
@@ -131,17 +131,50 @@ class DatabaseManager:
                         deleted BOOLEAN NOT NULL DEFAULT FALSE,
                         thumbnail_url TEXT,
                         tag TEXT NOT NULL DEFAULT '',
-                        root_topic TEXT,
+                        root_community TEXT,
                         root_post_id TEXT,
                         comment_count INTEGER NOT NULL DEFAULT 0,
                         media TEXT NOT NULL DEFAULT '[]'
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'posts' AND column_name = 'topic'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'posts' AND column_name = 'community'
+                        ) THEN
+                            ALTER TABLE posts RENAME COLUMN topic TO community;
+                        END IF;
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'posts' AND column_name = 'root_topic'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'posts' AND column_name = 'root_community'
+                        ) THEN
+                            ALTER TABLE posts RENAME COLUMN root_topic TO root_community;
+                        END IF;
+                    END $$;
+                    """
+                )
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT ''")
-                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_topic TEXT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_community TEXT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_post_id TEXT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS protocol_version SMALLINT NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_txhash TEXT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS post_sequence NUMERIC(20,0)")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS created_height BIGINT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS created_epoch BIGINT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS author_was_paid_at_creation BOOLEAN")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_height BIGINT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_epoch BIGINT")
                 # v1.12.0: dedicated media field (JSON array of URLs)
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media TEXT NOT NULL DEFAULT '[]'")
                 # v1.18.0: relayer (validator/node address)
@@ -151,17 +184,15 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_owner_lower ON posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_target_lower ON posts(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_txhash_lower ON posts(LOWER(txhash))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_topic_lower ON posts(LOWER(topic))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_community_lower ON posts(LOWER(community))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root ON posts((COALESCE(target,'') = ''))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root_post_id ON posts(LOWER(root_post_id))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_relayer_lower ON posts(LOWER(relayer))")
-                # Root posts always have their own topic as root_topic and their
-                # own txhash as root_post_id; this backfill is idempotent.
                 cur.execute(
                     """
                     UPDATE posts
-                    SET root_topic = COALESCE(root_topic, topic),
+                    SET root_community = COALESCE(root_community, community),
                         root_post_id = COALESCE(root_post_id, txhash)
                     WHERE COALESCE(target, '') = ''
                     """
@@ -404,6 +435,13 @@ class DatabaseManager:
 
                 # v1.14.0: soft-delete support for MsgDeleteUser
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS effective_paid BOOLEAN NOT NULL DEFAULT FALSE")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS subscriber_quota_epoch BIGINT")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS subscriber_quota_used NUMERIC(20,0)")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_next_attempt BIGINT")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_last_attempt_epoch BIGINT")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_warning_expiry BIGINT")
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_warning_sent BOOLEAN NOT NULL DEFAULT FALSE")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_deleted_at ON profiles(deleted_at)")
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_profiles_username_active "
@@ -455,22 +493,21 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_followed_users_target_lower ON followed_users(LOWER(target))"
                 )
 
-                # followed_topics (for v1.5 social graph)
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS followed_topics (
+                    CREATE TABLE IF NOT EXISTS community_curation_preferences (
                         owner TEXT NOT NULL,
-                        topic TEXT NOT NULL,
-                        position INTEGER NOT NULL DEFAULT 0,
-                        PRIMARY KEY (owner, topic)
+                        community TEXT NOT NULL,
+                        mode SMALLINT NOT NULL DEFAULT 0 CHECK (mode IN (0,1,2)),
+                        pinned_team_id NUMERIC(20,0),
+                        updated_height BIGINT NOT NULL DEFAULT 0,
+                        PRIMARY KEY (owner, community),
+                        CHECK ((mode = 1 AND pinned_team_id IS NOT NULL) OR (mode <> 1 AND pinned_team_id IS NULL))
                     )
                     """
                 )
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_followed_topics_owner_lower ON followed_topics(LOWER(owner))"
-                )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_followed_topics_topic_lower ON followed_topics(LOWER(topic))"
+                    "CREATE INDEX IF NOT EXISTS idx_ccp_owner_lower ON community_curation_preferences(LOWER(owner))"
                 )
 
                 # blocked_posts (with position for order)
@@ -505,10 +542,21 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_owner_lower ON blocked_users(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_target_lower ON blocked_users(LOWER(target))")
 
-                # blocked_topics (with position for order)
+                # blocked_communities (was blocked_topics)
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS blocked_topics (
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'blocked_topics')
+                           AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'blocked_communities') THEN
+                            ALTER TABLE blocked_topics RENAME TO blocked_communities;
+                        END IF;
+                    END $$;
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS blocked_communities (
                         owner TEXT NOT NULL,
                         target TEXT NOT NULL,
                         position INTEGER NOT NULL DEFAULT 0,
@@ -516,10 +564,10 @@ class DatabaseManager:
                     )
                     """
                 )
-                cur.execute("ALTER TABLE blocked_topics ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_owner_lower ON blocked_topics(LOWER(owner))")
+                cur.execute("ALTER TABLE blocked_communities ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_communities_owner_lower ON blocked_communities(LOWER(owner))")
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))"
+                    "CREATE INDEX IF NOT EXISTS idx_blocked_communities_target_lower ON blocked_communities(LOWER(target))"
                 )
 
                 # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
@@ -710,12 +758,12 @@ class DatabaseManager:
                     INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
                     SELECT
                         LOWER(owner),
-                        LOWER(root_topic),
+                        LOWER(root_community),
                         0, 0, 0,
                         COUNT(*)
                     FROM posts
-                    WHERE root_topic IS NOT NULL AND root_topic != '' AND deleted = FALSE
-                    GROUP BY LOWER(owner), LOWER(root_topic)
+                    WHERE root_community IS NOT NULL AND root_community != '' AND deleted = FALSE
+                    GROUP BY LOWER(owner), LOWER(root_community)
                     ON CONFLICT (owner, topic) DO UPDATE SET
                         post_count = EXCLUDED.post_count
                     """
@@ -833,7 +881,7 @@ class DatabaseManager:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT topic, title, content, target, paid, COALESCE(thumbnail_url,''), created_at, COALESCE(media,'[]') FROM posts WHERE txhash = %s",
+                    "SELECT community, title, content, target, paid, COALESCE(thumbnail_url,''), created_at, COALESCE(media,'[]') FROM posts WHERE txhash = %s",
                     (txhash,),
                 )
                 return cur.fetchone()
@@ -862,9 +910,9 @@ class DatabaseManager:
                     cur.execute(
                         """
                         SELECT
-                            COALESCE(root_topic, ''),
+                            COALESCE(root_community, ''),
                             COALESCE(root_post_id, ''),
-                            COALESCE(topic, ''),
+                            COALESCE(community, ''),
                             COALESCE(target, ''),
                             deleted
                         FROM posts
@@ -899,7 +947,7 @@ class DatabaseManager:
                         cur.execute("SAVEPOINT root_topic_backfill")
                         try:
                             cur.execute(
-                                "UPDATE posts SET root_topic = %s, root_post_id = %s WHERE LOWER(txhash) = LOWER(%s)",
+                                "UPDATE posts SET root_community = %s, root_post_id = %s WHERE LOWER(txhash) = LOWER(%s)",
                                 (final_topic, final_root_id, current_id),
                             )
                         except Exception:
@@ -1021,7 +1069,7 @@ class DatabaseManager:
                     INSERT INTO posts(
                         txhash,
                         owner,
-                        topic,
+                        community,
                         title,
                         content,
                         target,
@@ -1031,7 +1079,7 @@ class DatabaseManager:
                         deleted,
                         thumbnail_url,
                         tag,
-                        root_topic,
+                        root_community,
                         root_post_id,
                         media,
                         relayer,
@@ -1040,7 +1088,7 @@ class DatabaseManager:
                     VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
-                      topic=EXCLUDED.topic,
+                      community=EXCLUDED.community,
                       title=EXCLUDED.title,
                       content=EXCLUDED.content,
                       target=EXCLUDED.target,
@@ -1050,7 +1098,7 @@ class DatabaseManager:
                       deleted=EXCLUDED.deleted,
                       thumbnail_url=EXCLUDED.thumbnail_url,
                       tag=EXCLUDED.tag,
-                      root_topic=COALESCE(EXCLUDED.root_topic, posts.root_topic),
+                      root_community=COALESCE(EXCLUDED.root_community, posts.root_community),
                       root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id),
                       media=EXCLUDED.media,
                       relayer=EXCLUDED.relayer,
@@ -1323,7 +1371,7 @@ class DatabaseManager:
                     FROM posts
                     WHERE COALESCE(target, '') = ''
                       AND deleted = FALSE
-                      AND LOWER(COALESCE(topic, '')) = %s
+                      AND LOWER(COALESCE(community, '')) = %s
                     """,
                     (topic_norm,),
                 )
@@ -1679,7 +1727,7 @@ class DatabaseManager:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT 1 FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s) LIMIT 1",
+                    "SELECT 1 FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s) LIMIT 1",
                     (owner_norm, topic_norm),
                 )
                 return cur.fetchone() is not None
@@ -1806,7 +1854,7 @@ class DatabaseManager:
         INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
             LOWER(v.owner),
-            LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)),
+            LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)),
             COUNT(*) FILTER (WHERE v.user_vote <> 0),
             COALESCE(SUM(CASE
                 WHEN v.user_vote > 0 THEN 1
@@ -1819,7 +1867,7 @@ class DatabaseManager:
         FROM votes v
         JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
         WHERE LOWER(v.owner) = ANY(%s)
-          AND LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) = ANY(%s)
+          AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
           AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
         GROUP BY 1, 2
     """
@@ -1828,12 +1876,12 @@ class DatabaseManager:
         INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
             LOWER(p.owner),
-            LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)),
+            LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)),
             0, 0, 0,
             COUNT(*)::int
         FROM posts p
         WHERE LOWER(p.owner) = ANY(%s)
-          AND LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) = ANY(%s)
+          AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
           AND COALESCE(p.deleted, FALSE) = FALSE
         GROUP BY 1, 2
         ON CONFLICT (owner, topic) DO UPDATE SET
@@ -1884,7 +1932,7 @@ class DatabaseManager:
                 # The root and every descendant share root_post_id, so the whole
                 # thread follows the root in one statement.
                 cur.execute(
-                    "UPDATE posts SET root_topic = %s WHERE LOWER(root_post_id) = %s",
+                    "UPDATE posts SET root_community = %s WHERE LOWER(root_post_id) = %s",
                     (new_norm, root_norm),
                 )
                 threads_moved = cur.rowcount
@@ -2216,18 +2264,18 @@ class DatabaseManager:
                     )
 
     def set_followed_topics(self, owner: str, topics: list[str]) -> None:
-        """Set followed topics for an owner (full replace from chain state)."""
+        """Replace joined-community preferences from historical followed-topic state."""
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                for pos, topic in enumerate(topics):
+                cur.execute("DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                for topic in topics:
                     cur.execute(
                         """
-                        INSERT INTO followed_topics(owner, topic, position)
-                        VALUES(%s, %s, %s)
-                        ON CONFLICT(owner, topic) DO NOTHING
+                        INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
+                        VALUES(%s, %s, 0, NULL, 0)
+                        ON CONFLICT(owner, community) DO NOTHING
                         """,
-                        (owner, topic, pos),
+                        (owner, topic),
                     )
 
     def follow_user(self, owner: str, target: str) -> None:
@@ -2258,49 +2306,44 @@ class DatabaseManager:
                 )
 
     def follow_topic(self, owner: str, topic: str) -> None:
-        """Follow a topic (add to followed_topics with next position, evict oldest beyond cap)."""
+        """Join a community (LIVE_DEFAULT). Historical MsgFollowTopic writes here on reindex."""
         topic = self._strip_nul(topic) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COALESCE(MAX(position), -1) + 1 FROM followed_topics WHERE LOWER(owner) = LOWER(%s)",
-                    (owner,),
-                )
-                pos = cur.fetchone()[0]
-                cur.execute(
                     """
-                    INSERT INTO followed_topics(owner, topic, position)
-                    VALUES(%s, %s, %s)
-                    ON CONFLICT(owner, topic) DO NOTHING
+                    INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
+                    VALUES(%s, %s, 0, NULL, 0)
+                    ON CONFLICT(owner, community) DO NOTHING
                     """,
-                    (owner, topic, pos),
+                    (owner, topic),
                 )
 
     def unfollow_topic(self, owner: str, topic: str) -> None:
-        """Unfollow a topic (remove from followed_topics)."""
+        """Leave a community."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
+                    "DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s)",
                     (owner, topic),
                 )
 
     def unfollow_topics_matching(self, owner: str, topic_pattern: str) -> int:
-        """Unfollow topics matching a glob pattern (* maps to SQL %)."""
+        """Leave communities matching a glob pattern (* maps to SQL %)."""
         pattern = str(topic_pattern or "").strip().lower()
         if not pattern:
-            raise ValueError("topic pattern cannot be empty")
+            raise ValueError("community pattern cannot be empty")
         with self._connect() as conn:
             with conn.cursor() as cur:
                 if "*" in pattern:
                     like_pat = pattern.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
                     cur.execute(
-                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) LIKE %s",
+                        "DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) LIKE %s",
                         (owner, like_pat),
                     )
                 else:
                     cur.execute(
-                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
+                        "DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s)",
                         (owner, pattern),
                     )
                 return int(cur.rowcount or 0)
@@ -2367,26 +2410,26 @@ class DatabaseManager:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COALESCE(MAX(position), -1) + 1 FROM blocked_topics WHERE LOWER(owner) = LOWER(%s)",
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM blocked_communities WHERE LOWER(owner) = LOWER(%s)",
                     (owner,),
                 )
                 pos = cur.fetchone()[0]
                 cur.execute(
                     """
-                    INSERT INTO blocked_topics(owner, target, position, blocked_at)
+                    INSERT INTO blocked_communities(owner, target, position, blocked_at)
                     VALUES(%s, %s, %s, %s)
                     ON CONFLICT(owner, target) DO NOTHING
                     """,
                     (owner, target, pos, int(blocked_at)),
                 )
-                self._evict_oldest(cur, "blocked_topics", "target", owner)
+                self._evict_oldest(cur, "blocked_communities", "target", owner)
 
     def unblock_topic(self, owner: str, target: str) -> None:
         """Unblock a topic (remove from blocked_topics)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM blocked_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
+                    "DELETE FROM blocked_communities WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
                     (owner, target),
                 )
 
@@ -2404,7 +2447,7 @@ class DatabaseManager:
                 # %, _ and the escape character itself, then translate the glob.
                 cur.execute(
                     """
-                    DELETE FROM blocked_topics
+                    DELETE FROM blocked_communities
                     WHERE LOWER(owner) = LOWER(%s)
                       AND LOWER(%s) LIKE LOWER(
                           REPLACE(REPLACE(REPLACE(REPLACE(target, '#', '##'), '%%', '#%%'), '_', '#_'), '*', '%%')
@@ -2437,7 +2480,7 @@ class DatabaseManager:
                 if was_deleted:
                     return 0
 
-                _RETURN_STANDING = " RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_topic, ''), topic))"
+                _RETURN_STANDING = " RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_community, ''), community))"
                 if owner is None:
                     cur.execute(
                         "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND deleted = FALSE" + _RETURN_STANDING,
@@ -2468,7 +2511,7 @@ class DatabaseManager:
                         UPDATE posts SET deleted = TRUE
                         WHERE txhash IN (SELECT tx FROM descendants)
                           AND deleted = FALSE
-                        RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_topic, ''), topic))
+                        RETURNING LOWER(owner), LOWER(COALESCE(NULLIF(root_community, ''), community))
                         """,
                         (target,),
                     )

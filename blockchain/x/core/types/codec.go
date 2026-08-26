@@ -9,61 +9,97 @@ import (
 	proto "github.com/cosmos/gogoproto/proto"
 )
 
-// RegisterInterfaces registers the x/core interfaces.
 func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
-	// Register message implementations for sdk.Msg interface
 	msgTypes := []sdk.Msg{
 		&MsgUpdateParams{},
 		&MsgPost{}, &MsgEdit{}, &MsgVote{}, &MsgSetUsername{},
-		&MsgEnableAgent{}, &MsgDisableAgent{}, &MsgSetAgents{},
 		&MsgFollowUser{}, &MsgUnfollowUser{},
-		&MsgFollowTopic{}, &MsgUnfollowTopic{},
+		&MsgJoinCommunity{}, &MsgLeaveCommunity{},
 		&MsgBlockPost{}, &MsgUnblockPost{},
 		&MsgBlockUser{}, &MsgUnblockUser{},
-		&MsgBlockTopic{}, &MsgUnblockTopic{},
+		&MsgBlockCommunity{}, &MsgUnblockCommunity{},
 		&MsgDelete{}, &MsgDeleteUser{}, &MsgSendTokens{}, &MsgSetLevel{},
 		&MsgPunishValidator{}, &MsgMintTokens{}, &MsgBurnTokens{}, &MsgSubscribe{},
 		&MsgSetAutoRenewal{},
-		// Award
 		&MsgAward{},
-		// Profile
 		&MsgSetBiography{},
-		// Agent overlays
-		&MsgAnnotate{},
+		&MsgCreateCommunity{}, &MsgSetCommunityMetadata{}, &MsgTransferCommunity{},
+		&MsgCreateCurationTeam{}, &MsgSetCurationTeamProfile{},
+		&MsgInviteCurator{}, &MsgRevokeCuratorInvite{},
+		&MsgAcceptCuratorInvite{}, &MsgDeclineCuratorInvite{},
+		&MsgLeaveCurationTeam{}, &MsgRemoveCurator{},
+		&MsgTransferCurationTeam{}, &MsgDeleteCurationTeam{},
+		&MsgSetCurationPreference{},
+		&MsgSetCurationPostHidden{}, &MsgSetCurationUserHidden{},
+		&MsgSetCurationThreadLocked{}, &MsgSetCurationSubscriberOnly{},
+		&MsgClaimCreatorRewards{},
+		&MsgGovCreateCommunity{}, &MsgGovSetCommunityFounder{},
+		&MsgGovCreateCurationTeam{}, &MsgGovSetCurationTeamOwner{},
+		&MsgGovSetCuratorMembership{}, &MsgGovSetCommunityPreference{},
+		&MsgGovSetCommunityBlock{}, &MsgGovSetCuratorInvitation{},
+		&MsgGovSetSubscriptionState{}, &MsgGovClaimCreatorRewards{},
 	}
 	registry.RegisterImplementations((*sdk.Msg)(nil), msgTypes...)
 
 	msgResponseTypes := []proto.Message{
 		&MsgUpdateParamsResponse{},
 		&MsgPostResponse{}, &MsgEditResponse{}, &MsgVoteResponse{}, &MsgSetUsernameResponse{},
-		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{}, &MsgSetAgentsResponse{},
 		&MsgFollowUserResponse{}, &MsgUnfollowUserResponse{},
-		&MsgFollowTopicResponse{}, &MsgUnfollowTopicResponse{},
+		&MsgJoinCommunityResponse{}, &MsgLeaveCommunityResponse{},
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},
 		&MsgBlockUserResponse{}, &MsgUnblockUserResponse{},
-		&MsgBlockTopicResponse{}, &MsgUnblockTopicResponse{},
+		&MsgBlockCommunityResponse{}, &MsgUnblockCommunityResponse{},
 		&MsgDeleteResponse{}, &MsgDeleteUserResponse{}, &MsgSendTokensResponse{}, &MsgSetLevelResponse{},
 		&MsgPunishValidatorResponse{}, &MsgMintTokensResponse{}, &MsgBurnTokensResponse{}, &MsgSubscribeResponse{},
 		&MsgSetAutoRenewalResponse{},
-		// Award
 		&MsgAwardResponse{},
-		// Profile
 		&MsgSetBiographyResponse{},
-		// Agent overlays
+		&MsgCreateCommunityResponse{}, &MsgSetCommunityMetadataResponse{}, &MsgTransferCommunityResponse{},
+		&MsgCreateCurationTeamResponse{}, &MsgSetCurationTeamProfileResponse{},
+		&MsgInviteCuratorResponse{}, &MsgRevokeCuratorInviteResponse{},
+		&MsgAcceptCuratorInviteResponse{}, &MsgDeclineCuratorInviteResponse{},
+		&MsgLeaveCurationTeamResponse{}, &MsgRemoveCuratorResponse{},
+		&MsgTransferCurationTeamResponse{}, &MsgDeleteCurationTeamResponse{},
+		&MsgSetCurationPreferenceResponse{},
+		&MsgSetCurationPostHiddenResponse{}, &MsgSetCurationUserHiddenResponse{},
+		&MsgSetCurationThreadLockedResponse{}, &MsgSetCurationSubscriberOnlyResponse{},
+		&MsgClaimCreatorRewardsResponse{},
+		&MsgGovCreateCommunityResponse{}, &MsgGovSetCommunityFounderResponse{},
+		&MsgGovCreateCurationTeamResponse{}, &MsgGovSetCurationTeamOwnerResponse{},
+		&MsgGovSetCuratorMembershipResponse{}, &MsgGovSetCommunityPreferenceResponse{},
+		&MsgGovSetCommunityBlockResponse{}, &MsgGovSetCuratorInvitationResponse{},
+		&MsgGovSetSubscriptionStateResponse{}, &MsgGovClaimCreatorRewardsResponse{},
+		// Historical decode-only responses.
+		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{}, &MsgSetAgentsResponse{},
+		&MsgFollowTopicResponse{}, &MsgUnfollowTopicResponse{},
+		&MsgBlockTopicResponse{}, &MsgUnblockTopicResponse{},
 		&MsgAnnotateResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
 
-	// Register legacy message types for backwards compatibility (decoding old transactions)
-	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgMintTo{})
-	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgFollowModerator{}, &MsgUnfollowModerator{})
-	registry.RegisterImplementations(
-		(*sdk.Msg)(nil),
-		&MsgBridgeBurn{},
-		&MsgBridgeAttest{},
-		&MsgBridgeMinted{},
-		&MsgBridgeAttestBurned{},
-		&MsgBridgeAttestMinted{},
+	// Decode-only historical message types (replay, genesis export, old TxMsgData).
+	registry.RegisterImplementations((*sdk.Msg)(nil),
+		&MsgEnableAgent{}, &MsgDisableAgent{}, &MsgSetAgents{},
+		&MsgFollowTopic{}, &MsgUnfollowTopic{},
+		&MsgBlockTopic{}, &MsgUnblockTopic{},
+		&MsgAnnotate{},
+		&MsgMintTo{},
+		&MsgFollowModerator{}, &MsgUnfollowModerator{},
+		&MsgBridgeBurn{}, &MsgBridgeAttest{}, &MsgBridgeMinted{},
+		&MsgBridgeAttestBurned{}, &MsgBridgeAttestMinted{},
 	)
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
+}
+
+func RetiredMsgTypeURLs() map[string]struct{} {
+	return map[string]struct{}{
+		sdk.MsgTypeURL(&MsgEnableAgent{}):   {},
+		sdk.MsgTypeURL(&MsgDisableAgent{}):  {},
+		sdk.MsgTypeURL(&MsgSetAgents{}):     {},
+		sdk.MsgTypeURL(&MsgFollowTopic{}):   {},
+		sdk.MsgTypeURL(&MsgUnfollowTopic{}): {},
+		sdk.MsgTypeURL(&MsgBlockTopic{}):    {},
+		sdk.MsgTypeURL(&MsgUnblockTopic{}):  {},
+		sdk.MsgTypeURL(&MsgAnnotate{}):      {},
+	}
 }

@@ -7,6 +7,7 @@ import "gogoproto/gogo.proto";
 import "google/api/annotations.proto";
 import "cosmos/base/query/v1beta1/pagination.proto";
 import "mirage/core/v1/params.proto";
+import "mirage/core/v1/community.proto";
 
 option go_package = "mirage/x/core/types";
 
@@ -30,6 +31,58 @@ service Query {
   // GetProfiles queries all profiles with pagination.
   rpc GetProfiles(QueryProfilesRequest) returns (QueryProfilesResponse) {
     option (google.api.http).get = "/mirage/core/v1/profiles";
+  }
+
+  rpc Community(QueryCommunityRequest) returns (QueryCommunityResponse) {
+    option (google.api.http).get = "/mirage/core/v1/community/{slug}";
+  }
+  rpc Communities(QueryCommunitiesRequest) returns (QueryCommunitiesResponse) {
+    option (google.api.http).get = "/mirage/core/v1/communities";
+  }
+  rpc FoundedCommunities(QueryFoundedCommunitiesRequest) returns (QueryFoundedCommunitiesResponse) {
+    option (google.api.http).get = "/mirage/core/v1/founded/{address}";
+  }
+  rpc CurationTeam(QueryCurationTeamRequest) returns (QueryCurationTeamResponse) {
+    option (google.api.http).get = "/mirage/core/v1/community/{community}/team/{team_id}";
+  }
+  rpc CurationTeams(QueryCurationTeamsRequest) returns (QueryCurationTeamsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/community/{community}/teams";
+  }
+  rpc CurationTeamMembers(QueryCurationTeamMembersRequest) returns (QueryCurationTeamMembersResponse) {
+    option (google.api.http).get = "/mirage/core/v1/community/{community}/team/{team_id}/members";
+  }
+  rpc PendingCuratorInvitations(QueryPendingCuratorInvitationsRequest) returns (QueryPendingCuratorInvitationsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/curation/invitations/{address}";
+  }
+  rpc CurationMemberships(QueryCurationMembershipsRequest) returns (QueryCurationMembershipsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/curation/memberships/{address}";
+  }
+  rpc CommunityPreference(QueryCommunityPreferenceRequest) returns (QueryCommunityPreferenceResponse) {
+    option (google.api.http).get = "/mirage/core/v1/community/{community}/preference/{owner}";
+  }
+  rpc PostMetadata(QueryPostMetadataRequest) returns (QueryPostMetadataResponse) {
+    option (google.api.http).get = "/mirage/core/v1/post/{txhash}";
+  }
+  rpc CreatorEpoch(QueryCreatorEpochRequest) returns (QueryCreatorEpochResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/epoch/{epoch_id}";
+  }
+  rpc CreatorAccruals(QueryCreatorAccrualsRequest) returns (QueryCreatorAccrualsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/accruals/{creator}";
+  }
+  rpc TargetEarnings(QueryTargetEarningsRequest) returns (QueryTargetEarningsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/target/{target}";
+  }
+  rpc SubscriptionTranches(QuerySubscriptionTranchesRequest) returns (QuerySubscriptionTranchesResponse) {
+    option (google.api.http).get = "/mirage/core/v1/subscription/tranches/{address}";
+  }
+  rpc SubscriptionRenewal(QuerySubscriptionRenewalRequest) returns (QuerySubscriptionRenewalResponse) {
+    option (google.api.http).get = "/mirage/core/v1/subscription/renewal/{address}";
+  }
+  rpc SubscriberQuota(QuerySubscriberQuotaRequest) returns (QuerySubscriberQuotaResponse) {
+    option (google.api.http).get = "/mirage/core/v1/subscription/quota/{address}";
+  }
+  rpc CreatorLiability(QueryCreatorLiabilityRequest) returns (QueryCreatorLiabilityResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/liability";
   }
 }
 
@@ -84,14 +137,15 @@ message QueryProfileResponse {
   string avatar = 10;
   string banner = 11;
   string flair = 18;
+  bool effective_paid = 19;
 
   // Lists (stored separately but returned together for convenience)
-  repeated string enabled_agents = 12;
+  reserved 12; // was enabled_agents
   repeated string followed_users = 13;
-  repeated string followed_topics = 14;
+  repeated string joined_communities = 14;
   repeated string blocked_users = 15;
   repeated string blocked_posts = 16;
-  repeated string blocked_topics = 17;
+  repeated string blocked_communities = 17;
 }
 
 // QueryProfilesRequest is the request type for the Query/Profiles RPC method.
@@ -104,3 +158,154 @@ message QueryProfilesResponse {
   repeated QueryProfileResponse profiles = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
 }
+
+message QueryCommunityRequest { string slug = 1; }
+message QueryCommunityResponse {
+  Community community = 1;
+  uint64 default_count = 2;
+}
+
+message QueryCommunitiesRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+message QueryCommunitiesResponse {
+  repeated Community communities = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryFoundedCommunitiesRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryFoundedCommunitiesResponse {
+  repeated Community communities = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryCurationTeamRequest {
+  string community = 1;
+  uint64 team_id = 2;
+}
+message QueryCurationTeamResponse { CurationTeam team = 1; }
+
+message QueryCurationTeamsRequest {
+  string community = 1;
+  bool include_deleted = 2;
+  cosmos.base.query.v1beta1.PageRequest pagination = 3;
+}
+message QueryCurationTeamsResponse {
+  repeated CurationTeam teams = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryCurationTeamMembersRequest {
+  string community = 1;
+  uint64 team_id = 2;
+  cosmos.base.query.v1beta1.PageRequest pagination = 3;
+}
+message QueryCurationTeamMembersResponse {
+  repeated CurationTeamMember members = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryPendingCuratorInvitationsRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message PendingCuratorInvitation {
+  string community = 1;
+  uint64 team_id = 2;
+  string invitee = 3;
+  string inviter = 4;
+}
+message QueryPendingCuratorInvitationsResponse {
+  repeated PendingCuratorInvitation invitations = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryCurationMembershipsRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message CurationMembership {
+  string community = 1;
+  uint64 team_id = 2;
+}
+message QueryCurationMembershipsResponse {
+  repeated CurationMembership memberships = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryCommunityPreferenceRequest {
+  string owner = 1;
+  string community = 2;
+}
+message QueryCommunityPreferenceResponse {
+  CommunityPreference stored = 1;
+  CurationPreferenceMode effective_mode = 2;
+  uint64 effective_team_id = 3;
+}
+
+message QueryPostMetadataRequest { string txhash = 1; }
+message QueryPostMetadataResponse { PostMetadata metadata = 1; }
+
+message QueryCreatorEpochRequest { int64 epoch_id = 1; }
+message QueryCreatorEpochResponse { CreatorEpoch epoch = 1; }
+
+message QueryCreatorAccrualsRequest {
+  string creator = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryCreatorAccrualsResponse {
+  repeated CreatorAccrual accruals = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryTargetEarningsRequest {
+  string target = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message TargetEarning {
+  int64 epoch_id = 1;
+  string target = 2;
+  string creator = 3;
+  uint64 upvote_units = 4;
+  uint64 direct_reply_units = 5;
+  string amount = 6;
+}
+message QueryTargetEarningsResponse {
+  repeated TargetEarning earnings = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySubscriptionTranchesRequest {
+  string address = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QuerySubscriptionTranchesResponse {
+  repeated SubscriptionTranche tranches = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QuerySubscriptionRenewalRequest { string address = 1; }
+message QuerySubscriptionRenewalResponse {
+  SubscriptionRenewalState state = 1;
+  uint32 curation_membership_count = 2;
+}
+
+message QuerySubscriberQuotaRequest { string address = 1; }
+message QuerySubscriberQuotaResponse {
+  int64 epoch = 1;
+  uint64 limit = 2;
+  uint64 used = 3;
+  uint64 remaining = 4;
+  int64 reset_at = 5;
+}
+
+message QueryCreatorLiabilityRequest {}
+message QueryCreatorLiabilityResponse {
+  string liability = 1;
+  string module_balance = 2;
+  string activation_surplus = 3;
+}
+

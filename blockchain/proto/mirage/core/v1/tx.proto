@@ -9,6 +9,7 @@ import "amino/amino.proto";
 import "gogoproto/gogo.proto";
 import "google/protobuf/field_mask.proto";
 import "mirage/core/v1/params.proto";
+import "mirage/core/v1/community.proto";
 
 // Msg defines the Msg service for the core module.
 service Msg {
@@ -30,26 +31,14 @@ service Msg {
   // SetUsername persists a username for the signer.
   rpc SetUsername(MsgSetUsername) returns (MsgSetUsernameResponse);
 
-  // EnableAgent adds an agent to the signer's enabled agents list (capped deque).
-  rpc EnableAgent(MsgEnableAgent) returns (MsgEnableAgentResponse);
-
-  // DisableAgent removes an agent from the signer's enabled agents list.
-  rpc DisableAgent(MsgDisableAgent) returns (MsgDisableAgentResponse);
-
-  // SetAgents atomically replaces the signer's enabled agents list (ordered).
-  rpc SetAgents(MsgSetAgents) returns (MsgSetAgentsResponse);
-
   // FollowUser adds a user to the signer's followed users list (capped deque).
   rpc FollowUser(MsgFollowUser) returns (MsgFollowUserResponse);
 
   // UnfollowUser removes a user from the signer's followed users list.
   rpc UnfollowUser(MsgUnfollowUser) returns (MsgUnfollowUserResponse);
 
-  // FollowTopic adds a topic to the signer's followed topics list (capped deque).
-  rpc FollowTopic(MsgFollowTopic) returns (MsgFollowTopicResponse);
-
-  // UnfollowTopic removes a topic from the signer's followed topics list.
-  rpc UnfollowTopic(MsgUnfollowTopic) returns (MsgUnfollowTopicResponse);
+  rpc JoinCommunity(MsgJoinCommunity) returns (MsgJoinCommunityResponse);
+  rpc LeaveCommunity(MsgLeaveCommunity) returns (MsgLeaveCommunityResponse);
 
   // BlockPost blocks a post txhash (persisted on-chain).
   rpc BlockPost(MsgBlockPost) returns (MsgBlockPostResponse);
@@ -63,11 +52,8 @@ service Msg {
   // UnblockUser unblocks a user address (persisted on-chain).
   rpc UnblockUser(MsgUnblockUser) returns (MsgUnblockUserResponse);
 
-  // BlockTopic blocks a topic (persisted on-chain).
-  rpc BlockTopic(MsgBlockTopic) returns (MsgBlockTopicResponse);
-
-  // UnblockTopic unblocks a topic (persisted on-chain).
-  rpc UnblockTopic(MsgUnblockTopic) returns (MsgUnblockTopicResponse);
+  rpc BlockCommunity(MsgBlockCommunity) returns (MsgBlockCommunityResponse);
+  rpc UnblockCommunity(MsgUnblockCommunity) returns (MsgUnblockCommunityResponse);
 
   // Delete marks a post or comment as deleted (only emits event for indexer).
   rpc Delete(MsgDelete) returns (MsgDeleteResponse);
@@ -103,8 +89,36 @@ service Msg {
   // SetBiography sets a biography for an address (subscriber-only feature).
   rpc SetBiography(MsgSetBiography) returns (MsgSetBiographyResponse);
 
-  // Annotate creates an agent overlay on an existing post (agent-tier only).
-  rpc Annotate(MsgAnnotate) returns (MsgAnnotateResponse);
+  rpc CreateCommunity(MsgCreateCommunity) returns (MsgCreateCommunityResponse);
+  rpc SetCommunityMetadata(MsgSetCommunityMetadata) returns (MsgSetCommunityMetadataResponse);
+  rpc TransferCommunity(MsgTransferCommunity) returns (MsgTransferCommunityResponse);
+  rpc CreateCurationTeam(MsgCreateCurationTeam) returns (MsgCreateCurationTeamResponse);
+  rpc SetCurationTeamProfile(MsgSetCurationTeamProfile) returns (MsgSetCurationTeamProfileResponse);
+  rpc InviteCurator(MsgInviteCurator) returns (MsgInviteCuratorResponse);
+  rpc RevokeCuratorInvite(MsgRevokeCuratorInvite) returns (MsgRevokeCuratorInviteResponse);
+  rpc AcceptCuratorInvite(MsgAcceptCuratorInvite) returns (MsgAcceptCuratorInviteResponse);
+  rpc DeclineCuratorInvite(MsgDeclineCuratorInvite) returns (MsgDeclineCuratorInviteResponse);
+  rpc LeaveCurationTeam(MsgLeaveCurationTeam) returns (MsgLeaveCurationTeamResponse);
+  rpc RemoveCurator(MsgRemoveCurator) returns (MsgRemoveCuratorResponse);
+  rpc TransferCurationTeam(MsgTransferCurationTeam) returns (MsgTransferCurationTeamResponse);
+  rpc DeleteCurationTeam(MsgDeleteCurationTeam) returns (MsgDeleteCurationTeamResponse);
+  rpc SetCurationPreference(MsgSetCurationPreference) returns (MsgSetCurationPreferenceResponse);
+  rpc SetCurationPostHidden(MsgSetCurationPostHidden) returns (MsgSetCurationPostHiddenResponse);
+  rpc SetCurationUserHidden(MsgSetCurationUserHidden) returns (MsgSetCurationUserHiddenResponse);
+  rpc SetCurationThreadLocked(MsgSetCurationThreadLocked) returns (MsgSetCurationThreadLockedResponse);
+  rpc SetCurationSubscriberOnly(MsgSetCurationSubscriberOnly) returns (MsgSetCurationSubscriberOnlyResponse);
+  rpc ClaimCreatorRewards(MsgClaimCreatorRewards) returns (MsgClaimCreatorRewardsResponse);
+
+  rpc GovCreateCommunity(MsgGovCreateCommunity) returns (MsgGovCreateCommunityResponse);
+  rpc GovSetCommunityFounder(MsgGovSetCommunityFounder) returns (MsgGovSetCommunityFounderResponse);
+  rpc GovCreateCurationTeam(MsgGovCreateCurationTeam) returns (MsgGovCreateCurationTeamResponse);
+  rpc GovSetCurationTeamOwner(MsgGovSetCurationTeamOwner) returns (MsgGovSetCurationTeamOwnerResponse);
+  rpc GovSetCuratorMembership(MsgGovSetCuratorMembership) returns (MsgGovSetCuratorMembershipResponse);
+  rpc GovSetCommunityPreference(MsgGovSetCommunityPreference) returns (MsgGovSetCommunityPreferenceResponse);
+  rpc GovSetCommunityBlock(MsgGovSetCommunityBlock) returns (MsgGovSetCommunityBlockResponse);
+  rpc GovSetCuratorInvitation(MsgGovSetCuratorInvitation) returns (MsgGovSetCuratorInvitationResponse);
+  rpc GovSetSubscriptionState(MsgGovSetSubscriptionState) returns (MsgGovSetSubscriptionStateResponse);
+  rpc GovClaimCreatorRewards(MsgGovClaimCreatorRewards) returns (MsgGovClaimCreatorRewardsResponse);
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
@@ -150,11 +164,12 @@ message MsgPost {
 
   // Payload
   string target = 100;
-  string topic = 101;
+  string community = 101;
   string title = 102;
   string content = 103;
   string tag = 104;
   repeated string media = 105;
+  uint32 protocol_version = 106;
 }
 
 message MsgPostResponse {}
@@ -178,7 +193,7 @@ message MsgEdit {
 
   // Payload
   string target = 100;
-  string topic = 101;
+  string community = 101;
   string title = 102;
   string content = 103;
   string tag = 104;
@@ -723,9 +738,8 @@ message MsgSubscribe {
 
   // Payload
   uint32 level = 100;
-
-  // Optional: recipient address for gifting (omit or empty for self-subscribe)
   string target = 101;
+  uint32 period_count = 102;
 }
 
 message MsgSubscribeResponse {}
@@ -830,3 +844,502 @@ message MsgAnnotate {
 }
 
 message MsgAnnotateResponse {}
+
+// v1.39 community / curation / creator messages. Historical agent/topic
+// messages remain in tx.proto for decode-only registration.
+
+message MsgCreateCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  string title = 101;
+  string description = 102;
+  string original_team_name = 103;
+  string bio = 104;
+  string policy = 105;
+}
+
+message MsgCreateCommunityResponse {}
+
+message MsgSetCommunityMetadata {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  string title = 101;
+  string description = 102;
+}
+
+message MsgSetCommunityMetadataResponse {}
+
+message MsgTransferCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  string new_founder = 101;
+}
+
+message MsgTransferCommunityResponse {}
+
+message MsgJoinCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+}
+
+message MsgJoinCommunityResponse {}
+
+message MsgLeaveCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+}
+
+message MsgLeaveCommunityResponse {}
+
+message MsgBlockCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string target = 100;
+  string community = 101;
+}
+
+message MsgBlockCommunityResponse {}
+
+message MsgUnblockCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string target = 100;
+  string community = 101;
+}
+
+message MsgUnblockCommunityResponse {}
+
+message MsgCreateCurationTeam {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  string name = 101;
+  string bio = 102;
+  string policy = 103;
+}
+
+message MsgCreateCurationTeamResponse {}
+
+message MsgSetCurationTeamProfile {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string name = 102;
+  string bio = 103;
+  string policy = 104;
+}
+
+message MsgSetCurationTeamProfileResponse {}
+
+message MsgInviteCurator {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string target = 102;
+}
+
+message MsgInviteCuratorResponse {}
+
+message MsgRevokeCuratorInvite {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string target = 102;
+}
+
+message MsgRevokeCuratorInviteResponse {}
+
+message MsgAcceptCuratorInvite {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+}
+
+message MsgAcceptCuratorInviteResponse {}
+
+message MsgDeclineCuratorInvite {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+}
+
+message MsgDeclineCuratorInviteResponse {}
+
+message MsgLeaveCurationTeam {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+}
+
+message MsgLeaveCurationTeamResponse {}
+
+message MsgRemoveCurator {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string target = 102;
+}
+
+message MsgRemoveCuratorResponse {}
+
+message MsgTransferCurationTeam {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string new_owner = 102;
+}
+
+message MsgTransferCurationTeamResponse {}
+
+message MsgDeleteCurationTeam {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+}
+
+message MsgDeleteCurationTeamResponse {}
+
+message MsgSetCurationPreference {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  CurationPreferenceMode mode = 101;
+  uint64 pinned_team_id = 102;
+}
+
+message MsgSetCurationPreferenceResponse {}
+
+message MsgSetCurationPostHidden {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string target = 102;
+  bool hidden = 103;
+}
+
+message MsgSetCurationPostHiddenResponse {}
+
+message MsgSetCurationUserHidden {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string target = 102;
+  bool hidden = 103;
+}
+
+message MsgSetCurationUserHiddenResponse {}
+
+message MsgSetCurationThreadLocked {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  string root_hash = 102;
+  bool locked = 103;
+}
+
+message MsgSetCurationThreadLockedResponse {}
+
+message MsgSetCurationSubscriberOnly {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  string community = 100;
+  uint64 team_id = 101;
+  bool enabled = 102;
+}
+
+message MsgSetCurationSubscriberOnlyResponse {}
+
+message MsgClaimCreatorRewards {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  uint64 envelope_nonce = 7;
+  bytes envelope_signature = 10;
+  repeated int64 epoch_ids = 100;
+}
+
+message MsgClaimCreatorRewardsResponse {}
+
+message MsgGovCreateCommunity {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  string founder = 3;
+  string title = 4;
+  string description = 5;
+  string original_team_name = 6;
+  string bio = 7;
+  string policy = 8;
+}
+
+message MsgGovCreateCommunityResponse {}
+
+message MsgGovSetCommunityFounder {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  string new_founder = 3;
+}
+
+message MsgGovSetCommunityFounderResponse {}
+
+message MsgGovCreateCurationTeam {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  string owner = 3;
+  string name = 4;
+  string bio = 5;
+  string policy = 6;
+}
+
+message MsgGovCreateCurationTeamResponse {}
+
+message MsgGovSetCurationTeamOwner {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  uint64 team_id = 3;
+  string new_owner = 4;
+}
+
+message MsgGovSetCurationTeamOwnerResponse {}
+
+message MsgGovSetCuratorMembership {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  uint64 team_id = 3;
+  string target = 4;
+  bool present = 5;
+}
+
+message MsgGovSetCuratorMembershipResponse {}
+
+message MsgGovSetCommunityPreference {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string owner = 2;
+  string community = 3;
+  bool present = 4;
+  CurationPreferenceMode mode = 5;
+  uint64 team_id = 6;
+}
+
+message MsgGovSetCommunityPreferenceResponse {}
+
+message MsgGovSetCommunityBlock {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string owner = 2;
+  string community = 3;
+  bool blocked = 4;
+}
+
+message MsgGovSetCommunityBlockResponse {}
+
+message MsgGovSetCuratorInvitation {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string community = 2;
+  uint64 team_id = 3;
+  string invitee = 4;
+  CuratorInvitationAction action = 5;
+}
+
+message MsgGovSetCuratorInvitationResponse {}
+
+message MsgGovSetSubscriptionState {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string user = 2;
+  bool subscribed = 3;
+  int64 nominal_expiry = 4;
+  bool auto_renew = 5;
+}
+
+message MsgGovSetSubscriptionStateResponse {}
+
+message MsgGovClaimCreatorRewards {
+  option (cosmos.msg.v1.signer) = "authority";
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+  string creator = 2;
+  repeated int64 epoch_ids = 3;
+}
+
+message MsgGovClaimCreatorRewardsResponse {}

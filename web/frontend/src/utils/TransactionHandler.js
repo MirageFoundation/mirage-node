@@ -2704,7 +2704,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgPost
-    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, media, nonce }) {
+    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, community, title, content, tag, media, nonce, protocol_version }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2759,7 +2759,7 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
+            tag101, encStr(community || topic || ""),
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
@@ -2769,6 +2769,8 @@ class TransactionHandler {
             parts.push(tag105);
             parts.push(encStr(m));
         }
+        parts.push(Uint8Array.from([106]));
+        parts.push(uvarint((protocol_version == null ? 1 : protocol_version) >>> 0));
         return concat(...parts);
     }
 
@@ -4561,7 +4563,7 @@ class TransactionHandler {
                 endpoint = 'core/report';
             } else if (msgName === 'MsgPost') {
                 // Sign relay for post
-                const topic = transaction.topic || "";
+                const topic = transaction.community || transaction.topic || "";
                 const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
@@ -4570,12 +4572,14 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    community: topic,
                     topic: topic,
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
                     media: mediaArr,
                     nonce: envelopeNonce,
+                    protocol_version: 1,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4585,6 +4589,8 @@ class TransactionHandler {
                     ...toRelay,
                     signature: sigB64,
                     topic: topic,
+                    community: topic,
+                    protocol_version: 1,
                     tag: transaction.tag || "",
                     media: mediaArr,
                 };
@@ -5310,7 +5316,7 @@ class TransactionHandler {
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
                 const tag105 = Uint8Array.from([105]); // media (v1.12.0)
-                const topic = transaction.topic || "";
+                const topic = transaction.community || transaction.topic || "";
                 const mediaParts = [];
                 for (const m of (transaction.media || [])) {
                     mediaParts.push(tag105);
@@ -5329,6 +5335,7 @@ class TransactionHandler {
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
                     ...mediaParts,
+                    Uint8Array.from([106]), uvarint(1),
                 );
             } else if (action === 'enable_agent' || action === 'disable_agent') {
                 const prefix = new TextEncoder().encode(

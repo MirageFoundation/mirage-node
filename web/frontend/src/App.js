@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate, Navigate, useParams } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { ThemeProvider } from 'styled-components';
 import Storage from './utils/Storage';
@@ -93,9 +93,7 @@ const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
 const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
 const FollowsView = lazyWithRetry(() => import('./views/FollowsView'));
 const BlocksView = lazyWithRetry(() => import('./views/BlocksView'));
-const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const FAQView = lazyWithRetry(() => import('./views/FAQView'));
-const ReferralsView = lazyWithRetry(() => import('./views/ReferralsView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = typeof __MIRAGE_APP_VERSION__ === 'string' ? __MIRAGE_APP_VERSION__ : '';
 
@@ -113,23 +111,29 @@ const excludedRoutes = [
 const restorableRoutePrefixes = [
     '/home',
     '/following',
+    '/c/',
     '/t/',
     '/profile',
     '/u/',
     '/settings',
     '/follows',
     '/blocks',
-    '/agents',
     '/faq',
     '/subscription',
     '/network',
     '/server',
     '/reports',
     '/inbox',
+    '/communities',
     '/topics',
     '/stats',
     '/search',
 ];
+
+function TopicToCommunityRedirect() {
+    const { topic } = useParams();
+    return <Navigate to={`/c/${topic || ''}`} replace />;
+}
 
 // Component to track and restore the last route
 function RouteTracker({ children }) {
@@ -1123,9 +1127,10 @@ class App extends Component {
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="following" />}
                                             />
                                             <Route
-                                                path="/t/:topic"
+                                                path="/c/:topic"
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} />}
                                             />
+                                            <Route path="/t/:topic" element={<TopicToCommunityRedirect />} />
 
                                             <Route path="/create_post" element={<CreatePostView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} />} />
                                             <Route path="/signup" element={<CreateAccountView state={this.state} setCredentials={this.setCredentials} />} />
@@ -1139,7 +1144,7 @@ class App extends Component {
 
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />
-                                            <Route path="/agents" element={<AgentsView state={this.state} />} />
+                                            <Route path="/agents" element={<Navigate to="/home" replace />} />
                                             <Route path="/faq" element={<FAQView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
@@ -1147,11 +1152,12 @@ class App extends Component {
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
-                                            <Route path="/topics" element={<DiscoverView state={this.state} />} />
+                                            <Route path="/communities" element={<DiscoverView state={this.state} />} />
+                                            <Route path="/topics" element={<Navigate to="/communities" replace />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
-                                            <Route path="/referrals" element={<ReferralsView state={this.state} />} />
-                                            <Route path="/referrals/:address" element={<ReferralsView state={this.state} />} />
+                                            <Route path="/referrals" element={<Navigate to="/home" replace />} />
+                                            <Route path="/referrals/:address" element={<Navigate to="/home" replace />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>

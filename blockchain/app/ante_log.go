@@ -55,9 +55,9 @@ func (d LoggingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 		case *coretypes.MsgSetAgents:
 			logger.Info("--> Tx SetAgents", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "count", len(m.Agents))
 		case *coretypes.MsgPost:
-			logger.Info("--> Tx Post", "phase", phase, "tx", hash, "signer", m.Authority, "topic", m.Topic, "target", m.Target, "tag", m.Tag)
+			logger.Info("--> Tx Post", "phase", phase, "tx", hash, "signer", m.Authority, "community", m.Community, "target", m.Target, "tag", m.Tag)
 		case *coretypes.MsgEdit:
-			logger.Info("--> Tx Edit", "phase", phase, "tx", hash, "signer", m.Authority, "topic", m.Topic, "target", m.Target, "tag", m.Tag)
+			logger.Info("--> Tx Edit", "phase", phase, "tx", hash, "signer", m.Authority, "community", m.Community, "target", m.Target, "tag", m.Tag)
 		case *coretypes.MsgVote:
 			logger.Info("--> Tx Vote", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "direction", m.Direction)
 		case *coretypes.MsgFollowUser:

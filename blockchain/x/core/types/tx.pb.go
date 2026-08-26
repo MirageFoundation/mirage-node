@@ -153,12 +153,13 @@ type MsgPost struct {
 	// tags 8-9 reserved
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
-	Target  string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
-	Topic   string   `protobuf:"bytes,101,opt,name=topic,proto3" json:"topic,omitempty"`
-	Title   string   `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
-	Content string   `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
-	Tag     string   `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
-	Media   []string `protobuf:"bytes,105,rep,name=media,proto3" json:"media,omitempty"`
+	Target          string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
+	Community       string   `protobuf:"bytes,101,opt,name=community,proto3" json:"community,omitempty"`
+	Title           string   `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
+	Content         string   `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
+	Tag             string   `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
+	Media           []string `protobuf:"bytes,105,rep,name=media,proto3" json:"media,omitempty"`
+	ProtocolVersion uint32   `protobuf:"varint,106,opt,name=protocol_version,json=protocolVersion,proto3" json:"protocol_version,omitempty"`
 }
 
 func (m *MsgPost) Reset()         { *m = MsgPost{} }
@@ -257,9 +258,9 @@ func (m *MsgPost) GetTarget() string {
 	return ""
 }
 
-func (m *MsgPost) GetTopic() string {
+func (m *MsgPost) GetCommunity() string {
 	if m != nil {
-		return m.Topic
+		return m.Community
 	}
 	return ""
 }
@@ -290,6 +291,13 @@ func (m *MsgPost) GetMedia() []string {
 		return m.Media
 	}
 	return nil
+}
+
+func (m *MsgPost) GetProtocolVersion() uint32 {
+	if m != nil {
+		return m.ProtocolVersion
+	}
+	return 0
 }
 
 type MsgPostResponse struct {
@@ -342,13 +350,13 @@ type MsgEdit struct {
 	// tags 8-9 reserved
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
-	Target   string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
-	Topic    string   `protobuf:"bytes,101,opt,name=topic,proto3" json:"topic,omitempty"`
-	Title    string   `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
-	Content  string   `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
-	Tag      string   `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
-	Override string   `protobuf:"bytes,105,opt,name=override,proto3" json:"override,omitempty"`
-	Media    []string `protobuf:"bytes,106,rep,name=media,proto3" json:"media,omitempty"`
+	Target    string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
+	Community string   `protobuf:"bytes,101,opt,name=community,proto3" json:"community,omitempty"`
+	Title     string   `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
+	Content   string   `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
+	Tag       string   `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
+	Override  string   `protobuf:"bytes,105,opt,name=override,proto3" json:"override,omitempty"`
+	Media     []string `protobuf:"bytes,106,rep,name=media,proto3" json:"media,omitempty"`
 }
 
 func (m *MsgEdit) Reset()         { *m = MsgEdit{} }
@@ -447,9 +455,9 @@ func (m *MsgEdit) GetTarget() string {
 	return ""
 }
 
-func (m *MsgEdit) GetTopic() string {
+func (m *MsgEdit) GetCommunity() string {
 	if m != nil {
-		return m.Topic
+		return m.Community
 	}
 	return ""
 }
@@ -3829,9 +3837,9 @@ type MsgSubscribe struct {
 	// tags 8-9 reserved
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
-	Level uint32 `protobuf:"varint,100,opt,name=level,proto3" json:"level,omitempty"`
-	// Optional: recipient address for gifting (omit or empty for self-subscribe)
-	Target string `protobuf:"bytes,101,opt,name=target,proto3" json:"target,omitempty"`
+	Level       uint32 `protobuf:"varint,100,opt,name=level,proto3" json:"level,omitempty"`
+	Target      string `protobuf:"bytes,101,opt,name=target,proto3" json:"target,omitempty"`
+	PeriodCount uint32 `protobuf:"varint,102,opt,name=period_count,json=periodCount,proto3" json:"period_count,omitempty"`
 }
 
 func (m *MsgSubscribe) Reset()         { *m = MsgSubscribe{} }
@@ -3935,6 +3943,13 @@ func (m *MsgSubscribe) GetTarget() string {
 		return m.Target
 	}
 	return ""
+}
+
+func (m *MsgSubscribe) GetPeriodCount() uint32 {
+	if m != nil {
+		return m.PeriodCount
+	}
+	return 0
 }
 
 type MsgSubscribeResponse struct {
@@ -4634,6 +4649,4766 @@ func (m *MsgAnnotateResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgAnnotateResponse proto.InternalMessageInfo
 
+type MsgCreateCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	Title              string `protobuf:"bytes,101,opt,name=title,proto3" json:"title,omitempty"`
+	Description        string `protobuf:"bytes,102,opt,name=description,proto3" json:"description,omitempty"`
+	OriginalTeamName   string `protobuf:"bytes,103,opt,name=original_team_name,json=originalTeamName,proto3" json:"original_team_name,omitempty"`
+	Bio                string `protobuf:"bytes,104,opt,name=bio,proto3" json:"bio,omitempty"`
+	Policy             string `protobuf:"bytes,105,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (m *MsgCreateCommunity) Reset()         { *m = MsgCreateCommunity{} }
+func (m *MsgCreateCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgCreateCommunity) ProtoMessage()    {}
+func (*MsgCreateCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{60}
+}
+func (m *MsgCreateCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCreateCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCreateCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCreateCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCreateCommunity.Merge(m, src)
+}
+func (m *MsgCreateCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCreateCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCreateCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCreateCommunity proto.InternalMessageInfo
+
+func (m *MsgCreateCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgCreateCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgCreateCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgCreateCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgCreateCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgCreateCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgCreateCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgCreateCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetTitle() string {
+	if m != nil {
+		return m.Title
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetDescription() string {
+	if m != nil {
+		return m.Description
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetOriginalTeamName() string {
+	if m != nil {
+		return m.OriginalTeamName
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetBio() string {
+	if m != nil {
+		return m.Bio
+	}
+	return ""
+}
+
+func (m *MsgCreateCommunity) GetPolicy() string {
+	if m != nil {
+		return m.Policy
+	}
+	return ""
+}
+
+type MsgCreateCommunityResponse struct {
+}
+
+func (m *MsgCreateCommunityResponse) Reset()         { *m = MsgCreateCommunityResponse{} }
+func (m *MsgCreateCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgCreateCommunityResponse) ProtoMessage()    {}
+func (*MsgCreateCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{61}
+}
+func (m *MsgCreateCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCreateCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCreateCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCreateCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCreateCommunityResponse.Merge(m, src)
+}
+func (m *MsgCreateCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCreateCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCreateCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCreateCommunityResponse proto.InternalMessageInfo
+
+type MsgSetCommunityMetadata struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	Title              string `protobuf:"bytes,101,opt,name=title,proto3" json:"title,omitempty"`
+	Description        string `protobuf:"bytes,102,opt,name=description,proto3" json:"description,omitempty"`
+}
+
+func (m *MsgSetCommunityMetadata) Reset()         { *m = MsgSetCommunityMetadata{} }
+func (m *MsgSetCommunityMetadata) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCommunityMetadata) ProtoMessage()    {}
+func (*MsgSetCommunityMetadata) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{62}
+}
+func (m *MsgSetCommunityMetadata) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCommunityMetadata) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCommunityMetadata.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCommunityMetadata) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCommunityMetadata.Merge(m, src)
+}
+func (m *MsgSetCommunityMetadata) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCommunityMetadata) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCommunityMetadata.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCommunityMetadata proto.InternalMessageInfo
+
+func (m *MsgSetCommunityMetadata) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCommunityMetadata) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCommunityMetadata) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCommunityMetadata) GetTitle() string {
+	if m != nil {
+		return m.Title
+	}
+	return ""
+}
+
+func (m *MsgSetCommunityMetadata) GetDescription() string {
+	if m != nil {
+		return m.Description
+	}
+	return ""
+}
+
+type MsgSetCommunityMetadataResponse struct {
+}
+
+func (m *MsgSetCommunityMetadataResponse) Reset()         { *m = MsgSetCommunityMetadataResponse{} }
+func (m *MsgSetCommunityMetadataResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCommunityMetadataResponse) ProtoMessage()    {}
+func (*MsgSetCommunityMetadataResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{63}
+}
+func (m *MsgSetCommunityMetadataResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCommunityMetadataResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCommunityMetadataResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCommunityMetadataResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCommunityMetadataResponse.Merge(m, src)
+}
+func (m *MsgSetCommunityMetadataResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCommunityMetadataResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCommunityMetadataResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCommunityMetadataResponse proto.InternalMessageInfo
+
+type MsgTransferCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	NewFounder         string `protobuf:"bytes,101,opt,name=new_founder,json=newFounder,proto3" json:"new_founder,omitempty"`
+}
+
+func (m *MsgTransferCommunity) Reset()         { *m = MsgTransferCommunity{} }
+func (m *MsgTransferCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgTransferCommunity) ProtoMessage()    {}
+func (*MsgTransferCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{64}
+}
+func (m *MsgTransferCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgTransferCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgTransferCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgTransferCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgTransferCommunity.Merge(m, src)
+}
+func (m *MsgTransferCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgTransferCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgTransferCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgTransferCommunity proto.InternalMessageInfo
+
+func (m *MsgTransferCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgTransferCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgTransferCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgTransferCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgTransferCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgTransferCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgTransferCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgTransferCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgTransferCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgTransferCommunity) GetNewFounder() string {
+	if m != nil {
+		return m.NewFounder
+	}
+	return ""
+}
+
+type MsgTransferCommunityResponse struct {
+}
+
+func (m *MsgTransferCommunityResponse) Reset()         { *m = MsgTransferCommunityResponse{} }
+func (m *MsgTransferCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgTransferCommunityResponse) ProtoMessage()    {}
+func (*MsgTransferCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{65}
+}
+func (m *MsgTransferCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgTransferCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgTransferCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgTransferCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgTransferCommunityResponse.Merge(m, src)
+}
+func (m *MsgTransferCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgTransferCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgTransferCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgTransferCommunityResponse proto.InternalMessageInfo
+
+type MsgJoinCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+}
+
+func (m *MsgJoinCommunity) Reset()         { *m = MsgJoinCommunity{} }
+func (m *MsgJoinCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgJoinCommunity) ProtoMessage()    {}
+func (*MsgJoinCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{66}
+}
+func (m *MsgJoinCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgJoinCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgJoinCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgJoinCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgJoinCommunity.Merge(m, src)
+}
+func (m *MsgJoinCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgJoinCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgJoinCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgJoinCommunity proto.InternalMessageInfo
+
+func (m *MsgJoinCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgJoinCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgJoinCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgJoinCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgJoinCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgJoinCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgJoinCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgJoinCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgJoinCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+type MsgJoinCommunityResponse struct {
+}
+
+func (m *MsgJoinCommunityResponse) Reset()         { *m = MsgJoinCommunityResponse{} }
+func (m *MsgJoinCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgJoinCommunityResponse) ProtoMessage()    {}
+func (*MsgJoinCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{67}
+}
+func (m *MsgJoinCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgJoinCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgJoinCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgJoinCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgJoinCommunityResponse.Merge(m, src)
+}
+func (m *MsgJoinCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgJoinCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgJoinCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgJoinCommunityResponse proto.InternalMessageInfo
+
+type MsgLeaveCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+}
+
+func (m *MsgLeaveCommunity) Reset()         { *m = MsgLeaveCommunity{} }
+func (m *MsgLeaveCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgLeaveCommunity) ProtoMessage()    {}
+func (*MsgLeaveCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{68}
+}
+func (m *MsgLeaveCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgLeaveCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgLeaveCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgLeaveCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgLeaveCommunity.Merge(m, src)
+}
+func (m *MsgLeaveCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgLeaveCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgLeaveCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgLeaveCommunity proto.InternalMessageInfo
+
+func (m *MsgLeaveCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgLeaveCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgLeaveCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+type MsgLeaveCommunityResponse struct {
+}
+
+func (m *MsgLeaveCommunityResponse) Reset()         { *m = MsgLeaveCommunityResponse{} }
+func (m *MsgLeaveCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgLeaveCommunityResponse) ProtoMessage()    {}
+func (*MsgLeaveCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{69}
+}
+func (m *MsgLeaveCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgLeaveCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgLeaveCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgLeaveCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgLeaveCommunityResponse.Merge(m, src)
+}
+func (m *MsgLeaveCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgLeaveCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgLeaveCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgLeaveCommunityResponse proto.InternalMessageInfo
+
+type MsgBlockCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Target             string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
+	Community          string `protobuf:"bytes,101,opt,name=community,proto3" json:"community,omitempty"`
+}
+
+func (m *MsgBlockCommunity) Reset()         { *m = MsgBlockCommunity{} }
+func (m *MsgBlockCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgBlockCommunity) ProtoMessage()    {}
+func (*MsgBlockCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{70}
+}
+func (m *MsgBlockCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgBlockCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgBlockCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgBlockCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBlockCommunity.Merge(m, src)
+}
+func (m *MsgBlockCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgBlockCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBlockCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgBlockCommunity proto.InternalMessageInfo
+
+func (m *MsgBlockCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgBlockCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgBlockCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgBlockCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgBlockCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgBlockCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgBlockCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgBlockCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgBlockCommunity) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+func (m *MsgBlockCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+type MsgBlockCommunityResponse struct {
+}
+
+func (m *MsgBlockCommunityResponse) Reset()         { *m = MsgBlockCommunityResponse{} }
+func (m *MsgBlockCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgBlockCommunityResponse) ProtoMessage()    {}
+func (*MsgBlockCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{71}
+}
+func (m *MsgBlockCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgBlockCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgBlockCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgBlockCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBlockCommunityResponse.Merge(m, src)
+}
+func (m *MsgBlockCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgBlockCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBlockCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgBlockCommunityResponse proto.InternalMessageInfo
+
+type MsgUnblockCommunity struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Target             string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
+	Community          string `protobuf:"bytes,101,opt,name=community,proto3" json:"community,omitempty"`
+}
+
+func (m *MsgUnblockCommunity) Reset()         { *m = MsgUnblockCommunity{} }
+func (m *MsgUnblockCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgUnblockCommunity) ProtoMessage()    {}
+func (*MsgUnblockCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{72}
+}
+func (m *MsgUnblockCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgUnblockCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgUnblockCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgUnblockCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgUnblockCommunity.Merge(m, src)
+}
+func (m *MsgUnblockCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgUnblockCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgUnblockCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgUnblockCommunity proto.InternalMessageInfo
+
+func (m *MsgUnblockCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgUnblockCommunity) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgUnblockCommunity) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+func (m *MsgUnblockCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+type MsgUnblockCommunityResponse struct {
+}
+
+func (m *MsgUnblockCommunityResponse) Reset()         { *m = MsgUnblockCommunityResponse{} }
+func (m *MsgUnblockCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgUnblockCommunityResponse) ProtoMessage()    {}
+func (*MsgUnblockCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{73}
+}
+func (m *MsgUnblockCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgUnblockCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgUnblockCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgUnblockCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgUnblockCommunityResponse.Merge(m, src)
+}
+func (m *MsgUnblockCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgUnblockCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgUnblockCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgUnblockCommunityResponse proto.InternalMessageInfo
+
+type MsgCreateCurationTeam struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	Name               string `protobuf:"bytes,101,opt,name=name,proto3" json:"name,omitempty"`
+	Bio                string `protobuf:"bytes,102,opt,name=bio,proto3" json:"bio,omitempty"`
+	Policy             string `protobuf:"bytes,103,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (m *MsgCreateCurationTeam) Reset()         { *m = MsgCreateCurationTeam{} }
+func (m *MsgCreateCurationTeam) String() string { return proto.CompactTextString(m) }
+func (*MsgCreateCurationTeam) ProtoMessage()    {}
+func (*MsgCreateCurationTeam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{74}
+}
+func (m *MsgCreateCurationTeam) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCreateCurationTeam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCreateCurationTeam.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCreateCurationTeam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCreateCurationTeam.Merge(m, src)
+}
+func (m *MsgCreateCurationTeam) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCreateCurationTeam) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCreateCurationTeam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCreateCurationTeam proto.InternalMessageInfo
+
+func (m *MsgCreateCurationTeam) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgCreateCurationTeam) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgCreateCurationTeam) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgCreateCurationTeam) GetName() string {
+	if m != nil {
+		return m.Name
+	}
+	return ""
+}
+
+func (m *MsgCreateCurationTeam) GetBio() string {
+	if m != nil {
+		return m.Bio
+	}
+	return ""
+}
+
+func (m *MsgCreateCurationTeam) GetPolicy() string {
+	if m != nil {
+		return m.Policy
+	}
+	return ""
+}
+
+type MsgCreateCurationTeamResponse struct {
+}
+
+func (m *MsgCreateCurationTeamResponse) Reset()         { *m = MsgCreateCurationTeamResponse{} }
+func (m *MsgCreateCurationTeamResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgCreateCurationTeamResponse) ProtoMessage()    {}
+func (*MsgCreateCurationTeamResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{75}
+}
+func (m *MsgCreateCurationTeamResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgCreateCurationTeamResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgCreateCurationTeamResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgCreateCurationTeamResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgCreateCurationTeamResponse.Merge(m, src)
+}
+func (m *MsgCreateCurationTeamResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgCreateCurationTeamResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgCreateCurationTeamResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgCreateCurationTeamResponse proto.InternalMessageInfo
+
+type MsgSetCurationTeamProfile struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Name               string `protobuf:"bytes,102,opt,name=name,proto3" json:"name,omitempty"`
+	Bio                string `protobuf:"bytes,103,opt,name=bio,proto3" json:"bio,omitempty"`
+	Policy             string `protobuf:"bytes,104,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (m *MsgSetCurationTeamProfile) Reset()         { *m = MsgSetCurationTeamProfile{} }
+func (m *MsgSetCurationTeamProfile) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationTeamProfile) ProtoMessage()    {}
+func (*MsgSetCurationTeamProfile) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{76}
+}
+func (m *MsgSetCurationTeamProfile) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationTeamProfile) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationTeamProfile.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationTeamProfile) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationTeamProfile.Merge(m, src)
+}
+func (m *MsgSetCurationTeamProfile) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationTeamProfile) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationTeamProfile.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationTeamProfile proto.InternalMessageInfo
+
+func (m *MsgSetCurationTeamProfile) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationTeamProfile) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationTeamProfile) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationTeamProfile) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgSetCurationTeamProfile) GetName() string {
+	if m != nil {
+		return m.Name
+	}
+	return ""
+}
+
+func (m *MsgSetCurationTeamProfile) GetBio() string {
+	if m != nil {
+		return m.Bio
+	}
+	return ""
+}
+
+func (m *MsgSetCurationTeamProfile) GetPolicy() string {
+	if m != nil {
+		return m.Policy
+	}
+	return ""
+}
+
+type MsgSetCurationTeamProfileResponse struct {
+}
+
+func (m *MsgSetCurationTeamProfileResponse) Reset()         { *m = MsgSetCurationTeamProfileResponse{} }
+func (m *MsgSetCurationTeamProfileResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationTeamProfileResponse) ProtoMessage()    {}
+func (*MsgSetCurationTeamProfileResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{77}
+}
+func (m *MsgSetCurationTeamProfileResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationTeamProfileResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationTeamProfileResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationTeamProfileResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationTeamProfileResponse.Merge(m, src)
+}
+func (m *MsgSetCurationTeamProfileResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationTeamProfileResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationTeamProfileResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationTeamProfileResponse proto.InternalMessageInfo
+
+type MsgInviteCurator struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target             string `protobuf:"bytes,102,opt,name=target,proto3" json:"target,omitempty"`
+}
+
+func (m *MsgInviteCurator) Reset()         { *m = MsgInviteCurator{} }
+func (m *MsgInviteCurator) String() string { return proto.CompactTextString(m) }
+func (*MsgInviteCurator) ProtoMessage()    {}
+func (*MsgInviteCurator) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{78}
+}
+func (m *MsgInviteCurator) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgInviteCurator) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgInviteCurator.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgInviteCurator) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgInviteCurator.Merge(m, src)
+}
+func (m *MsgInviteCurator) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgInviteCurator) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgInviteCurator.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgInviteCurator proto.InternalMessageInfo
+
+func (m *MsgInviteCurator) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgInviteCurator) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgInviteCurator) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgInviteCurator) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgInviteCurator) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgInviteCurator) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgInviteCurator) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgInviteCurator) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgInviteCurator) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgInviteCurator) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgInviteCurator) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+type MsgInviteCuratorResponse struct {
+}
+
+func (m *MsgInviteCuratorResponse) Reset()         { *m = MsgInviteCuratorResponse{} }
+func (m *MsgInviteCuratorResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgInviteCuratorResponse) ProtoMessage()    {}
+func (*MsgInviteCuratorResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{79}
+}
+func (m *MsgInviteCuratorResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgInviteCuratorResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgInviteCuratorResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgInviteCuratorResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgInviteCuratorResponse.Merge(m, src)
+}
+func (m *MsgInviteCuratorResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgInviteCuratorResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgInviteCuratorResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgInviteCuratorResponse proto.InternalMessageInfo
+
+type MsgRevokeCuratorInvite struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target             string `protobuf:"bytes,102,opt,name=target,proto3" json:"target,omitempty"`
+}
+
+func (m *MsgRevokeCuratorInvite) Reset()         { *m = MsgRevokeCuratorInvite{} }
+func (m *MsgRevokeCuratorInvite) String() string { return proto.CompactTextString(m) }
+func (*MsgRevokeCuratorInvite) ProtoMessage()    {}
+func (*MsgRevokeCuratorInvite) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{80}
+}
+func (m *MsgRevokeCuratorInvite) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgRevokeCuratorInvite) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgRevokeCuratorInvite.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgRevokeCuratorInvite) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgRevokeCuratorInvite.Merge(m, src)
+}
+func (m *MsgRevokeCuratorInvite) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgRevokeCuratorInvite) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgRevokeCuratorInvite.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgRevokeCuratorInvite proto.InternalMessageInfo
+
+func (m *MsgRevokeCuratorInvite) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgRevokeCuratorInvite) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgRevokeCuratorInvite) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgRevokeCuratorInvite) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgRevokeCuratorInvite) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+type MsgRevokeCuratorInviteResponse struct {
+}
+
+func (m *MsgRevokeCuratorInviteResponse) Reset()         { *m = MsgRevokeCuratorInviteResponse{} }
+func (m *MsgRevokeCuratorInviteResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgRevokeCuratorInviteResponse) ProtoMessage()    {}
+func (*MsgRevokeCuratorInviteResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{81}
+}
+func (m *MsgRevokeCuratorInviteResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgRevokeCuratorInviteResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgRevokeCuratorInviteResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgRevokeCuratorInviteResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgRevokeCuratorInviteResponse.Merge(m, src)
+}
+func (m *MsgRevokeCuratorInviteResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgRevokeCuratorInviteResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgRevokeCuratorInviteResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgRevokeCuratorInviteResponse proto.InternalMessageInfo
+
+type MsgAcceptCuratorInvite struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+}
+
+func (m *MsgAcceptCuratorInvite) Reset()         { *m = MsgAcceptCuratorInvite{} }
+func (m *MsgAcceptCuratorInvite) String() string { return proto.CompactTextString(m) }
+func (*MsgAcceptCuratorInvite) ProtoMessage()    {}
+func (*MsgAcceptCuratorInvite) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{82}
+}
+func (m *MsgAcceptCuratorInvite) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAcceptCuratorInvite) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAcceptCuratorInvite.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAcceptCuratorInvite) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAcceptCuratorInvite.Merge(m, src)
+}
+func (m *MsgAcceptCuratorInvite) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAcceptCuratorInvite) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAcceptCuratorInvite.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAcceptCuratorInvite proto.InternalMessageInfo
+
+func (m *MsgAcceptCuratorInvite) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgAcceptCuratorInvite) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgAcceptCuratorInvite) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgAcceptCuratorInvite) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+type MsgAcceptCuratorInviteResponse struct {
+}
+
+func (m *MsgAcceptCuratorInviteResponse) Reset()         { *m = MsgAcceptCuratorInviteResponse{} }
+func (m *MsgAcceptCuratorInviteResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgAcceptCuratorInviteResponse) ProtoMessage()    {}
+func (*MsgAcceptCuratorInviteResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{83}
+}
+func (m *MsgAcceptCuratorInviteResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgAcceptCuratorInviteResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgAcceptCuratorInviteResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgAcceptCuratorInviteResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgAcceptCuratorInviteResponse.Merge(m, src)
+}
+func (m *MsgAcceptCuratorInviteResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgAcceptCuratorInviteResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgAcceptCuratorInviteResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgAcceptCuratorInviteResponse proto.InternalMessageInfo
+
+type MsgDeclineCuratorInvite struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+}
+
+func (m *MsgDeclineCuratorInvite) Reset()         { *m = MsgDeclineCuratorInvite{} }
+func (m *MsgDeclineCuratorInvite) String() string { return proto.CompactTextString(m) }
+func (*MsgDeclineCuratorInvite) ProtoMessage()    {}
+func (*MsgDeclineCuratorInvite) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{84}
+}
+func (m *MsgDeclineCuratorInvite) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgDeclineCuratorInvite) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgDeclineCuratorInvite.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgDeclineCuratorInvite) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgDeclineCuratorInvite.Merge(m, src)
+}
+func (m *MsgDeclineCuratorInvite) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgDeclineCuratorInvite) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgDeclineCuratorInvite.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgDeclineCuratorInvite proto.InternalMessageInfo
+
+func (m *MsgDeclineCuratorInvite) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgDeclineCuratorInvite) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgDeclineCuratorInvite) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgDeclineCuratorInvite) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+type MsgDeclineCuratorInviteResponse struct {
+}
+
+func (m *MsgDeclineCuratorInviteResponse) Reset()         { *m = MsgDeclineCuratorInviteResponse{} }
+func (m *MsgDeclineCuratorInviteResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgDeclineCuratorInviteResponse) ProtoMessage()    {}
+func (*MsgDeclineCuratorInviteResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{85}
+}
+func (m *MsgDeclineCuratorInviteResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgDeclineCuratorInviteResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgDeclineCuratorInviteResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgDeclineCuratorInviteResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgDeclineCuratorInviteResponse.Merge(m, src)
+}
+func (m *MsgDeclineCuratorInviteResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgDeclineCuratorInviteResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgDeclineCuratorInviteResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgDeclineCuratorInviteResponse proto.InternalMessageInfo
+
+type MsgLeaveCurationTeam struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+}
+
+func (m *MsgLeaveCurationTeam) Reset()         { *m = MsgLeaveCurationTeam{} }
+func (m *MsgLeaveCurationTeam) String() string { return proto.CompactTextString(m) }
+func (*MsgLeaveCurationTeam) ProtoMessage()    {}
+func (*MsgLeaveCurationTeam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{86}
+}
+func (m *MsgLeaveCurationTeam) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgLeaveCurationTeam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgLeaveCurationTeam.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgLeaveCurationTeam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgLeaveCurationTeam.Merge(m, src)
+}
+func (m *MsgLeaveCurationTeam) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgLeaveCurationTeam) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgLeaveCurationTeam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgLeaveCurationTeam proto.InternalMessageInfo
+
+func (m *MsgLeaveCurationTeam) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgLeaveCurationTeam) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgLeaveCurationTeam) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgLeaveCurationTeam) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+type MsgLeaveCurationTeamResponse struct {
+}
+
+func (m *MsgLeaveCurationTeamResponse) Reset()         { *m = MsgLeaveCurationTeamResponse{} }
+func (m *MsgLeaveCurationTeamResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgLeaveCurationTeamResponse) ProtoMessage()    {}
+func (*MsgLeaveCurationTeamResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{87}
+}
+func (m *MsgLeaveCurationTeamResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgLeaveCurationTeamResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgLeaveCurationTeamResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgLeaveCurationTeamResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgLeaveCurationTeamResponse.Merge(m, src)
+}
+func (m *MsgLeaveCurationTeamResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgLeaveCurationTeamResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgLeaveCurationTeamResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgLeaveCurationTeamResponse proto.InternalMessageInfo
+
+type MsgRemoveCurator struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target             string `protobuf:"bytes,102,opt,name=target,proto3" json:"target,omitempty"`
+}
+
+func (m *MsgRemoveCurator) Reset()         { *m = MsgRemoveCurator{} }
+func (m *MsgRemoveCurator) String() string { return proto.CompactTextString(m) }
+func (*MsgRemoveCurator) ProtoMessage()    {}
+func (*MsgRemoveCurator) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{88}
+}
+func (m *MsgRemoveCurator) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgRemoveCurator) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgRemoveCurator.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgRemoveCurator) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgRemoveCurator.Merge(m, src)
+}
+func (m *MsgRemoveCurator) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgRemoveCurator) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgRemoveCurator.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgRemoveCurator proto.InternalMessageInfo
+
+func (m *MsgRemoveCurator) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgRemoveCurator) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgRemoveCurator) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgRemoveCurator) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgRemoveCurator) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgRemoveCurator) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgRemoveCurator) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgRemoveCurator) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgRemoveCurator) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgRemoveCurator) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgRemoveCurator) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+type MsgRemoveCuratorResponse struct {
+}
+
+func (m *MsgRemoveCuratorResponse) Reset()         { *m = MsgRemoveCuratorResponse{} }
+func (m *MsgRemoveCuratorResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgRemoveCuratorResponse) ProtoMessage()    {}
+func (*MsgRemoveCuratorResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{89}
+}
+func (m *MsgRemoveCuratorResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgRemoveCuratorResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgRemoveCuratorResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgRemoveCuratorResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgRemoveCuratorResponse.Merge(m, src)
+}
+func (m *MsgRemoveCuratorResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgRemoveCuratorResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgRemoveCuratorResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgRemoveCuratorResponse proto.InternalMessageInfo
+
+type MsgTransferCurationTeam struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	NewOwner           string `protobuf:"bytes,102,opt,name=new_owner,json=newOwner,proto3" json:"new_owner,omitempty"`
+}
+
+func (m *MsgTransferCurationTeam) Reset()         { *m = MsgTransferCurationTeam{} }
+func (m *MsgTransferCurationTeam) String() string { return proto.CompactTextString(m) }
+func (*MsgTransferCurationTeam) ProtoMessage()    {}
+func (*MsgTransferCurationTeam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{90}
+}
+func (m *MsgTransferCurationTeam) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgTransferCurationTeam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgTransferCurationTeam.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgTransferCurationTeam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgTransferCurationTeam.Merge(m, src)
+}
+func (m *MsgTransferCurationTeam) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgTransferCurationTeam) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgTransferCurationTeam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgTransferCurationTeam proto.InternalMessageInfo
+
+func (m *MsgTransferCurationTeam) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgTransferCurationTeam) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgTransferCurationTeam) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgTransferCurationTeam) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgTransferCurationTeam) GetNewOwner() string {
+	if m != nil {
+		return m.NewOwner
+	}
+	return ""
+}
+
+type MsgTransferCurationTeamResponse struct {
+}
+
+func (m *MsgTransferCurationTeamResponse) Reset()         { *m = MsgTransferCurationTeamResponse{} }
+func (m *MsgTransferCurationTeamResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgTransferCurationTeamResponse) ProtoMessage()    {}
+func (*MsgTransferCurationTeamResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{91}
+}
+func (m *MsgTransferCurationTeamResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgTransferCurationTeamResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgTransferCurationTeamResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgTransferCurationTeamResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgTransferCurationTeamResponse.Merge(m, src)
+}
+func (m *MsgTransferCurationTeamResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgTransferCurationTeamResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgTransferCurationTeamResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgTransferCurationTeamResponse proto.InternalMessageInfo
+
+type MsgDeleteCurationTeam struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+}
+
+func (m *MsgDeleteCurationTeam) Reset()         { *m = MsgDeleteCurationTeam{} }
+func (m *MsgDeleteCurationTeam) String() string { return proto.CompactTextString(m) }
+func (*MsgDeleteCurationTeam) ProtoMessage()    {}
+func (*MsgDeleteCurationTeam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{92}
+}
+func (m *MsgDeleteCurationTeam) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgDeleteCurationTeam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgDeleteCurationTeam.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgDeleteCurationTeam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgDeleteCurationTeam.Merge(m, src)
+}
+func (m *MsgDeleteCurationTeam) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgDeleteCurationTeam) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgDeleteCurationTeam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgDeleteCurationTeam proto.InternalMessageInfo
+
+func (m *MsgDeleteCurationTeam) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgDeleteCurationTeam) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgDeleteCurationTeam) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgDeleteCurationTeam) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+type MsgDeleteCurationTeamResponse struct {
+}
+
+func (m *MsgDeleteCurationTeamResponse) Reset()         { *m = MsgDeleteCurationTeamResponse{} }
+func (m *MsgDeleteCurationTeamResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgDeleteCurationTeamResponse) ProtoMessage()    {}
+func (*MsgDeleteCurationTeamResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{93}
+}
+func (m *MsgDeleteCurationTeamResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgDeleteCurationTeamResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgDeleteCurationTeamResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgDeleteCurationTeamResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgDeleteCurationTeamResponse.Merge(m, src)
+}
+func (m *MsgDeleteCurationTeamResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgDeleteCurationTeamResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgDeleteCurationTeamResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgDeleteCurationTeamResponse proto.InternalMessageInfo
+
+type MsgSetCurationPreference struct {
+	Authority          string                 `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte                 `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte                 `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64                 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64                 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64                 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64                 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte                 `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string                 `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	Mode               CurationPreferenceMode `protobuf:"varint,101,opt,name=mode,proto3,enum=mirage.core.v1.CurationPreferenceMode" json:"mode,omitempty"`
+	PinnedTeamId       uint64                 `protobuf:"varint,102,opt,name=pinned_team_id,json=pinnedTeamId,proto3" json:"pinned_team_id,omitempty"`
+}
+
+func (m *MsgSetCurationPreference) Reset()         { *m = MsgSetCurationPreference{} }
+func (m *MsgSetCurationPreference) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationPreference) ProtoMessage()    {}
+func (*MsgSetCurationPreference) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{94}
+}
+func (m *MsgSetCurationPreference) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationPreference) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationPreference.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationPreference) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationPreference.Merge(m, src)
+}
+func (m *MsgSetCurationPreference) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationPreference) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationPreference.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationPreference proto.InternalMessageInfo
+
+func (m *MsgSetCurationPreference) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPreference) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPreference) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationPreference) GetMode() CurationPreferenceMode {
+	if m != nil {
+		return m.Mode
+	}
+	return CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT
+}
+
+func (m *MsgSetCurationPreference) GetPinnedTeamId() uint64 {
+	if m != nil {
+		return m.PinnedTeamId
+	}
+	return 0
+}
+
+type MsgSetCurationPreferenceResponse struct {
+}
+
+func (m *MsgSetCurationPreferenceResponse) Reset()         { *m = MsgSetCurationPreferenceResponse{} }
+func (m *MsgSetCurationPreferenceResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationPreferenceResponse) ProtoMessage()    {}
+func (*MsgSetCurationPreferenceResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{95}
+}
+func (m *MsgSetCurationPreferenceResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationPreferenceResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationPreferenceResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationPreferenceResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationPreferenceResponse.Merge(m, src)
+}
+func (m *MsgSetCurationPreferenceResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationPreferenceResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationPreferenceResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationPreferenceResponse proto.InternalMessageInfo
+
+type MsgSetCurationPostHidden struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target             string `protobuf:"bytes,102,opt,name=target,proto3" json:"target,omitempty"`
+	Hidden             bool   `protobuf:"varint,103,opt,name=hidden,proto3" json:"hidden,omitempty"`
+}
+
+func (m *MsgSetCurationPostHidden) Reset()         { *m = MsgSetCurationPostHidden{} }
+func (m *MsgSetCurationPostHidden) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationPostHidden) ProtoMessage()    {}
+func (*MsgSetCurationPostHidden) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{96}
+}
+func (m *MsgSetCurationPostHidden) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationPostHidden) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationPostHidden.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationPostHidden) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationPostHidden.Merge(m, src)
+}
+func (m *MsgSetCurationPostHidden) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationPostHidden) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationPostHidden.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationPostHidden proto.InternalMessageInfo
+
+func (m *MsgSetCurationPostHidden) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPostHidden) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationPostHidden) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationPostHidden) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgSetCurationPostHidden) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+func (m *MsgSetCurationPostHidden) GetHidden() bool {
+	if m != nil {
+		return m.Hidden
+	}
+	return false
+}
+
+type MsgSetCurationPostHiddenResponse struct {
+}
+
+func (m *MsgSetCurationPostHiddenResponse) Reset()         { *m = MsgSetCurationPostHiddenResponse{} }
+func (m *MsgSetCurationPostHiddenResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationPostHiddenResponse) ProtoMessage()    {}
+func (*MsgSetCurationPostHiddenResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{97}
+}
+func (m *MsgSetCurationPostHiddenResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationPostHiddenResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationPostHiddenResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationPostHiddenResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationPostHiddenResponse.Merge(m, src)
+}
+func (m *MsgSetCurationPostHiddenResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationPostHiddenResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationPostHiddenResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationPostHiddenResponse proto.InternalMessageInfo
+
+type MsgSetCurationUserHidden struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target             string `protobuf:"bytes,102,opt,name=target,proto3" json:"target,omitempty"`
+	Hidden             bool   `protobuf:"varint,103,opt,name=hidden,proto3" json:"hidden,omitempty"`
+}
+
+func (m *MsgSetCurationUserHidden) Reset()         { *m = MsgSetCurationUserHidden{} }
+func (m *MsgSetCurationUserHidden) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationUserHidden) ProtoMessage()    {}
+func (*MsgSetCurationUserHidden) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{98}
+}
+func (m *MsgSetCurationUserHidden) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationUserHidden) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationUserHidden.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationUserHidden) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationUserHidden.Merge(m, src)
+}
+func (m *MsgSetCurationUserHidden) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationUserHidden) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationUserHidden.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationUserHidden proto.InternalMessageInfo
+
+func (m *MsgSetCurationUserHidden) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationUserHidden) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationUserHidden) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationUserHidden) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgSetCurationUserHidden) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+func (m *MsgSetCurationUserHidden) GetHidden() bool {
+	if m != nil {
+		return m.Hidden
+	}
+	return false
+}
+
+type MsgSetCurationUserHiddenResponse struct {
+}
+
+func (m *MsgSetCurationUserHiddenResponse) Reset()         { *m = MsgSetCurationUserHiddenResponse{} }
+func (m *MsgSetCurationUserHiddenResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationUserHiddenResponse) ProtoMessage()    {}
+func (*MsgSetCurationUserHiddenResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{99}
+}
+func (m *MsgSetCurationUserHiddenResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationUserHiddenResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationUserHiddenResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationUserHiddenResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationUserHiddenResponse.Merge(m, src)
+}
+func (m *MsgSetCurationUserHiddenResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationUserHiddenResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationUserHiddenResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationUserHiddenResponse proto.InternalMessageInfo
+
+type MsgSetCurationThreadLocked struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	RootHash           string `protobuf:"bytes,102,opt,name=root_hash,json=rootHash,proto3" json:"root_hash,omitempty"`
+	Locked             bool   `protobuf:"varint,103,opt,name=locked,proto3" json:"locked,omitempty"`
+}
+
+func (m *MsgSetCurationThreadLocked) Reset()         { *m = MsgSetCurationThreadLocked{} }
+func (m *MsgSetCurationThreadLocked) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationThreadLocked) ProtoMessage()    {}
+func (*MsgSetCurationThreadLocked) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{100}
+}
+func (m *MsgSetCurationThreadLocked) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationThreadLocked) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationThreadLocked.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationThreadLocked) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationThreadLocked.Merge(m, src)
+}
+func (m *MsgSetCurationThreadLocked) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationThreadLocked) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationThreadLocked.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationThreadLocked proto.InternalMessageInfo
+
+func (m *MsgSetCurationThreadLocked) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationThreadLocked) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationThreadLocked) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationThreadLocked) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgSetCurationThreadLocked) GetRootHash() string {
+	if m != nil {
+		return m.RootHash
+	}
+	return ""
+}
+
+func (m *MsgSetCurationThreadLocked) GetLocked() bool {
+	if m != nil {
+		return m.Locked
+	}
+	return false
+}
+
+type MsgSetCurationThreadLockedResponse struct {
+}
+
+func (m *MsgSetCurationThreadLockedResponse) Reset()         { *m = MsgSetCurationThreadLockedResponse{} }
+func (m *MsgSetCurationThreadLockedResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationThreadLockedResponse) ProtoMessage()    {}
+func (*MsgSetCurationThreadLockedResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{101}
+}
+func (m *MsgSetCurationThreadLockedResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationThreadLockedResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationThreadLockedResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationThreadLockedResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationThreadLockedResponse.Merge(m, src)
+}
+func (m *MsgSetCurationThreadLockedResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationThreadLockedResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationThreadLockedResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationThreadLockedResponse proto.InternalMessageInfo
+
+type MsgSetCurationSubscriberOnly struct {
+	Authority          string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	Community          string `protobuf:"bytes,100,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId             uint64 `protobuf:"varint,101,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Enabled            bool   `protobuf:"varint,102,opt,name=enabled,proto3" json:"enabled,omitempty"`
+}
+
+func (m *MsgSetCurationSubscriberOnly) Reset()         { *m = MsgSetCurationSubscriberOnly{} }
+func (m *MsgSetCurationSubscriberOnly) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationSubscriberOnly) ProtoMessage()    {}
+func (*MsgSetCurationSubscriberOnly) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{102}
+}
+func (m *MsgSetCurationSubscriberOnly) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationSubscriberOnly) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationSubscriberOnly.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationSubscriberOnly) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationSubscriberOnly.Merge(m, src)
+}
+func (m *MsgSetCurationSubscriberOnly) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationSubscriberOnly) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationSubscriberOnly.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationSubscriberOnly proto.InternalMessageInfo
+
+func (m *MsgSetCurationSubscriberOnly) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgSetCurationSubscriberOnly) GetEnabled() bool {
+	if m != nil {
+		return m.Enabled
+	}
+	return false
+}
+
+type MsgSetCurationSubscriberOnlyResponse struct {
+}
+
+func (m *MsgSetCurationSubscriberOnlyResponse) Reset()         { *m = MsgSetCurationSubscriberOnlyResponse{} }
+func (m *MsgSetCurationSubscriberOnlyResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgSetCurationSubscriberOnlyResponse) ProtoMessage()    {}
+func (*MsgSetCurationSubscriberOnlyResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{103}
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgSetCurationSubscriberOnlyResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgSetCurationSubscriberOnlyResponse.Merge(m, src)
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgSetCurationSubscriberOnlyResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgSetCurationSubscriberOnlyResponse proto.InternalMessageInfo
+
+type MsgClaimCreatorRewards struct {
+	Authority          string  `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	EnvelopePubkey     []byte  `protobuf:"bytes,2,opt,name=envelope_pubkey,json=envelopePubkey,proto3" json:"envelope_pubkey,omitempty"`
+	EnvelopeBlockHash  []byte  `protobuf:"bytes,3,opt,name=envelope_block_hash,json=envelopeBlockHash,proto3" json:"envelope_block_hash,omitempty"`
+	EnvelopeDifficulty uint64  `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
+	EnvelopePow        uint64  `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
+	EnvelopeTimestamp  uint64  `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
+	EnvelopeNonce      uint64  `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
+	EnvelopeSignature  []byte  `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
+	EpochIds           []int64 `protobuf:"varint,100,rep,packed,name=epoch_ids,json=epochIds,proto3" json:"epoch_ids,omitempty"`
+}
+
+func (m *MsgClaimCreatorRewards) Reset()         { *m = MsgClaimCreatorRewards{} }
+func (m *MsgClaimCreatorRewards) String() string { return proto.CompactTextString(m) }
+func (*MsgClaimCreatorRewards) ProtoMessage()    {}
+func (*MsgClaimCreatorRewards) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{104}
+}
+func (m *MsgClaimCreatorRewards) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgClaimCreatorRewards) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgClaimCreatorRewards.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgClaimCreatorRewards) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgClaimCreatorRewards.Merge(m, src)
+}
+func (m *MsgClaimCreatorRewards) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgClaimCreatorRewards) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgClaimCreatorRewards.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgClaimCreatorRewards proto.InternalMessageInfo
+
+func (m *MsgClaimCreatorRewards) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopePubkey() []byte {
+	if m != nil {
+		return m.EnvelopePubkey
+	}
+	return nil
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopeBlockHash() []byte {
+	if m != nil {
+		return m.EnvelopeBlockHash
+	}
+	return nil
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopeDifficulty() uint64 {
+	if m != nil {
+		return m.EnvelopeDifficulty
+	}
+	return 0
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopePow() uint64 {
+	if m != nil {
+		return m.EnvelopePow
+	}
+	return 0
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopeTimestamp() uint64 {
+	if m != nil {
+		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
+func (m *MsgClaimCreatorRewards) GetEnvelopeSignature() []byte {
+	if m != nil {
+		return m.EnvelopeSignature
+	}
+	return nil
+}
+
+func (m *MsgClaimCreatorRewards) GetEpochIds() []int64 {
+	if m != nil {
+		return m.EpochIds
+	}
+	return nil
+}
+
+type MsgClaimCreatorRewardsResponse struct {
+}
+
+func (m *MsgClaimCreatorRewardsResponse) Reset()         { *m = MsgClaimCreatorRewardsResponse{} }
+func (m *MsgClaimCreatorRewardsResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgClaimCreatorRewardsResponse) ProtoMessage()    {}
+func (*MsgClaimCreatorRewardsResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{105}
+}
+func (m *MsgClaimCreatorRewardsResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgClaimCreatorRewardsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgClaimCreatorRewardsResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgClaimCreatorRewardsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgClaimCreatorRewardsResponse.Merge(m, src)
+}
+func (m *MsgClaimCreatorRewardsResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgClaimCreatorRewardsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgClaimCreatorRewardsResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgClaimCreatorRewardsResponse proto.InternalMessageInfo
+
+type MsgGovCreateCommunity struct {
+	Authority        string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community        string `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	Founder          string `protobuf:"bytes,3,opt,name=founder,proto3" json:"founder,omitempty"`
+	Title            string `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Description      string `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
+	OriginalTeamName string `protobuf:"bytes,6,opt,name=original_team_name,json=originalTeamName,proto3" json:"original_team_name,omitempty"`
+	Bio              string `protobuf:"bytes,7,opt,name=bio,proto3" json:"bio,omitempty"`
+	Policy           string `protobuf:"bytes,8,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (m *MsgGovCreateCommunity) Reset()         { *m = MsgGovCreateCommunity{} }
+func (m *MsgGovCreateCommunity) String() string { return proto.CompactTextString(m) }
+func (*MsgGovCreateCommunity) ProtoMessage()    {}
+func (*MsgGovCreateCommunity) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{106}
+}
+func (m *MsgGovCreateCommunity) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovCreateCommunity) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovCreateCommunity.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovCreateCommunity) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovCreateCommunity.Merge(m, src)
+}
+func (m *MsgGovCreateCommunity) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovCreateCommunity) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovCreateCommunity.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovCreateCommunity proto.InternalMessageInfo
+
+func (m *MsgGovCreateCommunity) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetFounder() string {
+	if m != nil {
+		return m.Founder
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetTitle() string {
+	if m != nil {
+		return m.Title
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetDescription() string {
+	if m != nil {
+		return m.Description
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetOriginalTeamName() string {
+	if m != nil {
+		return m.OriginalTeamName
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetBio() string {
+	if m != nil {
+		return m.Bio
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCommunity) GetPolicy() string {
+	if m != nil {
+		return m.Policy
+	}
+	return ""
+}
+
+type MsgGovCreateCommunityResponse struct {
+}
+
+func (m *MsgGovCreateCommunityResponse) Reset()         { *m = MsgGovCreateCommunityResponse{} }
+func (m *MsgGovCreateCommunityResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovCreateCommunityResponse) ProtoMessage()    {}
+func (*MsgGovCreateCommunityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{107}
+}
+func (m *MsgGovCreateCommunityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovCreateCommunityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovCreateCommunityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovCreateCommunityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovCreateCommunityResponse.Merge(m, src)
+}
+func (m *MsgGovCreateCommunityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovCreateCommunityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovCreateCommunityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovCreateCommunityResponse proto.InternalMessageInfo
+
+type MsgGovSetCommunityFounder struct {
+	Authority  string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community  string `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	NewFounder string `protobuf:"bytes,3,opt,name=new_founder,json=newFounder,proto3" json:"new_founder,omitempty"`
+}
+
+func (m *MsgGovSetCommunityFounder) Reset()         { *m = MsgGovSetCommunityFounder{} }
+func (m *MsgGovSetCommunityFounder) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityFounder) ProtoMessage()    {}
+func (*MsgGovSetCommunityFounder) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{108}
+}
+func (m *MsgGovSetCommunityFounder) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityFounder) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityFounder.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityFounder) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityFounder.Merge(m, src)
+}
+func (m *MsgGovSetCommunityFounder) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityFounder) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityFounder.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityFounder proto.InternalMessageInfo
+
+func (m *MsgGovSetCommunityFounder) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityFounder) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityFounder) GetNewFounder() string {
+	if m != nil {
+		return m.NewFounder
+	}
+	return ""
+}
+
+type MsgGovSetCommunityFounderResponse struct {
+}
+
+func (m *MsgGovSetCommunityFounderResponse) Reset()         { *m = MsgGovSetCommunityFounderResponse{} }
+func (m *MsgGovSetCommunityFounderResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityFounderResponse) ProtoMessage()    {}
+func (*MsgGovSetCommunityFounderResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{109}
+}
+func (m *MsgGovSetCommunityFounderResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityFounderResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityFounderResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityFounderResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityFounderResponse.Merge(m, src)
+}
+func (m *MsgGovSetCommunityFounderResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityFounderResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityFounderResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityFounderResponse proto.InternalMessageInfo
+
+type MsgGovCreateCurationTeam struct {
+	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community string `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	Owner     string `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	Name      string `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Bio       string `protobuf:"bytes,5,opt,name=bio,proto3" json:"bio,omitempty"`
+	Policy    string `protobuf:"bytes,6,opt,name=policy,proto3" json:"policy,omitempty"`
+}
+
+func (m *MsgGovCreateCurationTeam) Reset()         { *m = MsgGovCreateCurationTeam{} }
+func (m *MsgGovCreateCurationTeam) String() string { return proto.CompactTextString(m) }
+func (*MsgGovCreateCurationTeam) ProtoMessage()    {}
+func (*MsgGovCreateCurationTeam) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{110}
+}
+func (m *MsgGovCreateCurationTeam) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovCreateCurationTeam) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovCreateCurationTeam.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovCreateCurationTeam) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovCreateCurationTeam.Merge(m, src)
+}
+func (m *MsgGovCreateCurationTeam) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovCreateCurationTeam) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovCreateCurationTeam.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovCreateCurationTeam proto.InternalMessageInfo
+
+func (m *MsgGovCreateCurationTeam) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCurationTeam) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCurationTeam) GetOwner() string {
+	if m != nil {
+		return m.Owner
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCurationTeam) GetName() string {
+	if m != nil {
+		return m.Name
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCurationTeam) GetBio() string {
+	if m != nil {
+		return m.Bio
+	}
+	return ""
+}
+
+func (m *MsgGovCreateCurationTeam) GetPolicy() string {
+	if m != nil {
+		return m.Policy
+	}
+	return ""
+}
+
+type MsgGovCreateCurationTeamResponse struct {
+}
+
+func (m *MsgGovCreateCurationTeamResponse) Reset()         { *m = MsgGovCreateCurationTeamResponse{} }
+func (m *MsgGovCreateCurationTeamResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovCreateCurationTeamResponse) ProtoMessage()    {}
+func (*MsgGovCreateCurationTeamResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{111}
+}
+func (m *MsgGovCreateCurationTeamResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovCreateCurationTeamResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovCreateCurationTeamResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovCreateCurationTeamResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovCreateCurationTeamResponse.Merge(m, src)
+}
+func (m *MsgGovCreateCurationTeamResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovCreateCurationTeamResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovCreateCurationTeamResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovCreateCurationTeamResponse proto.InternalMessageInfo
+
+type MsgGovSetCurationTeamOwner struct {
+	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community string `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId    uint64 `protobuf:"varint,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	NewOwner  string `protobuf:"bytes,4,opt,name=new_owner,json=newOwner,proto3" json:"new_owner,omitempty"`
+}
+
+func (m *MsgGovSetCurationTeamOwner) Reset()         { *m = MsgGovSetCurationTeamOwner{} }
+func (m *MsgGovSetCurationTeamOwner) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCurationTeamOwner) ProtoMessage()    {}
+func (*MsgGovSetCurationTeamOwner) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{112}
+}
+func (m *MsgGovSetCurationTeamOwner) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCurationTeamOwner) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCurationTeamOwner.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCurationTeamOwner) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCurationTeamOwner.Merge(m, src)
+}
+func (m *MsgGovSetCurationTeamOwner) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCurationTeamOwner) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCurationTeamOwner.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCurationTeamOwner proto.InternalMessageInfo
+
+func (m *MsgGovSetCurationTeamOwner) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCurationTeamOwner) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCurationTeamOwner) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgGovSetCurationTeamOwner) GetNewOwner() string {
+	if m != nil {
+		return m.NewOwner
+	}
+	return ""
+}
+
+type MsgGovSetCurationTeamOwnerResponse struct {
+}
+
+func (m *MsgGovSetCurationTeamOwnerResponse) Reset()         { *m = MsgGovSetCurationTeamOwnerResponse{} }
+func (m *MsgGovSetCurationTeamOwnerResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCurationTeamOwnerResponse) ProtoMessage()    {}
+func (*MsgGovSetCurationTeamOwnerResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{113}
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCurationTeamOwnerResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCurationTeamOwnerResponse.Merge(m, src)
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCurationTeamOwnerResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCurationTeamOwnerResponse proto.InternalMessageInfo
+
+type MsgGovSetCuratorMembership struct {
+	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community string `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId    uint64 `protobuf:"varint,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Target    string `protobuf:"bytes,4,opt,name=target,proto3" json:"target,omitempty"`
+	Present   bool   `protobuf:"varint,5,opt,name=present,proto3" json:"present,omitempty"`
+}
+
+func (m *MsgGovSetCuratorMembership) Reset()         { *m = MsgGovSetCuratorMembership{} }
+func (m *MsgGovSetCuratorMembership) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCuratorMembership) ProtoMessage()    {}
+func (*MsgGovSetCuratorMembership) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{114}
+}
+func (m *MsgGovSetCuratorMembership) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCuratorMembership) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCuratorMembership.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCuratorMembership) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCuratorMembership.Merge(m, src)
+}
+func (m *MsgGovSetCuratorMembership) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCuratorMembership) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCuratorMembership.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCuratorMembership proto.InternalMessageInfo
+
+func (m *MsgGovSetCuratorMembership) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorMembership) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorMembership) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgGovSetCuratorMembership) GetTarget() string {
+	if m != nil {
+		return m.Target
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorMembership) GetPresent() bool {
+	if m != nil {
+		return m.Present
+	}
+	return false
+}
+
+type MsgGovSetCuratorMembershipResponse struct {
+}
+
+func (m *MsgGovSetCuratorMembershipResponse) Reset()         { *m = MsgGovSetCuratorMembershipResponse{} }
+func (m *MsgGovSetCuratorMembershipResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCuratorMembershipResponse) ProtoMessage()    {}
+func (*MsgGovSetCuratorMembershipResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{115}
+}
+func (m *MsgGovSetCuratorMembershipResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCuratorMembershipResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCuratorMembershipResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCuratorMembershipResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCuratorMembershipResponse.Merge(m, src)
+}
+func (m *MsgGovSetCuratorMembershipResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCuratorMembershipResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCuratorMembershipResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCuratorMembershipResponse proto.InternalMessageInfo
+
+type MsgGovSetCommunityPreference struct {
+	Authority string                 `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Owner     string                 `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	Community string                 `protobuf:"bytes,3,opt,name=community,proto3" json:"community,omitempty"`
+	Present   bool                   `protobuf:"varint,4,opt,name=present,proto3" json:"present,omitempty"`
+	Mode      CurationPreferenceMode `protobuf:"varint,5,opt,name=mode,proto3,enum=mirage.core.v1.CurationPreferenceMode" json:"mode,omitempty"`
+	TeamId    uint64                 `protobuf:"varint,6,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+}
+
+func (m *MsgGovSetCommunityPreference) Reset()         { *m = MsgGovSetCommunityPreference{} }
+func (m *MsgGovSetCommunityPreference) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityPreference) ProtoMessage()    {}
+func (*MsgGovSetCommunityPreference) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{116}
+}
+func (m *MsgGovSetCommunityPreference) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityPreference) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityPreference.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityPreference) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityPreference.Merge(m, src)
+}
+func (m *MsgGovSetCommunityPreference) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityPreference) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityPreference.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityPreference proto.InternalMessageInfo
+
+func (m *MsgGovSetCommunityPreference) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityPreference) GetOwner() string {
+	if m != nil {
+		return m.Owner
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityPreference) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityPreference) GetPresent() bool {
+	if m != nil {
+		return m.Present
+	}
+	return false
+}
+
+func (m *MsgGovSetCommunityPreference) GetMode() CurationPreferenceMode {
+	if m != nil {
+		return m.Mode
+	}
+	return CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT
+}
+
+func (m *MsgGovSetCommunityPreference) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+type MsgGovSetCommunityPreferenceResponse struct {
+}
+
+func (m *MsgGovSetCommunityPreferenceResponse) Reset()         { *m = MsgGovSetCommunityPreferenceResponse{} }
+func (m *MsgGovSetCommunityPreferenceResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityPreferenceResponse) ProtoMessage()    {}
+func (*MsgGovSetCommunityPreferenceResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{117}
+}
+func (m *MsgGovSetCommunityPreferenceResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityPreferenceResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityPreferenceResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityPreferenceResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityPreferenceResponse.Merge(m, src)
+}
+func (m *MsgGovSetCommunityPreferenceResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityPreferenceResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityPreferenceResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityPreferenceResponse proto.InternalMessageInfo
+
+type MsgGovSetCommunityBlock struct {
+	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Owner     string `protobuf:"bytes,2,opt,name=owner,proto3" json:"owner,omitempty"`
+	Community string `protobuf:"bytes,3,opt,name=community,proto3" json:"community,omitempty"`
+	Blocked   bool   `protobuf:"varint,4,opt,name=blocked,proto3" json:"blocked,omitempty"`
+}
+
+func (m *MsgGovSetCommunityBlock) Reset()         { *m = MsgGovSetCommunityBlock{} }
+func (m *MsgGovSetCommunityBlock) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityBlock) ProtoMessage()    {}
+func (*MsgGovSetCommunityBlock) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{118}
+}
+func (m *MsgGovSetCommunityBlock) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityBlock) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityBlock.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityBlock) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityBlock.Merge(m, src)
+}
+func (m *MsgGovSetCommunityBlock) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityBlock) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityBlock.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityBlock proto.InternalMessageInfo
+
+func (m *MsgGovSetCommunityBlock) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityBlock) GetOwner() string {
+	if m != nil {
+		return m.Owner
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityBlock) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCommunityBlock) GetBlocked() bool {
+	if m != nil {
+		return m.Blocked
+	}
+	return false
+}
+
+type MsgGovSetCommunityBlockResponse struct {
+}
+
+func (m *MsgGovSetCommunityBlockResponse) Reset()         { *m = MsgGovSetCommunityBlockResponse{} }
+func (m *MsgGovSetCommunityBlockResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCommunityBlockResponse) ProtoMessage()    {}
+func (*MsgGovSetCommunityBlockResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{119}
+}
+func (m *MsgGovSetCommunityBlockResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCommunityBlockResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCommunityBlockResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCommunityBlockResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCommunityBlockResponse.Merge(m, src)
+}
+func (m *MsgGovSetCommunityBlockResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCommunityBlockResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCommunityBlockResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCommunityBlockResponse proto.InternalMessageInfo
+
+type MsgGovSetCuratorInvitation struct {
+	Authority string                  `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Community string                  `protobuf:"bytes,2,opt,name=community,proto3" json:"community,omitempty"`
+	TeamId    uint64                  `protobuf:"varint,3,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	Invitee   string                  `protobuf:"bytes,4,opt,name=invitee,proto3" json:"invitee,omitempty"`
+	Action    CuratorInvitationAction `protobuf:"varint,5,opt,name=action,proto3,enum=mirage.core.v1.CuratorInvitationAction" json:"action,omitempty"`
+}
+
+func (m *MsgGovSetCuratorInvitation) Reset()         { *m = MsgGovSetCuratorInvitation{} }
+func (m *MsgGovSetCuratorInvitation) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCuratorInvitation) ProtoMessage()    {}
+func (*MsgGovSetCuratorInvitation) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{120}
+}
+func (m *MsgGovSetCuratorInvitation) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCuratorInvitation) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCuratorInvitation.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCuratorInvitation) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCuratorInvitation.Merge(m, src)
+}
+func (m *MsgGovSetCuratorInvitation) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCuratorInvitation) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCuratorInvitation.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCuratorInvitation proto.InternalMessageInfo
+
+func (m *MsgGovSetCuratorInvitation) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorInvitation) GetCommunity() string {
+	if m != nil {
+		return m.Community
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorInvitation) GetTeamId() uint64 {
+	if m != nil {
+		return m.TeamId
+	}
+	return 0
+}
+
+func (m *MsgGovSetCuratorInvitation) GetInvitee() string {
+	if m != nil {
+		return m.Invitee
+	}
+	return ""
+}
+
+func (m *MsgGovSetCuratorInvitation) GetAction() CuratorInvitationAction {
+	if m != nil {
+		return m.Action
+	}
+	return CuratorInvitationAction_CURATOR_INVITATION_ACTION_CREATE
+}
+
+type MsgGovSetCuratorInvitationResponse struct {
+}
+
+func (m *MsgGovSetCuratorInvitationResponse) Reset()         { *m = MsgGovSetCuratorInvitationResponse{} }
+func (m *MsgGovSetCuratorInvitationResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetCuratorInvitationResponse) ProtoMessage()    {}
+func (*MsgGovSetCuratorInvitationResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{121}
+}
+func (m *MsgGovSetCuratorInvitationResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetCuratorInvitationResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetCuratorInvitationResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetCuratorInvitationResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetCuratorInvitationResponse.Merge(m, src)
+}
+func (m *MsgGovSetCuratorInvitationResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetCuratorInvitationResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetCuratorInvitationResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetCuratorInvitationResponse proto.InternalMessageInfo
+
+type MsgGovSetSubscriptionState struct {
+	Authority     string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	User          string `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
+	Subscribed    bool   `protobuf:"varint,3,opt,name=subscribed,proto3" json:"subscribed,omitempty"`
+	NominalExpiry int64  `protobuf:"varint,4,opt,name=nominal_expiry,json=nominalExpiry,proto3" json:"nominal_expiry,omitempty"`
+	AutoRenew     bool   `protobuf:"varint,5,opt,name=auto_renew,json=autoRenew,proto3" json:"auto_renew,omitempty"`
+}
+
+func (m *MsgGovSetSubscriptionState) Reset()         { *m = MsgGovSetSubscriptionState{} }
+func (m *MsgGovSetSubscriptionState) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetSubscriptionState) ProtoMessage()    {}
+func (*MsgGovSetSubscriptionState) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{122}
+}
+func (m *MsgGovSetSubscriptionState) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetSubscriptionState) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetSubscriptionState.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetSubscriptionState) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetSubscriptionState.Merge(m, src)
+}
+func (m *MsgGovSetSubscriptionState) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetSubscriptionState) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetSubscriptionState.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetSubscriptionState proto.InternalMessageInfo
+
+func (m *MsgGovSetSubscriptionState) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovSetSubscriptionState) GetUser() string {
+	if m != nil {
+		return m.User
+	}
+	return ""
+}
+
+func (m *MsgGovSetSubscriptionState) GetSubscribed() bool {
+	if m != nil {
+		return m.Subscribed
+	}
+	return false
+}
+
+func (m *MsgGovSetSubscriptionState) GetNominalExpiry() int64 {
+	if m != nil {
+		return m.NominalExpiry
+	}
+	return 0
+}
+
+func (m *MsgGovSetSubscriptionState) GetAutoRenew() bool {
+	if m != nil {
+		return m.AutoRenew
+	}
+	return false
+}
+
+type MsgGovSetSubscriptionStateResponse struct {
+}
+
+func (m *MsgGovSetSubscriptionStateResponse) Reset()         { *m = MsgGovSetSubscriptionStateResponse{} }
+func (m *MsgGovSetSubscriptionStateResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovSetSubscriptionStateResponse) ProtoMessage()    {}
+func (*MsgGovSetSubscriptionStateResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{123}
+}
+func (m *MsgGovSetSubscriptionStateResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovSetSubscriptionStateResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovSetSubscriptionStateResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovSetSubscriptionStateResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovSetSubscriptionStateResponse.Merge(m, src)
+}
+func (m *MsgGovSetSubscriptionStateResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovSetSubscriptionStateResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovSetSubscriptionStateResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovSetSubscriptionStateResponse proto.InternalMessageInfo
+
+type MsgGovClaimCreatorRewards struct {
+	Authority string  `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
+	Creator   string  `protobuf:"bytes,2,opt,name=creator,proto3" json:"creator,omitempty"`
+	EpochIds  []int64 `protobuf:"varint,3,rep,packed,name=epoch_ids,json=epochIds,proto3" json:"epoch_ids,omitempty"`
+}
+
+func (m *MsgGovClaimCreatorRewards) Reset()         { *m = MsgGovClaimCreatorRewards{} }
+func (m *MsgGovClaimCreatorRewards) String() string { return proto.CompactTextString(m) }
+func (*MsgGovClaimCreatorRewards) ProtoMessage()    {}
+func (*MsgGovClaimCreatorRewards) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{124}
+}
+func (m *MsgGovClaimCreatorRewards) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovClaimCreatorRewards) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovClaimCreatorRewards.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovClaimCreatorRewards) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovClaimCreatorRewards.Merge(m, src)
+}
+func (m *MsgGovClaimCreatorRewards) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovClaimCreatorRewards) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovClaimCreatorRewards.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovClaimCreatorRewards proto.InternalMessageInfo
+
+func (m *MsgGovClaimCreatorRewards) GetAuthority() string {
+	if m != nil {
+		return m.Authority
+	}
+	return ""
+}
+
+func (m *MsgGovClaimCreatorRewards) GetCreator() string {
+	if m != nil {
+		return m.Creator
+	}
+	return ""
+}
+
+func (m *MsgGovClaimCreatorRewards) GetEpochIds() []int64 {
+	if m != nil {
+		return m.EpochIds
+	}
+	return nil
+}
+
+type MsgGovClaimCreatorRewardsResponse struct {
+}
+
+func (m *MsgGovClaimCreatorRewardsResponse) Reset()         { *m = MsgGovClaimCreatorRewardsResponse{} }
+func (m *MsgGovClaimCreatorRewardsResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgGovClaimCreatorRewardsResponse) ProtoMessage()    {}
+func (*MsgGovClaimCreatorRewardsResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_6bf938bf63970629, []int{125}
+}
+func (m *MsgGovClaimCreatorRewardsResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *MsgGovClaimCreatorRewardsResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_MsgGovClaimCreatorRewardsResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *MsgGovClaimCreatorRewardsResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgGovClaimCreatorRewardsResponse.Merge(m, src)
+}
+func (m *MsgGovClaimCreatorRewardsResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *MsgGovClaimCreatorRewardsResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgGovClaimCreatorRewardsResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_MsgGovClaimCreatorRewardsResponse proto.InternalMessageInfo
+
 func init() {
 	proto.RegisterType((*MsgUpdateParams)(nil), "mirage.core.v1.MsgUpdateParams")
 	proto.RegisterType((*MsgUpdateParamsResponse)(nil), "mirage.core.v1.MsgUpdateParamsResponse")
@@ -4695,131 +9470,301 @@ func init() {
 	proto.RegisterType((*MsgSetBiographyResponse)(nil), "mirage.core.v1.MsgSetBiographyResponse")
 	proto.RegisterType((*MsgAnnotate)(nil), "mirage.core.v1.MsgAnnotate")
 	proto.RegisterType((*MsgAnnotateResponse)(nil), "mirage.core.v1.MsgAnnotateResponse")
+	proto.RegisterType((*MsgCreateCommunity)(nil), "mirage.core.v1.MsgCreateCommunity")
+	proto.RegisterType((*MsgCreateCommunityResponse)(nil), "mirage.core.v1.MsgCreateCommunityResponse")
+	proto.RegisterType((*MsgSetCommunityMetadata)(nil), "mirage.core.v1.MsgSetCommunityMetadata")
+	proto.RegisterType((*MsgSetCommunityMetadataResponse)(nil), "mirage.core.v1.MsgSetCommunityMetadataResponse")
+	proto.RegisterType((*MsgTransferCommunity)(nil), "mirage.core.v1.MsgTransferCommunity")
+	proto.RegisterType((*MsgTransferCommunityResponse)(nil), "mirage.core.v1.MsgTransferCommunityResponse")
+	proto.RegisterType((*MsgJoinCommunity)(nil), "mirage.core.v1.MsgJoinCommunity")
+	proto.RegisterType((*MsgJoinCommunityResponse)(nil), "mirage.core.v1.MsgJoinCommunityResponse")
+	proto.RegisterType((*MsgLeaveCommunity)(nil), "mirage.core.v1.MsgLeaveCommunity")
+	proto.RegisterType((*MsgLeaveCommunityResponse)(nil), "mirage.core.v1.MsgLeaveCommunityResponse")
+	proto.RegisterType((*MsgBlockCommunity)(nil), "mirage.core.v1.MsgBlockCommunity")
+	proto.RegisterType((*MsgBlockCommunityResponse)(nil), "mirage.core.v1.MsgBlockCommunityResponse")
+	proto.RegisterType((*MsgUnblockCommunity)(nil), "mirage.core.v1.MsgUnblockCommunity")
+	proto.RegisterType((*MsgUnblockCommunityResponse)(nil), "mirage.core.v1.MsgUnblockCommunityResponse")
+	proto.RegisterType((*MsgCreateCurationTeam)(nil), "mirage.core.v1.MsgCreateCurationTeam")
+	proto.RegisterType((*MsgCreateCurationTeamResponse)(nil), "mirage.core.v1.MsgCreateCurationTeamResponse")
+	proto.RegisterType((*MsgSetCurationTeamProfile)(nil), "mirage.core.v1.MsgSetCurationTeamProfile")
+	proto.RegisterType((*MsgSetCurationTeamProfileResponse)(nil), "mirage.core.v1.MsgSetCurationTeamProfileResponse")
+	proto.RegisterType((*MsgInviteCurator)(nil), "mirage.core.v1.MsgInviteCurator")
+	proto.RegisterType((*MsgInviteCuratorResponse)(nil), "mirage.core.v1.MsgInviteCuratorResponse")
+	proto.RegisterType((*MsgRevokeCuratorInvite)(nil), "mirage.core.v1.MsgRevokeCuratorInvite")
+	proto.RegisterType((*MsgRevokeCuratorInviteResponse)(nil), "mirage.core.v1.MsgRevokeCuratorInviteResponse")
+	proto.RegisterType((*MsgAcceptCuratorInvite)(nil), "mirage.core.v1.MsgAcceptCuratorInvite")
+	proto.RegisterType((*MsgAcceptCuratorInviteResponse)(nil), "mirage.core.v1.MsgAcceptCuratorInviteResponse")
+	proto.RegisterType((*MsgDeclineCuratorInvite)(nil), "mirage.core.v1.MsgDeclineCuratorInvite")
+	proto.RegisterType((*MsgDeclineCuratorInviteResponse)(nil), "mirage.core.v1.MsgDeclineCuratorInviteResponse")
+	proto.RegisterType((*MsgLeaveCurationTeam)(nil), "mirage.core.v1.MsgLeaveCurationTeam")
+	proto.RegisterType((*MsgLeaveCurationTeamResponse)(nil), "mirage.core.v1.MsgLeaveCurationTeamResponse")
+	proto.RegisterType((*MsgRemoveCurator)(nil), "mirage.core.v1.MsgRemoveCurator")
+	proto.RegisterType((*MsgRemoveCuratorResponse)(nil), "mirage.core.v1.MsgRemoveCuratorResponse")
+	proto.RegisterType((*MsgTransferCurationTeam)(nil), "mirage.core.v1.MsgTransferCurationTeam")
+	proto.RegisterType((*MsgTransferCurationTeamResponse)(nil), "mirage.core.v1.MsgTransferCurationTeamResponse")
+	proto.RegisterType((*MsgDeleteCurationTeam)(nil), "mirage.core.v1.MsgDeleteCurationTeam")
+	proto.RegisterType((*MsgDeleteCurationTeamResponse)(nil), "mirage.core.v1.MsgDeleteCurationTeamResponse")
+	proto.RegisterType((*MsgSetCurationPreference)(nil), "mirage.core.v1.MsgSetCurationPreference")
+	proto.RegisterType((*MsgSetCurationPreferenceResponse)(nil), "mirage.core.v1.MsgSetCurationPreferenceResponse")
+	proto.RegisterType((*MsgSetCurationPostHidden)(nil), "mirage.core.v1.MsgSetCurationPostHidden")
+	proto.RegisterType((*MsgSetCurationPostHiddenResponse)(nil), "mirage.core.v1.MsgSetCurationPostHiddenResponse")
+	proto.RegisterType((*MsgSetCurationUserHidden)(nil), "mirage.core.v1.MsgSetCurationUserHidden")
+	proto.RegisterType((*MsgSetCurationUserHiddenResponse)(nil), "mirage.core.v1.MsgSetCurationUserHiddenResponse")
+	proto.RegisterType((*MsgSetCurationThreadLocked)(nil), "mirage.core.v1.MsgSetCurationThreadLocked")
+	proto.RegisterType((*MsgSetCurationThreadLockedResponse)(nil), "mirage.core.v1.MsgSetCurationThreadLockedResponse")
+	proto.RegisterType((*MsgSetCurationSubscriberOnly)(nil), "mirage.core.v1.MsgSetCurationSubscriberOnly")
+	proto.RegisterType((*MsgSetCurationSubscriberOnlyResponse)(nil), "mirage.core.v1.MsgSetCurationSubscriberOnlyResponse")
+	proto.RegisterType((*MsgClaimCreatorRewards)(nil), "mirage.core.v1.MsgClaimCreatorRewards")
+	proto.RegisterType((*MsgClaimCreatorRewardsResponse)(nil), "mirage.core.v1.MsgClaimCreatorRewardsResponse")
+	proto.RegisterType((*MsgGovCreateCommunity)(nil), "mirage.core.v1.MsgGovCreateCommunity")
+	proto.RegisterType((*MsgGovCreateCommunityResponse)(nil), "mirage.core.v1.MsgGovCreateCommunityResponse")
+	proto.RegisterType((*MsgGovSetCommunityFounder)(nil), "mirage.core.v1.MsgGovSetCommunityFounder")
+	proto.RegisterType((*MsgGovSetCommunityFounderResponse)(nil), "mirage.core.v1.MsgGovSetCommunityFounderResponse")
+	proto.RegisterType((*MsgGovCreateCurationTeam)(nil), "mirage.core.v1.MsgGovCreateCurationTeam")
+	proto.RegisterType((*MsgGovCreateCurationTeamResponse)(nil), "mirage.core.v1.MsgGovCreateCurationTeamResponse")
+	proto.RegisterType((*MsgGovSetCurationTeamOwner)(nil), "mirage.core.v1.MsgGovSetCurationTeamOwner")
+	proto.RegisterType((*MsgGovSetCurationTeamOwnerResponse)(nil), "mirage.core.v1.MsgGovSetCurationTeamOwnerResponse")
+	proto.RegisterType((*MsgGovSetCuratorMembership)(nil), "mirage.core.v1.MsgGovSetCuratorMembership")
+	proto.RegisterType((*MsgGovSetCuratorMembershipResponse)(nil), "mirage.core.v1.MsgGovSetCuratorMembershipResponse")
+	proto.RegisterType((*MsgGovSetCommunityPreference)(nil), "mirage.core.v1.MsgGovSetCommunityPreference")
+	proto.RegisterType((*MsgGovSetCommunityPreferenceResponse)(nil), "mirage.core.v1.MsgGovSetCommunityPreferenceResponse")
+	proto.RegisterType((*MsgGovSetCommunityBlock)(nil), "mirage.core.v1.MsgGovSetCommunityBlock")
+	proto.RegisterType((*MsgGovSetCommunityBlockResponse)(nil), "mirage.core.v1.MsgGovSetCommunityBlockResponse")
+	proto.RegisterType((*MsgGovSetCuratorInvitation)(nil), "mirage.core.v1.MsgGovSetCuratorInvitation")
+	proto.RegisterType((*MsgGovSetCuratorInvitationResponse)(nil), "mirage.core.v1.MsgGovSetCuratorInvitationResponse")
+	proto.RegisterType((*MsgGovSetSubscriptionState)(nil), "mirage.core.v1.MsgGovSetSubscriptionState")
+	proto.RegisterType((*MsgGovSetSubscriptionStateResponse)(nil), "mirage.core.v1.MsgGovSetSubscriptionStateResponse")
+	proto.RegisterType((*MsgGovClaimCreatorRewards)(nil), "mirage.core.v1.MsgGovClaimCreatorRewards")
+	proto.RegisterType((*MsgGovClaimCreatorRewardsResponse)(nil), "mirage.core.v1.MsgGovClaimCreatorRewardsResponse")
 }
 
 func init() { proto.RegisterFile("mirage/core/v1/tx.proto", fileDescriptor_6bf938bf63970629) }
 
 var fileDescriptor_6bf938bf63970629 = []byte{
-	// 1892 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xec, 0x9b, 0xcd, 0x6f, 0x1b, 0xc7,
-	0x15, 0xc0, 0x45, 0x93, 0x92, 0xc8, 0xd1, 0x87, 0xad, 0x95, 0x2c, 0xad, 0xd6, 0x12, 0x25, 0xab,
-	0xfe, 0x90, 0x05, 0x98, 0x84, 0x5d, 0xa0, 0x40, 0xdd, 0x4b, 0xa5, 0xda, 0x46, 0x0f, 0x66, 0x2b,
-	0xac, 0x24, 0xa3, 0x68, 0x81, 0x12, 0x43, 0x72, 0xb4, 0x5a, 0x8b, 0xdc, 0x21, 0x76, 0x86, 0x92,
-	0x75, 0x2b, 0x7a, 0x6b, 0x4f, 0xfd, 0x07, 0x8a, 0x36, 0x01, 0x02, 0xe4, 0x90, 0x00, 0x3a, 0xe4,
-	0x3b, 0x40, 0x80, 0xdc, 0x7c, 0xc8, 0xc1, 0xc9, 0x29, 0x87, 0x20, 0x08, 0xec, 0x83, 0x2e, 0xf9,
-	0x23, 0x82, 0x99, 0xd9, 0x9d, 0x1d, 0x72, 0x67, 0x29, 0xc0, 0x01, 0x24, 0x2a, 0xd8, 0x8b, 0xc0,
-	0x99, 0x37, 0xfb, 0xf4, 0x66, 0x7e, 0x6f, 0xde, 0xce, 0xbe, 0x7d, 0x0b, 0xe6, 0x5a, 0xae, 0x0f,
-	0x1d, 0x54, 0xae, 0x63, 0x1f, 0x95, 0x0f, 0xee, 0x95, 0xe9, 0xf3, 0x52, 0xdb, 0xc7, 0x14, 0x1b,
-	0x93, 0x42, 0x50, 0x62, 0x82, 0xd2, 0xc1, 0x3d, 0x6b, 0xae, 0x8e, 0x49, 0x0b, 0x93, 0x72, 0x8b,
-	0x38, 0x6c, 0x5c, 0x8b, 0x38, 0x62, 0xa0, 0x35, 0x2f, 0x04, 0x55, 0xde, 0x2a, 0x8b, 0x46, 0x20,
-	0x9a, 0x82, 0x2d, 0xd7, 0xc3, 0x65, 0xfe, 0x37, 0xe8, 0x9a, 0x71, 0xb0, 0x83, 0xc5, 0x50, 0xf6,
-	0x2b, 0xe8, 0x5d, 0x76, 0x30, 0x76, 0x9a, 0xa8, 0xcc, 0x5b, 0xb5, 0xce, 0x6e, 0x79, 0xd7, 0x45,
-	0xcd, 0x46, 0xb5, 0x05, 0xc9, 0x7e, 0x30, 0xe2, 0x5a, 0x8f, 0x9d, 0x6d, 0xe8, 0xc3, 0x56, 0xf0,
-	0x7f, 0x56, 0x7e, 0xcc, 0x80, 0xcb, 0x15, 0xe2, 0xec, 0xb4, 0x1b, 0x90, 0xa2, 0x4d, 0x2e, 0x31,
-	0x7e, 0x03, 0x0a, 0xb0, 0x43, 0xf7, 0xb0, 0xef, 0xd2, 0x23, 0x33, 0xb3, 0x9c, 0x59, 0x2d, 0x6c,
-	0x98, 0xdf, 0x7c, 0x70, 0x77, 0x26, 0x30, 0x70, 0xbd, 0xd1, 0xf0, 0x11, 0x21, 0x5b, 0xd4, 0x77,
-	0x3d, 0xc7, 0x8e, 0x86, 0x1a, 0xbf, 0x05, 0x23, 0x42, 0xb7, 0x79, 0x69, 0x39, 0xb3, 0x3a, 0x76,
-	0x7f, 0xb6, 0xd4, 0xbd, 0x10, 0x25, 0xa1, 0x7f, 0xa3, 0xf0, 0xe2, 0xfb, 0xa5, 0xa1, 0x77, 0x4f,
-	0x8e, 0xd7, 0x32, 0x76, 0x70, 0x81, 0xf1, 0x3b, 0x30, 0xd6, 0xe1, 0x26, 0x70, 0xc3, 0xcd, 0x2c,
-	0xbf, 0xde, 0x2a, 0x89, 0xb9, 0x95, 0xc2, 0xb9, 0x95, 0x1e, 0xb3, 0xb9, 0x55, 0x20, 0xd9, 0xb7,
-	0x81, 0x18, 0xce, 0x7e, 0x3f, 0xb8, 0xf3, 0xcf, 0x93, 0xe3, 0xb5, 0xc8, 0x8e, 0x7f, 0x9f, 0x1c,
-	0xaf, 0xcd, 0x06, 0x73, 0xee, 0x99, 0xda, 0xca, 0x3c, 0x98, 0xeb, 0xe9, 0xb2, 0x11, 0x69, 0x63,
-	0x8f, 0xa0, 0x95, 0x7f, 0xe5, 0xc0, 0x68, 0x85, 0x38, 0x9b, 0x98, 0xd0, 0x37, 0x5e, 0x81, 0xdb,
-	0xe0, 0x32, 0xf2, 0x0e, 0x50, 0x13, 0xb7, 0x51, 0xb5, 0xdd, 0xa9, 0xed, 0xa3, 0x23, 0xbe, 0x14,
-	0xe3, 0xf6, 0x64, 0xd8, 0xbd, 0xc9, 0x7b, 0x8d, 0x12, 0x98, 0x96, 0x03, 0x6b, 0x4d, 0x5c, 0xdf,
-	0xaf, 0xee, 0x41, 0xb2, 0xc7, 0xe7, 0x3d, 0x6e, 0x4f, 0x85, 0xa2, 0x0d, 0x26, 0xf9, 0x23, 0x24,
-	0x7b, 0x46, 0x59, 0x19, 0xdf, 0x70, 0x77, 0x77, 0xdd, 0x7a, 0xa7, 0x49, 0x8f, 0xcc, 0xdc, 0x72,
-	0x66, 0x35, 0x67, 0x1b, 0xa1, 0xe8, 0xa1, 0x94, 0x18, 0xd7, 0xc1, 0x78, 0x64, 0x09, 0x3e, 0x34,
-	0x87, 0xf9, 0xc8, 0x31, 0x69, 0x06, 0x3e, 0x34, 0xee, 0x02, 0x79, 0x61, 0x95, 0xba, 0x2d, 0x44,
-	0x28, 0x6c, 0xb5, 0xcd, 0x11, 0x3e, 0x50, 0x9a, 0xb0, 0x1d, 0x0a, 0x8c, 0x9b, 0x40, 0x4e, 0xa2,
-	0xea, 0x61, 0xaf, 0x8e, 0xcc, 0x51, 0x3e, 0x74, 0x22, 0xec, 0xfd, 0x13, 0xeb, 0xec, 0xd2, 0x4a,
-	0x5c, 0xc7, 0x83, 0xb4, 0xe3, 0x23, 0x13, 0x74, 0x4f, 0x6c, 0x2b, 0x14, 0x18, 0xb3, 0x60, 0x84,
-	0x42, 0xdf, 0x41, 0xd4, 0x6c, 0xb0, 0x65, 0xb6, 0x83, 0x96, 0x31, 0x03, 0x86, 0x29, 0x6e, 0xbb,
-	0x75, 0x13, 0xf1, 0x6e, 0xd1, 0xe0, 0xbd, 0x2e, 0x6d, 0x22, 0x73, 0x37, 0xe8, 0x65, 0x0d, 0xc3,
-	0x04, 0xa3, 0x75, 0xec, 0x51, 0xe4, 0x51, 0xd3, 0xe1, 0xfd, 0x61, 0xd3, 0xb8, 0x02, 0xb2, 0x14,
-	0x3a, 0xe6, 0x1e, 0xef, 0x65, 0x3f, 0x99, 0x86, 0x16, 0x6a, 0xb8, 0xd0, 0x74, 0x97, 0xb3, 0x4c,
-	0x03, 0x6f, 0x3c, 0x98, 0xec, 0xf6, 0xa0, 0x95, 0x29, 0xbe, 0x29, 0x98, 0x2b, 0x48, 0xf7, 0x78,
-	0x47, 0xb8, 0xc7, 0xa3, 0x86, 0x9b, 0xba, 0xc7, 0x2f, 0xd7, 0x3d, 0x2c, 0x90, 0xc7, 0x07, 0xc8,
-	0xf7, 0xdd, 0x06, 0x32, 0x5d, 0xde, 0x2d, 0xdb, 0x91, 0xeb, 0x3c, 0x3b, 0xdd, 0x75, 0x98, 0x9b,
-	0x48, 0xd7, 0xf9, 0x34, 0xcb, 0x5d, 0xe7, 0x29, 0xa6, 0x28, 0x75, 0x9d, 0x73, 0x77, 0x9d, 0x05,
-	0x50, 0x68, 0xb8, 0x3e, 0xaa, 0x53, 0x17, 0x7b, 0xdc, 0x7d, 0x86, 0xed, 0xa8, 0x23, 0x01, 0x27,
-	0x43, 0x27, 0x71, 0x7e, 0x91, 0x05, 0x93, 0x15, 0xe2, 0x6c, 0x21, 0xba, 0x43, 0x90, 0xef, 0xc1,
-	0x56, 0x4a, 0xf5, 0xfc, 0xa9, 0x5a, 0x20, 0xdf, 0x09, 0x68, 0x04, 0x31, 0x41, 0xb6, 0x63, 0x4c,
-	0x4d, 0x30, 0xdb, 0xcd, 0x4f, 0xa2, 0xfd, 0x44, 0xa0, 0x7d, 0xe4, 0xc1, 0x5a, 0x13, 0xad, 0x3b,
-	0x2c, 0x46, 0xa4, 0x68, 0x07, 0x20, 0xd6, 0x43, 0x86, 0x22, 0x8c, 0xf5, 0xbc, 0x91, 0x00, 0x55,
-	0x21, 0xa7, 0x86, 0x5f, 0xb6, 0x87, 0x1f, 0xba, 0x24, 0xa5, 0x7a, 0xd1, 0xa8, 0x8a, 0xf3, 0xba,
-	0x8a, 0x4e, 0xdd, 0xab, 0xe3, 0x62, 0x1b, 0xf3, 0x7e, 0x92, 0x32, 0x3d, 0x77, 0xa6, 0xb3, 0x60,
-	0x84, 0x63, 0x24, 0x26, 0xe2, 0x47, 0xa4, 0xa0, 0x15, 0xa3, 0x3a, 0x0b, 0x66, 0x54, 0x72, 0x12,
-	0xe9, 0x87, 0x59, 0x30, 0x51, 0x21, 0xce, 0x63, 0xdc, 0x6c, 0xe2, 0x43, 0x16, 0x9c, 0x53, 0xa6,
-	0xe7, 0xce, 0xd4, 0x00, 0x39, 0x76, 0x23, 0x0d, 0xb6, 0x29, 0xff, 0x1d, 0xe3, 0x39, 0x07, 0xae,
-	0x76, 0x61, 0x93, 0x40, 0x3f, 0x16, 0xa1, 0x77, 0xc7, 0xdb, 0x4d, 0x91, 0x5e, 0x2c, 0xa4, 0x41,
-	0xa2, 0x44, 0x01, 0xd7, 0x7b, 0x48, 0x12, 0xb8, 0xb7, 0xf9, 0x83, 0x57, 0xca, 0x74, 0x20, 0x1f,
-	0x88, 0x13, 0x0e, 0x49, 0x0a, 0x39, 0x09, 0xf5, 0xb3, 0x2c, 0xb8, 0xa2, 0x00, 0x4f, 0xb1, 0x5e,
-	0x24, 0xac, 0x16, 0x30, 0x7b, 0xd9, 0x49, 0xb0, 0xff, 0x17, 0xc7, 0x24, 0xbe, 0x86, 0x69, 0x6e,
-	0x73, 0x10, 0xa0, 0x26, 0x1c, 0x87, 0x24, 0x21, 0x89, 0xee, 0x6d, 0x11, 0x68, 0x77, 0xbc, 0x5a,
-	0x0a, 0x6f, 0x60, 0xe1, 0x89, 0x90, 0xaa, 0x30, 0xd2, 0xee, 0xbc, 0xf4, 0xe4, 0x33, 0xe8, 0x3b,
-	0xaf, 0xeb, 0x88, 0xd3, 0xbd, 0xf3, 0x52, 0x78, 0x83, 0xbf, 0xf3, 0x7a, 0x1f, 0x3b, 0x26, 0x42,
-	0xae, 0xe9, 0x49, 0xe6, 0x22, 0x9d, 0x64, 0xc4, 0x93, 0x64, 0x04, 0xae, 0x37, 0x89, 0x17, 0xd0,
-	0x4e, 0xa1, 0x5e, 0x24, 0xa8, 0xe1, 0xb3, 0x64, 0x2d, 0x8e, 0xf5, 0xbf, 0x59, 0x50, 0xa8, 0x10,
-	0xe7, 0x21, 0x6a, 0xa2, 0xf4, 0xe5, 0xd8, 0x00, 0xc6, 0xd8, 0x69, 0x30, 0x25, 0xf1, 0x48, 0x68,
-	0x6f, 0x89, 0xf0, 0x2a, 0x7a, 0xd3, 0x9b, 0xe3, 0x40, 0x82, 0x13, 0x81, 0x34, 0x42, 0x24, 0xe1,
-	0x7d, 0x2d, 0xe0, 0x6d, 0x21, 0xaf, 0xb1, 0x8d, 0xf7, 0x91, 0x97, 0xe6, 0xcd, 0xcf, 0x14, 0x1e,
-	0x41, 0x5e, 0x03, 0xf9, 0x21, 0x3c, 0xd1, 0x52, 0xa0, 0xa2, 0x58, 0x3e, 0xbd, 0x85, 0x3b, 0x1e,
-	0xe5, 0x05, 0x0d, 0x39, 0x3b, 0x68, 0x25, 0xc0, 0x8e, 0x90, 0xaa, 0x09, 0xf5, 0x31, 0x91, 0x69,
-	0x7f, 0x82, 0x0e, 0x50, 0x33, 0x45, 0x3d, 0x08, 0x77, 0xcc, 0x26, 0x43, 0x11, 0x54, 0x1e, 0x88,
-	0x46, 0x0c, 0xe8, 0x55, 0x30, 0xad, 0x60, 0x93, 0x38, 0xbf, 0xcb, 0x00, 0xa3, 0x42, 0x9c, 0xcd,
-	0x8e, 0xe7, 0x92, 0xbd, 0xa7, 0xb0, 0xe9, 0x36, 0x20, 0xc5, 0x6f, 0x1e, 0x7d, 0x4d, 0x30, 0x7a,
-	0x00, 0x99, 0xd9, 0x3e, 0xa7, 0x59, 0xb0, 0xc3, 0xa6, 0x61, 0x81, 0xfc, 0xae, 0x0f, 0x45, 0x89,
-	0x44, 0x56, 0xbc, 0x4d, 0x0f, 0xdb, 0x86, 0x01, 0x72, 0xcf, 0xa0, 0xdb, 0xe4, 0x8c, 0xf2, 0x36,
-	0xff, 0x6d, 0x2c, 0x80, 0x02, 0xc5, 0xad, 0x1a, 0xa1, 0xd8, 0x43, 0x1c, 0x49, 0xde, 0x8e, 0x3a,
-	0xd8, 0x5a, 0xf8, 0x08, 0x12, 0xec, 0x71, 0x08, 0x05, 0x3b, 0x68, 0xc5, 0x66, 0xbd, 0x00, 0xac,
-	0xf8, 0xec, 0xe4, 0xe4, 0xff, 0x97, 0xe1, 0x81, 0xab, 0xe2, 0x7a, 0xf4, 0x67, 0x06, 0xae, 0x88,
-	0xcd, 0xa5, 0x84, 0xed, 0x96, 0x55, 0xb7, 0x9b, 0x62, 0x7f, 0xae, 0xaf, 0xfd, 0x62, 0x1b, 0x46,
-	0x06, 0xf6, 0x9a, 0xbe, 0xd1, 0xf1, 0xbd, 0x81, 0x36, 0x3d, 0x32, 0x50, 0x9a, 0xfe, 0x51, 0xf0,
-	0x96, 0xb5, 0x53, 0x23, 0x75, 0xdf, 0xad, 0xa5, 0x67, 0xb4, 0xb3, 0x0b, 0x21, 0x32, 0x54, 0xb0,
-	0x08, 0x32, 0x11, 0x84, 0x8a, 0xa4, 0x7b, 0x45, 0xd2, 0x3b, 0xd6, 0x90, 0x9b, 0x04, 0xfa, 0x5e,
-	0x96, 0x1f, 0xe9, 0xb6, 0x10, 0x5d, 0xef, 0x50, 0x6c, 0x23, 0x0f, 0x1d, 0xc2, 0xf4, 0xc6, 0x70,
-	0x76, 0x54, 0x17, 0x01, 0x80, 0x1d, 0x8a, 0xab, 0x3e, 0x5b, 0x79, 0x8e, 0x36, 0xcf, 0x17, 0x54,
-	0xa0, 0x88, 0x61, 0xbc, 0x06, 0xe6, 0x63, 0xb4, 0x24, 0xcb, 0xcf, 0xb3, 0x20, 0x5f, 0x21, 0xce,
-	0xfa, 0x21, 0xf4, 0x1b, 0x29, 0xc2, 0x73, 0xbf, 0xb7, 0x33, 0xb4, 0x0c, 0x45, 0x95, 0x1e, 0xb5,
-	0xc3, 0x2a, 0xb4, 0x02, 0xef, 0xd9, 0x3e, 0x6a, 0xc7, 0xcb, 0xd0, 0x0c, 0xfe, 0xc6, 0x8d, 0xc3,
-	0x93, 0x44, 0xbf, 0x14, 0x69, 0x8e, 0x2d, 0x44, 0x37, 0x5c, 0xec, 0xf8, 0xb0, 0xbd, 0x77, 0x94,
-	0x82, 0x1d, 0x84, 0x92, 0xd1, 0x5a, 0x88, 0x23, 0xe4, 0x2a, 0x3b, 0x12, 0xd2, 0x1d, 0x2a, 0x42,
-	0x89, 0xf7, 0xfd, 0x1c, 0x3f, 0x8f, 0xaf, 0x7b, 0x1e, 0xa6, 0x30, 0x4d, 0x78, 0x9c, 0xed, 0xcd,
-	0x74, 0x30, 0x0a, 0xc6, 0xd9, 0x15, 0xb0, 0xdd, 0x46, 0x5e, 0xc3, 0x7d, 0x6e, 0xee, 0x8b, 0x2b,
-	0xc2, 0x76, 0xc2, 0x73, 0x40, 0xe8, 0x2e, 0xa1, 0x1b, 0xdd, 0xff, 0x6a, 0x1a, 0x64, 0x2b, 0xc4,
-	0x31, 0xfe, 0x02, 0xc6, 0xbb, 0x3e, 0xdc, 0x59, 0xea, 0xfd, 0xe0, 0xa6, 0xe7, 0x5b, 0x17, 0xeb,
-	0xf6, 0x29, 0x03, 0xc2, 0xff, 0x60, 0xfc, 0x1e, 0xe4, 0xf8, 0xfb, 0xc6, 0x39, 0xcd, 0x05, 0x4c,
-	0x60, 0x2d, 0x25, 0x08, 0x54, 0x0d, 0xfc, 0x5b, 0x09, 0x9d, 0x06, 0x26, 0xd0, 0x6a, 0x50, 0xcb,
-	0xe6, 0x99, 0x06, 0x5e, 0x32, 0xaf, 0xd3, 0xc0, 0x04, 0x5a, 0x0d, 0x6a, 0xa5, 0xb6, 0xb1, 0x03,
-	0xc6, 0xd4, 0x2a, 0xed, 0xa2, 0x66, 0xbc, 0x22, 0xb7, 0x6e, 0xf5, 0x97, 0xab, 0x6a, 0xd5, 0x0a,
-	0x61, 0x9d, 0x5a, 0x45, 0xae, 0x55, 0xab, 0xa9, 0x53, 0x65, 0x34, 0xbb, 0x6a, 0x54, 0x75, 0xd3,
-	0x53, 0x07, 0x68, 0x69, 0xea, 0x4a, 0x25, 0x8d, 0x3f, 0x83, 0x42, 0x54, 0x26, 0xb9, 0xa0, 0x9f,
-	0xa5, 0x90, 0x5a, 0x37, 0xfa, 0x49, 0xa5, 0x42, 0x1b, 0x00, 0xa5, 0x48, 0x6f, 0x51, 0x73, 0x4d,
-	0x24, 0xb6, 0x6e, 0xf6, 0x15, 0xab, 0xd3, 0xef, 0xaa, 0x13, 0xd3, 0x3a, 0xb3, 0x32, 0x40, 0xef,
-	0xcc, 0x9a, 0x82, 0x25, 0xc6, 0x4b, 0x2d, 0x56, 0x2a, 0x26, 0xda, 0xc3, 0xe5, 0x5a, 0x5e, 0x9a,
-	0x92, 0x19, 0xe3, 0x6f, 0x60, 0xa2, 0xbb, 0x5c, 0x66, 0xb9, 0x8f, 0x41, 0x42, 0xf5, 0xea, 0x69,
-	0x23, 0x54, 0x64, 0x51, 0xc9, 0x86, 0x0e, 0x99, 0x94, 0x6a, 0x91, 0xc5, 0x8a, 0x09, 0xd8, 0x22,
-	0xa8, 0x85, 0x04, 0x45, 0xad, 0x25, 0x52, 0xae, 0x5d, 0x04, 0xcd, 0x4b, 0x6e, 0x69, 0x27, 0x47,
-	0x96, 0x68, 0x27, 0xe7, 0x75, 0xa3, 0x9f, 0x54, 0x63, 0x27, 0x57, 0xd9, 0xc7, 0x4e, 0xae, 0xf4,
-	0x56, 0x7f, 0xb9, 0xea, 0xb1, 0xca, 0xeb, 0xc0, 0xc5, 0x24, 0x53, 0x04, 0xa6, 0x9b, 0x7d, 0xc5,
-	0xdd, 0x1e, 0xab, 0xbc, 0x8f, 0x5a, 0x4a, 0xb6, 0x45, 0xe8, 0xbd, 0x7d, 0xca, 0x00, 0xa9, 0xf9,
-	0x31, 0x18, 0x09, 0x5e, 0x89, 0xcc, 0xeb, 0xf6, 0x38, 0x17, 0x59, 0xd7, 0x13, 0x45, 0xea, 0xac,
-	0x95, 0x2c, 0xfd, 0x62, 0xe2, 0x05, 0x89, 0xfb, 0x34, 0x9e, 0x40, 0x66, 0x3a, 0x95, 0xe4, 0xf1,
-	0xa2, 0x36, 0x5e, 0x84, 0x62, 0xad, 0xce, 0x78, 0x9e, 0xd2, 0x78, 0x02, 0xf2, 0x32, 0x47, 0x79,
-	0x4d, 0x1f, 0x81, 0xb8, 0xd0, 0xfa, 0x55, 0x1f, 0xa1, 0xd4, 0x06, 0xc1, 0xe5, 0xde, 0x14, 0xd9,
-	0x8a, 0xee, 0x76, 0xd5, 0x3d, 0xc6, 0x5a, 0x3b, 0x7d, 0x8c, 0xba, 0x08, 0x4a, 0x22, 0x4a, 0xb7,
-	0x08, 0x91, 0x58, 0xbb, 0x08, 0xf1, 0x2c, 0x11, 0x77, 0xd1, 0x28, 0x43, 0xa4, 0x75, 0x51, 0x29,
-	0xd6, 0xbb, 0x68, 0x2c, 0x7d, 0xc3, 0x23, 0xbf, 0x4c, 0xdd, 0x68, 0x23, 0x7f, 0x28, 0xd5, 0x47,
-	0xfe, 0xde, 0xf4, 0x81, 0xf1, 0x77, 0x30, 0xd9, 0x93, 0x3a, 0xb8, 0x9e, 0x70, 0xc7, 0x88, 0x86,
-	0x58, 0x77, 0x4e, 0x1d, 0x22, 0xf5, 0xff, 0x01, 0x0c, 0x8b, 0xc7, 0x59, 0x53, 0x73, 0x0d, 0x97,
-	0x58, 0xcb, 0x49, 0x12, 0x75, 0x63, 0x76, 0x3d, 0x41, 0x2d, 0xe9, 0xff, 0xbf, 0x1c, 0xa0, 0xdd,
-	0x98, 0xba, 0x03, 0x3c, 0x73, 0x54, 0x79, 0x78, 0xd7, 0x39, 0x6a, 0x28, 0xd4, 0x3a, 0x6a, 0xef,
-	0x39, 0xce, 0x1a, 0xfe, 0xc7, 0xc9, 0xf1, 0x5a, 0x66, 0xe3, 0xee, 0x8b, 0x57, 0xc5, 0xcc, 0xcb,
-	0x57, 0xc5, 0xcc, 0x0f, 0xaf, 0x8a, 0x99, 0xff, 0xbc, 0x2e, 0x0e, 0xbd, 0x7c, 0x5d, 0x1c, 0xfa,
-	0xf6, 0x75, 0x71, 0xe8, 0xaf, 0xd3, 0xc1, 0x67, 0xcc, 0xcf, 0xc5, 0xc7, 0xdb, 0xec, 0xb9, 0x92,
-	0xd4, 0x46, 0xf8, 0xe7, 0xd0, 0xbf, 0xfe, 0x29, 0x00, 0x00, 0xff, 0xff, 0x75, 0xfa, 0xb4, 0x1f,
-	0x80, 0x3e, 0x00, 0x00,
+	// 3567 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xec, 0x5d, 0x4b, 0x6c, 0xdc, 0xc6,
+	0xf9, 0xf7, 0x8a, 0x2b, 0x69, 0x35, 0x7a, 0xd8, 0xa6, 0x15, 0x89, 0xa6, 0x6d, 0xbd, 0xe2, 0xd8,
+	0xb2, 0x62, 0x6b, 0x63, 0xff, 0x83, 0x3f, 0xf0, 0xcf, 0xff, 0xd0, 0xca, 0x76, 0x9c, 0xa4, 0xb0,
+	0x12, 0x83, 0x92, 0x83, 0xa2, 0x05, 0xba, 0xe0, 0x2e, 0x67, 0x29, 0x5a, 0xbb, 0x9c, 0x05, 0xc9,
+	0x5d, 0x59, 0xa7, 0x16, 0xb9, 0x35, 0xa7, 0x1e, 0x7a, 0x2a, 0x50, 0xf4, 0x71, 0x69, 0xd1, 0x07,
+	0xea, 0x43, 0x8b, 0x3e, 0x51, 0xa0, 0x28, 0x8a, 0xa6, 0x05, 0x8a, 0xa6, 0x45, 0x0f, 0x2d, 0x5a,
+	0x04, 0x6d, 0x72, 0x30, 0x0a, 0xb4, 0xd7, 0x5e, 0x7a, 0x29, 0x66, 0x86, 0x1c, 0x0e, 0xc9, 0x19,
+	0xee, 0x26, 0x71, 0xe4, 0xdd, 0x94, 0x17, 0x41, 0x33, 0xdf, 0xc7, 0x79, 0xfd, 0x7e, 0x33, 0xf3,
+	0xf1, 0x9b, 0x8f, 0xb3, 0x60, 0xb1, 0xed, 0x78, 0xa6, 0x0d, 0xab, 0x0d, 0xe4, 0xc1, 0x6a, 0xef,
+	0x6a, 0x35, 0xb8, 0xbf, 0xd9, 0xf1, 0x50, 0x80, 0xd4, 0x39, 0x2a, 0xd8, 0xc4, 0x82, 0xcd, 0xde,
+	0x55, 0x7d, 0xb1, 0x81, 0xfc, 0x36, 0xf2, 0xab, 0x6d, 0xdf, 0xc6, 0x7a, 0x6d, 0xdf, 0xa6, 0x8a,
+	0xfa, 0x69, 0x2a, 0xa8, 0x91, 0x54, 0x95, 0x26, 0x42, 0xd1, 0x49, 0xb3, 0xed, 0xb8, 0xa8, 0x4a,
+	0xfe, 0x86, 0x59, 0xf3, 0x36, 0xb2, 0x11, 0x55, 0xc5, 0xff, 0x85, 0xb9, 0x2b, 0x36, 0x42, 0x76,
+	0x0b, 0x56, 0x49, 0xaa, 0xde, 0x6d, 0x56, 0x9b, 0x0e, 0x6c, 0x59, 0xb5, 0xb6, 0xe9, 0xef, 0x87,
+	0x1a, 0x67, 0x52, 0xed, 0xec, 0x98, 0x9e, 0xd9, 0x8e, 0xea, 0x59, 0x4a, 0x09, 0x1b, 0xa8, 0xdd,
+	0xee, 0xba, 0x4e, 0x70, 0x48, 0xe5, 0x6b, 0xff, 0x28, 0x81, 0xe3, 0xdb, 0xbe, 0x7d, 0xb7, 0x63,
+	0x99, 0x01, 0xbc, 0x43, 0x9e, 0x54, 0xff, 0x17, 0x4c, 0x99, 0xdd, 0x60, 0x0f, 0x79, 0x4e, 0x70,
+	0xa8, 0x95, 0x56, 0x4a, 0xeb, 0x53, 0xd7, 0xb5, 0xdf, 0x7f, 0xf7, 0xca, 0x7c, 0xd8, 0x81, 0x2d,
+	0xcb, 0xf2, 0xa0, 0xef, 0xef, 0x04, 0x9e, 0xe3, 0xda, 0x46, 0xac, 0xaa, 0xfe, 0x1f, 0x98, 0xa0,
+	0x75, 0x6b, 0x63, 0x2b, 0xa5, 0xf5, 0xe9, 0x6b, 0x0b, 0x9b, 0xc9, 0x81, 0xda, 0xa4, 0xe5, 0x5f,
+	0x9f, 0x7a, 0xe3, 0xad, 0xe5, 0x63, 0x5f, 0x7f, 0xf8, 0x60, 0xa3, 0x64, 0x84, 0x0f, 0xa8, 0xff,
+	0x0f, 0xa6, 0xbb, 0xa4, 0x09, 0xa4, 0x63, 0x9a, 0x42, 0x9e, 0xd7, 0x37, 0x69, 0xdf, 0x37, 0xa3,
+	0xbe, 0x6f, 0xde, 0xc2, 0x7d, 0xdf, 0x36, 0xfd, 0x7d, 0x03, 0x50, 0x75, 0xfc, 0xff, 0x73, 0x97,
+	0x5e, 0x7b, 0xf8, 0x60, 0x23, 0x6e, 0xc7, 0xeb, 0x0f, 0x1f, 0x6c, 0x2c, 0x84, 0xdd, 0x4e, 0x75,
+	0x6d, 0xed, 0x34, 0x58, 0x4c, 0x65, 0x19, 0xd0, 0xef, 0x20, 0xd7, 0x87, 0x6b, 0x3f, 0x29, 0x83,
+	0xc9, 0x6d, 0xdf, 0xbe, 0x83, 0xfc, 0xe0, 0x3d, 0x8f, 0xc0, 0x45, 0x70, 0x1c, 0xba, 0x3d, 0xd8,
+	0x42, 0x1d, 0x58, 0xeb, 0x74, 0xeb, 0xfb, 0xf0, 0x90, 0x0c, 0xc5, 0x8c, 0x31, 0x17, 0x65, 0xdf,
+	0x21, 0xb9, 0xea, 0x26, 0x38, 0xc5, 0x14, 0xeb, 0x2d, 0xd4, 0xd8, 0xaf, 0xed, 0x99, 0xfe, 0x1e,
+	0xe9, 0xf7, 0x8c, 0x71, 0x32, 0x12, 0x5d, 0xc7, 0x92, 0x17, 0x4d, 0x7f, 0x4f, 0xad, 0x72, 0xfa,
+	0x96, 0xd3, 0x6c, 0x3a, 0x8d, 0x6e, 0x2b, 0x38, 0xd4, 0xca, 0x2b, 0xa5, 0xf5, 0xb2, 0xa1, 0x46,
+	0xa2, 0x9b, 0x4c, 0xa2, 0xae, 0x82, 0x99, 0xb8, 0x25, 0xe8, 0x40, 0x1b, 0x27, 0x9a, 0xd3, 0xac,
+	0x19, 0xe8, 0x40, 0xbd, 0x02, 0xd8, 0x83, 0xb5, 0xc0, 0x69, 0x43, 0x3f, 0x30, 0xdb, 0x1d, 0x6d,
+	0x82, 0x28, 0xb2, 0x26, 0xec, 0x46, 0x02, 0xf5, 0x29, 0xc0, 0x3a, 0x51, 0x73, 0x91, 0xdb, 0x80,
+	0xda, 0x24, 0x51, 0x9d, 0x8d, 0x72, 0x5f, 0xc6, 0x99, 0x89, 0x52, 0x7d, 0xc7, 0x76, 0xcd, 0xa0,
+	0xeb, 0x41, 0x0d, 0x24, 0x3b, 0xb6, 0x13, 0x09, 0xd4, 0x05, 0x30, 0x11, 0x98, 0x9e, 0x0d, 0x03,
+	0xcd, 0xc2, 0xc3, 0x6c, 0x84, 0x29, 0xf5, 0x2c, 0x98, 0x62, 0x54, 0xd5, 0x20, 0x11, 0xc5, 0x19,
+	0xea, 0x3c, 0x18, 0x0f, 0x9c, 0xa0, 0x05, 0xb5, 0x26, 0x91, 0xd0, 0x84, 0xaa, 0x81, 0xc9, 0x06,
+	0x72, 0x03, 0xe8, 0x06, 0x9a, 0x4d, 0xf2, 0xa3, 0xa4, 0x7a, 0x02, 0x28, 0x81, 0x69, 0x6b, 0x7b,
+	0x24, 0x17, 0xff, 0x8b, 0x4b, 0x68, 0x43, 0xcb, 0x31, 0x35, 0x67, 0x45, 0xc1, 0x25, 0x90, 0x84,
+	0x7a, 0x09, 0x9c, 0x20, 0x5c, 0x6b, 0xa0, 0x56, 0xad, 0x07, 0x3d, 0xdf, 0x41, 0xae, 0x76, 0x6f,
+	0xa5, 0xb4, 0x3e, 0x6b, 0x1c, 0x8f, 0xf2, 0x5f, 0xa5, 0xd9, 0xcf, 0xcd, 0x25, 0x49, 0xb7, 0x76,
+	0x92, 0xcc, 0x23, 0xcc, 0x1e, 0xc6, 0xa8, 0x6f, 0x53, 0x46, 0x3d, 0x6f, 0x39, 0x05, 0xa3, 0x3e,
+	0xfc, 0x8c, 0xd2, 0x41, 0x05, 0xf5, 0xa0, 0xe7, 0x39, 0x16, 0xd4, 0x1c, 0x92, 0xcd, 0xd2, 0x31,
+	0xdb, 0xee, 0x71, 0x6c, 0x93, 0x50, 0x08, 0xd3, 0x85, 0x51, 0xe8, 0x87, 0x0a, 0xa1, 0xd0, 0xab,
+	0x28, 0x80, 0x05, 0x85, 0x86, 0x81, 0x42, 0x96, 0xe3, 0xc1, 0x46, 0x80, 0xd7, 0x05, 0x4c, 0xa1,
+	0x71, 0x23, 0xce, 0x90, 0xc0, 0x89, 0xa1, 0x63, 0x70, 0xfe, 0x54, 0x01, 0x73, 0xdb, 0xbe, 0xbd,
+	0x03, 0x83, 0xbb, 0x3e, 0xf4, 0x5c, 0xb3, 0x5d, 0xa0, 0xfa, 0xf8, 0x51, 0xd5, 0x41, 0xa5, 0x1b,
+	0xa2, 0x11, 0xae, 0x0b, 0x2c, 0x9d, 0xc1, 0x54, 0x03, 0x0b, 0x49, 0xfc, 0x18, 0xb4, 0x3f, 0xa0,
+	0xd0, 0x3e, 0xef, 0x9a, 0xf5, 0x16, 0xdc, 0xb2, 0xf1, 0x1a, 0x51, 0x40, 0xfb, 0xb8, 0xa1, 0x9d,
+	0x07, 0xe3, 0x26, 0x86, 0x22, 0xc4, 0x95, 0x26, 0x24, 0xa0, 0x72, 0xc8, 0xf1, 0xcb, 0x2f, 0x9e,
+	0xc3, 0x37, 0x1d, 0xbf, 0x40, 0x75, 0xd4, 0x50, 0xa5, 0xa6, 0x3e, 0x0f, 0x1d, 0x3f, 0x57, 0x67,
+	0xe8, 0x34, 0x26, 0xf9, 0x7e, 0x81, 0xe9, 0x63, 0xc7, 0x74, 0x01, 0x4c, 0x10, 0x18, 0x7d, 0x0d,
+	0x12, 0x13, 0x29, 0x4c, 0x65, 0x50, 0x5d, 0x00, 0xf3, 0x3c, 0x72, 0x0c, 0xd2, 0xef, 0x29, 0x60,
+	0x76, 0xdb, 0xb7, 0x6f, 0xa1, 0x56, 0x0b, 0x1d, 0xe0, 0xc5, 0xb9, 0xc0, 0xf4, 0xb1, 0x63, 0xaa,
+	0x82, 0x32, 0xde, 0x48, 0xc3, 0x69, 0x4a, 0xfe, 0xcf, 0xe0, 0xb9, 0x08, 0x9e, 0x48, 0xc0, 0xc6,
+	0x00, 0xfd, 0x3e, 0x5d, 0x7a, 0xef, 0xba, 0xcd, 0x02, 0xd2, 0xd1, 0x82, 0x34, 0xf4, 0xb1, 0x70,
+	0xc0, 0xa5, 0x8d, 0x24, 0x0a, 0xf7, 0x2e, 0xea, 0x38, 0x8d, 0x02, 0xd3, 0x61, 0xd8, 0x4e, 0x03,
+	0x0c, 0x45, 0xb4, 0x9d, 0x92, 0x84, 0xc4, 0x48, 0xe2, 0x90, 0x63, 0xa0, 0xfe, 0x48, 0x01, 0x27,
+	0x38, 0xc0, 0x0b, 0x58, 0x47, 0x09, 0x56, 0x1d, 0x68, 0x69, 0xec, 0x18, 0xb0, 0x5f, 0xa6, 0x66,
+	0x12, 0x19, 0xc3, 0xc2, 0x2d, 0x3a, 0x0c, 0xa0, 0x4a, 0xcc, 0x21, 0x86, 0x10, 0x83, 0xee, 0xab,
+	0x74, 0xa1, 0xbd, 0xeb, 0xd6, 0x0b, 0xf0, 0x86, 0x16, 0x3c, 0xba, 0xa4, 0x72, 0x18, 0x09, 0x67,
+	0x5e, 0x61, 0xf9, 0x0c, 0xfb, 0xcc, 0x4b, 0x98, 0x38, 0xc9, 0x99, 0x57, 0x80, 0x37, 0xfc, 0x33,
+	0x2f, 0xfd, 0xda, 0x31, 0x1b, 0xe1, 0x5a, 0x58, 0x32, 0xa3, 0x64, 0xc9, 0xd0, 0x37, 0xc9, 0x18,
+	0xb8, 0xb4, 0x13, 0x2f, 0x44, 0xbb, 0x00, 0x75, 0x94, 0x40, 0x8d, 0xde, 0x25, 0xeb, 0x59, 0x58,
+	0xbf, 0xa8, 0x80, 0xa9, 0x6d, 0xdf, 0xbe, 0x09, 0x5b, 0xb0, 0x38, 0x1c, 0x1b, 0xc2, 0x35, 0xf6,
+	0x14, 0x38, 0xc9, 0xe0, 0x61, 0xa0, 0x7d, 0x85, 0x2e, 0xaf, 0x34, 0xb7, 0xd8, 0x1c, 0x87, 0x12,
+	0x38, 0xba, 0x90, 0xc6, 0x10, 0x31, 0xf0, 0x7e, 0x47, 0xc1, 0xdb, 0x81, 0xae, 0xb5, 0x8b, 0xf6,
+	0xa1, 0x5b, 0xf8, 0xcd, 0x8f, 0x14, 0x3c, 0x1f, 0xba, 0x16, 0xf4, 0x22, 0xf0, 0x68, 0x8a, 0x03,
+	0x15, 0x66, 0xfc, 0xe9, 0x6d, 0xd4, 0x75, 0x03, 0x12, 0xd0, 0x50, 0x36, 0xc2, 0x94, 0x04, 0xec,
+	0x18, 0x52, 0xde, 0xa1, 0x3e, 0x4d, 0x3d, 0xed, 0xb7, 0x61, 0x0f, 0xb6, 0x0a, 0xa8, 0x87, 0x61,
+	0xc7, 0x6c, 0x61, 0x28, 0xc2, 0xc8, 0x03, 0x9a, 0xc8, 0x00, 0xfa, 0x04, 0x38, 0xc5, 0xc1, 0xc6,
+	0xe0, 0xfc, 0x4b, 0x09, 0xa8, 0xdb, 0xbe, 0x7d, 0xa7, 0xeb, 0x3a, 0xfe, 0xde, 0xab, 0x66, 0xcb,
+	0xb1, 0xcc, 0x00, 0xbd, 0xf7, 0xd5, 0x57, 0x03, 0x93, 0x3d, 0x13, 0x37, 0xdb, 0x23, 0x68, 0x4e,
+	0x19, 0x51, 0x52, 0xd5, 0x41, 0xa5, 0xe9, 0x99, 0x34, 0x44, 0x42, 0xa1, 0xa7, 0xe9, 0x51, 0x5a,
+	0x55, 0x41, 0xf9, 0x9e, 0xe9, 0xb4, 0x08, 0x46, 0x15, 0x83, 0xfc, 0xaf, 0x9e, 0x05, 0x53, 0x01,
+	0x6a, 0xd7, 0xfd, 0x00, 0xb9, 0x90, 0x40, 0x52, 0x31, 0xe2, 0x0c, 0x3c, 0x16, 0x1e, 0x34, 0x7d,
+	0xe4, 0x12, 0x10, 0xa6, 0x8c, 0x30, 0x95, 0xe9, 0xf5, 0x59, 0xa0, 0x67, 0x7b, 0xc7, 0x3a, 0xff,
+	0xa5, 0x12, 0x59, 0xb8, 0xb6, 0x1d, 0x37, 0x78, 0x9f, 0x0b, 0x57, 0x8c, 0xcd, 0x98, 0x64, 0xba,
+	0x29, 0xfc, 0x74, 0xe3, 0xda, 0x5f, 0xce, 0x6d, 0x3f, 0x9d, 0x86, 0x71, 0x03, 0xd3, 0x4d, 0xbf,
+	0xde, 0xf5, 0xdc, 0xa1, 0x6e, 0x7a, 0xdc, 0x40, 0xd6, 0xf4, 0x3f, 0x85, 0xa7, 0xac, 0xdd, 0xba,
+	0xdf, 0xf0, 0x9c, 0x7a, 0x61, 0xa3, 0x1d, 0xdd, 0x12, 0xc2, 0x96, 0x0a, 0x8b, 0x04, 0x2f, 0xd2,
+	0x84, 0x74, 0xaf, 0x58, 0x05, 0x33, 0x1d, 0xe8, 0x39, 0xc8, 0xaa, 0x35, 0xd8, 0x8e, 0x31, 0x6b,
+	0x4c, 0xd3, 0xbc, 0x1b, 0xc2, 0x6d, 0x23, 0x3c, 0x86, 0x8d, 0xa0, 0x65, 0x98, 0x7f, 0x4b, 0x21,
+	0x56, 0xdf, 0x0e, 0x0c, 0xb6, 0xba, 0x01, 0x32, 0xa0, 0x0b, 0x0f, 0xcc, 0x62, 0xef, 0x38, 0x3a,
+	0xe0, 0xcf, 0x01, 0x60, 0x76, 0x03, 0x54, 0xf3, 0xf0, 0xc8, 0x13, 0xf4, 0x2b, 0x64, 0x40, 0x29,
+	0x14, 0x19, 0x18, 0xcf, 0x80, 0xd3, 0x19, 0xb4, 0x18, 0x96, 0x3f, 0x56, 0x40, 0x65, 0xdb, 0xb7,
+	0xb7, 0x0e, 0x4c, 0xcf, 0x2a, 0x20, 0x7c, 0xec, 0xdb, 0x3f, 0x86, 0x16, 0x43, 0x51, 0x0b, 0x0e,
+	0x3b, 0x51, 0xa0, 0xda, 0x14, 0xc9, 0xd9, 0x3d, 0xec, 0x64, 0x23, 0xd5, 0x54, 0x72, 0x28, 0x47,
+	0xc0, 0x63, 0x88, 0xfe, 0x8c, 0x7a, 0x42, 0x76, 0x60, 0x70, 0xdd, 0x41, 0xb6, 0x67, 0x76, 0xf6,
+	0x0e, 0x0b, 0x60, 0x87, 0x21, 0xaa, 0xb4, 0x1e, 0xc1, 0x11, 0xe1, 0xca, 0x32, 0x24, 0x1e, 0x11,
+	0x1e, 0x42, 0x3e, 0xde, 0x1c, 0x9b, 0xec, 0x5b, 0xae, 0x8b, 0x02, 0xb3, 0xf0, 0x89, 0x1c, 0xed,
+	0x7e, 0x9b, 0x75, 0x66, 0x3d, 0x8e, 0x98, 0x72, 0xfc, 0x84, 0xd9, 0xe9, 0x40, 0xd7, 0x72, 0xee,
+	0x6b, 0xfb, 0xf4, 0x89, 0x28, 0x2d, 0x79, 0x55, 0x88, 0xe8, 0xc2, 0x7f, 0x08, 0x83, 0x5f, 0x15,
+	0x6e, 0x78, 0xd0, 0x0c, 0xe0, 0x0d, 0x16, 0x21, 0x5f, 0xb0, 0xe9, 0xa8, 0xd8, 0x94, 0xf8, 0x52,
+	0xc1, 0x92, 0x7e, 0xa9, 0x00, 0x79, 0x56, 0xad, 0x80, 0x69, 0x0b, 0x62, 0x63, 0xac, 0x43, 0xde,
+	0xbc, 0x28, 0xe3, 0xf8, 0x2c, 0xf5, 0x32, 0x50, 0x91, 0xe7, 0xd8, 0x8e, 0x6b, 0xb6, 0x6a, 0x01,
+	0x34, 0xdb, 0x35, 0x12, 0xf0, 0x4c, 0x29, 0x78, 0x22, 0x92, 0xec, 0x42, 0xb3, 0xfd, 0xb2, 0xd9,
+	0x86, 0x98, 0x8b, 0x75, 0x07, 0x45, 0x5c, 0xac, 0x3b, 0x08, 0x2f, 0x5f, 0x1d, 0xd4, 0x72, 0x1a,
+	0x87, 0x21, 0x13, 0xc3, 0x94, 0xe4, 0x55, 0x2c, 0xc5, 0x1e, 0x46, 0xae, 0xbf, 0x2b, 0xd1, 0xfa,
+	0xc5, 0x64, 0xdb, 0x30, 0x30, 0x2d, 0x33, 0x30, 0x0b, 0x86, 0x8d, 0x36, 0xc3, 0x32, 0x4c, 0x58,
+	0x05, 0xcb, 0x12, 0xa8, 0x19, 0x1d, 0x7e, 0xab, 0x90, 0x17, 0x89, 0x5d, 0xcf, 0x74, 0xfd, 0x26,
+	0xf4, 0x8a, 0xd5, 0x66, 0xd8, 0xb8, 0xb0, 0x0c, 0xa6, 0x5d, 0x78, 0x50, 0x6b, 0xa2, 0x2e, 0x71,
+	0x3e, 0x52, 0x46, 0x00, 0x17, 0x1e, 0xdc, 0xa2, 0x39, 0x19, 0xd0, 0x97, 0xc0, 0x59, 0x11, 0xa0,
+	0x0c, 0xf1, 0x6f, 0xd0, 0x68, 0xb1, 0x8f, 0x21, 0xc7, 0x2d, 0xd0, 0x1e, 0x32, 0xb4, 0x25, 0xd1,
+	0x61, 0x09, 0xac, 0x18, 0x90, 0xdf, 0xa4, 0xaf, 0xfa, 0xb7, 0xa1, 0xd9, 0x2b, 0xac, 0x84, 0xa1,
+	0x47, 0x92, 0xbe, 0xe9, 0x27, 0xc1, 0x62, 0x50, 0xfe, 0x9c, 0x42, 0x49, 0x06, 0xad, 0x80, 0x72,
+	0x44, 0x3e, 0x59, 0x95, 0x40, 0x9c, 0x04, 0x91, 0x41, 0xfc, 0x0b, 0x85, 0x18, 0xfb, 0xe1, 0x49,
+	0x7a, 0x01, 0xf2, 0xa8, 0x82, 0x7c, 0x0e, 0x9c, 0x11, 0xc0, 0xc8, 0x60, 0xfe, 0xa7, 0x42, 0xbc,
+	0xf1, 0xa1, 0xf5, 0xdd, 0xf5, 0x4c, 0x6c, 0x98, 0x61, 0xa3, 0xbe, 0x00, 0x7a, 0x48, 0x0c, 0x2a,
+	0x15, 0x94, 0xb9, 0x2f, 0x4d, 0xc9, 0xff, 0xd1, 0xcb, 0x56, 0x53, 0xf4, 0xb2, 0x65, 0xe7, 0xbe,
+	0x6c, 0x2d, 0x83, 0x73, 0x42, 0xb8, 0x19, 0x21, 0x5e, 0x2f, 0x47, 0x2e, 0x5e, 0x5e, 0x7c, 0xc7,
+	0x43, 0x4d, 0xa7, 0x55, 0x78, 0x88, 0x86, 0x85, 0x14, 0x8b, 0x60, 0x92, 0xbc, 0x92, 0x3b, 0x16,
+	0xe1, 0x45, 0xd9, 0x98, 0xc0, 0xc9, 0x97, 0x2c, 0xc6, 0x96, 0x66, 0x96, 0x2d, 0xb6, 0x88, 0x2d,
+	0x7b, 0xb9, 0x6c, 0x79, 0x12, 0xac, 0x4a, 0xb9, 0xc0, 0x18, 0xf3, 0x67, 0x6a, 0xa0, 0xbf, 0xe4,
+	0xf6, 0x9c, 0x90, 0x53, 0xa8, 0x88, 0xd2, 0x19, 0x7a, 0xa2, 0xc4, 0xbb, 0x4b, 0x33, 0x37, 0xb8,
+	0x87, 0x5a, 0xf4, 0x09, 0x70, 0x19, 0xf2, 0x7f, 0x53, 0x48, 0x58, 0xac, 0x01, 0x7b, 0x68, 0x3f,
+	0x12, 0x52, 0xcd, 0x02, 0xff, 0x0f, 0x0b, 0xfe, 0x2b, 0x60, 0x49, 0x0c, 0x31, 0x63, 0xc1, 0xaf,
+	0x28, 0x0b, 0xb6, 0x1a, 0x0d, 0xd8, 0x09, 0x0a, 0x16, 0x8c, 0x12, 0x0b, 0x24, 0x68, 0x0b, 0xa0,
+	0x64, 0x68, 0xff, 0x9a, 0xfa, 0x63, 0x6f, 0xc2, 0x46, 0xcb, 0x71, 0x8b, 0x49, 0x3f, 0xda, 0x70,
+	0x53, 0x87, 0xab, 0x08, 0x4b, 0x86, 0xf7, 0x2f, 0xa9, 0xc3, 0x95, 0x3a, 0x02, 0x8a, 0xf7, 0x83,
+	0x11, 0x06, 0x9b, 0x3a, 0x5a, 0x33, 0x40, 0xa6, 0xed, 0x38, 0x03, 0xb6, 0x51, 0xaf, 0xb0, 0xe3,
+	0x3e, 0x9c, 0x76, 0x5c, 0x02, 0x5c, 0x86, 0xfc, 0x43, 0xba, 0xa6, 0x33, 0x1f, 0x7c, 0x31, 0xcd,
+	0x47, 0x88, 0x00, 0x67, 0xc0, 0x94, 0x0b, 0x0f, 0x6a, 0xe8, 0xc0, 0x85, 0x5e, 0xc8, 0x81, 0x8a,
+	0x0b, 0x0f, 0x5e, 0xc1, 0x69, 0xc9, 0x82, 0x2f, 0x02, 0x9a, 0x91, 0xe1, 0x0d, 0x85, 0x0b, 0xe7,
+	0x2f, 0xa8, 0x30, 0xca, 0x2b, 0x3e, 0x75, 0xf6, 0x64, 0x91, 0x64, 0x58, 0x7f, 0xbe, 0x4c, 0x56,
+	0x05, 0xee, 0x05, 0xff, 0x8e, 0x07, 0x9b, 0xd0, 0x83, 0xb8, 0xcd, 0x05, 0xdc, 0xc3, 0x01, 0xf7,
+	0x73, 0xa0, 0xdc, 0x46, 0x16, 0x75, 0x00, 0xce, 0x5d, 0xbb, 0x90, 0xbe, 0x23, 0x37, 0x8b, 0xdc,
+	0x36, 0xb2, 0xa0, 0x41, 0x9e, 0x51, 0xcf, 0x83, 0xb9, 0x8e, 0xe3, 0xba, 0xd0, 0xaa, 0x45, 0x8c,
+	0xa1, 0x5f, 0x77, 0xcc, 0xd0, 0xdc, 0x5d, 0x31, 0x6f, 0xd6, 0xc0, 0x8a, 0x8c, 0x15, 0x8c, 0x3a,
+	0xff, 0x56, 0x32, 0xd4, 0x41, 0x7e, 0xf0, 0xa2, 0x63, 0x59, 0xd0, 0x2d, 0xa8, 0x33, 0xa2, 0x56,
+	0x03, 0xce, 0xdf, 0x23, 0x10, 0x12, 0x6f, 0x61, 0xc5, 0x08, 0x53, 0x03, 0x30, 0x84, 0x81, 0x9f,
+	0xc3, 0x90, 0xbb, 0x3e, 0xf4, 0x0a, 0x86, 0xfc, 0x97, 0x32, 0x24, 0x06, 0x9f, 0x31, 0xe4, 0xb5,
+	0x32, 0x09, 0xfd, 0xe2, 0xfd, 0xcb, 0x7b, 0x1e, 0x34, 0xad, 0xdb, 0xa8, 0xb1, 0x0f, 0x8b, 0x10,
+	0xf2, 0x51, 0x30, 0x3d, 0x3d, 0x84, 0x02, 0x3a, 0x6a, 0xa1, 0xe9, 0x89, 0x33, 0xc8, 0x60, 0x2d,
+	0x80, 0x89, 0x16, 0xc1, 0x31, 0x22, 0x0a, 0x4d, 0x65, 0x88, 0x72, 0x1e, 0xac, 0xc9, 0x39, 0xc0,
+	0x87, 0x01, 0x9e, 0x4d, 0xaa, 0xb1, 0x6f, 0x49, 0xbc, 0x57, 0xdc, 0x56, 0x71, 0x2e, 0x3d, 0xf4,
+	0x64, 0xd1, 0xc0, 0x24, 0x24, 0x37, 0xa6, 0x52, 0x1b, 0xa4, 0x62, 0x44, 0xc9, 0x0c, 0x23, 0x2e,
+	0x80, 0xf3, 0x79, 0x50, 0x33, 0x4e, 0x7c, 0x87, 0x3a, 0x9e, 0x6f, 0xb4, 0x4c, 0xa7, 0x4d, 0x4e,
+	0x34, 0xf1, 0x2b, 0xed, 0x81, 0xe9, 0x59, 0xc5, 0x77, 0xc6, 0x47, 0xc7, 0x86, 0x33, 0x60, 0x0a,
+	0x76, 0x50, 0x63, 0xaf, 0xe6, 0x58, 0xbe, 0x66, 0xad, 0x28, 0xeb, 0x8a, 0x51, 0x21, 0x19, 0x2f,
+	0x59, 0xbe, 0xc4, 0xbd, 0x2c, 0x00, 0x8c, 0x61, 0xfa, 0xb5, 0x31, 0xf2, 0xf6, 0xf9, 0x02, 0xea,
+	0x3d, 0xaa, 0x70, 0xf2, 0x04, 0x5d, 0xc7, 0xd2, 0x74, 0xd5, 0xc0, 0x64, 0x14, 0xaa, 0x48, 0x3f,
+	0x3e, 0x8d, 0x92, 0x71, 0x50, 0x6b, 0x39, 0x27, 0xa8, 0x75, 0x7c, 0xd0, 0xb0, 0xe9, 0x89, 0xfc,
+	0xb0, 0xe9, 0x49, 0xd1, 0xd9, 0x6c, 0x65, 0x80, 0x93, 0xfc, 0xec, 0x40, 0xc5, 0x17, 0x0b, 0x95,
+	0xc8, 0x49, 0xfe, 0x0b, 0xa8, 0xc7, 0x47, 0xd4, 0x86, 0x61, 0x98, 0x1f, 0xd0, 0x70, 0xa6, 0xa2,
+	0x3f, 0x95, 0xbe, 0xd1, 0x9f, 0xf4, 0x84, 0x59, 0xdc, 0x46, 0xd6, 0x93, 0x3f, 0x94, 0x88, 0x25,
+	0x19, 0xf7, 0xf5, 0x51, 0x78, 0x25, 0xf2, 0x3b, 0x32, 0x0f, 0xc6, 0xa9, 0x47, 0x85, 0x76, 0x81,
+	0x26, 0xd8, 0xe9, 0x7a, 0x39, 0x7b, 0xba, 0x3e, 0x2e, 0x42, 0x70, 0x22, 0x17, 0x41, 0x6a, 0x22,
+	0x09, 0x7b, 0x15, 0x5f, 0x80, 0x59, 0x22, 0x26, 0x52, 0x38, 0x40, 0x9c, 0x06, 0xf1, 0xef, 0x7c,
+	0x40, 0x9d, 0xe7, 0xd6, 0x70, 0x45, 0xee, 0x6b, 0x2a, 0xf7, 0xf1, 0x35, 0xd1, 0x8d, 0x5d, 0xd2,
+	0x72, 0xd6, 0xc1, 0xdf, 0x64, 0x3a, 0x88, 0xbc, 0x6d, 0xd8, 0xae, 0x43, 0xcf, 0xdf, 0x73, 0x3a,
+	0x47, 0xdd, 0xc1, 0xd8, 0xea, 0x2d, 0x27, 0xac, 0x5e, 0x0d, 0x4c, 0x76, 0x3c, 0xe8, 0x43, 0x37,
+	0x08, 0x3f, 0x39, 0x8f, 0x92, 0xfd, 0x7b, 0xcd, 0x77, 0x87, 0xf5, 0xfa, 0xb3, 0x63, 0xc4, 0x9c,
+	0x49, 0xf1, 0xfe, 0x11, 0x38, 0x5f, 0x18, 0x6f, 0xc7, 0x78, 0xde, 0x26, 0x46, 0x43, 0x11, 0xac,
+	0x81, 0x51, 0xe7, 0xca, 0x89, 0xce, 0x31, 0xd7, 0xc3, 0xf8, 0x7b, 0x70, 0x3d, 0x70, 0x63, 0x3c,
+	0x91, 0xeb, 0xa5, 0xa2, 0xdb, 0xbd, 0x74, 0x28, 0xe2, 0xed, 0xbe, 0x44, 0xbc, 0xd4, 0x29, 0x45,
+	0xb2, 0xc5, 0x1e, 0xf5, 0x70, 0xd5, 0x43, 0xcb, 0x36, 0x1c, 0xae, 0xba, 0xc4, 0xb4, 0xa5, 0xde,
+	0x56, 0x51, 0x83, 0x59, 0xa7, 0xfe, 0x25, 0xa0, 0x3f, 0x39, 0x81, 0x23, 0x03, 0x7b, 0xd4, 0xf4,
+	0xd7, 0xc0, 0xa4, 0x43, 0x8e, 0xff, 0xa2, 0x25, 0x2e, 0x4a, 0xaa, 0x1f, 0x01, 0x13, 0xe1, 0x1d,
+	0x0d, 0x94, 0x0b, 0x17, 0x85, 0x5c, 0xe0, 0xdb, 0xbe, 0x45, 0xd4, 0x8d, 0xf0, 0xb1, 0x41, 0xe6,
+	0x49, 0xfc, 0x2c, 0x1b, 0x9e, 0xb7, 0xf8, 0xe1, 0x09, 0xcd, 0x40, 0xb2, 0xcd, 0xee, 0xbc, 0xaf,
+	0x0f, 0x16, 0xa3, 0x5b, 0x89, 0xc7, 0xe2, 0x5b, 0x89, 0xd5, 0x25, 0x00, 0xfc, 0xc8, 0xce, 0xa4,
+	0xe3, 0x52, 0x31, 0xb8, 0x1c, 0x6c, 0x3e, 0xb9, 0xa8, 0x4d, 0xb6, 0x75, 0x78, 0xbf, 0xe3, 0x78,
+	0xd4, 0x78, 0x53, 0x8c, 0xd9, 0x30, 0xf7, 0x79, 0x92, 0x99, 0xfa, 0xa0, 0x7a, 0xbc, 0xdf, 0x07,
+	0xd5, 0xfc, 0x30, 0x64, 0xfa, 0xc7, 0x86, 0xe1, 0x0b, 0x6c, 0x2b, 0x7f, 0x94, 0xc6, 0xae, 0x06,
+	0x26, 0x1b, 0xb4, 0xa4, 0xe8, 0x4e, 0x8e, 0x30, 0x99, 0x34, 0xea, 0x94, 0x3e, 0x46, 0x1d, 0xdb,
+	0xc2, 0x73, 0xec, 0xba, 0x6b, 0xaf, 0x3f, 0x0d, 0x94, 0x6d, 0xdf, 0x56, 0x3f, 0x0e, 0x66, 0x12,
+	0x3f, 0x1d, 0xb6, 0x9c, 0xe6, 0x51, 0xea, 0xd7, 0xb6, 0xf4, 0x8b, 0x7d, 0x14, 0xa2, 0x1a, 0xd4,
+	0x8f, 0x82, 0x32, 0xb9, 0xb6, 0x74, 0x51, 0xf0, 0x00, 0x16, 0xe8, 0xcb, 0x12, 0x01, 0x5f, 0x02,
+	0xf9, 0xe9, 0x25, 0x51, 0x09, 0x58, 0x20, 0x2c, 0x81, 0xff, 0xf5, 0x1d, 0x5c, 0x02, 0xf9, 0xe5,
+	0x1d, 0x51, 0x09, 0x58, 0x20, 0x2c, 0x81, 0xff, 0xc1, 0x17, 0xf5, 0x2e, 0x98, 0xe6, 0x7f, 0xec,
+	0x65, 0x49, 0xa0, 0xcf, 0xc9, 0xf5, 0x0b, 0xf9, 0x72, 0x56, 0xac, 0x01, 0x00, 0x77, 0xd3, 0xfd,
+	0x39, 0xc1, 0x53, 0xb1, 0x58, 0x7f, 0x2a, 0x57, 0xcc, 0xca, 0xc4, 0x50, 0xf2, 0x97, 0xad, 0x0b,
+	0xa1, 0xe4, 0x14, 0xc4, 0x50, 0x0a, 0x6e, 0xfd, 0x56, 0x3f, 0x09, 0x66, 0x93, 0x9f, 0xfb, 0xac,
+	0x08, 0x9e, 0x4c, 0x68, 0xe8, 0xeb, 0xfd, 0x34, 0x58, 0xe1, 0x9f, 0x02, 0x73, 0xa9, 0x4f, 0x50,
+	0x56, 0x05, 0xcf, 0x26, 0x55, 0xf4, 0x4b, 0x7d, 0x55, 0x58, 0xf9, 0xaf, 0x80, 0xa9, 0xf8, 0x02,
+	0xe4, 0xb3, 0x82, 0xe7, 0x98, 0x54, 0x3f, 0x9f, 0x27, 0xe5, 0x29, 0xc1, 0x5f, 0xcb, 0xbb, 0x24,
+	0x1c, 0x45, 0x26, 0x17, 0x52, 0x42, 0x70, 0x65, 0x2c, 0x6b, 0x27, 0xc1, 0x4e, 0xda, 0x4e, 0x02,
+	0xdc, 0xf9, 0x3c, 0xa9, 0xa0, 0x9d, 0xa4, 0xc8, 0x9c, 0x76, 0x92, 0x42, 0x2f, 0xe4, 0xcb, 0x79,
+	0xbc, 0x52, 0xdf, 0x99, 0xac, 0xca, 0x9a, 0x93, 0x8f, 0x97, 0xf8, 0x43, 0x07, 0xd5, 0x02, 0x27,
+	0x32, 0x1f, 0x39, 0x3c, 0x29, 0x6f, 0x5b, 0x5c, 0xc7, 0xd3, 0x03, 0x28, 0xb1, 0x5a, 0x6e, 0x81,
+	0x89, 0xf0, 0xe2, 0xc1, 0xd3, 0x82, 0xc7, 0xa8, 0x48, 0x5f, 0x95, 0x8a, 0xf8, 0x89, 0xcc, 0xdd,
+	0x85, 0x77, 0x4e, 0xfa, 0x80, 0x74, 0x22, 0x67, 0xaf, 0x69, 0xc3, 0x65, 0x72, 0x57, 0xb4, 0x9d,
+	0x13, 0x2e, 0x29, 0x91, 0x58, 0x58, 0x66, 0xf6, 0x36, 0x30, 0xf5, 0x36, 0xa8, 0xb0, 0x9b, 0xc0,
+	0xce, 0x88, 0x17, 0x29, 0x22, 0xd4, 0x9f, 0xcc, 0x11, 0xb2, 0xd2, 0x4c, 0x70, 0x3c, 0x7d, 0x11,
+	0xd5, 0x9a, 0x68, 0x35, 0x4f, 0xea, 0xe8, 0x1b, 0xfd, 0x75, 0xf8, 0x41, 0xe0, 0xae, 0x7b, 0x12,
+	0x0d, 0x42, 0x2c, 0x16, 0x0e, 0x42, 0xf6, 0x2e, 0x26, 0x5c, 0x26, 0x77, 0x0f, 0x93, 0xa8, 0xcc,
+	0x58, 0x2c, 0x2c, 0x33, 0x7b, 0x49, 0x12, 0x9e, 0xb6, 0xf1, 0x05, 0x49, 0xa2, 0x69, 0xcb, 0xa4,
+	0xc2, 0x69, 0x9b, 0xb9, 0x81, 0x07, 0xcf, 0xaf, 0xd4, 0xed, 0x3b, 0xab, 0x62, 0x48, 0x38, 0x15,
+	0xe1, 0xfc, 0x12, 0xdf, 0x0a, 0xa3, 0xde, 0x00, 0xe3, 0xf4, 0x46, 0x18, 0x4d, 0xf0, 0x0c, 0x91,
+	0xe8, 0x2b, 0x32, 0x09, 0xbf, 0xd7, 0x24, 0x2e, 0x21, 0x59, 0x16, 0xd7, 0xcf, 0x14, 0x84, 0x7b,
+	0x8d, 0xe8, 0x0e, 0x0c, 0x4c, 0xad, 0xb4, 0xa7, 0x49, 0x44, 0xad, 0x94, 0x8e, 0x90, 0x5a, 0x12,
+	0x47, 0x8c, 0xda, 0x01, 0xf3, 0xc2, 0xcf, 0xd7, 0x25, 0x6d, 0xcc, 0x28, 0xea, 0xd5, 0x01, 0x15,
+	0x59, 0x8d, 0x36, 0x38, 0x99, 0xfd, 0x42, 0x5a, 0x44, 0x87, 0x8c, 0x96, 0x7e, 0x79, 0x10, 0x2d,
+	0x56, 0xd1, 0x3d, 0xa0, 0x0a, 0x5c, 0x32, 0x4f, 0xc9, 0x07, 0x87, 0x53, 0xd3, 0xaf, 0x0c, 0xa4,
+	0xc6, 0xea, 0xea, 0x81, 0x05, 0xc9, 0x57, 0x29, 0x12, 0x36, 0x0a, 0x54, 0xf5, 0xab, 0x03, 0xab,
+	0xf2, 0xd6, 0x48, 0xf2, 0xdb, 0x06, 0x11, 0x5d, 0x13, 0x1a, 0x42, 0x6b, 0x44, 0x18, 0x42, 0xaf,
+	0xb6, 0xc1, 0x29, 0x51, 0xf8, 0xbc, 0x68, 0x73, 0x14, 0xe8, 0xe9, 0x9b, 0x83, 0xe9, 0xf1, 0xd5,
+	0x89, 0xe2, 0xb4, 0x45, 0xd5, 0x09, 0xf4, 0x84, 0xd5, 0xe5, 0x04, 0x0b, 0x63, 0xe6, 0x0b, 0x03,
+	0x85, 0x2f, 0x0a, 0x37, 0xa6, 0xac, 0xa2, 0x90, 0xf9, 0x79, 0xe1, 0xaa, 0x98, 0xf9, 0xd9, 0x50,
+	0xd5, 0xf3, 0x52, 0xeb, 0x8d, 0xa7, 0xe3, 0xe5, 0x41, 0xb4, 0x78, 0x56, 0x24, 0x23, 0x25, 0x57,
+	0x84, 0x50, 0x70, 0x1a, 0x42, 0x56, 0x08, 0x03, 0xf2, 0xf0, 0xb8, 0x09, 0x83, 0xf1, 0x2e, 0xe6,
+	0x4d, 0x4e, 0xbe, 0x2f, 0xd5, 0x01, 0x15, 0xf9, 0x89, 0x2c, 0x88, 0xf8, 0x92, 0x1b, 0x10, 0x7d,
+	0x27, 0xb2, 0x3c, 0xea, 0x48, 0xf5, 0xc1, 0x13, 0xe2, 0x88, 0xa3, 0xf5, 0xfc, 0xc9, 0x19, 0x6b,
+	0xea, 0xcf, 0x0c, 0xaa, 0x29, 0xab, 0x34, 0x8e, 0x55, 0xe9, 0x57, 0x29, 0xd3, 0xec, 0x5b, 0x69,
+	0x26, 0x04, 0x22, 0x55, 0x29, 0x17, 0xfe, 0xd0, 0xa7, 0xd2, 0x58, 0xb3, 0x5f, 0xa5, 0xd9, 0x53,
+	0x75, 0xf5, 0x10, 0x2c, 0xca, 0x4e, 0xd4, 0x37, 0xfa, 0xac, 0x7e, 0x9c, 0xae, 0x7e, 0x6d, 0x70,
+	0x5d, 0x56, 0xf5, 0xa7, 0xc1, 0x69, 0xf9, 0x09, 0xed, 0xe5, 0xfc, 0x02, 0x93, 0xda, 0xfa, 0xb3,
+	0xef, 0x46, 0x9b, 0x5f, 0xdf, 0x44, 0x1e, 0x12, 0xd1, 0xfa, 0x26, 0xd0, 0x13, 0xae, 0x6f, 0x39,
+	0x5e, 0x0d, 0x3c, 0x6b, 0x04, 0x27, 0x55, 0xa2, 0x59, 0x93, 0x55, 0x13, 0xce, 0x1a, 0xf9, 0x71,
+	0x0e, 0xde, 0xfe, 0x24, 0x47, 0x39, 0x97, 0xc4, 0x05, 0x09, 0x54, 0x85, 0xdb, 0x5f, 0xfe, 0xe1,
+	0x0b, 0xe6, 0xb0, 0xf8, 0xe0, 0x65, 0x3d, 0xb7, 0xfd, 0xfc, 0xfa, 0xf0, 0xcc, 0xa0, 0x9a, 0x3c,
+	0x87, 0x65, 0x47, 0x1e, 0x1b, 0xf2, 0x2e, 0xa4, 0x75, 0x85, 0x1c, 0xee, 0x73, 0x20, 0x91, 0xaa,
+	0x3a, 0x71, 0x18, 0xd1, 0xa7, 0x6a, 0x5e, 0xb7, 0x5f, 0xd5, 0xa2, 0x53, 0x01, 0x3c, 0x7d, 0xe4,
+	0x27, 0x02, 0x97, 0xfb, 0x43, 0xc7, 0x2d, 0x90, 0xcf, 0xbe, 0x1b, 0x6d, 0x7e, 0xdf, 0x11, 0xba,
+	0xd7, 0x2f, 0xf6, 0x2f, 0x8d, 0x28, 0x0a, 0xf7, 0x9d, 0x3c, 0xff, 0x77, 0x66, 0xb4, 0x39, 0xdf,
+	0x77, 0xdf, 0xd1, 0x8e, 0x75, 0xfb, 0x8f, 0x76, 0xd6, 0xb7, 0x1c, 0x57, 0x9d, 0xf5, 0x2b, 0xcb,
+	0xab, 0xce, 0xe8, 0xe6, 0x54, 0x2d, 0xf5, 0xe7, 0x86, 0x73, 0x59, 0xb4, 0x52, 0x49, 0xe6, 0xb2,
+	0x68, 0xb1, 0xba, 0x3a, 0xb0, 0x6a, 0x54, 0xaf, 0x3e, 0xfe, 0x99, 0x87, 0x0f, 0x36, 0x4a, 0xd7,
+	0xaf, 0xbc, 0xf1, 0xf6, 0x52, 0xe9, 0xcd, 0xb7, 0x97, 0x4a, 0x7f, 0x7d, 0x7b, 0xa9, 0xf4, 0xb9,
+	0x77, 0x96, 0x8e, 0xbd, 0xf9, 0xce, 0xd2, 0xb1, 0x3f, 0xbe, 0xb3, 0x74, 0xec, 0x13, 0xa7, 0x68,
+	0x91, 0xd5, 0xfb, 0x55, 0x5c, 0x68, 0x35, 0x38, 0xec, 0x40, 0xbf, 0x3e, 0x41, 0x7e, 0xca, 0xfe,
+	0x7f, 0xfe, 0x13, 0x00, 0x00, 0xff, 0xff, 0xdc, 0x11, 0xff, 0xe2, 0xe0, 0x82, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -4845,20 +9790,12 @@ type MsgClient interface {
 	Vote(ctx context.Context, in *MsgVote, opts ...grpc.CallOption) (*MsgVoteResponse, error)
 	// SetUsername persists a username for the signer.
 	SetUsername(ctx context.Context, in *MsgSetUsername, opts ...grpc.CallOption) (*MsgSetUsernameResponse, error)
-	// EnableAgent adds an agent to the signer's enabled agents list (capped deque).
-	EnableAgent(ctx context.Context, in *MsgEnableAgent, opts ...grpc.CallOption) (*MsgEnableAgentResponse, error)
-	// DisableAgent removes an agent from the signer's enabled agents list.
-	DisableAgent(ctx context.Context, in *MsgDisableAgent, opts ...grpc.CallOption) (*MsgDisableAgentResponse, error)
-	// SetAgents atomically replaces the signer's enabled agents list (ordered).
-	SetAgents(ctx context.Context, in *MsgSetAgents, opts ...grpc.CallOption) (*MsgSetAgentsResponse, error)
 	// FollowUser adds a user to the signer's followed users list (capped deque).
 	FollowUser(ctx context.Context, in *MsgFollowUser, opts ...grpc.CallOption) (*MsgFollowUserResponse, error)
 	// UnfollowUser removes a user from the signer's followed users list.
 	UnfollowUser(ctx context.Context, in *MsgUnfollowUser, opts ...grpc.CallOption) (*MsgUnfollowUserResponse, error)
-	// FollowTopic adds a topic to the signer's followed topics list (capped deque).
-	FollowTopic(ctx context.Context, in *MsgFollowTopic, opts ...grpc.CallOption) (*MsgFollowTopicResponse, error)
-	// UnfollowTopic removes a topic from the signer's followed topics list.
-	UnfollowTopic(ctx context.Context, in *MsgUnfollowTopic, opts ...grpc.CallOption) (*MsgUnfollowTopicResponse, error)
+	JoinCommunity(ctx context.Context, in *MsgJoinCommunity, opts ...grpc.CallOption) (*MsgJoinCommunityResponse, error)
+	LeaveCommunity(ctx context.Context, in *MsgLeaveCommunity, opts ...grpc.CallOption) (*MsgLeaveCommunityResponse, error)
 	// BlockPost blocks a post txhash (persisted on-chain).
 	BlockPost(ctx context.Context, in *MsgBlockPost, opts ...grpc.CallOption) (*MsgBlockPostResponse, error)
 	// UnblockPost unblocks a post txhash (persisted on-chain).
@@ -4867,10 +9804,8 @@ type MsgClient interface {
 	BlockUser(ctx context.Context, in *MsgBlockUser, opts ...grpc.CallOption) (*MsgBlockUserResponse, error)
 	// UnblockUser unblocks a user address (persisted on-chain).
 	UnblockUser(ctx context.Context, in *MsgUnblockUser, opts ...grpc.CallOption) (*MsgUnblockUserResponse, error)
-	// BlockTopic blocks a topic (persisted on-chain).
-	BlockTopic(ctx context.Context, in *MsgBlockTopic, opts ...grpc.CallOption) (*MsgBlockTopicResponse, error)
-	// UnblockTopic unblocks a topic (persisted on-chain).
-	UnblockTopic(ctx context.Context, in *MsgUnblockTopic, opts ...grpc.CallOption) (*MsgUnblockTopicResponse, error)
+	BlockCommunity(ctx context.Context, in *MsgBlockCommunity, opts ...grpc.CallOption) (*MsgBlockCommunityResponse, error)
+	UnblockCommunity(ctx context.Context, in *MsgUnblockCommunity, opts ...grpc.CallOption) (*MsgUnblockCommunityResponse, error)
 	// Delete marks a post or comment as deleted (only emits event for indexer).
 	Delete(ctx context.Context, in *MsgDelete, opts ...grpc.CallOption) (*MsgDeleteResponse, error)
 	// DeleteUser permanently removes a user account.
@@ -4894,8 +9829,35 @@ type MsgClient interface {
 	Award(ctx context.Context, in *MsgAward, opts ...grpc.CallOption) (*MsgAwardResponse, error)
 	// SetBiography sets a biography for an address (subscriber-only feature).
 	SetBiography(ctx context.Context, in *MsgSetBiography, opts ...grpc.CallOption) (*MsgSetBiographyResponse, error)
-	// Annotate creates an agent overlay on an existing post (agent-tier only).
-	Annotate(ctx context.Context, in *MsgAnnotate, opts ...grpc.CallOption) (*MsgAnnotateResponse, error)
+	CreateCommunity(ctx context.Context, in *MsgCreateCommunity, opts ...grpc.CallOption) (*MsgCreateCommunityResponse, error)
+	SetCommunityMetadata(ctx context.Context, in *MsgSetCommunityMetadata, opts ...grpc.CallOption) (*MsgSetCommunityMetadataResponse, error)
+	TransferCommunity(ctx context.Context, in *MsgTransferCommunity, opts ...grpc.CallOption) (*MsgTransferCommunityResponse, error)
+	CreateCurationTeam(ctx context.Context, in *MsgCreateCurationTeam, opts ...grpc.CallOption) (*MsgCreateCurationTeamResponse, error)
+	SetCurationTeamProfile(ctx context.Context, in *MsgSetCurationTeamProfile, opts ...grpc.CallOption) (*MsgSetCurationTeamProfileResponse, error)
+	InviteCurator(ctx context.Context, in *MsgInviteCurator, opts ...grpc.CallOption) (*MsgInviteCuratorResponse, error)
+	RevokeCuratorInvite(ctx context.Context, in *MsgRevokeCuratorInvite, opts ...grpc.CallOption) (*MsgRevokeCuratorInviteResponse, error)
+	AcceptCuratorInvite(ctx context.Context, in *MsgAcceptCuratorInvite, opts ...grpc.CallOption) (*MsgAcceptCuratorInviteResponse, error)
+	DeclineCuratorInvite(ctx context.Context, in *MsgDeclineCuratorInvite, opts ...grpc.CallOption) (*MsgDeclineCuratorInviteResponse, error)
+	LeaveCurationTeam(ctx context.Context, in *MsgLeaveCurationTeam, opts ...grpc.CallOption) (*MsgLeaveCurationTeamResponse, error)
+	RemoveCurator(ctx context.Context, in *MsgRemoveCurator, opts ...grpc.CallOption) (*MsgRemoveCuratorResponse, error)
+	TransferCurationTeam(ctx context.Context, in *MsgTransferCurationTeam, opts ...grpc.CallOption) (*MsgTransferCurationTeamResponse, error)
+	DeleteCurationTeam(ctx context.Context, in *MsgDeleteCurationTeam, opts ...grpc.CallOption) (*MsgDeleteCurationTeamResponse, error)
+	SetCurationPreference(ctx context.Context, in *MsgSetCurationPreference, opts ...grpc.CallOption) (*MsgSetCurationPreferenceResponse, error)
+	SetCurationPostHidden(ctx context.Context, in *MsgSetCurationPostHidden, opts ...grpc.CallOption) (*MsgSetCurationPostHiddenResponse, error)
+	SetCurationUserHidden(ctx context.Context, in *MsgSetCurationUserHidden, opts ...grpc.CallOption) (*MsgSetCurationUserHiddenResponse, error)
+	SetCurationThreadLocked(ctx context.Context, in *MsgSetCurationThreadLocked, opts ...grpc.CallOption) (*MsgSetCurationThreadLockedResponse, error)
+	SetCurationSubscriberOnly(ctx context.Context, in *MsgSetCurationSubscriberOnly, opts ...grpc.CallOption) (*MsgSetCurationSubscriberOnlyResponse, error)
+	ClaimCreatorRewards(ctx context.Context, in *MsgClaimCreatorRewards, opts ...grpc.CallOption) (*MsgClaimCreatorRewardsResponse, error)
+	GovCreateCommunity(ctx context.Context, in *MsgGovCreateCommunity, opts ...grpc.CallOption) (*MsgGovCreateCommunityResponse, error)
+	GovSetCommunityFounder(ctx context.Context, in *MsgGovSetCommunityFounder, opts ...grpc.CallOption) (*MsgGovSetCommunityFounderResponse, error)
+	GovCreateCurationTeam(ctx context.Context, in *MsgGovCreateCurationTeam, opts ...grpc.CallOption) (*MsgGovCreateCurationTeamResponse, error)
+	GovSetCurationTeamOwner(ctx context.Context, in *MsgGovSetCurationTeamOwner, opts ...grpc.CallOption) (*MsgGovSetCurationTeamOwnerResponse, error)
+	GovSetCuratorMembership(ctx context.Context, in *MsgGovSetCuratorMembership, opts ...grpc.CallOption) (*MsgGovSetCuratorMembershipResponse, error)
+	GovSetCommunityPreference(ctx context.Context, in *MsgGovSetCommunityPreference, opts ...grpc.CallOption) (*MsgGovSetCommunityPreferenceResponse, error)
+	GovSetCommunityBlock(ctx context.Context, in *MsgGovSetCommunityBlock, opts ...grpc.CallOption) (*MsgGovSetCommunityBlockResponse, error)
+	GovSetCuratorInvitation(ctx context.Context, in *MsgGovSetCuratorInvitation, opts ...grpc.CallOption) (*MsgGovSetCuratorInvitationResponse, error)
+	GovSetSubscriptionState(ctx context.Context, in *MsgGovSetSubscriptionState, opts ...grpc.CallOption) (*MsgGovSetSubscriptionStateResponse, error)
+	GovClaimCreatorRewards(ctx context.Context, in *MsgGovClaimCreatorRewards, opts ...grpc.CallOption) (*MsgGovClaimCreatorRewardsResponse, error)
 }
 
 type msgClient struct {
@@ -4951,33 +9913,6 @@ func (c *msgClient) SetUsername(ctx context.Context, in *MsgSetUsername, opts ..
 	return out, nil
 }
 
-func (c *msgClient) EnableAgent(ctx context.Context, in *MsgEnableAgent, opts ...grpc.CallOption) (*MsgEnableAgentResponse, error) {
-	out := new(MsgEnableAgentResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/EnableAgent", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) DisableAgent(ctx context.Context, in *MsgDisableAgent, opts ...grpc.CallOption) (*MsgDisableAgentResponse, error) {
-	out := new(MsgDisableAgentResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/DisableAgent", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *msgClient) SetAgents(ctx context.Context, in *MsgSetAgents, opts ...grpc.CallOption) (*MsgSetAgentsResponse, error) {
-	out := new(MsgSetAgentsResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetAgents", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *msgClient) FollowUser(ctx context.Context, in *MsgFollowUser, opts ...grpc.CallOption) (*MsgFollowUserResponse, error) {
 	out := new(MsgFollowUserResponse)
 	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/FollowUser", in, out, opts...)
@@ -4996,18 +9931,18 @@ func (c *msgClient) UnfollowUser(ctx context.Context, in *MsgUnfollowUser, opts 
 	return out, nil
 }
 
-func (c *msgClient) FollowTopic(ctx context.Context, in *MsgFollowTopic, opts ...grpc.CallOption) (*MsgFollowTopicResponse, error) {
-	out := new(MsgFollowTopicResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/FollowTopic", in, out, opts...)
+func (c *msgClient) JoinCommunity(ctx context.Context, in *MsgJoinCommunity, opts ...grpc.CallOption) (*MsgJoinCommunityResponse, error) {
+	out := new(MsgJoinCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/JoinCommunity", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *msgClient) UnfollowTopic(ctx context.Context, in *MsgUnfollowTopic, opts ...grpc.CallOption) (*MsgUnfollowTopicResponse, error) {
-	out := new(MsgUnfollowTopicResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/UnfollowTopic", in, out, opts...)
+func (c *msgClient) LeaveCommunity(ctx context.Context, in *MsgLeaveCommunity, opts ...grpc.CallOption) (*MsgLeaveCommunityResponse, error) {
+	out := new(MsgLeaveCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/LeaveCommunity", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -5050,18 +9985,18 @@ func (c *msgClient) UnblockUser(ctx context.Context, in *MsgUnblockUser, opts ..
 	return out, nil
 }
 
-func (c *msgClient) BlockTopic(ctx context.Context, in *MsgBlockTopic, opts ...grpc.CallOption) (*MsgBlockTopicResponse, error) {
-	out := new(MsgBlockTopicResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/BlockTopic", in, out, opts...)
+func (c *msgClient) BlockCommunity(ctx context.Context, in *MsgBlockCommunity, opts ...grpc.CallOption) (*MsgBlockCommunityResponse, error) {
+	out := new(MsgBlockCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/BlockCommunity", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *msgClient) UnblockTopic(ctx context.Context, in *MsgUnblockTopic, opts ...grpc.CallOption) (*MsgUnblockTopicResponse, error) {
-	out := new(MsgUnblockTopicResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/UnblockTopic", in, out, opts...)
+func (c *msgClient) UnblockCommunity(ctx context.Context, in *MsgUnblockCommunity, opts ...grpc.CallOption) (*MsgUnblockCommunityResponse, error) {
+	out := new(MsgUnblockCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/UnblockCommunity", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -5167,9 +10102,261 @@ func (c *msgClient) SetBiography(ctx context.Context, in *MsgSetBiography, opts 
 	return out, nil
 }
 
-func (c *msgClient) Annotate(ctx context.Context, in *MsgAnnotate, opts ...grpc.CallOption) (*MsgAnnotateResponse, error) {
-	out := new(MsgAnnotateResponse)
-	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/Annotate", in, out, opts...)
+func (c *msgClient) CreateCommunity(ctx context.Context, in *MsgCreateCommunity, opts ...grpc.CallOption) (*MsgCreateCommunityResponse, error) {
+	out := new(MsgCreateCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/CreateCommunity", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCommunityMetadata(ctx context.Context, in *MsgSetCommunityMetadata, opts ...grpc.CallOption) (*MsgSetCommunityMetadataResponse, error) {
+	out := new(MsgSetCommunityMetadataResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCommunityMetadata", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) TransferCommunity(ctx context.Context, in *MsgTransferCommunity, opts ...grpc.CallOption) (*MsgTransferCommunityResponse, error) {
+	out := new(MsgTransferCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/TransferCommunity", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) CreateCurationTeam(ctx context.Context, in *MsgCreateCurationTeam, opts ...grpc.CallOption) (*MsgCreateCurationTeamResponse, error) {
+	out := new(MsgCreateCurationTeamResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/CreateCurationTeam", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationTeamProfile(ctx context.Context, in *MsgSetCurationTeamProfile, opts ...grpc.CallOption) (*MsgSetCurationTeamProfileResponse, error) {
+	out := new(MsgSetCurationTeamProfileResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationTeamProfile", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) InviteCurator(ctx context.Context, in *MsgInviteCurator, opts ...grpc.CallOption) (*MsgInviteCuratorResponse, error) {
+	out := new(MsgInviteCuratorResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/InviteCurator", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) RevokeCuratorInvite(ctx context.Context, in *MsgRevokeCuratorInvite, opts ...grpc.CallOption) (*MsgRevokeCuratorInviteResponse, error) {
+	out := new(MsgRevokeCuratorInviteResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/RevokeCuratorInvite", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) AcceptCuratorInvite(ctx context.Context, in *MsgAcceptCuratorInvite, opts ...grpc.CallOption) (*MsgAcceptCuratorInviteResponse, error) {
+	out := new(MsgAcceptCuratorInviteResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/AcceptCuratorInvite", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) DeclineCuratorInvite(ctx context.Context, in *MsgDeclineCuratorInvite, opts ...grpc.CallOption) (*MsgDeclineCuratorInviteResponse, error) {
+	out := new(MsgDeclineCuratorInviteResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/DeclineCuratorInvite", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) LeaveCurationTeam(ctx context.Context, in *MsgLeaveCurationTeam, opts ...grpc.CallOption) (*MsgLeaveCurationTeamResponse, error) {
+	out := new(MsgLeaveCurationTeamResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/LeaveCurationTeam", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) RemoveCurator(ctx context.Context, in *MsgRemoveCurator, opts ...grpc.CallOption) (*MsgRemoveCuratorResponse, error) {
+	out := new(MsgRemoveCuratorResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/RemoveCurator", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) TransferCurationTeam(ctx context.Context, in *MsgTransferCurationTeam, opts ...grpc.CallOption) (*MsgTransferCurationTeamResponse, error) {
+	out := new(MsgTransferCurationTeamResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/TransferCurationTeam", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) DeleteCurationTeam(ctx context.Context, in *MsgDeleteCurationTeam, opts ...grpc.CallOption) (*MsgDeleteCurationTeamResponse, error) {
+	out := new(MsgDeleteCurationTeamResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/DeleteCurationTeam", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationPreference(ctx context.Context, in *MsgSetCurationPreference, opts ...grpc.CallOption) (*MsgSetCurationPreferenceResponse, error) {
+	out := new(MsgSetCurationPreferenceResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationPreference", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationPostHidden(ctx context.Context, in *MsgSetCurationPostHidden, opts ...grpc.CallOption) (*MsgSetCurationPostHiddenResponse, error) {
+	out := new(MsgSetCurationPostHiddenResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationPostHidden", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationUserHidden(ctx context.Context, in *MsgSetCurationUserHidden, opts ...grpc.CallOption) (*MsgSetCurationUserHiddenResponse, error) {
+	out := new(MsgSetCurationUserHiddenResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationUserHidden", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationThreadLocked(ctx context.Context, in *MsgSetCurationThreadLocked, opts ...grpc.CallOption) (*MsgSetCurationThreadLockedResponse, error) {
+	out := new(MsgSetCurationThreadLockedResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationThreadLocked", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) SetCurationSubscriberOnly(ctx context.Context, in *MsgSetCurationSubscriberOnly, opts ...grpc.CallOption) (*MsgSetCurationSubscriberOnlyResponse, error) {
+	out := new(MsgSetCurationSubscriberOnlyResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/SetCurationSubscriberOnly", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) ClaimCreatorRewards(ctx context.Context, in *MsgClaimCreatorRewards, opts ...grpc.CallOption) (*MsgClaimCreatorRewardsResponse, error) {
+	out := new(MsgClaimCreatorRewardsResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/ClaimCreatorRewards", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovCreateCommunity(ctx context.Context, in *MsgGovCreateCommunity, opts ...grpc.CallOption) (*MsgGovCreateCommunityResponse, error) {
+	out := new(MsgGovCreateCommunityResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovCreateCommunity", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCommunityFounder(ctx context.Context, in *MsgGovSetCommunityFounder, opts ...grpc.CallOption) (*MsgGovSetCommunityFounderResponse, error) {
+	out := new(MsgGovSetCommunityFounderResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCommunityFounder", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovCreateCurationTeam(ctx context.Context, in *MsgGovCreateCurationTeam, opts ...grpc.CallOption) (*MsgGovCreateCurationTeamResponse, error) {
+	out := new(MsgGovCreateCurationTeamResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovCreateCurationTeam", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCurationTeamOwner(ctx context.Context, in *MsgGovSetCurationTeamOwner, opts ...grpc.CallOption) (*MsgGovSetCurationTeamOwnerResponse, error) {
+	out := new(MsgGovSetCurationTeamOwnerResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCurationTeamOwner", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCuratorMembership(ctx context.Context, in *MsgGovSetCuratorMembership, opts ...grpc.CallOption) (*MsgGovSetCuratorMembershipResponse, error) {
+	out := new(MsgGovSetCuratorMembershipResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCuratorMembership", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCommunityPreference(ctx context.Context, in *MsgGovSetCommunityPreference, opts ...grpc.CallOption) (*MsgGovSetCommunityPreferenceResponse, error) {
+	out := new(MsgGovSetCommunityPreferenceResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCommunityPreference", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCommunityBlock(ctx context.Context, in *MsgGovSetCommunityBlock, opts ...grpc.CallOption) (*MsgGovSetCommunityBlockResponse, error) {
+	out := new(MsgGovSetCommunityBlockResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCommunityBlock", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetCuratorInvitation(ctx context.Context, in *MsgGovSetCuratorInvitation, opts ...grpc.CallOption) (*MsgGovSetCuratorInvitationResponse, error) {
+	out := new(MsgGovSetCuratorInvitationResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetCuratorInvitation", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovSetSubscriptionState(ctx context.Context, in *MsgGovSetSubscriptionState, opts ...grpc.CallOption) (*MsgGovSetSubscriptionStateResponse, error) {
+	out := new(MsgGovSetSubscriptionStateResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovSetSubscriptionState", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *msgClient) GovClaimCreatorRewards(ctx context.Context, in *MsgGovClaimCreatorRewards, opts ...grpc.CallOption) (*MsgGovClaimCreatorRewardsResponse, error) {
+	out := new(MsgGovClaimCreatorRewardsResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/GovClaimCreatorRewards", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -5189,20 +10376,12 @@ type MsgServer interface {
 	Vote(context.Context, *MsgVote) (*MsgVoteResponse, error)
 	// SetUsername persists a username for the signer.
 	SetUsername(context.Context, *MsgSetUsername) (*MsgSetUsernameResponse, error)
-	// EnableAgent adds an agent to the signer's enabled agents list (capped deque).
-	EnableAgent(context.Context, *MsgEnableAgent) (*MsgEnableAgentResponse, error)
-	// DisableAgent removes an agent from the signer's enabled agents list.
-	DisableAgent(context.Context, *MsgDisableAgent) (*MsgDisableAgentResponse, error)
-	// SetAgents atomically replaces the signer's enabled agents list (ordered).
-	SetAgents(context.Context, *MsgSetAgents) (*MsgSetAgentsResponse, error)
 	// FollowUser adds a user to the signer's followed users list (capped deque).
 	FollowUser(context.Context, *MsgFollowUser) (*MsgFollowUserResponse, error)
 	// UnfollowUser removes a user from the signer's followed users list.
 	UnfollowUser(context.Context, *MsgUnfollowUser) (*MsgUnfollowUserResponse, error)
-	// FollowTopic adds a topic to the signer's followed topics list (capped deque).
-	FollowTopic(context.Context, *MsgFollowTopic) (*MsgFollowTopicResponse, error)
-	// UnfollowTopic removes a topic from the signer's followed topics list.
-	UnfollowTopic(context.Context, *MsgUnfollowTopic) (*MsgUnfollowTopicResponse, error)
+	JoinCommunity(context.Context, *MsgJoinCommunity) (*MsgJoinCommunityResponse, error)
+	LeaveCommunity(context.Context, *MsgLeaveCommunity) (*MsgLeaveCommunityResponse, error)
 	// BlockPost blocks a post txhash (persisted on-chain).
 	BlockPost(context.Context, *MsgBlockPost) (*MsgBlockPostResponse, error)
 	// UnblockPost unblocks a post txhash (persisted on-chain).
@@ -5211,10 +10390,8 @@ type MsgServer interface {
 	BlockUser(context.Context, *MsgBlockUser) (*MsgBlockUserResponse, error)
 	// UnblockUser unblocks a user address (persisted on-chain).
 	UnblockUser(context.Context, *MsgUnblockUser) (*MsgUnblockUserResponse, error)
-	// BlockTopic blocks a topic (persisted on-chain).
-	BlockTopic(context.Context, *MsgBlockTopic) (*MsgBlockTopicResponse, error)
-	// UnblockTopic unblocks a topic (persisted on-chain).
-	UnblockTopic(context.Context, *MsgUnblockTopic) (*MsgUnblockTopicResponse, error)
+	BlockCommunity(context.Context, *MsgBlockCommunity) (*MsgBlockCommunityResponse, error)
+	UnblockCommunity(context.Context, *MsgUnblockCommunity) (*MsgUnblockCommunityResponse, error)
 	// Delete marks a post or comment as deleted (only emits event for indexer).
 	Delete(context.Context, *MsgDelete) (*MsgDeleteResponse, error)
 	// DeleteUser permanently removes a user account.
@@ -5238,8 +10415,35 @@ type MsgServer interface {
 	Award(context.Context, *MsgAward) (*MsgAwardResponse, error)
 	// SetBiography sets a biography for an address (subscriber-only feature).
 	SetBiography(context.Context, *MsgSetBiography) (*MsgSetBiographyResponse, error)
-	// Annotate creates an agent overlay on an existing post (agent-tier only).
-	Annotate(context.Context, *MsgAnnotate) (*MsgAnnotateResponse, error)
+	CreateCommunity(context.Context, *MsgCreateCommunity) (*MsgCreateCommunityResponse, error)
+	SetCommunityMetadata(context.Context, *MsgSetCommunityMetadata) (*MsgSetCommunityMetadataResponse, error)
+	TransferCommunity(context.Context, *MsgTransferCommunity) (*MsgTransferCommunityResponse, error)
+	CreateCurationTeam(context.Context, *MsgCreateCurationTeam) (*MsgCreateCurationTeamResponse, error)
+	SetCurationTeamProfile(context.Context, *MsgSetCurationTeamProfile) (*MsgSetCurationTeamProfileResponse, error)
+	InviteCurator(context.Context, *MsgInviteCurator) (*MsgInviteCuratorResponse, error)
+	RevokeCuratorInvite(context.Context, *MsgRevokeCuratorInvite) (*MsgRevokeCuratorInviteResponse, error)
+	AcceptCuratorInvite(context.Context, *MsgAcceptCuratorInvite) (*MsgAcceptCuratorInviteResponse, error)
+	DeclineCuratorInvite(context.Context, *MsgDeclineCuratorInvite) (*MsgDeclineCuratorInviteResponse, error)
+	LeaveCurationTeam(context.Context, *MsgLeaveCurationTeam) (*MsgLeaveCurationTeamResponse, error)
+	RemoveCurator(context.Context, *MsgRemoveCurator) (*MsgRemoveCuratorResponse, error)
+	TransferCurationTeam(context.Context, *MsgTransferCurationTeam) (*MsgTransferCurationTeamResponse, error)
+	DeleteCurationTeam(context.Context, *MsgDeleteCurationTeam) (*MsgDeleteCurationTeamResponse, error)
+	SetCurationPreference(context.Context, *MsgSetCurationPreference) (*MsgSetCurationPreferenceResponse, error)
+	SetCurationPostHidden(context.Context, *MsgSetCurationPostHidden) (*MsgSetCurationPostHiddenResponse, error)
+	SetCurationUserHidden(context.Context, *MsgSetCurationUserHidden) (*MsgSetCurationUserHiddenResponse, error)
+	SetCurationThreadLocked(context.Context, *MsgSetCurationThreadLocked) (*MsgSetCurationThreadLockedResponse, error)
+	SetCurationSubscriberOnly(context.Context, *MsgSetCurationSubscriberOnly) (*MsgSetCurationSubscriberOnlyResponse, error)
+	ClaimCreatorRewards(context.Context, *MsgClaimCreatorRewards) (*MsgClaimCreatorRewardsResponse, error)
+	GovCreateCommunity(context.Context, *MsgGovCreateCommunity) (*MsgGovCreateCommunityResponse, error)
+	GovSetCommunityFounder(context.Context, *MsgGovSetCommunityFounder) (*MsgGovSetCommunityFounderResponse, error)
+	GovCreateCurationTeam(context.Context, *MsgGovCreateCurationTeam) (*MsgGovCreateCurationTeamResponse, error)
+	GovSetCurationTeamOwner(context.Context, *MsgGovSetCurationTeamOwner) (*MsgGovSetCurationTeamOwnerResponse, error)
+	GovSetCuratorMembership(context.Context, *MsgGovSetCuratorMembership) (*MsgGovSetCuratorMembershipResponse, error)
+	GovSetCommunityPreference(context.Context, *MsgGovSetCommunityPreference) (*MsgGovSetCommunityPreferenceResponse, error)
+	GovSetCommunityBlock(context.Context, *MsgGovSetCommunityBlock) (*MsgGovSetCommunityBlockResponse, error)
+	GovSetCuratorInvitation(context.Context, *MsgGovSetCuratorInvitation) (*MsgGovSetCuratorInvitationResponse, error)
+	GovSetSubscriptionState(context.Context, *MsgGovSetSubscriptionState) (*MsgGovSetSubscriptionStateResponse, error)
+	GovClaimCreatorRewards(context.Context, *MsgGovClaimCreatorRewards) (*MsgGovClaimCreatorRewardsResponse, error)
 }
 
 // UnimplementedMsgServer can be embedded to have forward compatible implementations.
@@ -5261,26 +10465,17 @@ func (*UnimplementedMsgServer) Vote(ctx context.Context, req *MsgVote) (*MsgVote
 func (*UnimplementedMsgServer) SetUsername(ctx context.Context, req *MsgSetUsername) (*MsgSetUsernameResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetUsername not implemented")
 }
-func (*UnimplementedMsgServer) EnableAgent(ctx context.Context, req *MsgEnableAgent) (*MsgEnableAgentResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method EnableAgent not implemented")
-}
-func (*UnimplementedMsgServer) DisableAgent(ctx context.Context, req *MsgDisableAgent) (*MsgDisableAgentResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DisableAgent not implemented")
-}
-func (*UnimplementedMsgServer) SetAgents(ctx context.Context, req *MsgSetAgents) (*MsgSetAgentsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetAgents not implemented")
-}
 func (*UnimplementedMsgServer) FollowUser(ctx context.Context, req *MsgFollowUser) (*MsgFollowUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FollowUser not implemented")
 }
 func (*UnimplementedMsgServer) UnfollowUser(ctx context.Context, req *MsgUnfollowUser) (*MsgUnfollowUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UnfollowUser not implemented")
 }
-func (*UnimplementedMsgServer) FollowTopic(ctx context.Context, req *MsgFollowTopic) (*MsgFollowTopicResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FollowTopic not implemented")
+func (*UnimplementedMsgServer) JoinCommunity(ctx context.Context, req *MsgJoinCommunity) (*MsgJoinCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method JoinCommunity not implemented")
 }
-func (*UnimplementedMsgServer) UnfollowTopic(ctx context.Context, req *MsgUnfollowTopic) (*MsgUnfollowTopicResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UnfollowTopic not implemented")
+func (*UnimplementedMsgServer) LeaveCommunity(ctx context.Context, req *MsgLeaveCommunity) (*MsgLeaveCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LeaveCommunity not implemented")
 }
 func (*UnimplementedMsgServer) BlockPost(ctx context.Context, req *MsgBlockPost) (*MsgBlockPostResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BlockPost not implemented")
@@ -5294,11 +10489,11 @@ func (*UnimplementedMsgServer) BlockUser(ctx context.Context, req *MsgBlockUser)
 func (*UnimplementedMsgServer) UnblockUser(ctx context.Context, req *MsgUnblockUser) (*MsgUnblockUserResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UnblockUser not implemented")
 }
-func (*UnimplementedMsgServer) BlockTopic(ctx context.Context, req *MsgBlockTopic) (*MsgBlockTopicResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BlockTopic not implemented")
+func (*UnimplementedMsgServer) BlockCommunity(ctx context.Context, req *MsgBlockCommunity) (*MsgBlockCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BlockCommunity not implemented")
 }
-func (*UnimplementedMsgServer) UnblockTopic(ctx context.Context, req *MsgUnblockTopic) (*MsgUnblockTopicResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UnblockTopic not implemented")
+func (*UnimplementedMsgServer) UnblockCommunity(ctx context.Context, req *MsgUnblockCommunity) (*MsgUnblockCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UnblockCommunity not implemented")
 }
 func (*UnimplementedMsgServer) Delete(ctx context.Context, req *MsgDelete) (*MsgDeleteResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
@@ -5333,8 +10528,92 @@ func (*UnimplementedMsgServer) Award(ctx context.Context, req *MsgAward) (*MsgAw
 func (*UnimplementedMsgServer) SetBiography(ctx context.Context, req *MsgSetBiography) (*MsgSetBiographyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetBiography not implemented")
 }
-func (*UnimplementedMsgServer) Annotate(ctx context.Context, req *MsgAnnotate) (*MsgAnnotateResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Annotate not implemented")
+func (*UnimplementedMsgServer) CreateCommunity(ctx context.Context, req *MsgCreateCommunity) (*MsgCreateCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateCommunity not implemented")
+}
+func (*UnimplementedMsgServer) SetCommunityMetadata(ctx context.Context, req *MsgSetCommunityMetadata) (*MsgSetCommunityMetadataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCommunityMetadata not implemented")
+}
+func (*UnimplementedMsgServer) TransferCommunity(ctx context.Context, req *MsgTransferCommunity) (*MsgTransferCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransferCommunity not implemented")
+}
+func (*UnimplementedMsgServer) CreateCurationTeam(ctx context.Context, req *MsgCreateCurationTeam) (*MsgCreateCurationTeamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateCurationTeam not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationTeamProfile(ctx context.Context, req *MsgSetCurationTeamProfile) (*MsgSetCurationTeamProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationTeamProfile not implemented")
+}
+func (*UnimplementedMsgServer) InviteCurator(ctx context.Context, req *MsgInviteCurator) (*MsgInviteCuratorResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InviteCurator not implemented")
+}
+func (*UnimplementedMsgServer) RevokeCuratorInvite(ctx context.Context, req *MsgRevokeCuratorInvite) (*MsgRevokeCuratorInviteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RevokeCuratorInvite not implemented")
+}
+func (*UnimplementedMsgServer) AcceptCuratorInvite(ctx context.Context, req *MsgAcceptCuratorInvite) (*MsgAcceptCuratorInviteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcceptCuratorInvite not implemented")
+}
+func (*UnimplementedMsgServer) DeclineCuratorInvite(ctx context.Context, req *MsgDeclineCuratorInvite) (*MsgDeclineCuratorInviteResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeclineCuratorInvite not implemented")
+}
+func (*UnimplementedMsgServer) LeaveCurationTeam(ctx context.Context, req *MsgLeaveCurationTeam) (*MsgLeaveCurationTeamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LeaveCurationTeam not implemented")
+}
+func (*UnimplementedMsgServer) RemoveCurator(ctx context.Context, req *MsgRemoveCurator) (*MsgRemoveCuratorResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveCurator not implemented")
+}
+func (*UnimplementedMsgServer) TransferCurationTeam(ctx context.Context, req *MsgTransferCurationTeam) (*MsgTransferCurationTeamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransferCurationTeam not implemented")
+}
+func (*UnimplementedMsgServer) DeleteCurationTeam(ctx context.Context, req *MsgDeleteCurationTeam) (*MsgDeleteCurationTeamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteCurationTeam not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationPreference(ctx context.Context, req *MsgSetCurationPreference) (*MsgSetCurationPreferenceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationPreference not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationPostHidden(ctx context.Context, req *MsgSetCurationPostHidden) (*MsgSetCurationPostHiddenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationPostHidden not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationUserHidden(ctx context.Context, req *MsgSetCurationUserHidden) (*MsgSetCurationUserHiddenResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationUserHidden not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationThreadLocked(ctx context.Context, req *MsgSetCurationThreadLocked) (*MsgSetCurationThreadLockedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationThreadLocked not implemented")
+}
+func (*UnimplementedMsgServer) SetCurationSubscriberOnly(ctx context.Context, req *MsgSetCurationSubscriberOnly) (*MsgSetCurationSubscriberOnlyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetCurationSubscriberOnly not implemented")
+}
+func (*UnimplementedMsgServer) ClaimCreatorRewards(ctx context.Context, req *MsgClaimCreatorRewards) (*MsgClaimCreatorRewardsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClaimCreatorRewards not implemented")
+}
+func (*UnimplementedMsgServer) GovCreateCommunity(ctx context.Context, req *MsgGovCreateCommunity) (*MsgGovCreateCommunityResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovCreateCommunity not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCommunityFounder(ctx context.Context, req *MsgGovSetCommunityFounder) (*MsgGovSetCommunityFounderResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCommunityFounder not implemented")
+}
+func (*UnimplementedMsgServer) GovCreateCurationTeam(ctx context.Context, req *MsgGovCreateCurationTeam) (*MsgGovCreateCurationTeamResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovCreateCurationTeam not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCurationTeamOwner(ctx context.Context, req *MsgGovSetCurationTeamOwner) (*MsgGovSetCurationTeamOwnerResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCurationTeamOwner not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCuratorMembership(ctx context.Context, req *MsgGovSetCuratorMembership) (*MsgGovSetCuratorMembershipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCuratorMembership not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCommunityPreference(ctx context.Context, req *MsgGovSetCommunityPreference) (*MsgGovSetCommunityPreferenceResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCommunityPreference not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCommunityBlock(ctx context.Context, req *MsgGovSetCommunityBlock) (*MsgGovSetCommunityBlockResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCommunityBlock not implemented")
+}
+func (*UnimplementedMsgServer) GovSetCuratorInvitation(ctx context.Context, req *MsgGovSetCuratorInvitation) (*MsgGovSetCuratorInvitationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetCuratorInvitation not implemented")
+}
+func (*UnimplementedMsgServer) GovSetSubscriptionState(ctx context.Context, req *MsgGovSetSubscriptionState) (*MsgGovSetSubscriptionStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovSetSubscriptionState not implemented")
+}
+func (*UnimplementedMsgServer) GovClaimCreatorRewards(ctx context.Context, req *MsgGovClaimCreatorRewards) (*MsgGovClaimCreatorRewardsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GovClaimCreatorRewards not implemented")
 }
 
 func RegisterMsgServer(s grpc1.Server, srv MsgServer) {
@@ -5431,60 +10710,6 @@ func _Msg_SetUsername_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_EnableAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgEnableAgent)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).EnableAgent(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/EnableAgent",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).EnableAgent(ctx, req.(*MsgEnableAgent))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_DisableAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgDisableAgent)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).DisableAgent(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/DisableAgent",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).DisableAgent(ctx, req.(*MsgDisableAgent))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Msg_SetAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgSetAgents)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MsgServer).SetAgents(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/SetAgents",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).SetAgents(ctx, req.(*MsgSetAgents))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Msg_FollowUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MsgFollowUser)
 	if err := dec(in); err != nil {
@@ -5521,38 +10746,38 @@ func _Msg_UnfollowUser_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_FollowTopic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgFollowTopic)
+func _Msg_JoinCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgJoinCommunity)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).FollowTopic(ctx, in)
+		return srv.(MsgServer).JoinCommunity(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/FollowTopic",
+		FullMethod: "/mirage.core.v1.Msg/JoinCommunity",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).FollowTopic(ctx, req.(*MsgFollowTopic))
+		return srv.(MsgServer).JoinCommunity(ctx, req.(*MsgJoinCommunity))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_UnfollowTopic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgUnfollowTopic)
+func _Msg_LeaveCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgLeaveCommunity)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).UnfollowTopic(ctx, in)
+		return srv.(MsgServer).LeaveCommunity(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/UnfollowTopic",
+		FullMethod: "/mirage.core.v1.Msg/LeaveCommunity",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).UnfollowTopic(ctx, req.(*MsgUnfollowTopic))
+		return srv.(MsgServer).LeaveCommunity(ctx, req.(*MsgLeaveCommunity))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5629,38 +10854,38 @@ func _Msg_UnblockUser_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_BlockTopic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgBlockTopic)
+func _Msg_BlockCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgBlockCommunity)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).BlockTopic(ctx, in)
+		return srv.(MsgServer).BlockCommunity(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/BlockTopic",
+		FullMethod: "/mirage.core.v1.Msg/BlockCommunity",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).BlockTopic(ctx, req.(*MsgBlockTopic))
+		return srv.(MsgServer).BlockCommunity(ctx, req.(*MsgBlockCommunity))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_UnblockTopic_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgUnblockTopic)
+func _Msg_UnblockCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgUnblockCommunity)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).UnblockTopic(ctx, in)
+		return srv.(MsgServer).UnblockCommunity(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/UnblockTopic",
+		FullMethod: "/mirage.core.v1.Msg/UnblockCommunity",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).UnblockTopic(ctx, req.(*MsgUnblockTopic))
+		return srv.(MsgServer).UnblockCommunity(ctx, req.(*MsgUnblockCommunity))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5863,20 +11088,524 @@ func _Msg_SetBiography_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Msg_Annotate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgAnnotate)
+func _Msg_CreateCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgCreateCommunity)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(MsgServer).Annotate(ctx, in)
+		return srv.(MsgServer).CreateCommunity(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/mirage.core.v1.Msg/Annotate",
+		FullMethod: "/mirage.core.v1.Msg/CreateCommunity",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).Annotate(ctx, req.(*MsgAnnotate))
+		return srv.(MsgServer).CreateCommunity(ctx, req.(*MsgCreateCommunity))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCommunityMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCommunityMetadata)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCommunityMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCommunityMetadata",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCommunityMetadata(ctx, req.(*MsgSetCommunityMetadata))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_TransferCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgTransferCommunity)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).TransferCommunity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/TransferCommunity",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).TransferCommunity(ctx, req.(*MsgTransferCommunity))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_CreateCurationTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgCreateCurationTeam)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).CreateCurationTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/CreateCurationTeam",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).CreateCurationTeam(ctx, req.(*MsgCreateCurationTeam))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationTeamProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationTeamProfile)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationTeamProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationTeamProfile",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationTeamProfile(ctx, req.(*MsgSetCurationTeamProfile))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_InviteCurator_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgInviteCurator)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).InviteCurator(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/InviteCurator",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).InviteCurator(ctx, req.(*MsgInviteCurator))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_RevokeCuratorInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgRevokeCuratorInvite)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).RevokeCuratorInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/RevokeCuratorInvite",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).RevokeCuratorInvite(ctx, req.(*MsgRevokeCuratorInvite))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_AcceptCuratorInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgAcceptCuratorInvite)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).AcceptCuratorInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/AcceptCuratorInvite",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).AcceptCuratorInvite(ctx, req.(*MsgAcceptCuratorInvite))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_DeclineCuratorInvite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgDeclineCuratorInvite)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).DeclineCuratorInvite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/DeclineCuratorInvite",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).DeclineCuratorInvite(ctx, req.(*MsgDeclineCuratorInvite))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_LeaveCurationTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgLeaveCurationTeam)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).LeaveCurationTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/LeaveCurationTeam",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).LeaveCurationTeam(ctx, req.(*MsgLeaveCurationTeam))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_RemoveCurator_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgRemoveCurator)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).RemoveCurator(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/RemoveCurator",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).RemoveCurator(ctx, req.(*MsgRemoveCurator))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_TransferCurationTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgTransferCurationTeam)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).TransferCurationTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/TransferCurationTeam",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).TransferCurationTeam(ctx, req.(*MsgTransferCurationTeam))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_DeleteCurationTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgDeleteCurationTeam)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).DeleteCurationTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/DeleteCurationTeam",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).DeleteCurationTeam(ctx, req.(*MsgDeleteCurationTeam))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationPreference_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationPreference)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationPreference(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationPreference",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationPreference(ctx, req.(*MsgSetCurationPreference))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationPostHidden_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationPostHidden)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationPostHidden(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationPostHidden",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationPostHidden(ctx, req.(*MsgSetCurationPostHidden))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationUserHidden_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationUserHidden)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationUserHidden(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationUserHidden",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationUserHidden(ctx, req.(*MsgSetCurationUserHidden))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationThreadLocked_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationThreadLocked)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationThreadLocked(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationThreadLocked",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationThreadLocked(ctx, req.(*MsgSetCurationThreadLocked))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_SetCurationSubscriberOnly_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgSetCurationSubscriberOnly)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).SetCurationSubscriberOnly(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/SetCurationSubscriberOnly",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).SetCurationSubscriberOnly(ctx, req.(*MsgSetCurationSubscriberOnly))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_ClaimCreatorRewards_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgClaimCreatorRewards)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).ClaimCreatorRewards(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/ClaimCreatorRewards",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).ClaimCreatorRewards(ctx, req.(*MsgClaimCreatorRewards))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovCreateCommunity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovCreateCommunity)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovCreateCommunity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovCreateCommunity",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovCreateCommunity(ctx, req.(*MsgGovCreateCommunity))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCommunityFounder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCommunityFounder)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCommunityFounder(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCommunityFounder",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCommunityFounder(ctx, req.(*MsgGovSetCommunityFounder))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovCreateCurationTeam_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovCreateCurationTeam)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovCreateCurationTeam(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovCreateCurationTeam",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovCreateCurationTeam(ctx, req.(*MsgGovCreateCurationTeam))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCurationTeamOwner_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCurationTeamOwner)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCurationTeamOwner(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCurationTeamOwner",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCurationTeamOwner(ctx, req.(*MsgGovSetCurationTeamOwner))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCuratorMembership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCuratorMembership)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCuratorMembership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCuratorMembership",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCuratorMembership(ctx, req.(*MsgGovSetCuratorMembership))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCommunityPreference_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCommunityPreference)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCommunityPreference(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCommunityPreference",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCommunityPreference(ctx, req.(*MsgGovSetCommunityPreference))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCommunityBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCommunityBlock)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCommunityBlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCommunityBlock",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCommunityBlock(ctx, req.(*MsgGovSetCommunityBlock))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetCuratorInvitation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetCuratorInvitation)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetCuratorInvitation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetCuratorInvitation",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetCuratorInvitation(ctx, req.(*MsgGovSetCuratorInvitation))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovSetSubscriptionState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovSetSubscriptionState)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovSetSubscriptionState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovSetSubscriptionState",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovSetSubscriptionState(ctx, req.(*MsgGovSetSubscriptionState))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Msg_GovClaimCreatorRewards_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MsgGovClaimCreatorRewards)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MsgServer).GovClaimCreatorRewards(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Msg/GovClaimCreatorRewards",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MsgServer).GovClaimCreatorRewards(ctx, req.(*MsgGovClaimCreatorRewards))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -5907,18 +11636,6 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_SetUsername_Handler,
 		},
 		{
-			MethodName: "EnableAgent",
-			Handler:    _Msg_EnableAgent_Handler,
-		},
-		{
-			MethodName: "DisableAgent",
-			Handler:    _Msg_DisableAgent_Handler,
-		},
-		{
-			MethodName: "SetAgents",
-			Handler:    _Msg_SetAgents_Handler,
-		},
-		{
 			MethodName: "FollowUser",
 			Handler:    _Msg_FollowUser_Handler,
 		},
@@ -5927,12 +11644,12 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_UnfollowUser_Handler,
 		},
 		{
-			MethodName: "FollowTopic",
-			Handler:    _Msg_FollowTopic_Handler,
+			MethodName: "JoinCommunity",
+			Handler:    _Msg_JoinCommunity_Handler,
 		},
 		{
-			MethodName: "UnfollowTopic",
-			Handler:    _Msg_UnfollowTopic_Handler,
+			MethodName: "LeaveCommunity",
+			Handler:    _Msg_LeaveCommunity_Handler,
 		},
 		{
 			MethodName: "BlockPost",
@@ -5951,12 +11668,12 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_UnblockUser_Handler,
 		},
 		{
-			MethodName: "BlockTopic",
-			Handler:    _Msg_BlockTopic_Handler,
+			MethodName: "BlockCommunity",
+			Handler:    _Msg_BlockCommunity_Handler,
 		},
 		{
-			MethodName: "UnblockTopic",
-			Handler:    _Msg_UnblockTopic_Handler,
+			MethodName: "UnblockCommunity",
+			Handler:    _Msg_UnblockCommunity_Handler,
 		},
 		{
 			MethodName: "Delete",
@@ -6003,8 +11720,120 @@ var _Msg_serviceDesc = grpc.ServiceDesc{
 			Handler:    _Msg_SetBiography_Handler,
 		},
 		{
-			MethodName: "Annotate",
-			Handler:    _Msg_Annotate_Handler,
+			MethodName: "CreateCommunity",
+			Handler:    _Msg_CreateCommunity_Handler,
+		},
+		{
+			MethodName: "SetCommunityMetadata",
+			Handler:    _Msg_SetCommunityMetadata_Handler,
+		},
+		{
+			MethodName: "TransferCommunity",
+			Handler:    _Msg_TransferCommunity_Handler,
+		},
+		{
+			MethodName: "CreateCurationTeam",
+			Handler:    _Msg_CreateCurationTeam_Handler,
+		},
+		{
+			MethodName: "SetCurationTeamProfile",
+			Handler:    _Msg_SetCurationTeamProfile_Handler,
+		},
+		{
+			MethodName: "InviteCurator",
+			Handler:    _Msg_InviteCurator_Handler,
+		},
+		{
+			MethodName: "RevokeCuratorInvite",
+			Handler:    _Msg_RevokeCuratorInvite_Handler,
+		},
+		{
+			MethodName: "AcceptCuratorInvite",
+			Handler:    _Msg_AcceptCuratorInvite_Handler,
+		},
+		{
+			MethodName: "DeclineCuratorInvite",
+			Handler:    _Msg_DeclineCuratorInvite_Handler,
+		},
+		{
+			MethodName: "LeaveCurationTeam",
+			Handler:    _Msg_LeaveCurationTeam_Handler,
+		},
+		{
+			MethodName: "RemoveCurator",
+			Handler:    _Msg_RemoveCurator_Handler,
+		},
+		{
+			MethodName: "TransferCurationTeam",
+			Handler:    _Msg_TransferCurationTeam_Handler,
+		},
+		{
+			MethodName: "DeleteCurationTeam",
+			Handler:    _Msg_DeleteCurationTeam_Handler,
+		},
+		{
+			MethodName: "SetCurationPreference",
+			Handler:    _Msg_SetCurationPreference_Handler,
+		},
+		{
+			MethodName: "SetCurationPostHidden",
+			Handler:    _Msg_SetCurationPostHidden_Handler,
+		},
+		{
+			MethodName: "SetCurationUserHidden",
+			Handler:    _Msg_SetCurationUserHidden_Handler,
+		},
+		{
+			MethodName: "SetCurationThreadLocked",
+			Handler:    _Msg_SetCurationThreadLocked_Handler,
+		},
+		{
+			MethodName: "SetCurationSubscriberOnly",
+			Handler:    _Msg_SetCurationSubscriberOnly_Handler,
+		},
+		{
+			MethodName: "ClaimCreatorRewards",
+			Handler:    _Msg_ClaimCreatorRewards_Handler,
+		},
+		{
+			MethodName: "GovCreateCommunity",
+			Handler:    _Msg_GovCreateCommunity_Handler,
+		},
+		{
+			MethodName: "GovSetCommunityFounder",
+			Handler:    _Msg_GovSetCommunityFounder_Handler,
+		},
+		{
+			MethodName: "GovCreateCurationTeam",
+			Handler:    _Msg_GovCreateCurationTeam_Handler,
+		},
+		{
+			MethodName: "GovSetCurationTeamOwner",
+			Handler:    _Msg_GovSetCurationTeamOwner_Handler,
+		},
+		{
+			MethodName: "GovSetCuratorMembership",
+			Handler:    _Msg_GovSetCuratorMembership_Handler,
+		},
+		{
+			MethodName: "GovSetCommunityPreference",
+			Handler:    _Msg_GovSetCommunityPreference_Handler,
+		},
+		{
+			MethodName: "GovSetCommunityBlock",
+			Handler:    _Msg_GovSetCommunityBlock_Handler,
+		},
+		{
+			MethodName: "GovSetCuratorInvitation",
+			Handler:    _Msg_GovSetCuratorInvitation_Handler,
+		},
+		{
+			MethodName: "GovSetSubscriptionState",
+			Handler:    _Msg_GovSetSubscriptionState_Handler,
+		},
+		{
+			MethodName: "GovClaimCreatorRewards",
+			Handler:    _Msg_GovClaimCreatorRewards_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -6106,6 +11935,13 @@ func (m *MsgPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.ProtocolVersion != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.ProtocolVersion))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xd0
+	}
 	if len(m.Media) > 0 {
 		for iNdEx := len(m.Media) - 1; iNdEx >= 0; iNdEx-- {
 			i -= len(m.Media[iNdEx])
@@ -6144,10 +11980,10 @@ func (m *MsgPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xb2
 	}
-	if len(m.Topic) > 0 {
-		i -= len(m.Topic)
-		copy(dAtA[i:], m.Topic)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Topic)))
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
 		i--
 		dAtA[i] = 0x6
 		i--
@@ -6303,10 +12139,10 @@ func (m *MsgEdit) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xb2
 	}
-	if len(m.Topic) > 0 {
-		i -= len(m.Topic)
-		copy(dAtA[i:], m.Topic)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Topic)))
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
 		i--
 		dAtA[i] = 0x6
 		i--
@@ -8732,6 +14568,13 @@ func (m *MsgSubscribe) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.PeriodCount != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.PeriodCount))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb0
+	}
 	if len(m.Target) > 0 {
 		i -= len(m.Target)
 		copy(dAtA[i:], m.Target)
@@ -9311,6 +15154,3563 @@ func (m *MsgAnnotateResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *MsgCreateCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCreateCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCreateCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Policy) > 0 {
+		i -= len(m.Policy)
+		copy(dAtA[i:], m.Policy)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Policy)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xca
+	}
+	if len(m.Bio) > 0 {
+		i -= len(m.Bio)
+		copy(dAtA[i:], m.Bio)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Bio)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xc2
+	}
+	if len(m.OriginalTeamName) > 0 {
+		i -= len(m.OriginalTeamName)
+		copy(dAtA[i:], m.OriginalTeamName)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.OriginalTeamName)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xba
+	}
+	if len(m.Description) > 0 {
+		i -= len(m.Description)
+		copy(dAtA[i:], m.Description)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Description)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if len(m.Title) > 0 {
+		i -= len(m.Title)
+		copy(dAtA[i:], m.Title)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Title)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgCreateCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCreateCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCreateCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCommunityMetadata) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCommunityMetadata) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCommunityMetadata) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Description) > 0 {
+		i -= len(m.Description)
+		copy(dAtA[i:], m.Description)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Description)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if len(m.Title) > 0 {
+		i -= len(m.Title)
+		copy(dAtA[i:], m.Title)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Title)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCommunityMetadataResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCommunityMetadataResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCommunityMetadataResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgTransferCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgTransferCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgTransferCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.NewFounder) > 0 {
+		i -= len(m.NewFounder)
+		copy(dAtA[i:], m.NewFounder)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NewFounder)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgTransferCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgTransferCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgTransferCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgJoinCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgJoinCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgJoinCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgJoinCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgJoinCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgJoinCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgLeaveCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgLeaveCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgLeaveCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgLeaveCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgLeaveCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgLeaveCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgBlockCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgBlockCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgBlockCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgBlockCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgBlockCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgBlockCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgUnblockCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgUnblockCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgUnblockCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgUnblockCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgUnblockCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgUnblockCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgCreateCurationTeam) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCreateCurationTeam) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCreateCurationTeam) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Policy) > 0 {
+		i -= len(m.Policy)
+		copy(dAtA[i:], m.Policy)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Policy)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xba
+	}
+	if len(m.Bio) > 0 {
+		i -= len(m.Bio)
+		copy(dAtA[i:], m.Bio)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Bio)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if len(m.Name) > 0 {
+		i -= len(m.Name)
+		copy(dAtA[i:], m.Name)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Name)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xaa
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgCreateCurationTeamResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgCreateCurationTeamResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgCreateCurationTeamResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationTeamProfile) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationTeamProfile) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationTeamProfile) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Policy) > 0 {
+		i -= len(m.Policy)
+		copy(dAtA[i:], m.Policy)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Policy)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xc2
+	}
+	if len(m.Bio) > 0 {
+		i -= len(m.Bio)
+		copy(dAtA[i:], m.Bio)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Bio)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xba
+	}
+	if len(m.Name) > 0 {
+		i -= len(m.Name)
+		copy(dAtA[i:], m.Name)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Name)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationTeamProfileResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationTeamProfileResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationTeamProfileResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgInviteCurator) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgInviteCurator) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgInviteCurator) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgInviteCuratorResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgInviteCuratorResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgInviteCuratorResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgRevokeCuratorInvite) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgRevokeCuratorInvite) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgRevokeCuratorInvite) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgRevokeCuratorInviteResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgRevokeCuratorInviteResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgRevokeCuratorInviteResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAcceptCuratorInvite) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAcceptCuratorInvite) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAcceptCuratorInvite) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgAcceptCuratorInviteResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgAcceptCuratorInviteResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgAcceptCuratorInviteResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgDeclineCuratorInvite) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgDeclineCuratorInvite) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgDeclineCuratorInvite) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgDeclineCuratorInviteResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgDeclineCuratorInviteResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgDeclineCuratorInviteResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgLeaveCurationTeam) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgLeaveCurationTeam) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgLeaveCurationTeam) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgLeaveCurationTeamResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgLeaveCurationTeamResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgLeaveCurationTeamResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgRemoveCurator) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgRemoveCurator) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgRemoveCurator) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgRemoveCuratorResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgRemoveCuratorResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgRemoveCuratorResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgTransferCurationTeam) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgTransferCurationTeam) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgTransferCurationTeam) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.NewOwner) > 0 {
+		i -= len(m.NewOwner)
+		copy(dAtA[i:], m.NewOwner)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NewOwner)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgTransferCurationTeamResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgTransferCurationTeamResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgTransferCurationTeamResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgDeleteCurationTeam) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgDeleteCurationTeam) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgDeleteCurationTeam) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgDeleteCurationTeamResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgDeleteCurationTeamResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgDeleteCurationTeamResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationPreference) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationPreference) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationPreference) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.PinnedTeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.PinnedTeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb0
+	}
+	if m.Mode != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Mode))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationPreferenceResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationPreferenceResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationPreferenceResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationPostHidden) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationPostHidden) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationPostHidden) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Hidden {
+		i--
+		if m.Hidden {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb8
+	}
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationPostHiddenResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationPostHiddenResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationPostHiddenResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationUserHidden) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationUserHidden) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationUserHidden) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Hidden {
+		i--
+		if m.Hidden {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb8
+	}
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationUserHiddenResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationUserHiddenResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationUserHiddenResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationThreadLocked) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationThreadLocked) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationThreadLocked) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Locked {
+		i--
+		if m.Locked {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb8
+	}
+	if len(m.RootHash) > 0 {
+		i -= len(m.RootHash)
+		copy(dAtA[i:], m.RootHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.RootHash)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb2
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationThreadLockedResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationThreadLockedResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationThreadLockedResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationSubscriberOnly) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationSubscriberOnly) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationSubscriberOnly) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Enabled {
+		i--
+		if m.Enabled {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xb0
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa8
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgSetCurationSubscriberOnlyResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgSetCurationSubscriberOnlyResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgSetCurationSubscriberOnlyResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgClaimCreatorRewards) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgClaimCreatorRewards) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgClaimCreatorRewards) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.EpochIds) > 0 {
+		dAtA4 := make([]byte, len(m.EpochIds)*10)
+		var j3 int
+		for _, num1 := range m.EpochIds {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA4[j3] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j3++
+			}
+			dAtA4[j3] = uint8(num)
+			j3++
+		}
+		i -= j3
+		copy(dAtA[i:], dAtA4[:j3])
+		i = encodeVarintTx(dAtA, i, uint64(j3))
+		i--
+		dAtA[i] = 0x6
+		i--
+		dAtA[i] = 0xa2
+	}
+	if len(m.EnvelopeSignature) > 0 {
+		i -= len(m.EnvelopeSignature)
+		copy(dAtA[i:], m.EnvelopeSignature)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.EnvelopeTimestamp != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.EnvelopePow != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopePow))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.EnvelopeDifficulty != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeDifficulty))
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.EnvelopeBlockHash) > 0 {
+		i -= len(m.EnvelopeBlockHash)
+		copy(dAtA[i:], m.EnvelopeBlockHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeBlockHash)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.EnvelopePubkey) > 0 {
+		i -= len(m.EnvelopePubkey)
+		copy(dAtA[i:], m.EnvelopePubkey)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopePubkey)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgClaimCreatorRewardsResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgClaimCreatorRewardsResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgClaimCreatorRewardsResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovCreateCommunity) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovCreateCommunity) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovCreateCommunity) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Policy) > 0 {
+		i -= len(m.Policy)
+		copy(dAtA[i:], m.Policy)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Policy)))
+		i--
+		dAtA[i] = 0x42
+	}
+	if len(m.Bio) > 0 {
+		i -= len(m.Bio)
+		copy(dAtA[i:], m.Bio)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Bio)))
+		i--
+		dAtA[i] = 0x3a
+	}
+	if len(m.OriginalTeamName) > 0 {
+		i -= len(m.OriginalTeamName)
+		copy(dAtA[i:], m.OriginalTeamName)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.OriginalTeamName)))
+		i--
+		dAtA[i] = 0x32
+	}
+	if len(m.Description) > 0 {
+		i -= len(m.Description)
+		copy(dAtA[i:], m.Description)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Description)))
+		i--
+		dAtA[i] = 0x2a
+	}
+	if len(m.Title) > 0 {
+		i -= len(m.Title)
+		copy(dAtA[i:], m.Title)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Title)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.Founder) > 0 {
+		i -= len(m.Founder)
+		copy(dAtA[i:], m.Founder)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Founder)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovCreateCommunityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovCreateCommunityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovCreateCommunityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityFounder) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityFounder) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityFounder) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.NewFounder) > 0 {
+		i -= len(m.NewFounder)
+		copy(dAtA[i:], m.NewFounder)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NewFounder)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityFounderResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityFounderResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityFounderResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovCreateCurationTeam) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovCreateCurationTeam) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovCreateCurationTeam) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Policy) > 0 {
+		i -= len(m.Policy)
+		copy(dAtA[i:], m.Policy)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Policy)))
+		i--
+		dAtA[i] = 0x32
+	}
+	if len(m.Bio) > 0 {
+		i -= len(m.Bio)
+		copy(dAtA[i:], m.Bio)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Bio)))
+		i--
+		dAtA[i] = 0x2a
+	}
+	if len(m.Name) > 0 {
+		i -= len(m.Name)
+		copy(dAtA[i:], m.Name)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Name)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.Owner) > 0 {
+		i -= len(m.Owner)
+		copy(dAtA[i:], m.Owner)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Owner)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovCreateCurationTeamResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovCreateCurationTeamResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovCreateCurationTeamResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCurationTeamOwner) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCurationTeamOwner) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCurationTeamOwner) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.NewOwner) > 0 {
+		i -= len(m.NewOwner)
+		copy(dAtA[i:], m.NewOwner)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.NewOwner)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCurationTeamOwnerResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCurationTeamOwnerResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCurationTeamOwnerResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCuratorMembership) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCuratorMembership) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCuratorMembership) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Present {
+		i--
+		if m.Present {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x28
+	}
+	if len(m.Target) > 0 {
+		i -= len(m.Target)
+		copy(dAtA[i:], m.Target)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Target)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCuratorMembershipResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCuratorMembershipResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCuratorMembershipResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityPreference) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityPreference) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityPreference) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.Mode != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Mode))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.Present {
+		i--
+		if m.Present {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Owner) > 0 {
+		i -= len(m.Owner)
+		copy(dAtA[i:], m.Owner)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Owner)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityPreferenceResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityPreferenceResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityPreferenceResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityBlock) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityBlock) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityBlock) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Blocked {
+		i--
+		if m.Blocked {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Owner) > 0 {
+		i -= len(m.Owner)
+		copy(dAtA[i:], m.Owner)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Owner)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCommunityBlockResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCommunityBlockResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCommunityBlockResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCuratorInvitation) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCuratorInvitation) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCuratorInvitation) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Action != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.Action))
+		i--
+		dAtA[i] = 0x28
+	}
+	if len(m.Invitee) > 0 {
+		i -= len(m.Invitee)
+		copy(dAtA[i:], m.Invitee)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Invitee)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if m.TeamId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.TeamId))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.Community) > 0 {
+		i -= len(m.Community)
+		copy(dAtA[i:], m.Community)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Community)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetCuratorInvitationResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetCuratorInvitationResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetCuratorInvitationResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetSubscriptionState) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetSubscriptionState) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetSubscriptionState) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.AutoRenew {
+		i--
+		if m.AutoRenew {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.NominalExpiry != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.NominalExpiry))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.Subscribed {
+		i--
+		if m.Subscribed {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.User) > 0 {
+		i -= len(m.User)
+		copy(dAtA[i:], m.User)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.User)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovSetSubscriptionStateResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovSetSubscriptionStateResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovSetSubscriptionStateResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovClaimCreatorRewards) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovClaimCreatorRewards) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovClaimCreatorRewards) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.EpochIds) > 0 {
+		dAtA6 := make([]byte, len(m.EpochIds)*10)
+		var j5 int
+		for _, num1 := range m.EpochIds {
+			num := uint64(num1)
+			for num >= 1<<7 {
+				dAtA6[j5] = uint8(uint64(num)&0x7f | 0x80)
+				num >>= 7
+				j5++
+			}
+			dAtA6[j5] = uint8(num)
+			j5++
+		}
+		i -= j5
+		copy(dAtA[i:], dAtA6[:j5])
+		i = encodeVarintTx(dAtA, i, uint64(j5))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.Creator) > 0 {
+		i -= len(m.Creator)
+		copy(dAtA[i:], m.Creator)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Creator)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.Authority) > 0 {
+		i -= len(m.Authority)
+		copy(dAtA[i:], m.Authority)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *MsgGovClaimCreatorRewardsResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *MsgGovClaimCreatorRewardsResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *MsgGovClaimCreatorRewardsResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
 func encodeVarintTx(dAtA []byte, offset int, v uint64) int {
 	offset -= sovTx(v)
 	base := offset
@@ -9388,7 +18788,7 @@ func (m *MsgPost) Size() (n int) {
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
-	l = len(m.Topic)
+	l = len(m.Community)
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
@@ -9409,6 +18809,9 @@ func (m *MsgPost) Size() (n int) {
 			l = len(s)
 			n += 2 + l + sovTx(uint64(l))
 		}
+	}
+	if m.ProtocolVersion != 0 {
+		n += 2 + sovTx(uint64(m.ProtocolVersion))
 	}
 	return n
 }
@@ -9460,7 +18863,7 @@ func (m *MsgEdit) Size() (n int) {
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
-	l = len(m.Topic)
+	l = len(m.Community)
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
@@ -10650,6 +20053,9 @@ func (m *MsgSubscribe) Size() (n int) {
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
+	if m.PeriodCount != 0 {
+		n += 2 + sovTx(uint64(m.PeriodCount))
+	}
 	return n
 }
 
@@ -10887,6 +20293,1675 @@ func (m *MsgAnnotate) Size() (n int) {
 }
 
 func (m *MsgAnnotateResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgCreateCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Title)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Description)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.OriginalTeamName)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Bio)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Policy)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgCreateCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCommunityMetadata) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Title)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Description)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgSetCommunityMetadataResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgTransferCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.NewFounder)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgTransferCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgJoinCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgJoinCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgLeaveCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgLeaveCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgBlockCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgBlockCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgUnblockCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgUnblockCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgCreateCurationTeam) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Name)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Bio)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Policy)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgCreateCurationTeamResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationTeamProfile) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Name)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Bio)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	l = len(m.Policy)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgSetCurationTeamProfileResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgInviteCurator) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgInviteCuratorResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgRevokeCuratorInvite) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgRevokeCuratorInviteResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgAcceptCuratorInvite) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	return n
+}
+
+func (m *MsgAcceptCuratorInviteResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgDeclineCuratorInvite) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	return n
+}
+
+func (m *MsgDeclineCuratorInviteResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgLeaveCurationTeam) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	return n
+}
+
+func (m *MsgLeaveCurationTeamResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgRemoveCurator) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgRemoveCuratorResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgTransferCurationTeam) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.NewOwner)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgTransferCurationTeamResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgDeleteCurationTeam) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	return n
+}
+
+func (m *MsgDeleteCurationTeamResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationPreference) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.Mode != 0 {
+		n += 2 + sovTx(uint64(m.Mode))
+	}
+	if m.PinnedTeamId != 0 {
+		n += 2 + sovTx(uint64(m.PinnedTeamId))
+	}
+	return n
+}
+
+func (m *MsgSetCurationPreferenceResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationPostHidden) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.Hidden {
+		n += 3
+	}
+	return n
+}
+
+func (m *MsgSetCurationPostHiddenResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationUserHidden) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.Hidden {
+		n += 3
+	}
+	return n
+}
+
+func (m *MsgSetCurationUserHiddenResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationThreadLocked) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.RootHash)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.Locked {
+		n += 3
+	}
+	return n
+}
+
+func (m *MsgSetCurationThreadLockedResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgSetCurationSubscriberOnly) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 2 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 2 + sovTx(uint64(m.TeamId))
+	}
+	if m.Enabled {
+		n += 3
+	}
+	return n
+}
+
+func (m *MsgSetCurationSubscriberOnlyResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgClaimCreatorRewards) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopePubkey)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.EnvelopeBlockHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.EnvelopeDifficulty != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeDifficulty))
+	}
+	if m.EnvelopePow != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopePow))
+	}
+	if m.EnvelopeTimestamp != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
+	l = len(m.EnvelopeSignature)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if len(m.EpochIds) > 0 {
+		l = 0
+		for _, e := range m.EpochIds {
+			l += sovTx(uint64(e))
+		}
+		n += 2 + sovTx(uint64(l)) + l
+	}
+	return n
+}
+
+func (m *MsgClaimCreatorRewardsResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovCreateCommunity) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Founder)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Title)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Description)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.OriginalTeamName)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Bio)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Policy)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgGovCreateCommunityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCommunityFounder) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.NewFounder)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgGovSetCommunityFounderResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovCreateCurationTeam) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Owner)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Name)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Bio)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Policy)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgGovCreateCurationTeamResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCurationTeamOwner) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 1 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.NewOwner)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	return n
+}
+
+func (m *MsgGovSetCurationTeamOwnerResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCuratorMembership) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 1 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Target)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Present {
+		n += 2
+	}
+	return n
+}
+
+func (m *MsgGovSetCuratorMembershipResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCommunityPreference) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Owner)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Present {
+		n += 2
+	}
+	if m.Mode != 0 {
+		n += 1 + sovTx(uint64(m.Mode))
+	}
+	if m.TeamId != 0 {
+		n += 1 + sovTx(uint64(m.TeamId))
+	}
+	return n
+}
+
+func (m *MsgGovSetCommunityPreferenceResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCommunityBlock) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Owner)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Blocked {
+		n += 2
+	}
+	return n
+}
+
+func (m *MsgGovSetCommunityBlockResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetCuratorInvitation) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Community)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.TeamId != 0 {
+		n += 1 + sovTx(uint64(m.TeamId))
+	}
+	l = len(m.Invitee)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Action != 0 {
+		n += 1 + sovTx(uint64(m.Action))
+	}
+	return n
+}
+
+func (m *MsgGovSetCuratorInvitationResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovSetSubscriptionState) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.User)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if m.Subscribed {
+		n += 2
+	}
+	if m.NominalExpiry != 0 {
+		n += 1 + sovTx(uint64(m.NominalExpiry))
+	}
+	if m.AutoRenew {
+		n += 2
+	}
+	return n
+}
+
+func (m *MsgGovSetSubscriptionStateResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *MsgGovClaimCreatorRewards) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Authority)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	l = len(m.Creator)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
+	if len(m.EpochIds) > 0 {
+		l = 0
+		for _, e := range m.EpochIds {
+			l += sovTx(uint64(e))
+		}
+		n += 1 + sovTx(uint64(l)) + l
+	}
+	return n
+}
+
+func (m *MsgGovClaimCreatorRewardsResponse) Size() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -11375,7 +22450,7 @@ func (m *MsgPost) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 101:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Topic", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -11403,7 +22478,7 @@ func (m *MsgPost) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Topic = string(dAtA[iNdEx:postIndex])
+			m.Community = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 102:
 			if wireType != 2 {
@@ -11533,6 +22608,25 @@ func (m *MsgPost) Unmarshal(dAtA []byte) error {
 			}
 			m.Media = append(m.Media, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
+		case 106:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ProtocolVersion", wireType)
+			}
+			m.ProtocolVersion = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.ProtocolVersion |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -11877,7 +22971,7 @@ func (m *MsgEdit) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 101:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Topic", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -11905,7 +22999,7 @@ func (m *MsgEdit) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Topic = string(dAtA[iNdEx:postIndex])
+			m.Community = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 102:
 			if wireType != 2 {
@@ -20033,6 +31127,25 @@ func (m *MsgSubscribe) Unmarshal(dAtA []byte) error {
 			}
 			m.Target = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 102:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PeriodCount", wireType)
+			}
+			m.PeriodCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.PeriodCount |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -21693,6 +32806,11478 @@ func (m *MsgAnnotateResponse) Unmarshal(dAtA []byte) error {
 		}
 		if fieldNum <= 0 {
 			return fmt.Errorf("proto: MsgAnnotateResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCreateCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCreateCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCreateCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Title", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Title = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Description", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Description = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field OriginalTeamName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.OriginalTeamName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 104:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bio", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bio = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 105:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCreateCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCreateCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCreateCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCommunityMetadata) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCommunityMetadata: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCommunityMetadata: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Title", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Title = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Description", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Description = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCommunityMetadataResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCommunityMetadataResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCommunityMetadataResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgTransferCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgTransferCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgTransferCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NewFounder", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NewFounder = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgTransferCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgTransferCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgTransferCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgJoinCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgJoinCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgJoinCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgJoinCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgJoinCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgJoinCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgLeaveCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgLeaveCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgLeaveCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgLeaveCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgLeaveCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgLeaveCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgBlockCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgBlockCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgBlockCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgBlockCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgBlockCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgBlockCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgUnblockCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgUnblockCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgUnblockCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgUnblockCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgUnblockCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgUnblockCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCreateCurationTeam) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCreateCurationTeam: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCreateCurationTeam: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bio", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bio = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgCreateCurationTeamResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgCreateCurationTeamResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgCreateCurationTeamResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationTeamProfile) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationTeamProfile: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationTeamProfile: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bio", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bio = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 104:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationTeamProfileResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationTeamProfileResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationTeamProfileResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgInviteCurator) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgInviteCurator: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgInviteCurator: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgInviteCuratorResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgInviteCuratorResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgInviteCuratorResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgRevokeCuratorInvite) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgRevokeCuratorInvite: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgRevokeCuratorInvite: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgRevokeCuratorInviteResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgRevokeCuratorInviteResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgRevokeCuratorInviteResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAcceptCuratorInvite) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAcceptCuratorInvite: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAcceptCuratorInvite: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgAcceptCuratorInviteResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgAcceptCuratorInviteResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgAcceptCuratorInviteResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgDeclineCuratorInvite) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgDeclineCuratorInvite: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgDeclineCuratorInvite: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgDeclineCuratorInviteResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgDeclineCuratorInviteResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgDeclineCuratorInviteResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgLeaveCurationTeam) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgLeaveCurationTeam: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgLeaveCurationTeam: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgLeaveCurationTeamResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgLeaveCurationTeamResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgLeaveCurationTeamResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgRemoveCurator) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgRemoveCurator: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgRemoveCurator: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgRemoveCuratorResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgRemoveCuratorResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgRemoveCuratorResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgTransferCurationTeam) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgTransferCurationTeam: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgTransferCurationTeam: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NewOwner", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NewOwner = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgTransferCurationTeamResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgTransferCurationTeamResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgTransferCurationTeamResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgDeleteCurationTeam) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgDeleteCurationTeam: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgDeleteCurationTeam: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgDeleteCurationTeamResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgDeleteCurationTeamResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgDeleteCurationTeamResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationPreference) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationPreference: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationPreference: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Mode", wireType)
+			}
+			m.Mode = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Mode |= CurationPreferenceMode(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PinnedTeamId", wireType)
+			}
+			m.PinnedTeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.PinnedTeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationPreferenceResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationPreferenceResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationPreferenceResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationPostHidden) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationPostHidden: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationPostHidden: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Hidden", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Hidden = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationPostHiddenResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationPostHiddenResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationPostHiddenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationUserHidden) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationUserHidden: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationUserHidden: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Hidden", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Hidden = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationUserHiddenResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationUserHiddenResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationUserHiddenResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationThreadLocked) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationThreadLocked: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationThreadLocked: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RootHash", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RootHash = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 103:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Locked", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Locked = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationThreadLockedResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationThreadLockedResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationThreadLockedResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationSubscriberOnly) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationSubscriberOnly: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationSubscriberOnly: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 101:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 102:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Enabled", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Enabled = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgSetCurationSubscriberOnlyResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgSetCurationSubscriberOnlyResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgSetCurationSubscriberOnlyResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgClaimCreatorRewards) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgClaimCreatorRewards: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgClaimCreatorRewards: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePubkey", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopePubkey = append(m.EnvelopePubkey[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopePubkey == nil {
+				m.EnvelopePubkey = []byte{}
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeBlockHash", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeBlockHash = append(m.EnvelopeBlockHash[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeBlockHash == nil {
+				m.EnvelopeBlockHash = []byte{}
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeDifficulty", wireType)
+			}
+			m.EnvelopeDifficulty = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeDifficulty |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopePow", wireType)
+			}
+			m.EnvelopePow = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopePow |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeTimestamp", wireType)
+			}
+			m.EnvelopeTimestamp = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
+			}
+			var byteLen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				byteLen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if byteLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + byteLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnvelopeSignature = append(m.EnvelopeSignature[:0], dAtA[iNdEx:postIndex]...)
+			if m.EnvelopeSignature == nil {
+				m.EnvelopeSignature = []byte{}
+			}
+			iNdEx = postIndex
+		case 100:
+			if wireType == 0 {
+				var v int64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowTx
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= int64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.EpochIds = append(m.EpochIds, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowTx
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= int(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthTx
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex < 0 {
+					return ErrInvalidLengthTx
+				}
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				var elementCount int
+				var count int
+				for _, integer := range dAtA[iNdEx:postIndex] {
+					if integer < 128 {
+						count++
+					}
+				}
+				elementCount = count
+				if elementCount != 0 && len(m.EpochIds) == 0 {
+					m.EpochIds = make([]int64, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowTx
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= int64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.EpochIds = append(m.EpochIds, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field EpochIds", wireType)
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgClaimCreatorRewardsResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgClaimCreatorRewardsResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgClaimCreatorRewardsResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovCreateCommunity) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovCreateCommunity: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovCreateCommunity: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Founder", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Founder = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Title", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Title = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Description", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Description = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field OriginalTeamName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.OriginalTeamName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bio", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bio = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovCreateCommunityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovCreateCommunityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovCreateCommunityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityFounder) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityFounder: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityFounder: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NewFounder", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NewFounder = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityFounderResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityFounderResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityFounderResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovCreateCurationTeam) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovCreateCurationTeam: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovCreateCurationTeam: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Owner", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Owner = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Bio", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Bio = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Policy", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Policy = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovCreateCurationTeamResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovCreateCurationTeamResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovCreateCurationTeamResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCurationTeamOwner) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCurationTeamOwner: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCurationTeamOwner: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NewOwner", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NewOwner = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCurationTeamOwnerResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCurationTeamOwnerResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCurationTeamOwnerResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCuratorMembership) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCuratorMembership: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCuratorMembership: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Target", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Target = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Present", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Present = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCuratorMembershipResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCuratorMembershipResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCuratorMembershipResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityPreference) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityPreference: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityPreference: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Owner", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Owner = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Present", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Present = bool(v != 0)
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Mode", wireType)
+			}
+			m.Mode = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Mode |= CurationPreferenceMode(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityPreferenceResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityPreferenceResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityPreferenceResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityBlock) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityBlock: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityBlock: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Owner", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Owner = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Blocked", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Blocked = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCommunityBlockResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCommunityBlockResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCommunityBlockResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCuratorInvitation) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCuratorInvitation: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCuratorInvitation: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Community", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Community = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TeamId", wireType)
+			}
+			m.TeamId = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TeamId |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Invitee", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Invitee = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Action", wireType)
+			}
+			m.Action = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Action |= CuratorInvitationAction(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetCuratorInvitationResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetCuratorInvitationResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetCuratorInvitationResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetSubscriptionState) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetSubscriptionState: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetSubscriptionState: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field User", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.User = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Subscribed", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Subscribed = bool(v != 0)
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NominalExpiry", wireType)
+			}
+			m.NominalExpiry = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.NominalExpiry |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AutoRenew", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.AutoRenew = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovSetSubscriptionStateResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovSetSubscriptionStateResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovSetSubscriptionStateResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovClaimCreatorRewards) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovClaimCreatorRewards: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovClaimCreatorRewards: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Authority = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Creator", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Creator = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType == 0 {
+				var v int64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowTx
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					v |= int64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				m.EpochIds = append(m.EpochIds, v)
+			} else if wireType == 2 {
+				var packedLen int
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowTx
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					packedLen |= int(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				if packedLen < 0 {
+					return ErrInvalidLengthTx
+				}
+				postIndex := iNdEx + packedLen
+				if postIndex < 0 {
+					return ErrInvalidLengthTx
+				}
+				if postIndex > l {
+					return io.ErrUnexpectedEOF
+				}
+				var elementCount int
+				var count int
+				for _, integer := range dAtA[iNdEx:postIndex] {
+					if integer < 128 {
+						count++
+					}
+				}
+				elementCount = count
+				if elementCount != 0 && len(m.EpochIds) == 0 {
+					m.EpochIds = make([]int64, 0, elementCount)
+				}
+				for iNdEx < postIndex {
+					var v int64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowTx
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						v |= int64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					m.EpochIds = append(m.EpochIds, v)
+				}
+			} else {
+				return fmt.Errorf("proto: wrong wireType = %d for field EpochIds", wireType)
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipTx(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthTx
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *MsgGovClaimCreatorRewardsResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowTx
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: MsgGovClaimCreatorRewardsResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: MsgGovClaimCreatorRewardsResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		default:

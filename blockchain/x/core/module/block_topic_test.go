@@ -128,7 +128,7 @@ func TestBlockTopicNormalizesAndDedups(t *testing.T) {
 	am := newTestModule(mk)
 
 	params := mk.GetParams(ctx)
-	params.Tiers[0].MaxBlockedTopics = 10
+	params.Tiers[0].MaxBlockedCommunities = 10
 	require.NoError(t, mk.SetParams(ctx, params))
 
 	pub, owner := testPubkeyOwner()
@@ -161,7 +161,7 @@ func TestBlockTopicCapsToTierLimit(t *testing.T) {
 	am := newTestModule(mk)
 
 	params := mk.GetParams(ctx)
-	params.Tiers[0].MaxBlockedTopics = 3
+	params.Tiers[0].MaxBlockedCommunities = 3
 	require.NoError(t, mk.SetParams(ctx, params))
 
 	pub, owner := testPubkeyOwner()

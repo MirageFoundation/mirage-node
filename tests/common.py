@@ -67,6 +67,7 @@ from shared.canon import (  # noqa: E402
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
     canon_base_annotate as _canon_base_annotate_raw,
+    canon_base_create_community as _canon_base_create_community_raw,
     canon_signed_with_pow,
     canon_attribution,
 )
@@ -299,9 +300,7 @@ def _post_multipart(url: str, data: dict, files: Optional[dict] = None):
             if attempt >= max_retries:
                 raise
             delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
-            _debug(
-                f"retry upload {url} error={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s"
-            )
+            _debug(f"retry upload {url} error={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
             time.sleep(delay)
             continue
         if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
@@ -714,6 +713,7 @@ def _do_subscribe(backend: str, wallet: LocalWallet, level: int, target: str = "
         "timestamp": ts,
         "envelope_nonce": str(nonce),
         "level": level,
+        "period_count": 1,
     }
     if target:
         payload["target"] = target
@@ -923,21 +923,21 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot check balance for {name}: {e}")
             return False
 
-    # Subscribe wallets: sub1,sub2 -> level 1, agent1/agent2 -> level 10
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
+    # Subscribe wallets: sub1,sub2,agent1,agent2 all become subscribers (Agent is gone).
+    for name in ("sub1", "sub2", "agent1", "agent2"):
         w = WALLETS[name]
-        resp = _do_subscribe(backend, w, level)
+        resp = _do_subscribe(backend, w, 1)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            print(f"  Subscribed {name} to level {level} (tx: {txh[:16]}...)")
+            print(f"  Subscribed {name} to level 1 (tx: {txh[:16]}...)")
         else:
             err = resp.get("error", resp)
-            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level {level}: {err}")
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level 1: {err}")
             return False
 
     # Wait for subscription levels to be reflected in BOTH chain and indexer DB
     # (is_subscriber() checks the indexer, not the chain — must wait for indexer to catch up)
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
+    for name in ("sub1", "sub2", "agent1", "agent2"):
         w = WALLETS[name]
         addr = str(w.address())
         deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
@@ -946,7 +946,7 @@ def setup_test_wallets(backend: str) -> bool:
             try:
                 status = get_user_status(backend, addr)
                 actual_level = int(status.get("user_level", 0) or 0)
-                if actual_level >= level:
+                if actual_level >= 1:
                     print(f"  Verified {name} level={actual_level}")
                     verified = True
                     break

@@ -94,7 +94,7 @@ def estimate_total_gas_limit(
     return int(gas_guess)
 
 
-def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
+def build_tx_bytes(body_bytes: bytes, gas_limit: int, *, zero_fee: bool = False) -> bytes:
     """Build a signed unordered relay TxRaw. Gas payer = validator (must have signed)."""
     rt = require_runtime()
     tx_bytes, _timeout_ns = build_signed_tx(
@@ -104,6 +104,7 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
         pubkey_bytes=rt.validator_pubkey_bytes,
         account_number=int(rt.validator_account_number),
         fee_payer=rt.validator_payer_addr,
+        zero_fee=zero_fee,
     )
     return tx_bytes
 
@@ -117,6 +118,7 @@ def build_signed_tx(
     account_number: int,
     fee_payer: str = "",
     include_request_memo: bool = True,
+    zero_fee: bool = False,
 ) -> Tuple[bytes, int]:
     """Sign an unordered tx with an explicit signer.
 
@@ -130,9 +132,10 @@ def build_signed_tx(
         raise RuntimeError("build_signed_tx requires a signer key pair")
     rt = require_runtime()
     min_gas_price = min_gas_price_umirage()
-    fee_amt = int(_math.ceil(int(gas_limit) * min_gas_price))
+    fee_amt = 0 if zero_fee else int(_math.ceil(int(gas_limit) * min_gas_price))
     fee = Fee(gas_limit=int(gas_limit))
-    fee.amount.extend([Coin(denom="umirage", amount=str(fee_amt))])
+    if fee_amt > 0:
+        fee.amount.extend([Coin(denom="umirage", amount=str(fee_amt))])
     if fee_payer:
         fee.payer = fee_payer
 
@@ -324,11 +327,11 @@ def simulate_gas(tx_bytes: bytes) -> int:
     return int(gas_used)
 
 
-def build_and_broadcast_tx(body_bytes: bytes, gas_limit: int) -> Tuple[str, int, int, str]:
+def build_and_broadcast_tx(body_bytes: bytes, gas_limit: int, *, zero_fee: bool = False) -> Tuple[str, int, int, str]:
     """Sign a relay tx and broadcast; rebuild once on unordered-nonce collision."""
     last: Tuple[str, int, int, str] = ("", 1, 0, "build_and_broadcast_tx: no attempt")
     for attempt in range(2):
-        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit, zero_fee=zero_fee)
         last = _broadcast_once(tx_bytes)
         tx_hash, code, height, raw_log = last
         if code == 0:

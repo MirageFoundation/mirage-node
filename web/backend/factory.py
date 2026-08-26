@@ -34,7 +34,26 @@ from params import load_params  # noqa: E402
 from tx import load_tx_size_cost_per_byte  # noqa: E402
 from routes.public import public_bp  # noqa: E402
 from routes.core import core_bp  # noqa: E402
-from routes.quests import quests_bp  # noqa: E402
+from routes.communities import communities_bp  # noqa: E402
+
+_GONE_PATHS = {
+    "/api/get_topics",
+    "/api/search_topics",
+    "/api/core/follow_topic",
+    "/api/core/unfollow_topic",
+    "/api/core/block_topic",
+    "/api/core/unblock_topic",
+    "/api/core/enable_agent",
+    "/api/core/disable_agent",
+    "/api/core/set_agents",
+    "/api/core/annotate",
+    "/api/get_quests",
+    "/api/quests",
+    "/api/achievements",
+    "/api/invite",
+    "/api/referrals",
+    "/api/get_referral",
+}
 
 
 def create_app(init_runtime: bool = True) -> Flask:
@@ -57,7 +76,14 @@ def create_app(init_runtime: bool = True) -> Flask:
 
     app.register_blueprint(public_bp)
     app.register_blueprint(core_bp)
-    app.register_blueprint(quests_bp)
+    app.register_blueprint(communities_bp)
+
+    @app.before_request
+    def _reject_retired_v139_routes():
+        path = request.path.rstrip("/") or "/"
+        if path in _GONE_PATHS or path.startswith("/api/quests") or path.startswith("/api/referrals"):
+            from error_utils import api_error_code
+            return api_error_code("gone", 410)
 
     # Global safety net: catch any unhandled exception and return a generic error
     @app.errorhandler(Exception)

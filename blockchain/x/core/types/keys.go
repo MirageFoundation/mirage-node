@@ -96,4 +96,15 @@ const (
 	// full supply-vs-balances invariant.
 	BlockSupplyStartKey = "block_supply_start"
 	BlockSupplyDeltaKey = "block_supply_delta"
+
+	// CreatorPoolName is the module account that holds creator-liability funds.
+	// Direct user sends to it are blocked; only create_tranche and claims move it.
+	CreatorPoolName = "creator_pool"
+
+	ProtocolVersionV139 uint32 = 1
+
+	UpgradeV139CompleteKey = "upgrade/v1.39.0/complete"
+
+	EngagementKindUpvote      byte = 0x01
+	EngagementKindDirectReply byte = 0x02
 )

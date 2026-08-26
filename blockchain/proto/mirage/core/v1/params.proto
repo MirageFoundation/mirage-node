@@ -12,12 +12,12 @@ message TierConfig {
 
   // uint64 fields
   uint64 period_fee = 1;
-  uint64 max_enabled_agents = 2;
+  reserved 2; // was max_enabled_agents
   uint64 max_followed_users = 3;
-  uint64 max_followed_topics = 4;
+  uint64 max_joined_communities = 4;
   uint64 max_blocked_users = 5;
   uint64 max_blocked_posts = 6;
-  uint64 max_blocked_topics = 7;
+  uint64 max_blocked_communities = 7;
   uint64 max_title_length = 8;
   uint64 max_content_length = 9;
   uint64 editing_time_mins = 10;
@@ -27,7 +27,7 @@ message TierConfig {
   double vote_weight = 13;
 
   // bool fields
-  bool can_be_agent = 15;
+  reserved 15; // was can_be_agent
   bool can_remove_anon = 16;
   bool can_have_biography = 17;
   bool can_have_avatar = 18;
@@ -35,6 +35,7 @@ message TierConfig {
   bool can_have_flair = 20;
   // max_biography_length is the max biography length for this tier (0 = disabled)
   uint64 max_biography_length = 21;
+  uint64 max_curation_memberships = 22;
 }
 
 // Params defines the parameters for the module.
@@ -77,14 +78,14 @@ message Params {
   // max_username_size is the maximum username length
   uint64 max_username_size = 34;
 
-  // max_topic_size is the maximum topic length
-  uint64 max_topic_size = 35;
+  // max_community_size is the maximum community slug length
+  uint64 max_community_size = 35;
 
   // min_username_size is the minimum username length
   uint64 min_username_size = 36;
 
-  // min_topic_size is the minimum topic length
-  uint64 min_topic_size = 37;
+  // min_community_size is the minimum community slug length
+  uint64 min_community_size = 37;
 
   // mint_dynamic_credit_cap caps per-interval relay credits per validator.
   // Zero disables credit weighting; the dynamic pool then falls back to stake weighting.
@@ -99,8 +100,8 @@ message Params {
   // tiers defines the tier configurations, indexed by user-level-to-tier mapping.
   // The exact level -> tier-index mapping is defined by LevelToTierIndex in
   // x/core/types/params.go: level 0 (Free) -> 0, level 1 (Subscriber) -> 1,
-  // level 10 (Agent) -> 2, level >= 100 (Admin) -> 2 (inherits Agent tier).
-  // Levels 2-9 are reserved for future subscription tiers and currently invalid.
+  // level >= 100 (Admin) -> 1 (inherits Subscriber limits).
+  // Levels 2-9 and 10 are invalid after v1.39.0.
   repeated TierConfig tiers = 41;
 
   // subscription_reserve_percent is superseded by subscription_reserve_bps and
@@ -151,6 +152,29 @@ message Params {
   // Zero is valid so Params blobs written before v1.38.0 still decode.
   // Default: 0.20 (20% floor).
   double mint_floor_split = 55;
+
+  uint64 subscription_creator_bps = 56;
+  uint64 max_curators_per_team = 57;
+  uint64 max_pending_curator_invites_per_team = 58;
+  uint64 max_pending_curator_invites_per_user = 59;
+  uint64 max_community_title_length = 60;
+  uint64 max_community_description_length = 61;
+  uint64 max_curation_team_name_length = 62;
+  uint64 max_curation_team_bio_length = 63;
+  uint64 max_curation_team_policy_length = 64;
+  uint64 subscription_transitions_per_block = 65;
+  uint64 curation_prune_keys_per_block = 66;
+  uint64 creator_epoch_closures_per_block = 67;
+  uint64 creator_settlement_records_per_block = 68;
+  uint64 creator_prune_keys_per_block = 69;
+  uint64 creator_claim_window_days = 70;
+  uint64 max_creator_claim_epochs = 71;
+  uint64 max_creator_engagements_per_epoch = 72;
+  uint64 creator_epoch_expiries_per_block = 73;
+  uint64 subscription_early_renewal_days = 74;
+  uint64 subscription_renewal_attempts_per_block = 75;
+  uint64 subscriber_daily_relay_limit = 76;
+  uint64 max_subscription_periods_per_purchase = 77;
 }
 
 // AwardConfig defines a single award type and its cost.

@@ -29,7 +29,14 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from shared.client import _request_with_retries, check_pow_target, compute_pow, get_status, sign_canonical, der_to_compact_sig
+from shared.client import (
+    _request_with_retries,
+    check_pow_target,
+    compute_pow,
+    get_status,
+    sign_canonical,
+    der_to_compact_sig,
+)
 from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
@@ -587,7 +594,7 @@ def _require_validator_account_number() -> int:
     resp = requests.get(url, timeout=10)
     if resp.status_code != 200:
         raise RuntimeError(f"account query failed: {resp.status_code} {resp.text[:200]}")
-    acc = (resp.json().get("account") or {})
+    acc = resp.json().get("account") or {}
     if "base_account" in acc:
         acc = acc["base_account"] or {}
     _VALIDATOR_ACCOUNT_NUMBER = int(acc["account_number"])
@@ -825,10 +832,11 @@ def _build_msg_post(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.topic = topic
+    msg.community = topic
     msg.title = title
     msg.content = content
     msg.tag = tag
+    msg.protocol_version = 1
     for m in media or []:
         msg.media.append(m)
     return msg
@@ -1067,7 +1075,7 @@ def _build_msg_edit(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.topic = topic
+    msg.community = topic
     msg.title = title
     msg.content = content
     msg.tag = tag
@@ -1222,6 +1230,7 @@ def _build_msg_subscribe(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.level = int(level)
+    msg.period_count = 1
     if target:
         msg.target = target
     return msg

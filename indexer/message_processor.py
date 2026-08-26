@@ -34,6 +34,10 @@ from shared.datatypes import (
     MsgUpdateParams,
     MsgAward,
     MsgAnnotate,
+    MsgJoinCommunity,
+    MsgLeaveCommunity,
+    MsgCreateCommunity,
+    MsgClaimCreatorRewards,
 )
 from indexer.address_utils import addr_from_pubkey, derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import get_vote_weight
@@ -156,6 +160,10 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSetAutoRenewal": MsgSetAutoRenewal,
     "/mirage.core.v1.MsgUpdateParams": MsgUpdateParams,
     "/mirage.core.v1.MsgAward": MsgAward,
+    "/mirage.core.v1.MsgJoinCommunity": MsgJoinCommunity,
+    "/mirage.core.v1.MsgLeaveCommunity": MsgLeaveCommunity,
+    "/mirage.core.v1.MsgCreateCommunity": MsgCreateCommunity,
+    "/mirage.core.v1.MsgClaimCreatorRewards": MsgClaimCreatorRewards,
 }
 
 
@@ -279,6 +287,36 @@ class MessageProcessor:
             self._handle_update_params(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgAward":
             self._handle_award(type_url, value, tx_hash, ts, height)
+        elif type_url == "/mirage.core.v1.MsgJoinCommunity":
+            self._handle_join_community(type_url, value, ts, height)
+        elif type_url == "/mirage.core.v1.MsgLeaveCommunity":
+            self._handle_leave_community(type_url, value, ts, height)
+        elif type_url == "/mirage.core.v1.MsgCreateCommunity":
+            self._handle_create_community(type_url, value, ts, height)
+        elif type_url == "/mirage.core.v1.MsgClaimCreatorRewards":
+            self._handle_claim_creator_rewards(type_url, value, tx_hash, ts, height)
+        elif type_url in (
+            "/mirage.core.v1.MsgSetCommunityMetadata",
+            "/mirage.core.v1.MsgTransferCommunity",
+            "/mirage.core.v1.MsgBlockCommunity",
+            "/mirage.core.v1.MsgUnblockCommunity",
+            "/mirage.core.v1.MsgCreateCurationTeam",
+            "/mirage.core.v1.MsgSetCurationTeamProfile",
+            "/mirage.core.v1.MsgInviteCurator",
+            "/mirage.core.v1.MsgRevokeCuratorInvite",
+            "/mirage.core.v1.MsgAcceptCuratorInvite",
+            "/mirage.core.v1.MsgDeclineCuratorInvite",
+            "/mirage.core.v1.MsgLeaveCurationTeam",
+            "/mirage.core.v1.MsgRemoveCurator",
+            "/mirage.core.v1.MsgTransferCurationTeam",
+            "/mirage.core.v1.MsgDeleteCurationTeam",
+            "/mirage.core.v1.MsgSetCurationPreference",
+            "/mirage.core.v1.MsgSetCurationPostHidden",
+            "/mirage.core.v1.MsgSetCurationUserHidden",
+            "/mirage.core.v1.MsgSetCurationThreadLocked",
+            "/mirage.core.v1.MsgSetCurationSubscriberOnly",
+        ):
+            logger.info("indexed_community_msg type_url=%s height=%s tx=%s", type_url, height, tx_hash)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
         elif type_url == "/mirage.core.v1.MsgBridgeBurn":
@@ -314,7 +352,7 @@ class MessageProcessor:
         owner = derive_owner_from_msg(msg_dict)
         relayer = str(msg_dict.get("authority", "") or "").strip().lower()
 
-        topic = str(msg_dict.get("topic", "") or "")
+        topic = str(msg_dict.get("community", "") or msg_dict.get("topic", "") or "")
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
         target = str(msg_dict.get("target", "") or "").lower()
@@ -1208,7 +1246,6 @@ class MessageProcessor:
             username = str(msg.get("username", ""))
 
             level = 0
-            agents = []
 
             profile = self.chain.query_profile_full(addr)
             if profile is None:
@@ -1218,18 +1255,12 @@ class MessageProcessor:
                 raise RuntimeError(f"missing username for {addr}")
             if "level" not in profile:
                 raise RuntimeError(f"missing level for {addr}")
-            if "enabled_agents" not in profile:
-                raise RuntimeError(f"missing enabled_agents for {addr}")
             username = str(profile["username"])
             level = int(profile["level"])
-            agents = profile["enabled_agents"]
-            if not isinstance(agents, list):
-                raise RuntimeError(f"invalid enabled_agents for {addr}")
-            logger.debug("set_username profile loaded addr=%s agents=%d", addr, len(agents))
+            logger.debug("set_username profile loaded addr=%s", addr)
 
             old = self.db.get_profile(addr)
             self.db.upsert_profile(addr, username, level, ts)
-            self.db.set_enabled_agents(addr, agents)
 
             new_tuple = (username, level)
             if not old or old != new_tuple:
@@ -1241,7 +1272,6 @@ class MessageProcessor:
                         "time_iso": self.iso_timestamp(ts),
                         "username": username,
                         "level": level,
-                        "enabled_agents": agents,
                     },
                 )
         except Exception as e:
@@ -1354,52 +1384,13 @@ class MessageProcessor:
         )
 
     def _handle_enable_agent(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgEnableAgent."""
-        try:
-            parsed = MsgEnableAgent()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
-            if not owner:
-                logger.warning("Rejected enable_agent: missing owner")
-                return
-            self._refresh_enabled_agents(owner, ts)
-        except Exception as e:
-            logger.error("Error handling MsgEnableAgent: %s", e, exc_info=True)
-
-            raise
+        logger.debug("historical_agent_msg ignored type_url=%s", type_url)
 
     def _handle_disable_agent(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgDisableAgent."""
-        try:
-            parsed = MsgDisableAgent()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
-            if not owner:
-                logger.warning("Rejected disable_agent: missing owner")
-                return
-            self._refresh_enabled_agents(owner, ts)
-        except Exception as e:
-            logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
-
-            raise
+        logger.debug("historical_agent_msg ignored type_url=%s", type_url)
 
     def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgSetAgents."""
-        try:
-            parsed = MsgSetAgents()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
-            if not owner:
-                logger.warning("Rejected set_agents: missing owner")
-                return
-            self._refresh_enabled_agents(owner, ts)
-        except Exception as e:
-            logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
-
-            raise
+        logger.debug("historical_agent_msg ignored type_url=%s", type_url)
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""
@@ -1450,53 +1441,28 @@ class MessageProcessor:
             raise
 
     def _handle_follow_topic(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgFollowTopic."""
-        try:
-            parsed = MsgFollowTopic()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = derive_owner_from_msg(msg_dict)
-            topic = str(msg_dict.get("topic", "")).strip().lower()
-
-            if not owner or not topic:
-                logger.warning("Rejected follow_topic: missing owner or topic")
-                return
-
-            removed = self.db.unblock_topics_matching(owner, topic)
-            if removed > 0:
-                logger.debug("Follow topic removed block(s): owner=%s topic=%s removed=%d", owner, topic, removed)
-            self._refresh_followed_topics(owner, ts)
-            self.log_yaml(
-                "Follow topic",
-                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
-            )
-        except Exception as e:
-            logger.error("Error handling MsgFollowTopic: %s", e, exc_info=True)
-
-            raise
+        """Historical MsgFollowTopic: write LIVE_DEFAULT join on reindex."""
+        parsed = MsgFollowTopic()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        topic = str(msg_dict.get("topic", "") or msg_dict.get("community", "")).strip().lower()
+        if not owner or not topic:
+            return
+        removed = self.db.unblock_topics_matching(owner, topic)
+        if removed > 0:
+            logger.debug("Follow topic removed block(s): owner=%s community=%s removed=%d", owner, topic, removed)
+        self.db.follow_topic(owner, topic)
 
     def _handle_unfollow_topic(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgUnfollowTopic."""
-        try:
-            parsed = MsgUnfollowTopic()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = derive_owner_from_msg(msg_dict)
-            topic = str(msg_dict.get("topic", "")).strip().lower()
-
-            if not owner or not topic:
-                logger.warning("Rejected unfollow_topic: missing owner or topic")
-                return
-
-            self._refresh_followed_topics(owner, ts)
-            self.log_yaml(
-                "Unfollow topic",
-                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
-            )
-        except Exception as e:
-            logger.error("Error handling MsgUnfollowTopic: %s", e, exc_info=True)
-
-            raise
+        parsed = MsgUnfollowTopic()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        topic = str(msg_dict.get("topic", "") or msg_dict.get("community", "")).strip().lower()
+        if not owner or not topic:
+            return
+        self.db.unfollow_topic(owner, topic)
 
     def _handle_block_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockPost."""
@@ -2137,6 +2103,82 @@ class MessageProcessor:
         if content is not None and getattr(content, "type_url", ""):
             return [content]
         return []
+
+    def _handle_join_community(self, type_url: str, value: bytes, ts: int, height: int):
+        parsed = MsgJoinCommunity()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        slug = str(msg_dict.get("community", "")).strip().lower()
+        if not owner or not slug:
+            return
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
+                    VALUES(%s, %s, 0, NULL, %s)
+                    ON CONFLICT (owner, community) DO UPDATE SET updated_height = EXCLUDED.updated_height
+                    """,
+                    (owner, slug, int(height)),
+                )
+        logger.info("join_community owner=%s community=%s height=%s", owner, slug, height)
+
+    def _handle_leave_community(self, type_url: str, value: bytes, ts: int, height: int):
+        parsed = MsgLeaveCommunity()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        slug = str(msg_dict.get("community", "")).strip().lower()
+        if not owner or not slug:
+            return
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM community_curation_preferences WHERE LOWER(owner)=LOWER(%s) AND community=%s",
+                    (owner, slug),
+                )
+        logger.info("leave_community owner=%s community=%s height=%s", owner, slug, height)
+
+    def _handle_create_community(self, type_url: str, value: bytes, ts: int, height: int):
+        parsed = MsgCreateCommunity()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        slug = str(msg_dict.get("community", "")).strip().lower()
+        title = str(msg_dict.get("title", "") or "")
+        description = str(msg_dict.get("description", "") or "")
+        if not owner or not slug:
+            return
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO communities(
+                        community, original_founder, current_founder, title, description,
+                        original_team_id, current_default_team_id, default_count, created_height, created_order
+                    ) VALUES(%s, %s, %s, %s, %s, 1, 1, 0, %s, %s)
+                    ON CONFLICT (community) DO NOTHING
+                    """,
+                    (slug, owner, owner, title, description, int(height), int(height)),
+                )
+                cur.execute(
+                    """
+                    INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
+                    VALUES(%s, %s, 0, NULL, %s)
+                    ON CONFLICT (owner, community) DO NOTHING
+                    """,
+                    (owner, slug, int(height)),
+                )
+        logger.info("create_community owner=%s community=%s height=%s", owner, slug, height)
+
+    def _handle_claim_creator_rewards(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
+        parsed = MsgClaimCreatorRewards()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        owner = derive_owner_from_msg(msg_dict)
+        epochs = [int(x) for x in (msg_dict.get("epoch_ids") or [])]
+        logger.info("claim_creator_rewards owner=%s epochs=%s tx=%s height=%s", owner, epochs, tx_hash, height)
 
     @staticmethod
     def extract_proposal_id(attrs: dict) -> int | None:

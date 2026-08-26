@@ -53,3 +53,20 @@ func SplitPeriodFee(periodFee uint64, bps uint64) (reserve uint64, burn uint64, 
 	reserve = periodFee * bps / BasisPointsDenominator
 	return reserve, periodFee - reserve, nil
 }
+
+// SplitCreatorFee splits a subscription fee into burn and creator-pool amounts.
+// burn + creator always equals periodFee. Creator BPS of 5000 on an odd fee of 7
+// yields burn 3 and creator 4 (remainder goes to the creator pool).
+func SplitCreatorFee(periodFee uint64, creatorBps uint64) (burn uint64, creator uint64, err error) {
+	if creatorBps > BasisPointsDenominator {
+		return 0, 0, fmt.Errorf("creator basis points out of range: %d", creatorBps)
+	}
+	if periodFee == 0 || creatorBps == 0 {
+		return periodFee, 0, nil
+	}
+	if periodFee > math.MaxUint64/creatorBps {
+		return 0, 0, fmt.Errorf("period fee %d overflows basis-point multiplication at %d bps", periodFee, creatorBps)
+	}
+	creator = periodFee * creatorBps / BasisPointsDenominator
+	return periodFee - creator, creator, nil
+}

@@ -66,6 +66,7 @@ var (
 		{Account: stakingtypes.NotBondedPoolName, Permissions: []string{authtypes.Burner, stakingtypes.ModuleName}},
 		{Account: govtypes.ModuleName, Permissions: []string{authtypes.Burner}},
 		{Account: coremoduletypes.ModuleName, Permissions: []string{authtypes.Minter, authtypes.Burner, authtypes.Staking}},
+		{Account: coremoduletypes.CreatorPoolName, Permissions: []string{authtypes.Burner}},
 		// this line is used by starport scaffolding # stargate/app/maccPerms
 	}
 
@@ -77,6 +78,8 @@ var (
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
 		govtypes.ModuleName,
+		coremoduletypes.ModuleName,
+		coremoduletypes.CreatorPoolName,
 	}
 
 	// application configuration (used by depinject)

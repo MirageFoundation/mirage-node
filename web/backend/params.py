@@ -51,6 +51,10 @@ _REQUIRED_INT_PARAMS = [
     "relay_max_gas_fee",
     "max_envelope_age",
     "subscription_reserve_bps",
+    "subscription_creator_bps",
+    "subscriber_daily_relay_limit",
+    "max_subscription_periods_per_purchase",
+    "subscription_early_renewal_days",
 ]
 
 _REQUIRED_FLOAT_PARAMS = [

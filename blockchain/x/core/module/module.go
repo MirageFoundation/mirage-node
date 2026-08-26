@@ -2,10 +2,10 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -21,7 +21,6 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/types/module"
 	"github.com/cosmos/cosmos-sdk/types/query"
 
@@ -287,153 +286,8 @@ func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
 // Only deducts from users with level >= 1; free users (level 0) use PoW instead.
 // If reserve is insufficient, burns remainder, zeros reserve, and downgrades user to level 0.
 func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int, gasUsed uint64, reason string) error {
-	// Only charge paid users (level >= 1)
-	if userLevel < 1 {
-		return nil
-	}
-
-	params := am.k.GetParams(ctx)
-	minGasPrice := params.RelayMinGasPrice
-	maxGasFee := params.RelayMaxGasFee
-
-	// Calculate fee based on gas used for this message
-	fee := calculateRelayFee(gasUsed, minGasPrice, maxGasFee)
-
-	if fee == 0 {
-		return nil
-	}
-
-	// Special rule for admins (level >= 100): deduct gas directly from on-chain balance,
-	// never from reserve and never downgrade. If balance is insufficient, skip deduction
-	// but let the tx through -- admin operations should never be blocked over gas fees.
-	//
-	// ADR: docs/architecture/adr-mint-log-and-continue.md — intentional
-	// log-and-continue (not CONSENSUS_FATAL) for insufficient admin balance;
-	// liveness preferred after the 2026-07-12 full-chain halt.
-	//
-	// The waiver covers insufficient funds only. Treating every error as an
-	// empty balance meant a node-local bank/store failure skipped the deduction
-	// here while peers deducted and burned (review L-10).
-	if userLevel >= 100 {
-		if err := am.k.DeductFeeFromOwner(ctx, owner, fee); err != nil {
-			if !errors.Is(err, sdkerrors.ErrInsufficientFunds) {
-				return fmt.Errorf("relay gas fee (admin): deduct from %s failed: %w", owner, err)
-			}
-			ctx.Logger().Warn("relay gas fee (admin): insufficient balance, skipping deduction",
-				"owner", owner,
-				"level", userLevel,
-				"reason", reason,
-				"gas_used", gasUsed,
-				"fee", fee,
-				"err", err)
-			return nil
-		}
-		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
-			return fmt.Errorf("relay gas fee (admin): burn from module failed: %w", err)
-		} else {
-			ctx.Logger().Info("relay gas fee deducted from admin balance",
-				"owner", owner,
-				"level", userLevel,
-				"reason", reason,
-				"gas_used", gasUsed,
-				"fee", fee,
-				"min_gas_price", minGasPrice,
-				"max_gas_fee", maxGasFee)
-		}
-		return nil
-	}
-
-	// Load profile core to access reserve.
-	// FAIL-FAST: a paid user (level >= 1) without a readable profile is a
-	// state inconsistency. Silently skipping the fee deduction on this node
-	// while peers (with intact state) deduct correctly produces a per-node
-	// state divergence -> app-hash divergence on the next consensus round.
-	// Returning the error rejects the tx; the same corrupt bytes on all
-	// peers reject identically, so consensus is preserved.
-	bz, found, err := am.k.GetProfileCore(ctx, owner)
-	if err != nil {
-		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_GET deductRelayGasFee owner=%s: %w", owner, err)
-	}
-	if !found {
-		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_MISSING deductRelayGasFee owner=%s level=%d: paid user has no profile", owner, userLevel)
-	}
-
-	var core types.ProfileCore
-	if err := json.Unmarshal(bz, &core); err != nil {
-		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE deductRelayGasFee owner=%s bytes=%d: %w", owner, len(bz), err)
-	}
-
-	// Deduct from reserve
-	if core.ReserveFunds >= fee {
-		// Sufficient reserve: deduct and burn from module
-		reserveBefore := core.ReserveFunds
-		core.ReserveFunds -= fee
-		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
-			return fmt.Errorf("deductRelayGasFee: burn from module failed: %w", err)
-		}
-		ctx.Logger().Info("relay gas fee deducted from reserve",
-			"owner", owner,
-			"level", userLevel,
-			"reason", reason,
-			"gas_used", gasUsed,
-			"fee", fee,
-			"min_gas_price", minGasPrice,
-			"max_gas_fee", maxGasFee,
-			"reserve_before", reserveBefore,
-			"reserve_remaining", core.ReserveFunds)
-	} else {
-		// Insufficient reserve: burn whatever is left, then downgrade
-		previousLevel := core.Level
-		reserveBefore := core.ReserveFunds
-		if core.ReserveFunds > 0 {
-			if err := am.k.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
-				return fmt.Errorf("deductRelayGasFee: burn remaining reserve failed: %w", err)
-			}
-		}
-		ctx.Logger().Info("deductRelayGasFee: reserve exhausted, downgrading to free",
-			"owner", owner,
-			"level", core.Level,
-			"reason", reason,
-			"gas_used", gasUsed,
-			"fee", fee,
-			"min_gas_price", minGasPrice,
-			"max_gas_fee", maxGasFee,
-			"reserve_before", reserveBefore,
-			"reserve_was", core.ReserveFunds)
-
-		// Remove subscription index
-		if core.SubscriptionExpiry > 0 {
-			if err := am.k.RemoveSubscription(ctx, owner, core.SubscriptionExpiry); err != nil {
-				return fmt.Errorf("deductRelayGasFee: remove subscription failed for %s: %w", owner, err)
-			}
-		}
-
-		// Downgrade to free tier
-		core.ReserveFunds = 0
-		core.Level = 0
-		core.SubscriptionExpiry = 0
-		core.AutoRenew = false
-
-		// Emit event so the indexer updates the user's level
-		ctx.EventManager().EmitEvent(
-			sdk.NewEvent(
-				"subscription_expired",
-				sdk.NewAttribute("address", owner),
-				sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
-				sdk.NewAttribute("reason", "reserve_exhausted"),
-			),
-		)
-	}
-
-	// Save updated profile
-	newBz, err := json.Marshal(core)
-	if err != nil {
-		return fmt.Errorf("deductRelayGasFee: failed to marshal profile for %s: %w", owner, err)
-	}
-	if err := am.k.SetProfileCore(ctx, owner, newBz); err != nil {
-		return fmt.Errorf("deductRelayGasFee: failed to save profile for %s: %w", owner, err)
-	}
-	return nil
+	ctx.Logger().Debug("relay quota consume", "owner", owner, "level", userLevel, "reason", reason, "gas_used", gasUsed)
+	return am.k.ConsumeSubscriberQuota(ctx, owner)
 }
 
 // AppModule implements the AppModule interface for the minimal core module.
@@ -501,6 +355,7 @@ func reservedModuleAccountNames() []string {
 		stakingtypes.NotBondedPoolName,
 		govtypes.ModuleName,
 		types.ModuleName, // core module account
+		types.CreatorPoolName,
 	}
 }
 
@@ -609,19 +464,26 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 			}
 		}
 
-		if len(ip.EnabledAgents) > 0 {
-			if err := am.k.ReplaceAllEnabledAgents(sdkCtx, owner, ip.EnabledAgents); err != nil {
-				panic(fmt.Errorf("InitGenesis: ReplaceAllEnabledAgents for %s failed: %w", owner, err))
-			}
-		}
 		for _, u := range ip.FollowedUsers {
 			if _, err := am.k.AddFollowedUser(sdkCtx, owner, u); err != nil {
 				panic(fmt.Errorf("InitGenesis: AddFollowedUser for %s failed: %w", owner, err))
 			}
 		}
-		for _, t := range ip.FollowedTopics {
-			if _, err := am.k.AddFollowedTopic(sdkCtx, owner, t); err != nil {
-				panic(fmt.Errorf("InitGenesis: AddFollowedTopic for %s failed: %w", owner, err))
+		if len(ip.JoinedCommunities) > 0 {
+			params := am.k.GetParams(sdkCtx)
+			corePaid := ip.Core != nil && ip.Core.EffectivePaid
+			tier := params.GetTierConfig(0)
+			if ip.Core != nil {
+				tier = params.GetTierConfig(int(ip.Core.Level))
+			}
+			cap := uint32(0)
+			if tier != nil {
+				cap = uint32(tier.MaxJoinedCommunities)
+			}
+			for _, t := range ip.JoinedCommunities {
+				if err := am.k.JoinCommunity(sdkCtx, owner, t, corePaid, cap, false); err != nil {
+					panic(fmt.Errorf("InitGenesis: JoinCommunity for %s failed: %w", owner, err))
+				}
 			}
 		}
 		for _, u := range ip.BlockedUsers {
@@ -634,9 +496,9 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 				panic(fmt.Errorf("InitGenesis: AddBlockedPostDeque for %s failed: %w", owner, err))
 			}
 		}
-		for _, t := range ip.BlockedTopics {
-			if _, err := am.k.AddBlockedTopicDeque(sdkCtx, owner, t, 0); err != nil {
-				panic(fmt.Errorf("InitGenesis: AddBlockedTopicDeque for %s failed: %w", owner, err))
+		for _, t := range ip.BlockedCommunities {
+			if err := am.k.AddBlockedCommunity(sdkCtx, owner, t, 0); err != nil {
+				panic(fmt.Errorf("InitGenesis: AddBlockedCommunity for %s failed: %w", owner, err))
 			}
 		}
 	}
@@ -788,6 +650,12 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		sdkCtx.Logger().Info("BeginBlock: reserved module profiles bootstrap complete; sentinel set")
 	}
 
+	if err := am.k.ProcessBeginBlockV139(sdkCtx); err != nil {
+		sdkCtx.Logger().Error("CONSENSUS_FATAL:V139_BEGINBLOCK BeginBlock; halting chain (auto-recovery will state-sync)",
+			"height", sdkCtx.BlockHeight(), "err", err)
+		return err
+	}
+
 	// Faucet username is set during network bootstrap via a direct tx.
 
 	// Cleanup old counters periodically (every 100 blocks). The sweep deletes
@@ -836,13 +704,7 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		sdkCtx.Logger().Debug("EndBlock: pruned expired nonces", "count", pruned)
 	}
 
-	// Process subscription renewals/expirations. CONSENSUS_FATAL decode
-	// failures propagate to halt the chain rather than silently diverge.
-	if err := am.processSubscriptions(sdkCtx, params); err != nil {
-		sdkCtx.Logger().Error("EndBlock: processSubscriptions returned error; propagating to halt chain (auto-recovery will state-sync)",
-			"height", sdkCtx.BlockHeight(), "err", err)
-		return err
-	}
+	// v1.39: subscription renewal/expiry runs in BeginBlock only.
 
 	// The O(1) delta check catches missed or duplicated supply updates. It cannot
 	// prove that the matching account-balance write happened, so the full
@@ -1270,12 +1132,12 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 		Avatar:             profile.Avatar,
 		Banner:             profile.Banner,
 		Flair:              profile.Flair,
-		EnabledAgents:      profile.EnabledAgents,
+		EffectivePaid:      profile.EffectivePaid,
 		FollowedUsers:      profile.FollowedUsers,
-		FollowedTopics:     profile.FollowedTopics,
+		JoinedCommunities:  profile.JoinedCommunities,
 		BlockedUsers:       profile.BlockedUsers,
 		BlockedPosts:       profile.BlockedPosts,
-		BlockedTopics:      profile.BlockedTopics,
+		BlockedCommunities: profile.BlockedCommunities,
 	}, nil
 }
 
@@ -1305,17 +1167,13 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			return nil, fmt.Errorf("GetProfiles: corrupt profile JSON: %w", err)
 		}
 
-		agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, core.Owner)
-		if err != nil {
-			return nil, fmt.Errorf("GetProfiles: enabled_agents for %s: %w", core.Owner, err)
-		}
 		users, err := am.k.ListFollowedUsers(sdkCtx, core.Owner)
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: followed_users for %s: %w", core.Owner, err)
 		}
-		topics, err := am.k.ListFollowedTopics(sdkCtx, core.Owner)
+		topics, err := am.k.ListJoinedCommunities(sdkCtx, core.Owner)
 		if err != nil {
-			return nil, fmt.Errorf("GetProfiles: followed_topics for %s: %w", core.Owner, err)
+			return nil, fmt.Errorf("GetProfiles: joined_communities for %s: %w", core.Owner, err)
 		}
 		blockedUsers, err := am.k.ListBlockedUsers(sdkCtx, core.Owner)
 		if err != nil {
@@ -1325,9 +1183,9 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: blocked_posts for %s: %w", core.Owner, err)
 		}
-		blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, core.Owner)
+		blockedTopics, err := am.k.ListBlockedCommunities(sdkCtx, core.Owner)
 		if err != nil {
-			return nil, fmt.Errorf("GetProfiles: blocked_topics for %s: %w", core.Owner, err)
+			return nil, fmt.Errorf("GetProfiles: blocked_communities for %s: %w", core.Owner, err)
 		}
 
 		profiles = append(profiles, &types.QueryProfileResponse{
@@ -1342,12 +1200,12 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			Avatar:             core.Avatar,
 			Banner:             core.Banner,
 			Flair:              core.Flair,
-			EnabledAgents:      agents,
+			EffectivePaid:      core.EffectivePaid,
 			FollowedUsers:      users,
-			FollowedTopics:     topics,
+			JoinedCommunities:  topics,
 			BlockedUsers:       blockedUsers,
 			BlockedPosts:       blockedPosts,
-			BlockedTopics:      blockedTopics,
+			BlockedCommunities: blockedTopics,
 		})
 	}
 
@@ -1391,18 +1249,55 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"block_hash_window":           func(d *types.Params, s types.Params) { d.BlockHashWindow = s.BlockHashWindow },
 	"min_username_size":           func(d *types.Params, s types.Params) { d.MinUsernameSize = s.MinUsernameSize },
 	"max_username_size":           func(d *types.Params, s types.Params) { d.MaxUsernameSize = s.MaxUsernameSize },
-	"min_topic_size":              func(d *types.Params, s types.Params) { d.MinTopicSize = s.MinTopicSize },
-	"max_topic_size":              func(d *types.Params, s types.Params) { d.MaxTopicSize = s.MaxTopicSize },
+	"min_community_size":          func(d *types.Params, s types.Params) { d.MinCommunitySize = s.MinCommunitySize },
+	"max_community_size":          func(d *types.Params, s types.Params) { d.MaxCommunitySize = s.MaxCommunitySize },
 	"subscription_period":         func(d *types.Params, s types.Params) { d.SubscriptionPeriod = s.SubscriptionPeriod },
 	// subscription_reserve_percent is deliberately absent: it is superseded by
 	// subscription_reserve_bps, so a proposal naming it is rejected as an
 	// unsupported path instead of being applied to a field nothing reads.
 	// deprecatedParamFields records that choice for the coverage test.
 	"subscription_reserve_bps": func(d *types.Params, s types.Params) { d.SubscriptionReserveBps = s.SubscriptionReserveBps },
+	"subscription_creator_bps": func(d *types.Params, s types.Params) { d.SubscriptionCreatorBps = s.SubscriptionCreatorBps },
 	"relay_min_gas_price":      func(d *types.Params, s types.Params) { d.RelayMinGasPrice = s.RelayMinGasPrice },
 	"relay_max_gas_fee":        func(d *types.Params, s types.Params) { d.RelayMaxGasFee = s.RelayMaxGasFee },
 	"max_envelope_age":         func(d *types.Params, s types.Params) { d.MaxEnvelopeAge = s.MaxEnvelopeAge },
-	// Repeated fields are replaced wholesale; there is no per-element merge.
+	"max_curators_per_team":    func(d *types.Params, s types.Params) { d.MaxCuratorsPerTeam = s.MaxCuratorsPerTeam },
+	"max_pending_curator_invites_per_team": func(d *types.Params, s types.Params) {
+		d.MaxPendingCuratorInvitesPerTeam = s.MaxPendingCuratorInvitesPerTeam
+	},
+	"max_pending_curator_invites_per_user": func(d *types.Params, s types.Params) {
+		d.MaxPendingCuratorInvitesPerUser = s.MaxPendingCuratorInvitesPerUser
+	},
+	"max_community_title_length": func(d *types.Params, s types.Params) { d.MaxCommunityTitleLength = s.MaxCommunityTitleLength },
+	"max_community_description_length": func(d *types.Params, s types.Params) {
+		d.MaxCommunityDescriptionLength = s.MaxCommunityDescriptionLength
+	},
+	"max_curation_team_name_length":   func(d *types.Params, s types.Params) { d.MaxCurationTeamNameLength = s.MaxCurationTeamNameLength },
+	"max_curation_team_bio_length":    func(d *types.Params, s types.Params) { d.MaxCurationTeamBioLength = s.MaxCurationTeamBioLength },
+	"max_curation_team_policy_length": func(d *types.Params, s types.Params) { d.MaxCurationTeamPolicyLength = s.MaxCurationTeamPolicyLength },
+	"subscription_transitions_per_block": func(d *types.Params, s types.Params) {
+		d.SubscriptionTransitionsPerBlock = s.SubscriptionTransitionsPerBlock
+	},
+	"curation_prune_keys_per_block":    func(d *types.Params, s types.Params) { d.CurationPruneKeysPerBlock = s.CurationPruneKeysPerBlock },
+	"creator_epoch_closures_per_block": func(d *types.Params, s types.Params) { d.CreatorEpochClosuresPerBlock = s.CreatorEpochClosuresPerBlock },
+	"creator_settlement_records_per_block": func(d *types.Params, s types.Params) {
+		d.CreatorSettlementRecordsPerBlock = s.CreatorSettlementRecordsPerBlock
+	},
+	"creator_prune_keys_per_block": func(d *types.Params, s types.Params) { d.CreatorPruneKeysPerBlock = s.CreatorPruneKeysPerBlock },
+	"creator_claim_window_days":    func(d *types.Params, s types.Params) { d.CreatorClaimWindowDays = s.CreatorClaimWindowDays },
+	"max_creator_claim_epochs":     func(d *types.Params, s types.Params) { d.MaxCreatorClaimEpochs = s.MaxCreatorClaimEpochs },
+	"max_creator_engagements_per_epoch": func(d *types.Params, s types.Params) {
+		d.MaxCreatorEngagementsPerEpoch = s.MaxCreatorEngagementsPerEpoch
+	},
+	"creator_epoch_expiries_per_block": func(d *types.Params, s types.Params) { d.CreatorEpochExpiriesPerBlock = s.CreatorEpochExpiriesPerBlock },
+	"subscription_early_renewal_days":  func(d *types.Params, s types.Params) { d.SubscriptionEarlyRenewalDays = s.SubscriptionEarlyRenewalDays },
+	"subscription_renewal_attempts_per_block": func(d *types.Params, s types.Params) {
+		d.SubscriptionRenewalAttemptsPerBlock = s.SubscriptionRenewalAttemptsPerBlock
+	},
+	"subscriber_daily_relay_limit": func(d *types.Params, s types.Params) { d.SubscriberDailyRelayLimit = s.SubscriberDailyRelayLimit },
+	"max_subscription_periods_per_purchase": func(d *types.Params, s types.Params) {
+		d.MaxSubscriptionPeriodsPerPurchase = s.MaxSubscriptionPeriodsPerPurchase
+	},
 	"tiers":         func(d *types.Params, s types.Params) { d.Tiers = s.Tiers },
 	"award_configs": func(d *types.Params, s types.Params) { d.AwardConfigs = s.AwardConfigs },
 }
@@ -1478,6 +1373,13 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if err := updated.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
+	if done, err := am.k.HasUpgradeV139(sdkCtx); err != nil {
+		return nil, err
+	} else if done {
+		if err := updated.ValidateV139(); err != nil {
+			return nil, fmt.Errorf("invalid params: %w", err)
+		}
+	}
 	// Constraints a proposal must satisfy but a historical blob need not, so they
 	// cannot be folded into Validate() without breaking a from-genesis replay.
 	if err := updated.ValidateGovernanceUpdate(); err != nil {
@@ -1544,9 +1446,18 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	params := am.k.GetParams(sdkCtx)
+	if req.GetProtocolVersion() != types.ProtocolVersionV139 {
+		return nil, fmt.Errorf("protocol_version must be %d", types.ProtocolVersionV139)
+	}
+	txbz := sdkCtx.TxBytes()
+	if len(txbz) == 0 {
+		return nil, fmt.Errorf("MsgPost requires transaction bytes")
+	}
+	sum := sha256.Sum256(txbz)
+	postHash := hex.EncodeToString(sum[:])
 
 	if err := rejectUnsafeFields(
-		"topic", req.GetTopic(),
+		"community", req.GetCommunity(),
 		"title", req.GetTitle(),
 		"content", req.GetContent(),
 		"target", req.GetTarget(),
@@ -1562,8 +1473,8 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 			return nil, err
 		}
 		// Comments must not include topic
-		if strings.TrimSpace(req.GetTopic()) != "" {
-			return nil, fmt.Errorf("comments must not include topic")
+		if strings.TrimSpace(req.GetCommunity()) != "" {
+			return nil, fmt.Errorf("comments must not include community")
 		}
 		// Comments must include non-empty content
 		if strings.TrimSpace(req.GetContent()) == "" {
@@ -1571,12 +1482,18 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		}
 	} else {
 		// Root posts MUST include a non-empty topic
-		topic := strings.TrimSpace(req.GetTopic())
+		topic := strings.TrimSpace(req.GetCommunity())
 		if topic == "" {
-			return nil, fmt.Errorf("root posts require a topic")
+			return nil, fmt.Errorf("root posts require a community")
 		}
-		if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
+		}
+		claimedSlug := strings.ToLower(topic)
+		if _, claimed, err := am.k.GetCommunity(sdkCtx, claimedSlug); err != nil {
+			return nil, err
+		} else if !claimed {
+			return nil, fmt.Errorf("community %s is not claimed", claimedSlug)
 		}
 	}
 
@@ -1608,6 +1525,51 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		maxTitle := tierConfig.MaxTitleLength
 		if titleLen > maxTitle {
 			return nil, fmt.Errorf("title exceeds limit: %d > %d (tier level=%d)", titleLen, maxTitle, userLevel)
+		}
+	}
+
+	paid, err := am.k.IsEffectivePaid(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	seq, err := am.k.NextPostSequence(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	meta := &types.PostMetadata{
+		Author:                  owner,
+		CreatedHeight:           sdkCtx.BlockHeight(),
+		CreatedEpoch:            types.UTCEpoch(sdkCtx.BlockTime().Unix()),
+		AuthorWasPaidAtCreation: paid,
+		GlobalSequence:          seq,
+	}
+	if isComment {
+		parent, found, err := am.k.GetPostMetadata(sdkCtx, target)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("parent post metadata not found")
+		}
+		if parent.Community == "" {
+			return nil, fmt.Errorf("legacy parent cannot receive new comments")
+		}
+		meta.ParentHash = target
+		meta.RootHash = parent.RootHash
+		if meta.RootHash == "" {
+			meta.RootHash = target
+		}
+		meta.Community = parent.Community
+	} else {
+		meta.Community = strings.ToLower(strings.TrimSpace(req.GetCommunity()))
+		meta.RootHash = postHash
+	}
+	if err := am.k.SetPostMetadata(sdkCtx, postHash, meta); err != nil {
+		return nil, err
+	}
+	if isComment {
+		if err := am.k.RecordDirectReplyEngagement(sdkCtx, owner, target, postHash); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1665,6 +1627,11 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 	if err := validateTxHash(target); err != nil {
 		return nil, err
 	}
+	if owner != "" {
+		if err := am.k.RecordUpvoteEngagement(sdkCtx, owner, target, req.GetDirection()); err != nil {
+			return nil, err
+		}
+	}
 
 	// Deduct gas fee from paid users
 	if owner != "" {
@@ -1710,7 +1677,7 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	params := am.k.GetParams(sdkCtx)
 
 	if err := rejectUnsafeFields(
-		"topic", req.GetTopic(),
+		"community", req.GetCommunity(),
 		"title", req.GetTitle(),
 		"content", req.GetContent(),
 		"target", req.GetTarget(),
@@ -1755,18 +1722,18 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	}
 
 	// Validate topic
-	topic := strings.TrimSpace(req.GetTopic())
+	topic := strings.TrimSpace(req.GetCommunity())
 	if isComment {
 		// Comments must not include topic on edit
 		if topic != "" {
-			return nil, fmt.Errorf("comments must not include topic")
+			return nil, fmt.Errorf("comments must not include community")
 		}
 	} else {
 		// Root posts must include a non-empty topic
 		if topic == "" {
-			return nil, fmt.Errorf("root posts require a topic")
+			return nil, fmt.Errorf("root posts require a community")
 		}
-		if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
 		}
 	}
@@ -1855,7 +1822,7 @@ func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*type
 	// Validate topic (skip if sentinel)
 	topic := strings.TrimSpace(req.GetTopic())
 	if topic != sentinel && topic != "" {
-		if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
 		}
 	}
@@ -1968,26 +1935,13 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 		return err
 	}
 
-	// Validate core fields (need to get agents count for validation)
-	agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner)
-	if err != nil {
-		return fmt.Errorf("updateProfileCore: load enabled_agents for %s: %w", owner, err)
-	}
-	// A nil tier config is a governance fault, not a cue to invent a limit.
-	// Each of these eight sites used to substitute a different hardcoded number,
-	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
-	// same condition (review I-5). Reachable only through a governance
-	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
 	tierConfig := params.GetTierConfig(int(core.Level))
 	if tierConfig == nil {
 		return fmt.Errorf("tier config not found for level %d", core.Level)
 	}
-	maxAgents := tierConfig.MaxEnabledAgents
 
-	// Build a temporary Profile for validation
 	tempProf := core.ToProfile()
-	tempProf.EnabledAgents = agents
-	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize, maxAgents); err != nil {
+	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize); err != nil {
 		return err
 	}
 
@@ -2027,23 +1981,17 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	// Query-only, so it could not diverge consensus, but it is the exact fail-open
 	// shape the v1.34.0 contract set out to remove, and the paginated path already
 	// propagates.
-	agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner)
-	if err != nil {
-		return types.Profile{}, false, fmt.Errorf("loading enabled agents for %s: %w", owner, err)
-	}
-	prof.EnabledAgents = agents
-
 	users, err := am.k.ListFollowedUsers(sdkCtx, owner)
 	if err != nil {
 		return types.Profile{}, false, fmt.Errorf("loading followed users for %s: %w", owner, err)
 	}
 	prof.FollowedUsers = users
 
-	topics, err := am.k.ListFollowedTopics(sdkCtx, owner)
+	topics, err := am.k.ListJoinedCommunities(sdkCtx, owner)
 	if err != nil {
-		return types.Profile{}, false, fmt.Errorf("loading followed topics for %s: %w", owner, err)
+		return types.Profile{}, false, fmt.Errorf("loading joined communities for %s: %w", owner, err)
 	}
-	prof.FollowedTopics = topics
+	prof.JoinedCommunities = topics
 
 	blocked, err := am.k.ListBlockedUsers(sdkCtx, owner)
 	if err != nil {
@@ -2057,11 +2005,11 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	}
 	prof.BlockedPosts = posts
 
-	blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner)
+	blockedTopics, err := am.k.ListBlockedCommunities(sdkCtx, owner)
 	if err != nil {
-		return types.Profile{}, false, fmt.Errorf("loading blocked topics for %s: %w", owner, err)
+		return types.Profile{}, false, fmt.Errorf("loading blocked communities for %s: %w", owner, err)
 	}
-	prof.BlockedTopics = blockedTopics
+	prof.BlockedCommunities = blockedTopics
 
 	return prof, true, nil
 }
@@ -2341,7 +2289,7 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
-	maxAgents := int(tierConfig.MaxEnabledAgents)
+	maxAgents := int(0 /* agents removed */)
 
 	has, err := am.k.HasEnabledAgent(sdkCtx, owner, agent)
 	if err != nil {
@@ -2481,7 +2429,7 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
-	maxAgents := int(tierConfig.MaxEnabledAgents)
+	maxAgents := int(0 /* agents removed */)
 
 	agents := req.GetAgents()
 	if len(agents) > maxAgents {
@@ -2788,7 +2736,7 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 	if strings.HasSuffix(topic, "*") {
@@ -2817,7 +2765,7 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
-	maxTopics := tierConfig.MaxBlockedTopics
+	maxTopics := tierConfig.MaxBlockedCommunities
 	if maxTopics == 0 {
 		return nil, fmt.Errorf("blocked topic limit is zero for level %d", userLevel)
 	}
@@ -2864,7 +2812,7 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
@@ -3090,7 +3038,7 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		userLevel = int(core.Level)
 	}
 
-	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+	if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
@@ -3117,7 +3065,7 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
 	}
-	maxTopics := tierConfig.MaxFollowedTopics
+	maxTopics := tierConfig.MaxJoinedCommunities
 
 	has, err := am.k.HasFollowedTopic(sdkCtx, owner, topic)
 	if err != nil {
@@ -3263,6 +3211,24 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		"owner", owner,
 		"target", target,
 	)
+	if meta, found, err := am.k.GetPostMetadata(sdkCtx, target); err != nil {
+		return nil, err
+	} else if found {
+		if authority != govAuthority && meta.Author != owner {
+			return nil, fmt.Errorf("only the author can delete this post")
+		}
+		meta.DeletedHeight = sdkCtx.BlockHeight()
+		meta.DeletedEpoch = types.UTCEpoch(sdkCtx.BlockTime().Unix())
+		meta.DeletionActor = owner
+		if err := am.k.SetPostMetadata(sdkCtx, target, meta); err != nil {
+			return nil, err
+		}
+		if meta.ParentHash != "" {
+			if err := am.k.ClearOpenDirectReply(sdkCtx, meta.Author, meta.ParentHash, target); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	// Deduct gas fee from paid users
 	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
@@ -3582,7 +3548,6 @@ func (am AppModule) BurnTokens(ctx context.Context, req *types.MsgBurnTokens) (*
 // When target != payer: gift — payer pays, recipient's expiry extends by one period.
 func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*types.MsgSubscribeResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -3590,7 +3555,6 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 	var payer string
 	var isGov bool
 	if authority == govAuthority {
-		// Governance path: target is the recipient, governance pays
 		if err := validateAddress(target); err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
@@ -3608,216 +3572,49 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 		isGov = false
 	}
 
-	// Determine recipient: if target is set and different from payer, it's a gift
 	recipient := payer
-	isGift := false
+	source := types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_SELF_PURCHASE
+	if isGov {
+		source = types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GOVERNANCE
+	}
 	if target != "" && target != payer && !isGov {
 		if err := validateAddress(target); err != nil {
 			return nil, fmt.Errorf("invalid gift target address: %w", err)
 		}
 		recipient = target
-		isGift = true
+		source = types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT
 	}
 
-	// MsgSubscribe MUST be paid with tokens, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSubscribe cannot use PoW, must pay with tokens")
 	}
-
-	requestedLevel := int(req.GetLevel())
-
-	// Only levels 1 (Subscriber) and 10 (Agent) are valid
-	if !types.ValidSubscriptionLevels[requestedLevel] {
-		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber) or %d (Agent)", requestedLevel, types.LevelSubscriber, types.LevelAgent)
+	if req.GetLevel() != 0 && int(req.GetLevel()) != types.LevelSubscriber {
+		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber)", req.GetLevel(), types.LevelSubscriber)
 	}
-
-	tierConfig := params.GetTierConfig(requestedLevel)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", requestedLevel)
-	}
-
-	// Load recipient profile (must have a username)
-	recipientCore, err := am.requireUsername(sdkCtx, recipient, "Subscribe")
-	if err != nil {
+	if _, err := am.requireUsername(sdkCtx, recipient, "Subscribe"); err != nil {
 		return nil, err
 	}
-
-	sdkCtx.Logger().Debug("Subscribe",
+	periodCount := req.GetPeriodCount()
+	if periodCount < 1 {
+		return nil, fmt.Errorf("period_count must be at least 1")
+	}
+	txhash := ""
+	if bz := sdkCtx.TxBytes(); len(bz) > 0 {
+		sum := sha256.Sum256(bz)
+		txhash = hex.EncodeToString(sum[:])
+	}
+	if err := am.k.CreateTranche(sdkCtx, payer, recipient, source, periodCount, txhash); err != nil {
+		return nil, err
+	}
+	if err := am.k.ConsumeSubscriberQuota(sdkCtx, payer); err != nil {
+		return nil, err
+	}
+	sdkCtx.Logger().Info("Subscribe",
 		"payer", payer,
 		"recipient", recipient,
-		"is_gift", isGift,
-		"is_gov", isGov,
-		"level", requestedLevel,
+		"source", source.String(),
+		"period_count", periodCount,
 	)
-
-	periodFee := tierConfig.PeriodFee
-
-	if isGift {
-		if recipientCore.Level > int32(requestedLevel) {
-			return nil, fmt.Errorf("gift rejected: recipient level %d > requested %d", recipientCore.Level, requestedLevel)
-		}
-		// ── Gift path: payer pays, recipient's subscription extends ──
-		var reserveAmount uint64
-		if periodFee > 0 {
-			balance := am.k.GetBalance(sdkCtx, payer, "umirage")
-			if balance.LT(sdkmath.NewIntFromUint64(periodFee)) {
-				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
-			}
-
-			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReserveBps)
-			if err != nil {
-				return nil, fmt.Errorf("Subscribe gift: fee split: %w", err)
-			}
-			reserveAmount = reserve
-
-			if burnAmount > 0 {
-				if err := am.k.BurnFromAccount(sdkCtx, payer, burnAmount); err != nil {
-					return nil, fmt.Errorf("Subscribe gift: failed to burn fee: %w", err)
-				}
-			}
-			if reserveAmount > 0 {
-				if err := am.k.DeductFeeFromOwner(sdkCtx, payer, reserveAmount); err != nil {
-					return nil, fmt.Errorf("Subscribe gift: failed to escrow reserve: %w", err)
-				}
-			}
-		}
-
-		// Remove old subscription index. Value has already moved, so a stale
-		// index must reject the transaction rather than survive (review M-1).
-		if recipientCore.SubscriptionExpiry > 0 {
-			if err := am.k.RemoveSubscription(sdkCtx, recipient, recipientCore.SubscriptionExpiry); err != nil {
-				return nil, fmt.Errorf("Subscribe gift: failed to remove old subscription index for %s: %w",
-					recipient, err)
-			}
-		}
-
-		// Extend expiry from max(currentExpiry, now) + period
-		var newExpiry int64
-		if params.SubscriptionPeriod > 0 {
-			base := sdkCtx.BlockTime().Unix()
-			if recipientCore.SubscriptionExpiry > base {
-				base = recipientCore.SubscriptionExpiry
-			}
-			newExpiry, err = types.CheckedSubscriptionExpiry(base, params.SubscriptionPeriod)
-			if err != nil {
-				return nil, fmt.Errorf("Subscribe gift: expiry for %s: %w", recipient, err)
-			}
-		}
-
-		recipientCore.Level = int32(requestedLevel)
-		recipientCore.SubscriptionExpiry = newExpiry
-		// Keep auto_renew unchanged for gifts
-		recipientCore.ReserveFunds, err = types.CheckedAddUint64(recipientCore.ReserveFunds, reserveAmount)
-		if err != nil {
-			return nil, fmt.Errorf("Subscribe gift: reserve for %s: %w", recipient, err)
-		}
-
-		if newExpiry > 0 {
-			if err := am.k.SetSubscription(sdkCtx, recipient, requestedLevel, newExpiry); err != nil {
-				return nil, fmt.Errorf("Subscribe gift: failed to set subscription index for %s: %w",
-					recipient, err)
-			}
-		}
-
-		bz, err := json.Marshal(recipientCore)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal profile: %w", err)
-		}
-		if err := am.k.SetProfileCore(sdkCtx, recipient, bz); err != nil {
-			return nil, fmt.Errorf("failed to save profile: %w", err)
-		}
-
-		sdkCtx.Logger().Info("Subscribe (gift)",
-			"payer", payer,
-			"recipient", recipient,
-			"level", requestedLevel,
-			"period_fee", periodFee,
-			"reserve_added", reserveAmount,
-			"new_expiry", newExpiry,
-			"auto_renew", recipientCore.AutoRenew,
-		)
-	} else {
-		// ── Self-subscribe path (or governance): payer == recipient ──
-		// Burn old reserve
-		if recipientCore.ReserveFunds > 0 {
-			if err := am.k.BurnFromModuleAmount(sdkCtx, recipientCore.ReserveFunds); err != nil {
-				return nil, fmt.Errorf("Subscribe: failed to burn old reserve: %w", err)
-			}
-			recipientCore.ReserveFunds = 0
-		}
-
-		var reserveAmount uint64
-		if periodFee > 0 {
-			balance := am.k.GetBalance(sdkCtx, payer, "umirage")
-			if balance.LT(sdkmath.NewIntFromUint64(periodFee)) {
-				return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
-			}
-
-			reserve, burnAmount, err := types.SplitPeriodFee(periodFee, params.SubscriptionReserveBps)
-			if err != nil {
-				return nil, fmt.Errorf("Subscribe: fee split: %w", err)
-			}
-			reserveAmount = reserve
-
-			if burnAmount > 0 {
-				if err := am.k.BurnFromAccount(sdkCtx, payer, burnAmount); err != nil {
-					return nil, fmt.Errorf("Subscribe: failed to burn fee: %w", err)
-				}
-			}
-			if reserveAmount > 0 {
-				if err := am.k.DeductFeeFromOwner(sdkCtx, payer, reserveAmount); err != nil {
-					return nil, fmt.Errorf("Subscribe: failed to escrow reserve: %w", err)
-				}
-			}
-		}
-
-		// Remove old subscription index
-		if recipientCore.SubscriptionExpiry > 0 {
-			if err := am.k.RemoveSubscription(sdkCtx, recipient, recipientCore.SubscriptionExpiry); err != nil {
-				return nil, fmt.Errorf("Subscribe: failed to remove old subscription index for %s: %w",
-					recipient, err)
-			}
-		}
-
-		var newExpiry int64
-		if params.SubscriptionPeriod > 0 {
-			newExpiry, err = types.CheckedSubscriptionExpiry(sdkCtx.BlockTime().Unix(), params.SubscriptionPeriod)
-			if err != nil {
-				return nil, fmt.Errorf("Subscribe: expiry for %s: %w", recipient, err)
-			}
-		}
-
-		recipientCore.Level = int32(requestedLevel)
-		recipientCore.SubscriptionExpiry = newExpiry
-		recipientCore.AutoRenew = true
-		recipientCore.ReserveFunds = reserveAmount
-
-		if newExpiry > 0 {
-			if err := am.k.SetSubscription(sdkCtx, recipient, requestedLevel, newExpiry); err != nil {
-				return nil, fmt.Errorf("Subscribe: failed to set subscription index for %s: %w",
-					recipient, err)
-			}
-		}
-
-		bz, err := json.Marshal(recipientCore)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal profile: %w", err)
-		}
-		if err := am.k.SetProfileCore(sdkCtx, recipient, bz); err != nil {
-			return nil, fmt.Errorf("failed to save profile: %w", err)
-		}
-
-		sdkCtx.Logger().Info("Subscribe (self)",
-			"owner", payer,
-			"level", requestedLevel,
-			"period_fee", periodFee,
-			"reserve", reserveAmount,
-			"expiry", newExpiry,
-			"auto_renew", true,
-			"subscription_period", params.SubscriptionPeriod,
-		)
-	}
-
 	return &types.MsgSubscribeResponse{}, nil
 }
 
@@ -3842,7 +3639,10 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 
 	// MsgSetAutoRenewal MUST be paid with reserve, not PoW
 	if req.GetEnvelopePow() > 0 {
-		return nil, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
+		return nil, fmt.Errorf("MsgSetAutoRenewal cannot use PoW")
+	}
+	if !core.EffectivePaid {
+		return nil, fmt.Errorf("MsgSetAutoRenewal requires an active subscriber")
 	}
 
 	targetAuto := req.GetAutoRenew()
@@ -3874,6 +3674,9 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	}
 	if err := am.k.SetProfileCore(sdkCtx, owner, bz); err != nil {
 		return nil, fmt.Errorf("failed to save profile: %w", err)
+	}
+	if err := am.k.ReplaceSubscriptionRenewalSchedule(sdkCtx, owner); err != nil {
+		return nil, err
 	}
 
 	sdkCtx.Logger().Info("SetAutoRenewal",

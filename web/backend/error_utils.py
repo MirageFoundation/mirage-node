@@ -85,7 +85,8 @@ ERRORS = {
     # Server state
     "node_catching_up": "node is catching up",
     "backend_not_initialized": "backend not initialized",
-    "indexer_unavailable": "indexer DB unavailable",
+    "upgrade_required": "client upgrade required",
+    "gone": "this API has been removed",
     "internal_error": "internal server error",
     "debug_localhost_only": "debug endpoints only available on localhost",
     # PoW

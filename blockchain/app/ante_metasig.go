@@ -68,13 +68,14 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
+				w.writeString(101, m.Community)
 				w.writeString(102, m.Title)
 				w.writeString(103, m.Content)
 				w.writeString(104, m.Tag)
 				for _, media := range m.Media {
 					w.writeString(105, media)
 				}
+				w.writeUvarint(106, uint64(m.ProtocolVersion))
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
@@ -195,116 +196,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgEnableAgent:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgEnableAgent", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgEnableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Agent)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEnableAgent", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEnableAgent", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		case *coretypes.MsgDisableAgent:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgDisableAgent", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgDisableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Agent)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDisableAgent", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgDisableAgent", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		case *coretypes.MsgSetAgents:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgSetAgents", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgSetAgents", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				for _, agent := range m.Agents {
-					w.writeString(101, agent)
-				}
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAgents", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgSetAgents", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
 		case *coretypes.MsgFollowUser:
 			if m.Authority == govAuthority {
 				continue
@@ -375,78 +266,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			}
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowUser", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		case *coretypes.MsgFollowTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgFollowTopic", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgFollowTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowTopic", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgFollowTopic", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		case *coretypes.MsgUnfollowTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgUnfollowTopic", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgUnfollowTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowTopic", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
 		case *coretypes.MsgBlockPost:
@@ -589,78 +408,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgBlockTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgBlockTopic", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgBlockTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBlockTopic", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgBlockTopic", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		case *coretypes.MsgUnblockTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgUnblockTopic", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgUnblockTopic", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnblockTopic", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnblockTopic", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
 		case *coretypes.MsgDelete:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -791,7 +538,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeUvarint(7, m.EnvelopeNonce)
 				w.writeString(100, m.Target)
-				w.writeString(101, m.Topic)
+				w.writeString(101, m.Community)
 				w.writeString(102, m.Title)
 				w.writeString(103, m.Content)
 				w.writeString(104, m.Tag)
@@ -811,52 +558,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgEdit", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
 			}
-		case *coretypes.MsgAnnotate:
-			if m.Authority == govAuthority {
-				continue // Skip validation for governance
-			}
-			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgAnnotate", "err", err.Error())
-				return ctx, err
-			}
-			pubHash := sha256.Sum256(m.EnvelopePubkey)
-			if m.EnvelopeNonce == 0 {
-				return ctx, fmt.Errorf("envelope_nonce is required (must be >0)")
-			}
-			if d.Keeper.HasEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce) {
-				return ctx, fmt.Errorf("envelope replay: nonce already used")
-			}
-			if err := verifyRelaySignature("MsgAnnotate", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeBytes(2, m.EnvelopePubkey)
-				w.writeBytes(3, m.EnvelopeBlockHash)
-				w.writeUvarint(4, m.EnvelopeDifficulty)
-				w.writeUvarint(5, m.EnvelopePow)
-				w.writeUvarint(6, m.EnvelopeTimestamp)
-				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(101, m.Topic)
-				w.writeString(102, m.Title)
-				w.writeString(103, m.Content)
-				w.writeString(104, m.Tag)
-				w.writeString(105, m.Override)
-				for _, mediaItem := range m.Media {
-					w.writeString(106, mediaItem)
-				}
-				w.writeString(107, m.Appendix)
-			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAnnotate", "err", err.Error())
-				return ctx, err
-			}
-			nonceExpiry, err := envelopeNonceExpiryUnix(ctx, m.EnvelopeTimestamp, maxAge)
-			if err != nil {
-				return ctx, err
-			}
-			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
-				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAnnotate", "err", err.Error())
-				return ctx, fmt.Errorf("failed to record nonce: %w", err)
-			}
-		// MsgSetLevel is not in isRelayMessage / relayMessagePrototypes — it
-		// routes through stdAnte (governance). A RelaySig branch here would be
-		// unreachable via the relay ante chain.
 		case *coretypes.MsgSubscribe:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance
@@ -883,6 +584,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				if m.Target != "" {
 					w.writeString(101, m.Target)
 				}
+				w.writeUvarint(102, uint64(m.PeriodCount))
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, err
@@ -969,6 +671,189 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgAward", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
+
+		case *coretypes.MsgJoinCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgJoinCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgLeaveCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgLeaveCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgBlockCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgBlockCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Community)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgUnblockCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgUnblockCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Community)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgCreateCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgCreateCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Title)
+				w.writeString(102, m.Description)
+				w.writeString(103, m.OriginalTeamName)
+				w.writeString(104, m.Bio)
+				w.writeString(105, m.Policy)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCommunityMetadata:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCommunityMetadata", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Title)
+				w.writeString(102, m.Description)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgTransferCommunity:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgTransferCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeString(101, m.NewFounder)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgCreateCurationTeam:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgCreateCurationTeam", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Name)
+				w.writeString(102, m.Bio)
+				w.writeString(103, m.Policy)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationTeamProfile:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationTeamProfile", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Name)
+				w.writeString(103, m.Bio)
+				w.writeString(104, m.Policy)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgInviteCurator:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgInviteCurator", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgRevokeCuratorInvite:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgRevokeCuratorInvite", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgAcceptCuratorInvite:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgAcceptCuratorInvite", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgDeclineCuratorInvite:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgDeclineCuratorInvite", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgLeaveCurationTeam:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgLeaveCurationTeam", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgRemoveCurator:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgRemoveCurator", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgTransferCurationTeam:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgTransferCurationTeam", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.NewOwner)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgDeleteCurationTeam:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgDeleteCurationTeam", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPreference:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationPreference", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, uint64(m.Mode))
+				w.writeUvarint(102, m.PinnedTeamId)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPostHidden:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationPostHidden", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				writeCanonBool(w, 103, m.Hidden)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationUserHidden:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationUserHidden", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				writeCanonBool(w, 103, m.Hidden)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationThreadLocked:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationThreadLocked", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.RootHash)
+				writeCanonBool(w, 103, m.Locked)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationSubscriberOnly:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationSubscriberOnly", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				writeCanonBool(w, 102, m.Enabled)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgClaimCreatorRewards:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgClaimCreatorRewards", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				for _, id := range m.EpochIds {
+					w.writeUvarint(100, uint64(id))
+				}
+			}); err != nil {
+				return ctx, err
 			}
 		default:
 			return ctx, fmt.Errorf("RelaySig: unsupported relay message %T", msg)

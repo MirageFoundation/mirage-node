@@ -10,9 +10,13 @@ import (
 const (
 	LevelFree       = 0
 	LevelSubscriber = 1
-	LevelAgent      = 10
 	LevelAdminMin   = 100
 )
+
+// LevelAgent is the retired v1.16–v1.38 paid tier. Kept so historical
+// upgrade handlers and decode paths can name it; it is not a valid
+// current subscription level.
+const LevelAgent = 10
 
 // Governance-safe upper bounds for key economics parameters.
 const (
@@ -86,7 +90,6 @@ const (
 // ValidSubscriptionLevels are the levels users can subscribe to via MsgSubscribe.
 var ValidSubscriptionLevels = map[int]bool{
 	LevelSubscriber: true,
-	LevelAgent:      true,
 }
 
 // LevelToTierIndex maps a user level to the index in the Tiers array.
@@ -97,81 +100,113 @@ func LevelToTierIndex(level int) int {
 		return 0
 	case level == LevelSubscriber:
 		return 1
-	case level == LevelAgent:
-		return 2
 	case level >= LevelAdminMin:
-		return 2 // admins get agent-tier capabilities
+		return 1
 	default:
 		return -1
 	}
 }
 
-// DefaultTiers returns the default tier configurations.
-// Index 0 = Free (level 0), 1 = Subscriber (level 1), 2 = Agent (level 10)
+// HistoricalDefaultTiers is the three-tier config written by pre-v1.39
+// upgrade handlers. Do not use for current defaults.
+func HistoricalDefaultTiers() []*TierConfig {
+	return []*TierConfig{
+		{
+			PeriodFee:             0,
+			MaxFollowedUsers:      25,
+			MaxJoinedCommunities:  25,
+			MaxBlockedUsers:       25,
+			MaxBlockedPosts:       25,
+			MaxBlockedCommunities: 25,
+			MaxTitleLength:        150,
+			MaxContentLength:      1000,
+			EditingTimeMins:       10,
+			VoteWeight:            1.0,
+			CanRemoveAnon:         false,
+			CanHaveBiography:      false,
+			CanHaveAvatar:         false,
+			CanHaveBanner:         false,
+			CanHaveFlair:          false,
+			MaxBiographyLength:    0,
+		},
+		{
+			PeriodFee:             100_000_000_000,
+			MaxFollowedUsers:      500,
+			MaxJoinedCommunities:  500,
+			MaxBlockedUsers:       500,
+			MaxBlockedPosts:       500,
+			MaxBlockedCommunities: 500,
+			MaxTitleLength:        300,
+			MaxContentLength:      20000,
+			EditingTimeMins:       360,
+			VoteWeight:            1.33,
+			CanRemoveAnon:         true,
+			CanHaveBiography:      true,
+			CanHaveAvatar:         true,
+			CanHaveBanner:         true,
+			CanHaveFlair:          true,
+			MaxBiographyLength:    512,
+		},
+		{
+			PeriodFee:             500_000_000_000,
+			MaxFollowedUsers:      500,
+			MaxJoinedCommunities:  500,
+			MaxBlockedUsers:       500,
+			MaxBlockedPosts:       500,
+			MaxBlockedCommunities: 500,
+			MaxTitleLength:        300,
+			MaxContentLength:      20000,
+			EditingTimeMins:       360,
+			VoteWeight:            1.33,
+			CanRemoveAnon:         true,
+			CanHaveBiography:      true,
+			CanHaveAvatar:         true,
+			CanHaveBanner:         true,
+			CanHaveFlair:          true,
+			MaxBiographyLength:    512,
+		},
+	}
+}
+
 func DefaultTiers() []*TierConfig {
 	return []*TierConfig{
-		// Index 0 — Level 0: Free
 		{
-			PeriodFee:          0,
-			MaxEnabledAgents:   5,
-			MaxFollowedUsers:   25,
-			MaxFollowedTopics:  25,
-			MaxBlockedUsers:    25,
-			MaxBlockedPosts:    25,
-			MaxBlockedTopics:   25,
-			MaxTitleLength:     150,
-			MaxContentLength:   1000,
-			EditingTimeMins:    10,
-			VoteWeight:         1.0,
-			CanBeAgent:         false,
-			CanRemoveAnon:      false,
-			CanHaveBiography:   false,
-			CanHaveAvatar:      false,
-			CanHaveBanner:      false,
-			CanHaveFlair:       false,
-			MaxBiographyLength: 0,
+			PeriodFee:              0,
+			MaxFollowedUsers:       25,
+			MaxJoinedCommunities:   25,
+			MaxBlockedUsers:        25,
+			MaxBlockedPosts:        25,
+			MaxBlockedCommunities:  25,
+			MaxTitleLength:         150,
+			MaxContentLength:       1000,
+			EditingTimeMins:        10,
+			VoteWeight:             1.0,
+			CanRemoveAnon:          false,
+			CanHaveBiography:       false,
+			CanHaveAvatar:          false,
+			CanHaveBanner:          false,
+			CanHaveFlair:           false,
+			MaxBiographyLength:     0,
+			MaxCurationMemberships: 0,
 		},
-		// Index 1 — Level 1: Subscriber (100B umirage)
 		{
-			PeriodFee:          100_000_000_000,
-			MaxEnabledAgents:   50,
-			MaxFollowedUsers:   500,
-			MaxFollowedTopics:  500,
-			MaxBlockedUsers:    500,
-			MaxBlockedPosts:    500,
-			MaxBlockedTopics:   500,
-			MaxTitleLength:     300,
-			MaxContentLength:   20000,
-			EditingTimeMins:    360,
-			VoteWeight:         1.33,
-			CanBeAgent:         false,
-			CanRemoveAnon:      true,
-			CanHaveBiography:   true,
-			CanHaveAvatar:      true,
-			CanHaveBanner:      true,
-			CanHaveFlair:       true,
-			MaxBiographyLength: 512,
-		},
-		// Index 2 — Level 10: Agent (500B umirage)
-		{
-			PeriodFee:          500_000_000_000,
-			MaxEnabledAgents:   50,
-			MaxFollowedUsers:   500,
-			MaxFollowedTopics:  500,
-			MaxBlockedUsers:    500,
-			MaxBlockedPosts:    500,
-			MaxBlockedTopics:   500,
-			MaxTitleLength:     300,
-			MaxContentLength:   20000,
-			EditingTimeMins:    360,
-			VoteWeight:         1.33,
-			CanBeAgent:         true,
-			CanRemoveAnon:      true,
-			CanHaveBiography:   true,
-			CanHaveAvatar:      true,
-			CanHaveBanner:      true,
-			CanHaveFlair:       true,
-			MaxBiographyLength: 512,
+			PeriodFee:              100_000_000_000,
+			MaxFollowedUsers:       500,
+			MaxJoinedCommunities:   500,
+			MaxBlockedUsers:        500,
+			MaxBlockedPosts:        500,
+			MaxBlockedCommunities:  500,
+			MaxTitleLength:         300,
+			MaxContentLength:       20000,
+			EditingTimeMins:        360,
+			VoteWeight:             1.33,
+			CanRemoveAnon:          true,
+			CanHaveBiography:       true,
+			CanHaveAvatar:          true,
+			CanHaveBanner:          true,
+			CanHaveFlair:           true,
+			MaxBiographyLength:     512,
+			MaxCurationMemberships: 500,
 		},
 	}
 }
@@ -187,7 +222,7 @@ func DefaultAwardConfigs() []*AwardConfig {
 }
 
 // DefaultParams returns a default set of parameters.
-// These defaults reflect v1.16.0 economics (Free=0, Subscriber=1, Agent=10).
+// These defaults reflect v1.39.0 economics (Free=0, Subscriber=1).
 func DefaultParams() Params {
 	return Params{
 		// Minting
@@ -220,34 +255,76 @@ func DefaultParams() Params {
 		PowDifficultyAllowance: 2, // in blocks
 
 		// Username limits
-		MinUsernameSize: 3,
-		MaxUsernameSize: 30,
-		MinTopicSize:    2,
-		MaxTopicSize:    35,
+		MinUsernameSize:  3,
+		MaxUsernameSize:  30,
+		MinCommunitySize: 2,
+		MaxCommunitySize: 35,
 
-		// Subscription period in minutes (0 = one-time, 43200 = 30 days)
+		// Subscription period in minutes (43200 = 30 days)
 		SubscriptionPeriod: 43200,
 
-		// Tier configurations
 		Tiers: DefaultTiers(),
 
-		// Fraction of period fee escrowed as gas reserve in basis points
-		// (remainder burned). The float field it replaces stays 0; see Validate.
-		SubscriptionReserveBps: 9_500,
+		SubscriptionReserveBps: 0,
+		SubscriptionCreatorBps: 5_000,
 
-		// Min gas price for relayed txs in umirage per gas unit
-		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
 		RelayMinGasPrice: 1000,
+		RelayMaxGasFee:   500_000_000,
+		MaxEnvelopeAge:   60,
+		AwardConfigs:     DefaultAwardConfigs(),
 
-		// Max fee deducted per relayed tx in umirage (500 MIRAGE cap)
-		RelayMaxGasFee: 500_000_000,
-
-		// Max age in seconds for envelope_timestamp (replay protection)
-		MaxEnvelopeAge: 60,
-
-		// Award configurations (cost in umirage; 1 MIRAGE = 1,000,000 umirage)
-		AwardConfigs: DefaultAwardConfigs(),
+		MaxCuratorsPerTeam:                  10,
+		MaxPendingCuratorInvitesPerTeam:     20,
+		MaxPendingCuratorInvitesPerUser:     100,
+		MaxCommunityTitleLength:             100,
+		MaxCommunityDescriptionLength:       2000,
+		MaxCurationTeamNameLength:           64,
+		MaxCurationTeamBioLength:            280,
+		MaxCurationTeamPolicyLength:         4000,
+		SubscriptionTransitionsPerBlock:     100,
+		CurationPruneKeysPerBlock:           500,
+		CreatorEpochClosuresPerBlock:        4,
+		CreatorSettlementRecordsPerBlock:    1000,
+		CreatorPruneKeysPerBlock:            1000,
+		CreatorClaimWindowDays:              30,
+		MaxCreatorClaimEpochs:               30,
+		MaxCreatorEngagementsPerEpoch:       1_000_000,
+		CreatorEpochExpiriesPerBlock:        4,
+		SubscriptionEarlyRenewalDays:        7,
+		SubscriptionRenewalAttemptsPerBlock: 100,
+		SubscriberDailyRelayLimit:           250,
+		MaxSubscriptionPeriodsPerPurchase:   12,
 	}
+}
+
+// HistoricalDefaultParams freezes pre-v1.39 defaults for upgrade handlers.
+func HistoricalDefaultParams() Params {
+	p := DefaultParams()
+	p.Tiers = HistoricalDefaultTiers()
+	p.SubscriptionReserveBps = 9_500
+	p.SubscriptionCreatorBps = 0
+	p.MaxCuratorsPerTeam = 0
+	p.MaxPendingCuratorInvitesPerTeam = 0
+	p.MaxPendingCuratorInvitesPerUser = 0
+	p.MaxCommunityTitleLength = 0
+	p.MaxCommunityDescriptionLength = 0
+	p.MaxCurationTeamNameLength = 0
+	p.MaxCurationTeamBioLength = 0
+	p.MaxCurationTeamPolicyLength = 0
+	p.SubscriptionTransitionsPerBlock = 0
+	p.CurationPruneKeysPerBlock = 0
+	p.CreatorEpochClosuresPerBlock = 0
+	p.CreatorSettlementRecordsPerBlock = 0
+	p.CreatorPruneKeysPerBlock = 0
+	p.CreatorClaimWindowDays = 0
+	p.MaxCreatorClaimEpochs = 0
+	p.MaxCreatorEngagementsPerEpoch = 0
+	p.CreatorEpochExpiriesPerBlock = 0
+	p.SubscriptionEarlyRenewalDays = 0
+	p.SubscriptionRenewalAttemptsPerBlock = 0
+	p.SubscriberDailyRelayLimit = 0
+	p.MaxSubscriptionPeriodsPerPurchase = 0
+	return p
 }
 
 // Validate validates the set of params.
@@ -311,11 +388,14 @@ func (p Params) Validate() error {
 	if p.MaxUsernameSize == 0 || p.MaxUsernameSize > 128 {
 		return fmt.Errorf("max_username_size must be in [1,128]")
 	}
-	if p.MaxTopicSize == 0 || p.MaxTopicSize > 100 {
-		return fmt.Errorf("max_topic_size must be in [1,100]")
+	if p.MaxCommunitySize > 100 {
+		return fmt.Errorf("max_community_size must be in [0,100]")
 	}
-	if p.MinTopicSize == 0 || p.MinTopicSize > p.MaxTopicSize {
-		return fmt.Errorf("min_topic_size must be in [1,max_topic_size]")
+	if p.MinCommunitySize > 0 && p.MaxCommunitySize > 0 && p.MinCommunitySize > p.MaxCommunitySize {
+		return fmt.Errorf("min_community_size must be <= max_community_size")
+	}
+	if p.MinCommunitySize > 100 {
+		return fmt.Errorf("min_community_size must be in [0,100]")
 	}
 	if p.MinUsernameSize == 0 || p.MinUsernameSize > 64 {
 		return fmt.Errorf("min_username_size must be in [1,64]")
@@ -353,11 +433,10 @@ func (p Params) Validate() error {
 	if p.SubscriptionPeriod > MaxSubscriptionPeriodMinutes {
 		return fmt.Errorf("subscription_period must be in [0,%d]", MaxSubscriptionPeriodMinutes)
 	}
-	// Validate tiers
-	if len(p.Tiers) != 3 {
-		return fmt.Errorf("tiers must contain exactly 3 entries")
+	// Validate tiers. Historical blobs have 3; v1.39 has 2.
+	if n := len(p.Tiers); n != 2 && n != 3 {
+		return fmt.Errorf("tiers must contain exactly 2 or 3 entries")
 	}
-	// Free tier (index 0) must have 0 monthly fee
 	if p.Tiers[0] == nil {
 		return fmt.Errorf("tier 0 must not be nil")
 	}
@@ -378,12 +457,12 @@ func (p Params) Validate() error {
 			name  string
 			value uint64
 		}{
-			{"max_enabled_agents", tier.MaxEnabledAgents},
 			{"max_followed_users", tier.MaxFollowedUsers},
-			{"max_followed_topics", tier.MaxFollowedTopics},
+			{"max_joined_communities", tier.MaxJoinedCommunities},
 			{"max_blocked_users", tier.MaxBlockedUsers},
 			{"max_blocked_posts", tier.MaxBlockedPosts},
-			{"max_blocked_topics", tier.MaxBlockedTopics},
+			{"max_blocked_communities", tier.MaxBlockedCommunities},
+			{"max_curation_memberships", tier.MaxCurationMemberships},
 		}
 		for _, limit := range listLimits {
 			if limit.value > MaxProfileListEntries {
@@ -421,6 +500,79 @@ func (p Params) Validate() error {
 			return fmt.Errorf("award_configs[%d]: cost %d exceeds max allowed %d", i, ac.Cost, MaxAwardConfigCost)
 		}
 	}
+	if p.SubscriptionCreatorBps > BasisPointsDenominator {
+		return fmt.Errorf("subscription_creator_bps must be in [0,%d]", BasisPointsDenominator)
+	}
+	return nil
+}
+
+func (p Params) ValidateV139() error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if len(p.Tiers) != 2 {
+		return fmt.Errorf("v1.39: tiers must contain exactly 2 entries")
+	}
+	if p.MinCommunitySize == 0 || p.MaxCommunitySize == 0 || p.MinCommunitySize > p.MaxCommunitySize || p.MaxCommunitySize > 100 {
+		return fmt.Errorf("v1.39: min/max_community_size must be in [1,100] with min <= max")
+	}
+	if p.SubscriptionReserveBps != 0 {
+		return fmt.Errorf("v1.39: subscription_reserve_bps must be 0")
+	}
+	if p.SubscriptionCreatorBps != 5000 {
+		return fmt.Errorf("v1.39: subscription_creator_bps must be 5000")
+	}
+	if p.SubscriptionPeriod < 1 || p.SubscriptionPeriod > MaxSubscriptionPeriodMinutes {
+		return fmt.Errorf("subscription_period must be in [1,%d]", MaxSubscriptionPeriodMinutes)
+	}
+	if p.SubscriptionEarlyRenewalDays < 1 || p.SubscriptionEarlyRenewalDays > 30 {
+		return fmt.Errorf("subscription_early_renewal_days must be in [1,30]")
+	}
+	if p.SubscriptionEarlyRenewalDays*1440 >= p.SubscriptionPeriod {
+		return fmt.Errorf("subscription_early_renewal_days must be strictly shorter than subscription_period")
+	}
+	if p.SubscriberDailyRelayLimit < 1 || p.SubscriberDailyRelayLimit > 10000 {
+		return fmt.Errorf("subscriber_daily_relay_limit must be in [1,10000]")
+	}
+	if p.MaxSubscriptionPeriodsPerPurchase < 1 || p.MaxSubscriptionPeriodsPerPurchase > 12 {
+		return fmt.Errorf("max_subscription_periods_per_purchase must be in [1,12]")
+	}
+	if p.SubscriptionPeriod > 527040/p.MaxSubscriptionPeriodsPerPurchase {
+		return fmt.Errorf("subscription_period * max_subscription_periods_per_purchase exceeds 527040 minutes")
+	}
+	required := []struct {
+		name string
+		val  uint64
+		min  uint64
+		max  uint64
+	}{
+		{"max_curators_per_team", p.MaxCuratorsPerTeam, 1, 10},
+		{"max_pending_curator_invites_per_team", p.MaxPendingCuratorInvitesPerTeam, p.MaxCuratorsPerTeam, 100},
+		{"max_pending_curator_invites_per_user", p.MaxPendingCuratorInvitesPerUser, 1, 1000},
+		{"max_community_title_length", p.MaxCommunityTitleLength, 1, 100000},
+		{"max_community_description_length", p.MaxCommunityDescriptionLength, 1, 100000},
+		{"max_curation_team_name_length", p.MaxCurationTeamNameLength, 1, 100000},
+		{"max_curation_team_bio_length", p.MaxCurationTeamBioLength, 1, 100000},
+		{"max_curation_team_policy_length", p.MaxCurationTeamPolicyLength, 1, 100000},
+		{"subscription_transitions_per_block", p.SubscriptionTransitionsPerBlock, 1, 100000},
+		{"curation_prune_keys_per_block", p.CurationPruneKeysPerBlock, 1, 100000},
+		{"creator_epoch_closures_per_block", p.CreatorEpochClosuresPerBlock, 1, 100000},
+		{"creator_settlement_records_per_block", p.CreatorSettlementRecordsPerBlock, 1, 100000},
+		{"creator_prune_keys_per_block", p.CreatorPruneKeysPerBlock, 1, 100000},
+		{"creator_epoch_expiries_per_block", p.CreatorEpochExpiriesPerBlock, 1, 100000},
+		{"subscription_renewal_attempts_per_block", p.SubscriptionRenewalAttemptsPerBlock, 1, 100000},
+		{"creator_claim_window_days", p.CreatorClaimWindowDays, 1, 365},
+		{"max_creator_claim_epochs", p.MaxCreatorClaimEpochs, 1, 30},
+		{"max_creator_engagements_per_epoch", p.MaxCreatorEngagementsPerEpoch, 1, 10_000_000},
+	}
+	for _, r := range required {
+		if r.val < r.min || r.val > r.max {
+			return fmt.Errorf("%s must be in [%d,%d]", r.name, r.min, r.max)
+		}
+	}
+	if p.Tiers[0].MaxCurationMemberships != 0 {
+		return fmt.Errorf("free tier max_curation_memberships must be 0")
+	}
 	return nil
 }
 
@@ -457,11 +609,8 @@ func (p Params) ValidateGovernanceUpdate() error {
 		return fmt.Errorf("relay_max_gas_fee must be > 0: zero removes the only per-message " +
 			"cost paid tiers bear, since they are exempt from proof of work")
 	}
-	// Zero burns the whole period fee and escrows nothing, so a subscriber pays
-	// in full and is demoted to free on their first action.
-	if p.SubscriptionReserveBps == 0 {
-		return fmt.Errorf("subscription_reserve_bps must be > 0: zero escrows nothing, so a " +
-			"subscriber pays the full period fee and is demoted on their first message")
+	if err := p.ValidateV139(); err != nil {
+		return err
 	}
 	// A window shorter than this is a stricter freshness rule than
 	// max_envelope_age, rejecting work the age check still accepts.
@@ -498,8 +647,8 @@ func (p Params) GetAwardConfig(name string) *AwardConfig {
 }
 
 // GetTierConfig returns the tier config for the given user level.
-// Maps user levels (0, 1, 10, 100+) to tier array indices (0, 1, 2).
-// Returns nil for invalid levels (2-9, negative).
+// Maps user levels (0, 1, 100+) to tier array indices (0, 1).
+// Returns nil for invalid levels (2-99 except 100+, and negative).
 func (p Params) GetTierConfig(level int) *TierConfig {
 	if len(p.Tiers) == 0 {
 		return nil

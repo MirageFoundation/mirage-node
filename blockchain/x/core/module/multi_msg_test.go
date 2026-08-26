@@ -108,12 +108,13 @@ func TestMultiMessageMixedTypes(t *testing.T) {
 		User:           target,
 	}
 	msgPost := &types.MsgPost{
-		Authority:      testAccAddressString(),
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Topic:          "test",
-		Title:          "Hello",
-		Content:        "World",
+		Authority:       testAccAddressString(),
+		EnvelopePubkey:  pub,
+		Target:          owner,
+		Community:       "test",
+		Title:           "Hello",
+		Content:         "World",
+		ProtocolVersion: types.ProtocolVersionV139,
 	}
 
 	anyFollow, err := codectypes.NewAnyWithValue(msgFollow)

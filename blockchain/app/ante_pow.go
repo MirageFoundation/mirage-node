@@ -96,14 +96,18 @@ func (d *PowDecorator) getUserLevel(ctx sdk.Context, pubkey []byte) (level int, 
 // Decode errors from getUserLevel propagate; callers MUST reject the tx on
 // non-nil err to avoid silent free-tier routing on a corrupt profile.
 func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, reason string, err error) {
-	level, addr, lerr := d.getUserLevel(ctx, pubkey)
+	_, addr, lerr := d.getUserLevel(ctx, pubkey)
 	if lerr != nil {
 		return false, "", lerr
 	}
-	if level == 0 {
-		return true, "free tier", nil
+	paid, perr := d.Keeper.IsEffectivePaid(ctx, addr)
+	if perr != nil {
+		return false, "", perr
 	}
-	return false, fmt.Sprintf("paid user (level=%d) must use reserve for gas, addr=%s", level, addr), nil
+	if !paid {
+		return true, "free path", nil
+	}
+	return false, fmt.Sprintf("effective_paid user must skip PoW, addr=%s", addr), nil
 }
 
 // routePoWTx unifies the canUsePoW + checkReserveOrDowngrade decision used by
@@ -357,6 +361,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	msgCounts := envelopeMsgCounts(tx.GetMsgs())
 
 	for _, msg := range tx.GetMsgs() {
+		var err error
 		switch m := msg.(type) {
 		case *coretypes.MsgSubscribe:
 			// MsgSubscribe NEVER allows PoW - must pay with tokens
@@ -370,40 +375,23 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			// MsgSetAutoRenewal NEVER allows PoW - must pay with reserve
 			if m.EnvelopePow > 0 {
-				ctx.Logger().Error("PoW: MsgSetAutoRenewal cannot use PoW, must pay with reserve")
-				return ctx, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
+				ctx.Logger().Error("PoW: MsgSetAutoRenewal cannot use PoW")
+				return ctx, fmt.Errorf("MsgSetAutoRenewal cannot use PoW")
 			}
-			// The exemption above rests on "must pay with reserve", which is only
-			// true for a paid user. At level 0 nothing charges: checkReserveOrDowngrade
-			// returns nil unconditionally, and the handler cannot charge either —
-			// a free user may only set the flag to the value it already has, which
-			// forces the no-op branch, and deductRelayGasFee returns immediately
-			// below level 1. That made this the one relay message costing zero PoW,
-			// zero tokens and zero reserve while the node paid a full relay ante,
-			// and because RecordPoWMessage sits inside the PoW branches the abuse
-			// never raised difficulty (review M-4).
-			//
-			// Rejecting here mirrors the handler's own free-tier rule, so nothing
-			// legitimate is lost: the only value a level-0 user could set was the
-			// one already stored.
-			level, addr, lerr := d.getUserLevel(ctx, m.EnvelopePubkey)
+			_, addr, lerr := d.getUserLevel(ctx, m.EnvelopePubkey)
 			if lerr != nil {
 				ctx.Logger().Error("PoW: profile read failed", "msg", "MsgSetAutoRenewal", "err", lerr.Error())
 				return ctx, lerr
 			}
-			if level < coretypes.LevelSubscriber {
-				ctx.Logger().Error("PoW: MsgSetAutoRenewal requires a paid level", "addr", addr, "level", level)
-				return ctx, fmt.Errorf("MsgSetAutoRenewal requires a subscription: auto-renewal cannot be set at level %d", level)
+			isPaid, perr := d.Keeper.IsEffectivePaid(ctx, addr)
+			if perr != nil {
+				return ctx, perr
 			}
-			// Paid path only: reject on profile CONSENSUS_FATAL / malformed pubkey.
-			// Insufficient reserve is allowed through so deductRelayGasFee can downgrade.
-			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params, msgCounts[string(m.EnvelopePubkey)]); err != nil {
-				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgSetAutoRenewal", "err", err.Error())
-				return ctx, err
+			if !isPaid {
+				ctx.Logger().Error("PoW: MsgSetAutoRenewal requires effective_paid", "addr", addr)
+				return ctx, fmt.Errorf("MsgSetAutoRenewal requires a subscription")
 			}
-			// Skip PoW validation entirely for set_auto_renewal; gas is covered via reserve
 
 		case *coretypes.MsgPost:
 			if m.Authority == govAuthority {
@@ -481,19 +469,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
 					return ctx, err
 				}
-			}
-
-		case *coretypes.MsgAnnotate:
-			if m.Authority == govAuthority {
-				continue
-			}
-			if m.EnvelopeDifficulty > 0 || m.EnvelopePow > 0 {
-				ctx.Logger().Error("PoW: MsgAnnotate cannot use PoW")
-				return ctx, fmt.Errorf("MsgAnnotate cannot use PoW")
-			}
-			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params, msgCounts[string(m.EnvelopePubkey)]); err != nil {
-				ctx.Logger().Error("PoW: reserve/profile check failed", "msg", "MsgAnnotate", "err", err.Error())
-				return ctx, err
 			}
 
 		case *coretypes.MsgSetUsername:
@@ -634,84 +609,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				return ctx, fmt.Errorf("MsgAward cannot use PoW")
 			}
 
-		case *coretypes.MsgEnableAgent:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgEnableAgent", msgCounts[string(m.EnvelopePubkey)])
-			if err != nil {
-				return ctx, err
-			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForEnableAgent(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEnableAgent", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
-		case *coretypes.MsgDisableAgent:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgDisableAgent", msgCounts[string(m.EnvelopePubkey)])
-			if err != nil {
-				return ctx, err
-			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForDisableAgent(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDisableAgent", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
-		case *coretypes.MsgSetAgents:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgSetAgents", msgCounts[string(m.EnvelopePubkey)])
-			if err != nil {
-				return ctx, err
-			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForSetAgents(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetAgents", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
 		case *coretypes.MsgFollowUser:
 			if m.Authority == govAuthority {
 				continue
@@ -752,58 +649,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			canon := buildCanonForUnfollowUser(m)
 			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowUser", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
-		case *coretypes.MsgFollowTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgFollowTopic", msgCounts[string(m.EnvelopePubkey)])
-			if err != nil {
-				return ctx, err
-			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForFollowTopic(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowTopic", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
-		case *coretypes.MsgUnfollowTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnfollowTopic", msgCounts[string(m.EnvelopePubkey)])
-			if err != nil {
-				return ctx, err
-			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForUnfollowTopic(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
 			if ctx.Priority() <= 0 {
@@ -920,58 +765,160 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
-		case *coretypes.MsgBlockTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgBlockTopic", msgCounts[string(m.EnvelopePubkey)])
+
+		case *coretypes.MsgJoinCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgJoinCommunity", buildCanonV139("MsgJoinCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Community) }), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForBlockTopic(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockTopic", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
-			}
-
-		case *coretypes.MsgUnblockTopic:
-			if m.Authority == govAuthority {
-				continue
-			}
-			canPoW, err := d.routePoWTx(ctx, m.EnvelopePubkey, params, "MsgUnblockTopic", msgCounts[string(m.EnvelopePubkey)])
+		case *coretypes.MsgLeaveCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgLeaveCommunity", buildCanonV139("MsgLeaveCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Community) }), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
-			if !canPoW {
-				continue
-			}
-			canon := buildCanonForUnblockTopic(m)
-			if err := verifyPoW(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockTopic", "err", err.Error())
+		case *coretypes.MsgBlockCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgBlockCommunity", buildCanonV139("MsgBlockCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Target); w.writeString(101, m.Community) }), verifyPoW)
+			if err != nil {
 				return ctx, err
 			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+		case *coretypes.MsgUnblockCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgUnblockCommunity", buildCanonV139("MsgUnblockCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Target); w.writeString(101, m.Community) }), verifyPoW)
+			if err != nil {
+				return ctx, err
 			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-					return ctx, err
-				}
+		case *coretypes.MsgCreateCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCommunity", buildCanonV139("MsgCreateCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeString(101, m.Title); w.writeString(102, m.Description); w.writeString(103, m.OriginalTeamName); w.writeString(104, m.Bio); w.writeString(105, m.Policy)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
 			}
-
+		case *coretypes.MsgSetCommunityMetadata:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCommunityMetadata", buildCanonV139("MsgSetCommunityMetadata", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeString(101, m.Title); w.writeString(102, m.Description)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgTransferCommunity:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgTransferCommunity", buildCanonV139("MsgTransferCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeString(101, m.NewFounder)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgCreateCurationTeam:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCurationTeam", buildCanonV139("MsgCreateCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeString(101, m.Name); w.writeString(102, m.Bio); w.writeString(103, m.Policy)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationTeamProfile:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationTeamProfile", buildCanonV139("MsgSetCurationTeamProfile", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Name); w.writeString(103, m.Bio); w.writeString(104, m.Policy)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgInviteCurator:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgInviteCurator", buildCanonV139("MsgInviteCurator", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgRevokeCuratorInvite:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgRevokeCuratorInvite", buildCanonV139("MsgRevokeCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgAcceptCuratorInvite:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgAcceptCuratorInvite", buildCanonV139("MsgAcceptCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgDeclineCuratorInvite:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgDeclineCuratorInvite", buildCanonV139("MsgDeclineCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgLeaveCurationTeam:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgLeaveCurationTeam", buildCanonV139("MsgLeaveCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgRemoveCurator:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgRemoveCurator", buildCanonV139("MsgRemoveCurator", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgTransferCurationTeam:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgTransferCurationTeam", buildCanonV139("MsgTransferCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.NewOwner)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgDeleteCurationTeam:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgDeleteCurationTeam", buildCanonV139("MsgDeleteCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPreference:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationPreference", buildCanonV139("MsgSetCurationPreference", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, uint64(m.Mode)); w.writeUvarint(102, m.PinnedTeamId)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPostHidden:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationPostHidden", buildCanonV139("MsgSetCurationPostHidden", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target); writeCanonBool(w, 103, m.Hidden)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationUserHidden:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationUserHidden", buildCanonV139("MsgSetCurationUserHidden", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target); writeCanonBool(w, 103, m.Hidden)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationThreadLocked:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationThreadLocked", buildCanonV139("MsgSetCurationThreadLocked", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.RootHash); writeCanonBool(w, 103, m.Locked)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationSubscriberOnly:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationSubscriberOnly", buildCanonV139("MsgSetCurationSubscriberOnly", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); writeCanonBool(w, 102, m.Enabled)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgClaimCreatorRewards:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgClaimCreatorRewards", buildCanonV139("MsgClaimCreatorRewards", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				for _, id := range m.EpochIds { w.writeUvarint(100, uint64(id)) }
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
 		default:
 			return ctx, fmt.Errorf("PowDecorator: unsupported relay message %T", msg)
 		}
@@ -991,118 +938,24 @@ func requireEnvelopePubkey(pubkey []byte) error {
 
 // envelopeAuthorityOf returns the Authority field for relay-routed messages.
 func envelopeAuthorityOf(msg sdk.Msg) (string, bool) {
-	switch m := msg.(type) {
-	case *coretypes.MsgPost:
-		return m.Authority, true
-	case *coretypes.MsgVote:
-		return m.Authority, true
-	case *coretypes.MsgEdit:
-		return m.Authority, true
-	case *coretypes.MsgAnnotate:
-		return m.Authority, true
-	case *coretypes.MsgSetUsername:
-		return m.Authority, true
-	case *coretypes.MsgSetBiography:
-		return m.Authority, true
-	case *coretypes.MsgDelete:
-		return m.Authority, true
-	case *coretypes.MsgDeleteUser:
-		return m.Authority, true
-	case *coretypes.MsgSendTokens:
-		return m.Authority, true
-	case *coretypes.MsgAward:
-		return m.Authority, true
-	case *coretypes.MsgEnableAgent:
-		return m.Authority, true
-	case *coretypes.MsgDisableAgent:
-		return m.Authority, true
-	case *coretypes.MsgSetAgents:
-		return m.Authority, true
-	case *coretypes.MsgFollowUser:
-		return m.Authority, true
-	case *coretypes.MsgUnfollowUser:
-		return m.Authority, true
-	case *coretypes.MsgFollowTopic:
-		return m.Authority, true
-	case *coretypes.MsgUnfollowTopic:
-		return m.Authority, true
-	case *coretypes.MsgBlockPost:
-		return m.Authority, true
-	case *coretypes.MsgUnblockPost:
-		return m.Authority, true
-	case *coretypes.MsgBlockUser:
-		return m.Authority, true
-	case *coretypes.MsgUnblockUser:
-		return m.Authority, true
-	case *coretypes.MsgBlockTopic:
-		return m.Authority, true
-	case *coretypes.MsgUnblockTopic:
-		return m.Authority, true
-	case *coretypes.MsgSubscribe:
-		return m.Authority, true
-	case *coretypes.MsgSetAutoRenewal:
-		return m.Authority, true
-	default:
+	if !isRelayMessage(msg) {
 		return "", false
 	}
+	if m, ok := msg.(interface{ GetAuthority() string }); ok {
+		return m.GetAuthority(), true
+	}
+	return "", false
 }
 
 // envelopePubkeyOf returns the envelope pubkey for relay-routed messages.
 func envelopePubkeyOf(msg sdk.Msg) ([]byte, bool) {
-	switch m := msg.(type) {
-	case *coretypes.MsgPost:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgVote:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgEdit:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgAnnotate:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSetUsername:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSetBiography:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgDelete:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgDeleteUser:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSendTokens:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgAward:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgEnableAgent:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgDisableAgent:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSetAgents:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgFollowUser:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgUnfollowUser:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgFollowTopic:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgUnfollowTopic:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgBlockPost:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgUnblockPost:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgBlockUser:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgUnblockUser:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgBlockTopic:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgUnblockTopic:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSubscribe:
-		return m.EnvelopePubkey, true
-	case *coretypes.MsgSetAutoRenewal:
-		return m.EnvelopePubkey, true
-	default:
+	if !isRelayMessage(msg) {
 		return nil, false
 	}
+	if m, ok := msg.(interface{ GetEnvelopePubkey() []byte }); ok {
+		return m.GetEnvelopePubkey(), true
+	}
+	return nil, false
 }
 
 // (legacy helpers removed)
@@ -1130,13 +983,14 @@ func buildCanonForPost(m *coretypes.MsgPost) []byte {
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeUvarint(7, m.EnvelopeNonce)
 	cw.writeString(100, m.Target)
-	cw.writeString(101, m.Topic)
+	cw.writeString(101, m.Community)
 	cw.writeString(102, m.Title)
 	cw.writeString(103, m.Content)
 	cw.writeString(104, m.Tag)
 	for _, media := range m.Media {
 		cw.writeString(105, media)
 	}
+	cw.writeUvarint(106, uint64(m.ProtocolVersion))
 	return cw.buf
 }
 
@@ -1390,7 +1244,7 @@ func buildCanonForEdit(m *coretypes.MsgEdit) []byte {
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeUvarint(7, m.EnvelopeNonce)
 	cw.writeString(100, m.Target)
-	cw.writeString(101, m.Topic)
+	cw.writeString(101, m.Community)
 	cw.writeString(102, m.Title)
 	cw.writeString(103, m.Content)
 	cw.writeString(104, m.Tag)
@@ -1413,6 +1267,7 @@ func buildCanonForSubscribe(m *coretypes.MsgSubscribe) []byte {
 	if m.Target != "" {
 		cw.writeString(101, m.Target)
 	}
+	cw.writeUvarint(102, uint64(m.PeriodCount))
 	return cw.buf
 }
 
@@ -1601,4 +1456,16 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 		return fmt.Errorf("insufficient proof of work")
 	}
 	return nil
+}
+
+
+func buildCanonV139(name string, pubkey, blockHash []byte, difficulty, ts, nonce uint64, fill func(*canonWriter)) []byte {
+	cw := newCanonWriter(name)
+	cw.writeBytes(2, pubkey)
+	cw.writeBytes(3, blockHash)
+	cw.writeUvarint(4, difficulty)
+	cw.writeUvarint(6, ts)
+	cw.writeUvarint(7, nonce)
+	fill(cw)
+	return cw.buf
 }

@@ -21,7 +21,7 @@ import (
 func TestRelayMessageRegistryParity(t *testing.T) {
 	prototypes := relayMessagePrototypes()
 	require.NotEmpty(t, prototypes)
-	require.Equal(t, 25, len(prototypes), "update this count when adding/removing relay message types")
+	require.Equal(t, 40, len(prototypes), "update this count when adding/removing relay message types")
 
 	seen := make(map[string]struct{}, len(prototypes))
 	for _, m := range prototypes {
@@ -115,7 +115,7 @@ func switchedCoreMessages(t *testing.T, file, receiverType, method string) map[s
 // verification, which is an authorization hole.
 func TestRelayDecoratorSwitchParity(t *testing.T) {
 	registry := relayMessageNames(t)
-	require.Len(t, registry, 25, "update this count when adding/removing relay message types")
+	require.Len(t, registry, 40, "update this count when adding/removing relay message types")
 
 	powCases := switchedCoreMessages(t, "ante_pow.go", "PowDecorator", "AnteHandle")
 	sigCases := switchedCoreMessages(t, "ante_metasig.go", "RelaySigDecorator", "AnteHandle")
@@ -140,6 +140,17 @@ var governanceOnlyEnvelopeMessages = map[string]struct{}{
 	"MsgSetLevel": {},
 }
 
+var retiredEnvelopeMessages = map[string]struct{}{
+	"MsgEnableAgent":   {},
+	"MsgDisableAgent":  {},
+	"MsgSetAgents":     {},
+	"MsgFollowTopic":   {},
+	"MsgUnfollowTopic": {},
+	"MsgBlockTopic":    {},
+	"MsgUnblockTopic":  {},
+	"MsgAnnotate":      {},
+}
+
 // TestEveryEnvelopeMessageIsRoutedOrGovernanceOnly pins the other half of L-5:
 // a newly generated core message that carries envelope fields must either join
 // the relay registry (and therefore both decorator switches, enforced above) or
@@ -162,8 +173,9 @@ func TestEveryEnvelopeMessageIsRoutedOrGovernanceOnly(t *testing.T) {
 		checked++
 		_, relayed := registry[name]
 		_, govOnly := governanceOnlyEnvelopeMessages[name]
-		require.True(t, relayed || govOnly,
-			"%s carries envelope fields but is neither relay-routed nor recorded as governance-only", name)
+		_, retired := retiredEnvelopeMessages[name]
+		require.True(t, relayed || govOnly || retired,
+			"%s carries envelope fields but is neither relay-routed, governance-only, nor retired", name)
 		require.False(t, relayed && govOnly,
 			"%s cannot be both relay-routed and governance-only", name)
 	}

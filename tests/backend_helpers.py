@@ -46,6 +46,7 @@ from tests.common import (
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
     _canon_base_annotate_raw,
+    _canon_base_create_community_raw,
     canon_signed_with_pow,
     canon_attribution,
     sign_canonical,
@@ -55,6 +56,68 @@ from tests.common import (
     INDEX_TIMEOUT_SEC,
 )
 from cosmpy.aerial.wallet import LocalWallet
+
+_CLAIMED_COMMUNITIES: set[str] = set()
+
+
+def _do_create_community(backend: str, wallet, community: str) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    title = community
+    description = "test community"
+    team = "orig"
+    bio = "bio"
+    policy = "policy"
+    base = _canon_base_create_community_raw(
+        pub, _lb_bytes(lb), 0, ts, community, title, description, team, bio, policy, nonce
+    )
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": 0,
+        "community": community,
+        "title": title,
+        "description": description,
+        "original_team_name": team,
+        "bio": bio,
+        "policy": policy,
+    }
+    _, resp = _post(f"{backend}/api/core/create_community", payload)
+    return resp or {}
+
+
+def _ensure_community_claimed(backend: str, community: str) -> None:
+    slug = (community or "").strip().lower()
+    if not slug or slug in _CLAIMED_COMMUNITIES:
+        return
+    from tests.common import WALLETS
+
+    claimer = WALLETS.get("sub1")
+    if claimer is None:
+        return
+    resp = _do_create_community(backend, claimer, slug)
+    err = str(resp.get("error") or resp.get("raw_log") or "").lower()
+    txh = str(resp.get("tx_hash") or "").lower()
+    if txh:
+        delivered = _wait_tx_deliver(txh)
+        if delivered is None or delivered[0] != 0:
+            if delivered and "already claimed" in (delivered[1] or "").lower():
+                _CLAIMED_COMMUNITIES.add(slug)
+                return
+            _debug(f"create_community failed slug={slug} deliver={delivered} resp={resp}")
+            return
+        _CLAIMED_COMMUNITIES.add(slug)
+        return
+    if "already claimed" in err or "already" in err:
+        _CLAIMED_COMMUNITIES.add(slug)
 
 
 def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
@@ -130,6 +193,8 @@ def _do_post(
     backend: str, wallet, topic: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
 ) -> str | None:
     """Create a post/comment and return the tx_hash or None."""
+    if not target:
+        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -152,7 +217,8 @@ def _do_post(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "topic": topic,
+        "community": topic,
+        "protocol_version": 1,
         "title": title,
         "content": content,
         "tag": tag,
@@ -185,6 +251,8 @@ def _do_post_at_timestamp(
     skip_pow: bool = False,
 ) -> tuple[int, dict]:
     """Create a post with an explicit envelope timestamp; return (status, body)."""
+    if not target:
+        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -207,7 +275,8 @@ def _do_post_at_timestamp(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "topic": topic,
+        "community": topic,
+        "protocol_version": 1,
         "title": title,
         "content": content,
         "tag": tag,
@@ -358,7 +427,8 @@ def _do_edit(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "topic": topic,
+        "community": topic,
+        "protocol_version": 1,
         "title": title,
         "content": content,
         "tag": tag,
@@ -929,6 +999,8 @@ def _do_post_with_media(
     skip_pow: bool = False,
 ) -> str | None:
     """Create a post with media attachments; returns tx_hash or None."""
+    if not target:
+        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -951,7 +1023,8 @@ def _do_post_with_media(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "topic": topic,
+        "community": topic,
+        "protocol_version": 1,
         "title": title,
         "content": content,
         "tag": tag,
