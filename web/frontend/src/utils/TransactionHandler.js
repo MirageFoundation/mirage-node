@@ -1691,8 +1691,8 @@ class TransactionHandler {
         try {
             const targetLevel = Number(level);
 
-            if (targetLevel !== 1 && targetLevel !== 10) {
-                return this._fail("Invalid level (must be 1 or 10)");
+            if (targetLevel !== 1) {
+                return this._fail("Invalid level (must be 1)");
             }
 
             const targetTrimmed = String(target || "").trim().toLowerCase();
@@ -1707,6 +1707,7 @@ class TransactionHandler {
                 action: 'subscribe',
                 level: targetLevel,
                 target: targetTrimmed,
+                period_count: 1,
             }, {
                 reserveUmirage: feeUmirage,
                 beforeEnqueue: () => {
@@ -2492,6 +2493,7 @@ class TransactionHandler {
                     action: transaction.action,
                     level: Number(transaction.level),
                     target: transaction.target || "",
+                    period_count: Math.max(1, Number(transaction.period_count || 1) || 1),
                     last_block_hash: "",
                     pow_difficulty: 0,
                     pow_base_bits: 0,
@@ -4884,7 +4886,9 @@ class TransactionHandler {
                 const tag6 = Uint8Array.from([6]);   // envelope_timestamp
                 const tag100 = Uint8Array.from([100]); // level
                 const tag101 = Uint8Array.from([101]); // target
+                const tag102 = Uint8Array.from([102]); // period_count
                 const targetLevel = Number(transaction.level || 0);
+                const periodCount = Math.max(1, Number(transaction.period_count || 1) || 1);
                 const targetStr = (transaction.target || "").trim().toLowerCase();
                 const targetBytes = new TextEncoder().encode(targetStr);
                 const canonParts = [
@@ -4900,6 +4904,7 @@ class TransactionHandler {
                 if (targetStr) {
                     canonParts.push(tag101, encBytes(targetBytes));
                 }
+                canonParts.push(tag102, uvarint(periodCount));
                 const canon = concat(...canonParts);
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4911,6 +4916,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp || 0,
                     last_block_hash: transaction.last_block_hash,
                     level: targetLevel,
+                    period_count: periodCount,
                     envelope_nonce: envelopeNonce,
                 };
                 if (targetStr) {

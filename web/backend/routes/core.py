@@ -4830,8 +4830,10 @@ def core_subscribe():
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
+                log_event(rid, "subscribe.bad_signature", user=user_addr, period_count=period_count)
                 return jsonify({"error": "invalid signature"}), 400
-        except Exception:
+        except Exception as sig_exc:
+            log_event(rid, "subscribe.signature_error", error=str(sig_exc))
             return jsonify({"error": "invalid signature"}), 400
 
         msg = MsgSubscribe()
