@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 import tomllib
 from typing import Optional
@@ -1464,6 +1465,13 @@ def _build_msg_create_community(
 _CLAIMED_ON_CHAIN: set[str] = set()
 _SHARED_COMMUNITY: str = ""
 
+# Mirrors ValidateCommunitySlug on the chain.
+_COMMUNITY_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+def _is_valid_community_slug(slug: str) -> bool:
+    return 2 <= len(slug) <= 35 and bool(_COMMUNITY_SLUG_RE.fullmatch(slug)) and "--" not in slug
+
 
 def _shared_community() -> str:
     """One claimed community, reused by tests that don't assert on the slug.
@@ -1489,6 +1497,12 @@ def _claim_community(backend: str, slug: str) -> None:
 
     community = str(slug or "").strip().lower()
     if not community or community in _CLAIMED_ON_CHAIN:
+        return
+    if not _is_valid_community_slug(community):
+        # The malicious-input and msg-format cases pass slugs the chain must refuse
+        # (NUL bytes, spaces, over-length). Those cannot be pre-claimed by
+        # definition, and the assertion under test is the chain's rejection of the
+        # message that follows, so leave the claim to fail there instead of here.
         return
     claimer = WALLETS.get("sub1")
     if claimer is None:

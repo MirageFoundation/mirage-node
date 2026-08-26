@@ -579,11 +579,16 @@ def get_nonce_for_subscriber(last_block_hash: str) -> str:
 
 
 def is_subscriber(addr: str) -> bool:
-    """Check if user is a paid subscriber via the indexer database (level-based).
+    """Check if user is a paid subscriber via the indexer database (effective_paid).
     Note: We intentionally do not apply runtime expiry logic here; the chain/indexer
     state must be the source of truth for level transitions.
+
+    Only a True is cached across requests. False is the answer that flips the instant
+    a user subscribes, and every zero-fee and PoW-exempt gate rejects on it, so a
+    cached one turned the seconds after a subscription into hard 400s for a client
+    that had correctly stopped sending PoW. A False is memoised for the current
+    request instead: still one lookup per request, without the staleness.
     """
-    # Small in-process TTL cache to avoid hitting the database on every call
     if not hasattr(is_subscriber, "_cache"):
         setattr(is_subscriber, "_cache", {})  # type: ignore[attr-defined]
         setattr(is_subscriber, "_ttl", 10.0)  # seconds  # type: ignore[attr-defined]
@@ -595,7 +600,17 @@ def is_subscriber(addr: str) -> bool:
     now = time.time()
     ent = cache.get(addr_lc)
     if ent and (now - ent[0]) < ttl:
-        return bool(ent[1])
+        return True
+
+    per_request: dict[str, bool] | None = None
+    if has_request_context():
+        per_request = getattr(g, "_is_subscriber_cache", None)
+        if per_request is None:
+            per_request = {}
+            g._is_subscriber_cache = per_request
+        if addr_lc in per_request:
+            return per_request[addr_lc]
+
     try:
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
@@ -605,11 +620,14 @@ def is_subscriber(addr: str) -> bool:
             )
             row = cur.fetchone()
             is_sub = bool(row[0]) if row and row[0] is not None else False
-            cache[addr_lc] = (now, is_sub)
-            # Bound cache size
-            if len(cache) > 4096:
-                oldest = min(cache.items(), key=lambda kv: kv[1][0])[0]
-                cache.pop(oldest, None)
+            if is_sub:
+                cache[addr_lc] = (now, True)
+                # Bound cache size
+                if len(cache) > 4096:
+                    oldest = min(cache.items(), key=lambda kv: kv[1][0])[0]
+                    cache.pop(oldest, None)
+            if per_request is not None:
+                per_request[addr_lc] = is_sub
             return is_sub
     except Exception:
         return False

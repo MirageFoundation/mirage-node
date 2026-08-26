@@ -944,8 +944,10 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level 1: {err}")
             return False
 
-    # Wait for subscription levels to be reflected in BOTH chain and indexer DB
-    # (is_subscriber() checks the indexer, not the chain — must wait for indexer to catch up)
+    # Wait for the subscription to be reflected in the indexer DB. The backend gates
+    # every zero-fee, PoW-exempt path on effective_paid, not on the level column, so
+    # waiting for user_level>=1 can return before the flag is set and leave the next
+    # request (a skip_pow biography, say) rejected as a free user's.
     for name in ("sub1", "sub2", "agent1", "agent2"):
         w = WALLETS[name]
         addr = str(w.address())
@@ -955,8 +957,8 @@ def setup_test_wallets(backend: str) -> bool:
             try:
                 status = get_user_status(backend, addr)
                 actual_level = int(status.get("user_level", 0) or 0)
-                if actual_level >= 1:
-                    print(f"  Verified {name} level={actual_level}")
+                if actual_level >= 1 and bool(status.get("effective_paid")):
+                    print(f"  Verified {name} level={actual_level} effective_paid=true")
                     verified = True
                     break
             except Exception:
@@ -964,7 +966,7 @@ def setup_test_wallets(backend: str) -> bool:
             time.sleep(1)
         if not verified:
             print(
-                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} level not reflected in indexer after {int(INDEX_TIMEOUT_SEC)}s"
+                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} subscription not reflected in indexer after {int(INDEX_TIMEOUT_SEC)}s"
             )
             return False
 

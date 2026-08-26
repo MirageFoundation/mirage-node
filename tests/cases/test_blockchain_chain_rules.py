@@ -236,11 +236,12 @@ def test_fee(backend: str) -> None:
             wallet, lb, 0, _now_ms(), community, "Title", "content", pow_val=0, nonce=_gen_nonce()
         )
 
-    # 4.1 Zero fee
+    # 4.1 Zero fee. v1.39 checks zero-fee eligibility ahead of the fee floor, so an
+    # unpaid signer is turned away by that gate rather than by "insufficient fee".
     _, code, log, _, _ = _submit_tx(
         [(_fee_post(), "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=0
     )
-    _check_reject("fee.zero_fee_rejected", code, log, "insufficient fee")
+    _check_reject("fee.zero_fee_rejected", code, log, "requires effective_paid")
 
     # 4.2 Wrong denom
     _, code, log, _, _ = _submit_tx(
@@ -565,7 +566,8 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.set_username_duplicate", ccode, dcode, dlog)
 
-    # 6.7 MsgDelete/MsgEdit ownership gap
+    # 6.7 MsgDelete is author-only from v1.39; MsgEdit is still permitted on chain
+    # and screened by the indexer instead (see _handle_edit's ownership check).
     post_topic = f"own{_rand_str(4)}"
     post = _build_msg_post(w1, lb, 0, ts, post_topic, "Title", "content", pow_val=0, nonce=_gen_nonce())
     txh, ccode, clog, dcode, dlog = _submit_tx(
@@ -590,7 +592,7 @@ def test_msg_validation(backend: str) -> None:
             w2.public_key().public_key_bytes,
             wait_deliver=True,
         )
-        _check_deliver_accept("msg.delete_foreign_succeeds", ccode, dcode, dlog)
+        _check_deliver_reject("msg.delete_foreign_rejected", ccode, dcode, dlog)
 
         edit_msg = _build_msg_edit(
             w2, lb, 0, ts, "", post_topic, "Edited", "edited content", "", txh, pow_val=0, nonce=_gen_nonce()
@@ -604,7 +606,7 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_accept("msg.edit_foreign_succeeds", ccode, dcode, dlog)
     else:
-        _fail("msg.delete_foreign_succeeds", "missing post tx hash")
+        _fail("msg.delete_foreign_rejected", "missing post tx hash")
         _fail("msg.edit_foreign_succeeds", "missing post tx hash")
 
     # 6.8 MsgPost invalid media

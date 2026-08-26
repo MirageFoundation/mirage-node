@@ -174,13 +174,18 @@ def test_follow_limits(backend: str) -> None:
     joined_targets: list[str] = []
     for start in range(0, remaining_joined, chunk_size):
         batch_count = min(chunk_size, remaining_joined - start)
+        # Claim every community in the chunk before any envelope is timestamped.
+        # Each claim is a CreateCommunity submitted with wait_deliver, so claiming
+        # inside the build loop spent minutes between the first timestamp and the
+        # submit and aged the whole batch past max_envelope_age.
+        topics = [f"ft{_rand_str(4)}{start + i}" for i in range(batch_count)]
+        for topic in topics:
+            _claim_community(backend, topic)
+        joined_targets.extend(topics)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         msgs = []
-        for i in range(batch_count):
-            topic = f"ft{_rand_str(4)}{start + i}"
-            joined_targets.append(topic)
-            _claim_community(backend, topic)
+        for i, topic in enumerate(topics):
             ts = ts_base + i
             nonce = _gen_nonce()
             base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, topic, nonce=nonce)
