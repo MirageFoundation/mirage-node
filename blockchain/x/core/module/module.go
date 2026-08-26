@@ -112,24 +112,13 @@ func validateAddress(address string) error {
 	return nil
 }
 
-// validateTopic enforces lowercase alphanumeric topics and max length
+// validateTopic enforces community-slug rules (lowercase, digits, single internal hyphens).
 func validateTopic(topic string, maxLen, minLen uint64) error {
 	topic = strings.TrimSpace(topic)
 	if topic == "" {
 		return fmt.Errorf("topic required for root posts")
 	}
-	if uint64(len(topic)) < minLen {
-		return fmt.Errorf("topic below minimum: %d < %d", len(topic), minLen)
-	}
-	if uint64(len(topic)) > maxLen {
-		return fmt.Errorf("topic exceeds limit: %d > %d", len(topic), maxLen)
-	}
-	for _, c := range topic {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
-			return fmt.Errorf("topic must be lowercase alphanumeric")
-		}
-	}
-	return nil
+	return types.ValidateCommunitySlug(topic, minLen, maxLen)
 }
 
 // validateBlockedTopicPattern allows exact topics or glob patterns with * wildcards.

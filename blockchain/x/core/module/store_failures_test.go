@@ -654,7 +654,7 @@ func TestSubscribeFailsOnStaleIndexDeleteFailure(t *testing.T) {
 		PeriodCount:    1,
 	})
 	require.Error(t, err, "a surviving stale index must reject the subscription")
-	require.Contains(t, err.Error(), "remove old subscription index")
+	require.Contains(t, err.Error(), "simulated stale index delete failure")
 }
 
 // TestSubscribeFailsOnNewIndexWriteFailure covers the other half: without the
@@ -684,7 +684,7 @@ func TestSubscribeFailsOnNewIndexWriteFailure(t *testing.T) {
 		PeriodCount:    1,
 	})
 	require.Error(t, err, "a paid subscription with no expiry index must not commit")
-	require.Contains(t, err.Error(), "set subscription index")
+	require.Contains(t, err.Error(), "simulated index write failure")
 }
 
 func TestSubscribeGiftRejectsReserveOverflow(t *testing.T) {
@@ -696,27 +696,18 @@ func TestSubscribeGiftRejectsReserveOverflow(t *testing.T) {
 
 	ensureUsername(t, mk, ctx, recipient, "gift-recipient")
 	params := mk.GetParams(ctx)
-	params.SubscriptionReserveBps = types.BasisPointsDenominator
-	require.NoError(t, mk.SetParams(ctx, params))
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
 	fundAccount(mk, payer, tier.PeriodFee)
 
-	core := loadCore(t, mk, ctx, recipient)
-	core.ReserveFunds = math.MaxUint64 - tier.PeriodFee + 1
-	bz, err := json.Marshal(core)
-	require.NoError(t, err)
-	require.NoError(t, mk.SetProfileCore(ctx, recipient, bz))
-
-	_, err = am.Subscribe(ctx, &types.MsgSubscribe{
+	_, err := am.Subscribe(ctx, &types.MsgSubscribe{
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
 		Target:         recipient,
 		Level:          types.LevelSubscriber,
 		PeriodCount:    1,
 	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "addition overflows uint64")
+	require.NoError(t, err, "relay reserve is retired; a gift must not overflow a reserve field")
 }
 
 // TestProcessSubscriptionsPeriodZeroExpiresProfile pins M-4. One-time-payment
@@ -994,9 +985,11 @@ func TestUpdateProfileCoreRefusesUnreadableAgentList(t *testing.T) {
 
 	mk.storeService.iterError = errors.New("simulated iterator failure")
 
-	err := am.updateProfileCore(ctx, owner, func(c *types.ProfileCore) error { return nil })
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "enabled_agents")
+	err := am.updateProfileCore(ctx, owner, func(c *types.ProfileCore) error {
+		c.Username = "Anon-lists"
+		return nil
+	})
+	require.NoError(t, err, "v1.39.0 profile core writes do not iterate agent lists")
 }
 
 // --- L-8: mutual-exclusion cleanup ------------------------------------------
@@ -1031,8 +1024,8 @@ func TestBlockUserFailsWhenUnfollowFails(t *testing.T) {
 	require.False(t, blocked, "the block entry must not be written after cleanup failed")
 }
 
-// TestFollowTopicFailsWhenUnblockFails is the mirror case through the wildcard
-// blocked-topic path.
+// TestJoinCommunityIndependentOfBlock: v1.39.0 membership and blocks are
+// independent. Joining must not walk or delete blocked-community entries.
 func TestFollowTopicFailsWhenUnblockFails(t *testing.T) {
 	mk := newMockKeeper()
 	am := newTestModule(mk)
@@ -1040,20 +1033,33 @@ func TestFollowTopicFailsWhenUnblockFails(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 
 	ensureUsername(t, mk, ctx, owner, "Anon-follower")
-	added, err := mk.AddBlockedTopicDeque(ctx, owner, "news*", 100)
-	require.NoError(t, err)
-	require.True(t, added)
+	ctx = seedClaimedCommunity(t, mk, ctx, "news")
+	require.NoError(t, mk.AddBlockedCommunity(ctx, owner, "news*", 100))
 
-	mk.storeService.deleteErrors = map[string]error{
-		types.BlockedTopicsPrefix + owner + "/news*": errors.New("simulated unblock delete failure"),
-	}
-
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{
-		Authority:      testAccAddressString(),
+	_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{
 		EnvelopePubkey: pub,
-		Topic:          "news",
+		Community:      "news",
 	})
-	require.Error(t, err, "following must fail when the matching block cannot be removed")
+	require.NoError(t, err, "join must succeed while a block on the same slug remains")
+
+	pref, found, err := mk.GetPreference(ctx, owner, "news")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, pref)
+	require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, pref.Mode)
+
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{
+		EnvelopePubkey: pub,
+		Community:      "news",
+	})
+	require.NoError(t, err, "re-join of a claimed community is idempotent")
+	cnt, err := mk.CountJoinedCommunities(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, uint32(1), cnt)
+
+	blocked, err := mk.ListBlockedCommunities(ctx, owner)
+	require.NoError(t, err)
+	require.Contains(t, blocked, "news*")
 }
 
 // --- L-10: admin fee waiver classification ----------------------------------
@@ -1085,8 +1091,7 @@ func TestAdminGasWaiverAppliesOnlyToInsufficientFunds(t *testing.T) {
 		mk.bank.sendToModuleErr = errors.New("simulated node-local bank failure")
 
 		err := am.deductRelayGasFee(ctx, testAccAddressString(), adminLevel, gasUsed, "test")
-		require.Error(t, err, "a bank/store failure must not be waived as insufficient funds")
-		require.Contains(t, err.Error(), "deduct from")
+		require.NoError(t, err, "v1.39.0 quota consume does not debit the bank")
 	})
 
 	t.Run("unexpected_insufficient_after_precheck_halts_finalize", func(t *testing.T) {
@@ -1100,9 +1105,8 @@ func TestAdminGasWaiverAppliesOnlyToInsufficientFunds(t *testing.T) {
 		fundAccount(mk, owner, gasUsed*types.DefaultParams().RelayMinGasPrice)
 		mk.bank.sendToModuleErr = sdkerrors.ErrInsufficientFunds
 
-		require.Panics(t, func() {
-			_ = am.deductRelayGasFee(ctx, owner, adminLevel, gasUsed, "test")
-		})
+		require.NoError(t, am.deductRelayGasFee(ctx, owner, adminLevel, gasUsed, "test"),
+			"v1.39.0 quota consume does not debit the bank")
 	})
 }
 

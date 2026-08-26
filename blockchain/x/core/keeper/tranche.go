@@ -139,6 +139,7 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 		var amount sdkmath.Int
 		if epoch == last {
 			amount = remaining
+			remaining = sdkmath.ZeroInt()
 		} else {
 			amount = sdkmath.NewIntFromUint64(creatorAmt).Mul(sdkmath.NewInt(overlap)).Quo(dur)
 			remaining = remaining.Sub(amount)

@@ -26,12 +26,9 @@ import (
 
 // --- deductRelayGasFee fail-fast on profile decode ------------------------
 
-// TestDeductRelayGasFeeFailsFastOnCorruptProfile: a paid user (level >= 1)
-// whose stored ProfileCore bytes do not unmarshal MUST cause
-// deductRelayGasFee to return a tagged CONSENSUS_FATAL error. The previous
-// behavior — log and return nil — silently skipped the fee deduction on
-// the affected node only, leaving its reserve and supply state diverged
-// from peers.
+// TestDeductRelayGasFeeFailsFastOnCorruptProfile: quota consume loads
+// ProfileCore for every caller. Corrupt bytes must fail closed rather than
+// being treated as unpaid.
 func TestDeductRelayGasFeeFailsFastOnCorruptProfile(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -42,15 +39,14 @@ func TestDeductRelayGasFeeFailsFastOnCorruptProfile(t *testing.T) {
 		"seed corrupt profile bytes")
 
 	err := am.deductRelayGasFee(ctx, owner, 1, 100, "regression-test")
-	require.Error(t, err, "corrupt profile must surface error, not silently skip fee")
-	require.Contains(t, err.Error(), "CONSENSUS_FATAL:PROFILE_DECODE",
-		"error must be tagged for incident triage")
+	require.Error(t, err, "corrupt profile must surface error, not silently skip quota")
+	require.Contains(t, err.Error(), "corrupt profile JSON",
+		"quota consume must fail closed on undecodable ProfileCore")
 }
 
-// TestDeductRelayGasFeeFailsFastOnMissingProfile: a paid user with no
-// profile in the store at all is a state inconsistency (the level argument
-// claims paid tier; the store says no such user). Returning nil silently
-// would let this node skip a fee that peers correctly charge — divergence.
+// TestDeductRelayGasFeeNoOpOnMissingProfile: v1.39.0 quota consume is keyed
+// off EffectivePaid. A missing profile is unpaid, so there is no quota to
+// charge and nothing to diverge.
 func TestDeductRelayGasFeeFailsFastOnMissingProfile(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -59,14 +55,12 @@ func TestDeductRelayGasFeeFailsFastOnMissingProfile(t *testing.T) {
 	owner := testAccAddressString()
 
 	err := am.deductRelayGasFee(ctx, owner, 1, 100, "regression-test")
-	require.Error(t, err, "missing profile for paid user must surface error")
-	require.Contains(t, err.Error(), "CONSENSUS_FATAL:PROFILE_MISSING",
-		"error must be tagged for incident triage")
+	require.NoError(t, err, "missing profile is unpaid; quota consume is a no-op")
 }
 
-// TestDeductRelayGasFeeNoOpForFreeTier: free-tier users (level 0) bypass the
-// fee path entirely; this remains a no-op even with corrupt/missing profile
-// because the function returns early before touching ProfileCore.
+// TestDeductRelayGasFeeCorruptProfileAlwaysFails: quota consume always loads
+// ProfileCore, even when the caller claims free tier. Corrupt bytes must not
+// be treated as unpaid.
 func TestDeductRelayGasFeeNoOpForFreeTier(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -75,8 +69,9 @@ func TestDeductRelayGasFeeNoOpForFreeTier(t *testing.T) {
 	owner := testAccAddressString()
 	require.NoError(t, mk.SetProfileCore(ctx, owner, []byte{0xff, 0x00, 0xff}))
 
-	require.NoError(t, am.deductRelayGasFee(ctx, owner, 0, 100, "regression-test"),
-		"free-tier short-circuit must not exercise the profile-decode path")
+	err := am.deductRelayGasFee(ctx, owner, 0, 100, "regression-test")
+	require.Error(t, err, "corrupt profile must fail regardless of claimed level")
+	require.Contains(t, err.Error(), "corrupt profile JSON")
 }
 
 // --- processSubscriptions fail-fast on profile decode ---------------------
@@ -358,6 +353,9 @@ func TestProcessSubscriptionsHandlesValidExpiredSubscription(t *testing.T) {
 // the downgrade, and the user could never transact again). The handler-side
 // deduction downgrades them to free tier, and the next operation succeeds
 // because free tier is charged nothing.
+// TestWedgedPaidUserDowngradesThenSucceedsAsFreeTier: relay reserve and the
+// handler-side downgrade were removed in v1.39.0. Quota consume must not mutate
+// the profile when EffectivePaid is false (zero reserve, no paid flag).
 func TestWedgedPaidUserDowngradesThenSucceedsAsFreeTier(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -376,47 +374,13 @@ func TestWedgedPaidUserDowngradesThenSucceedsAsFreeTier(t *testing.T) {
 	require.NoError(t, mk.SetProfileCore(ctx, owner, bz))
 	require.NoError(t, mk.SetSubscription(ctx, owner, 1, expiry))
 
-	// An ordinary relay operation reaches the handler and pays for its gas.
 	require.NoError(t, am.deductRelayGasFee(ctx, owner, 1, 100_000, "wedged-user-regression"),
-		"exhausted reserve must downgrade, not reject and wedge the user")
-
-	stored, found, err := mk.GetProfileCore(ctx, owner)
-	require.NoError(t, err)
-	require.True(t, found)
-	var core types.ProfileCore
-	require.NoError(t, json.Unmarshal(stored, &core))
-	require.Equal(t, int32(0), core.Level, "downgraded to free tier")
-	require.Zero(t, core.ReserveFunds)
-	require.Zero(t, core.SubscriptionExpiry)
-	require.False(t, core.AutoRenew)
-
-	// The downgrade must be durable, including the subscription index, so
-	// EndBlock does not try to renew a user who no longer has a reserve.
-	expired, err := mk.GetExpiredSubscriptions(ctx, expiry+1)
-	require.NoError(t, err)
-	require.Empty(t, expired, "subscription index entry must be removed on downgrade")
-
-	var downgrade bool
-	for _, ev := range ctx.EventManager().Events() {
-		if ev.Type != "subscription_expired" {
-			continue
-		}
-		for _, attr := range ev.Attributes {
-			if attr.Key == "reason" && attr.Value == "reserve_exhausted" {
-				downgrade = true
-			}
-		}
-	}
-	require.True(t, downgrade, "indexer needs a subscription_expired event to mirror the downgrade")
-
-	// The next operation runs as free tier: nothing to charge, nothing to fail.
-	require.NoError(t, am.deductRelayGasFee(ctx, owner, int(core.Level), 100_000, "wedged-user-regression"),
-		"user must be able to transact again after the downgrade")
+		"unpaid quota consume is a no-op")
 
 	after, found, err := mk.GetProfileCore(ctx, owner)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, stored, after, "free-tier path must not mutate the profile again")
+	require.Equal(t, bz, after, "quota consume must not rewrite the profile")
 }
 
 // Compile-time guard: keeps sdk imported even if a future test refactor

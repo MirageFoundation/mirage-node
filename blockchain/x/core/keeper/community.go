@@ -36,10 +36,20 @@ func (k Keeper) SetCurationTeam(ctx sdk.Context, t *types.CurationTeam) error {
 }
 
 func (k Keeper) GetPreference(ctx sdk.Context, owner, slug string) (*types.CommunityPreference, bool, error) {
+	key := types.KeyJoin(owner, slug)
+	has, err := k.storeHas(ctx, key)
+	if err != nil || !has {
+		return nil, has, err
+	}
+	bz, err := k.storeGet(ctx, key)
+	if err != nil {
+		return nil, false, err
+	}
 	var p types.CommunityPreference
-	found, err := k.getProto(ctx, types.KeyJoin(owner, slug), &p)
-	if err != nil || !found {
-		return nil, found, err
+	if len(bz) > 0 {
+		if err := k.cdc.Unmarshal(bz, &p); err != nil {
+			return nil, false, err
+		}
 	}
 	return &p, true, nil
 }

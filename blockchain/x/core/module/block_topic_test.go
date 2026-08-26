@@ -68,7 +68,8 @@ func TestValidateTopic(t *testing.T) {
 		{"too short", "a", 2, 10, true, "below minimum"},
 		{"too long", "abcdefghijk", 2, 10, true, "exceeds limit"},
 		{"uppercase", "Abc", 2, 10, true, "lowercase alphanumeric"},
-		{"symbol", "ab-c", 2, 10, true, "lowercase alphanumeric"},
+		{"internal hyphen", "ab-c", 2, 10, false, ""},
+		{"consecutive hyphens", "ab--c", 2, 10, true, "consecutive hyphens"},
 		{"empty", " ", 2, 10, true, "topic required"},
 	}
 
@@ -105,6 +106,7 @@ func TestValidateBlockedTopicPattern(t *testing.T) {
 		{"wildcard only star", "*", 1, 10, true, "must contain alphanumeric"},
 		{"wildcard double star", "beer**", 2, 10, true, "consecutive wildcards"},
 		{"wildcard uppercase", "Beer*", 2, 10, true, "lowercase alphanumeric"},
+		{"hyphenated slug", "foo-bar", 2, 10, false, ""},
 	}
 
 	for _, tt := range tests {
@@ -201,7 +203,7 @@ func TestBlockTopicInvalidTopic(t *testing.T) {
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
 		Authority:      "not-gov",
 		EnvelopePubkey: pub,
-		Topic:          "bad-topic",
+		Topic:          "bad_topic",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid topic")
