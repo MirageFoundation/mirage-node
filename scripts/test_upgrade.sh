@@ -320,6 +320,17 @@ supervisor_ready() {
   docker exec "$CONTAINER" test -S /var/run/supervisor.sock
 }
 
+backend_ready() {
+  docker exec "$CONTAINER" python3 -c '
+import urllib.request, sys
+try:
+    with urllib.request.urlopen("http://127.0.0.1:80/api/get_parameters", timeout=5) as resp:
+        sys.exit(0 if resp.status == 200 else 1)
+except Exception:
+    sys.exit(1)
+'
+}
+
 write_run_job() {
   mkdir -p "$STATUS_HOST"
   cat > "${STATUS_HOST}/run_job.sh" <<'EOF'
@@ -563,6 +574,7 @@ wait_chain_advancing() {
 launch_jobs() {
   write_run_job
   wait_until 60 "supervisord socket" supervisor_ready
+  wait_until 90 "backend /api/get_parameters" backend_ready
 
   log "launching detached docker exec jobs: blockchain, backend, verify"
   docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" blockchain python3 tests/test_blockchain.py

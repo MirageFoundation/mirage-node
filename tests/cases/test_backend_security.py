@@ -993,7 +993,7 @@ def test_relay_signing(backend: str):
                 if not messages:
                     continue
                 msg = messages[0]
-    if str(msg.get("@type", "")) == "/mirage.core.v1.MsgJoinCommunity" and msg.get("community") == topic:
+                if str(msg.get("@type", "")) == "/mirage.core.v1.MsgJoinCommunity" and msg.get("community") == topic:
                     tx = candidate
                     _debug(f"relay_signing found tx at height={height}")
                     break
