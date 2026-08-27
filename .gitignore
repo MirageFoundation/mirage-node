@@ -52,6 +52,9 @@ htmlcov/
 
 # Frontend
 web/frontend/build/
+# Any scratch output dir from `vite build --outDir`, which is how 39k lines of
+# build artifacts once reached a commit.
+web/frontend/build-*/
 web/frontend/node_modules/
 
 # Blockchain data

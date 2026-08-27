@@ -1,4 +1,0 @@
-package=argon2-browser@1.18.0
-synced_at=2026-08-09T21:25:46.369Z
-argon2-bundled.min.js sha256=77c64b946baf1a5116dc591f4b9965d636b1b455f75edd2d4a587cb75e01687b bytes=45921
-argon2.wasm sha256=0c2149886c13e4eae4a6ca25ee71d47423c5c8740a874cf04ff816d1b2c901d7 bytes=25725
