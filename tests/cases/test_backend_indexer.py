@@ -1792,7 +1792,7 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
         with psycopg.connect(scoped_url, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "INSERT INTO blocked_topics(owner, target, position) VALUES('u', %s, %s)",
+                    "INSERT INTO blocked_communities(owner, target, position) VALUES('u', %s, %s)",
                     [("100%", 1), ("a_b", 2), ("spo*", 3)],
                 )
         wildcard_bugs = []

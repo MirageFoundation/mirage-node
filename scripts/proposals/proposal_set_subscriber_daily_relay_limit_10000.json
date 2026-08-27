@@ -1,0 +1,21 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgUpdateParams",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "params": {
+                "subscriber_daily_relay_limit": "10000"
+            },
+            "update_mask": {
+                "paths": [
+                    "subscriber_daily_relay_limit"
+                ]
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Set subscriber daily relay limit",
+    "summary": "Raise the subscriber daily relay limit to 10,000 for transaction-heavy test runs.",
+    "expedited": true
+}

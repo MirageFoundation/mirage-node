@@ -36,6 +36,7 @@ STATUS_HOST="${HOME}/.mirage/upgrade_tests"
 STATUS_CTN="/root/.mirage/upgrade_tests"
 PROPOSAL_UPGRADE="${ROOT}/scripts/proposals/proposal_upgrade.json"
 PROPOSAL_POW="${ROOT}/scripts/proposals/proposal_set_pow_message_limit_9999999.json"
+PROPOSAL_RELAY_LIMIT="${ROOT}/scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json"
 UPGRADES_GO="${ROOT}/blockchain/app/upgrades.go"
 JOBS=(blockchain backend verify)
 
@@ -266,19 +267,19 @@ print(int(data.get('height') or data.get('Height') or 0))
 "
 }
 
-pow_message_limit() {
-  ctn_python '
+chain_param() {
+  ctn_python "
 import json, urllib.request, sys
-url = "http://127.0.0.1:1317/mirage/core/v1/params"
-req = urllib.request.Request(url, headers={"Accept": "application/json"})
+url = 'http://127.0.0.1:1317/mirage/core/v1/params'
+req = urllib.request.Request(url, headers={'Accept': 'application/json'})
 try:
     with urllib.request.urlopen(req, timeout=5) as resp:
         data = json.load(resp)
 except Exception as e:
-    print(f"params query failed: {e}", file=sys.stderr)
+    print(f'params query failed: {e}', file=sys.stderr)
     sys.exit(1)
-print(int(data["params"]["pow_message_limit"]))
-'
+print(int(data['params']['$1']))
+"
 }
 
 wait_until() {
@@ -522,13 +523,14 @@ wait_applied_and_live() {
   die "timed out waiting for ${name} to apply and produce blocks"
 }
 
-wait_pow_limit() {
+wait_param_limit() {
+  local name="$1" want="$2"
   local start=$SECONDS limit
-  log "waiting for pow_message_limit=9999999 (budget ${POW_BUDGET_SEC}s)"
+  log "waiting for ${name}=${want} (budget ${POW_BUDGET_SEC}s)"
   while (( SECONDS - start < POW_BUDGET_SEC )); do
-    if limit=$(pow_message_limit); then
-      log "pow_message_limit=${limit}"
-      if [[ "$limit" -eq 9999999 ]]; then
+    if limit=$(chain_param "$name"); then
+      log "${name}=${limit}"
+      if [[ "$limit" -eq "$want" ]]; then
         return 0
       fi
     else
@@ -536,22 +538,32 @@ wait_pow_limit() {
     fi
     sleep 3
   done
-  die "timed out waiting for pow_message_limit=9999999"
+  die "timed out waiting for ${name}=${want}"
 }
 
-# Raise the limit only when it is not already raised. MsgUpdateParams rejects an
+# Raise a limit only when it is not already raised. MsgUpdateParams rejects an
 # update whose mask selects a field it would not change ("update_mask does not
 # change any selected field"), so re-proposing against an already-raised chain
 # fails the proposal and, under set -e, would kill the pipeline for no reason.
-ensure_pow_limit() {
+ensure_param_limit() {
+  local name="$1" want="$2" proposal="$3"
   local limit
-  if limit=$(pow_message_limit) && [[ "$limit" -eq 9999999 ]]; then
-    log "pow_message_limit already 9999999; skipping the proposal"
+  if limit=$(chain_param "$name") && [[ "$limit" -eq "$want" ]]; then
+    log "${name} already ${want}; skipping the proposal"
     return 0
   fi
-  log "raise PoW message limit for the test suites (currently ${limit:-unknown})"
-  python3 "${ROOT}/scripts/submit_proposal.py" local "$PROPOSAL_POW" --no-confirm
-  wait_pow_limit
+  log "raise ${name} for the test suites (currently ${limit:-unknown})"
+  python3 "${ROOT}/scripts/submit_proposal.py" local "$proposal" --no-confirm
+  wait_param_limit "$name" "$want"
+}
+
+# The transaction-heavy suites run as a handful of wallets, so a subscriber
+# spends far more than a real user's share of the daily relay quota in one run.
+# Left at the production default the suite starts failing partway through with
+# subscriber_daily_limit_reached, which says nothing about the release.
+ensure_test_limits() {
+  ensure_param_limit pow_message_limit 9999999 "$PROPOSAL_POW"
+  ensure_param_limit subscriber_daily_relay_limit 10000 "$PROPOSAL_RELAY_LIMIT"
 }
 
 # Liveness for a release with no plan to apply: the chain must gain height on
@@ -602,6 +614,7 @@ EOF
 run_pipeline() {
   [[ -f "$PROPOSAL_UPGRADE" ]] || die "missing ${PROPOSAL_UPGRADE}"
   [[ -f "$PROPOSAL_POW" ]] || die "missing ${PROPOSAL_POW}"
+  [[ -f "$PROPOSAL_RELAY_LIMIT" ]] || die "missing ${PROPOSAL_RELAY_LIMIT}"
   preflight_clean_tree
   activate_conda
 
@@ -645,7 +658,7 @@ run_pipeline() {
   fi
 
   set_stage pow
-  ensure_pow_limit
+  ensure_test_limits
 
   launch_jobs
   set_stage launched

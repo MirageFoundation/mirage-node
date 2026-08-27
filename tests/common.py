@@ -492,8 +492,21 @@ def _check_local_docker() -> bool:
     return _INSIDE_CONTAINER and socket.gethostname().strip().lower() == "testnet"
 
 
+# Params the transaction-heavy suites need raised, and the proposal that raises
+# each. A suite runs hundreds of transactions from a handful of wallets, so both
+# the PoW difficulty ramp and a subscriber's daily relay quota are spent far
+# faster than any real user would spend them.
+_REQUIRED_TEST_LIMITS = {
+    "pow_message_limit": (9_999_999, "scripts/proposals/proposal_set_pow_message_limit_9999999.json"),
+    "subscriber_daily_relay_limit": (
+        10_000,
+        "scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json",
+    ),
+}
+
+
 def _check_test_pow_limit() -> tuple[bool, str]:
-    """Require the local anti-spam limit used by the transaction-heavy suites."""
+    """Require the local anti-spam limits used by the transaction-heavy suites."""
     code, out = _run_miraged(
         ["q", "core", "params", "--home", "/root/.mirage/node", "--output", "json"],
         timeout=15,
@@ -507,12 +520,13 @@ def _check_test_pow_limit() -> tuple[bool, str]:
         params = json.loads(out[json_start:])
     except Exception as exc:
         return False, f"params query returned invalid JSON: {exc}"
-    try:
-        value = int(params["pow_message_limit"])
-    except (KeyError, TypeError, ValueError):
-        return False, f"pow_message_limit missing or invalid: {str(params)[:200]}"
-    if value != 9_999_999:
-        return False, f"pow_message_limit={value}, expected 9999999"
+    for name, (want, proposal) in _REQUIRED_TEST_LIMITS.items():
+        try:
+            value = int(params[name])
+        except (KeyError, TypeError, ValueError):
+            return False, f"{name} missing or invalid: {str(params)[:200]}"
+        if value != want:
+            return False, f"{name}={value}, expected {want} (submit {proposal})"
     return True, ""
 
 
@@ -1131,13 +1145,11 @@ def run_suite(
 
     pow_ready, pow_error = _check_test_pow_limit()
     if not pow_ready:
-        print(f"\n{_COLOR_RED}ABORT: Local test PoW limit is not configured.{_COLOR_RESET}")
+        print(f"\n{_COLOR_RED}ABORT: Local test limits are not configured.{_COLOR_RESET}")
         print(f"  {pow_error}")
-        print("  From the host, submit this proposal first:")
-        print(
-            "  python3 scripts/submit_proposal.py local "
-            "scripts/proposals/proposal_set_pow_message_limit_9999999.json"
-        )
+        print("  From the host, submit these proposals first:")
+        for _, proposal in _REQUIRED_TEST_LIMITS.values():
+            print(f"  python3 scripts/submit_proposal.py local {proposal}")
         return 1
 
     if set(to_run).issubset(walletless_categories):

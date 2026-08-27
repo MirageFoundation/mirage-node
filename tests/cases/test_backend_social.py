@@ -211,7 +211,12 @@ def test_social_graph(backend: str):
     else:
         _fail("social.follow_topic succeeds", f"resp={resp}")
 
-    time.sleep(2)
+    # The leave below is simulated against committed state, so a fixed sleep
+    # raced the join into "not joined" whenever the block was slow.
+    if txh:
+        deliver = _wait_tx_deliver(txh)
+        if deliver and deliver[0] != 0:
+            _fail("social.follow_topic delivered", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
 
     # 5.5 unfollow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=False)
