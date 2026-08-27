@@ -912,8 +912,11 @@ class MessageProcessor:
         relayer = str(msg_dict.get("authority", "") or "").strip().lower()
         override = str(msg_dict.get("override", "") or "").strip().lower()
         target = str(msg_dict.get("target", "") or "").strip().lower()
-        topic = str(msg_dict.get("topic", "") or "")
-        logger.info("MsgEdit topic=%s", topic)
+        # MsgEdit carries the slug as `community`; reading the retired `topic` key
+        # made every value empty, so a root's community edit was dropped from the
+        # index and never triggered the standing re-attribution below.
+        topic = str(msg_dict.get("community", "") or "")
+        logger.info("MsgEdit community=%s", topic)
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
         raw_tag = str(msg_dict.get("tag", "") or "")

@@ -60,6 +60,14 @@ OPEN_BROWSING_ENABLED = require_bool_env("OPEN_BROWSING_ENABLED")
 QUESTS_ENABLED = require_bool_env("QUESTS_ENABLED")
 QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
 ACHIEVEMENTS_ENABLED = require_bool_env("ACHIEVEMENTS_ENABLED")
+if QUESTS_ENABLED or QUESTS_PAYOUTS_ENABLED or ACHIEVEMENTS_ENABLED:
+    # v1.39 replaced the quest board with the creator pool and dropped the quest,
+    # achievement and pending-reward tables. Leaving these on would run every
+    # tracking write against tables that no longer exist.
+    raise ValueError(
+        "QUESTS_ENABLED, QUESTS_PAYOUTS_ENABLED and ACHIEVEMENTS_ENABLED must be false: "
+        "quests and achievements were replaced by the creator pool in v1.39"
+    )
 PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
 
 # Quest assignment shape. Every path that assigns or tracks quests reads these;

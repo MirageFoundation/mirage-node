@@ -1553,7 +1553,10 @@ def test_invite_code_hygiene(backend):
 
     unguarded = [sorted(g) for g in guard_sets if not {"is_new_user", "code"} <= set(g)]
     if not guard_sets:
-        _skip("invite_code.referral_payout_registration_only", f"no call to {target} found")
+        # v1.39.0 removed the referral payout with the invite tables. No call site
+        # is the strongest form of "cannot fire outside registration", so this is a
+        # pass, not an untestable condition — and this category must not skip.
+        _pass("invite_code.referral_payout_registration_only", call_sites=0)
     elif unguarded:
         _fail(
             "invite_code.referral_payout_registration_only",

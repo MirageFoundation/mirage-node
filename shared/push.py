@@ -479,13 +479,13 @@ def _truncate(text: str, max_len: int = 150) -> str:
 
 
 def _recipient_blocks_actor(recipient: str, actor: str) -> bool:
-    """True if ``recipient`` (or an agent they enabled) has blocked ``actor``.
+    """True if ``recipient`` has blocked ``actor``.
 
-    Mirrors the inbox's own filter, including agent-level blocks. The in-app inbox
-    has always dropped items from blocked actors; push delivery had no reference to
-    any blocked list at all, so replying to someone who blocked you or writing
-    ``@them`` in any post put attacker-authored text on their lock screen while
-    they saw nothing in-app to report.
+    Mirrors the inbox's own filter. The in-app inbox has always dropped items from
+    blocked actors; push delivery had no reference to any blocked list at all, so
+    replying to someone who blocked you or writing ``@them`` in any post put
+    attacker-authored text on their lock screen while they saw nothing in-app to
+    report.
     """
     recipient_lc = (recipient or "").strip().lower()
     actor_lc = (actor or "").strip().lower()
@@ -498,14 +498,10 @@ def _recipient_blocks_actor(recipient: str, actor: str) -> bool:
                     """
                     SELECT 1
                     FROM blocked_users
-                    WHERE LOWER(target) = %s
-                      AND (
-                        LOWER(owner) = %s
-                        OR LOWER(owner) IN (SELECT LOWER(target) FROM enabled_agents WHERE LOWER(owner) = %s)
-                      )
+                    WHERE LOWER(target) = %s AND LOWER(owner) = %s
                     LIMIT 1
                     """,
-                    (actor_lc, recipient_lc, recipient_lc),
+                    (actor_lc, recipient_lc),
                 )
                 return cur.fetchone() is not None
     except Exception as exc:  # noqa: BLE001

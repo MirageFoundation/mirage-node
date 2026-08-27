@@ -39,14 +39,12 @@ from tests.common import (
 #                 (must not land _guard_push_request on a read path)
 # SIGNED_IDENTITY signature plus the push-nonce replay guard (writes)
 # SIGNED_ADMIN    signature plus an admin level check
-# DISABLED        feature gated off; handler must 404 while the flag is false
 # DEBUG_ONLY      must not be reachable in production
 PUBLIC = "PUBLIC"
 ENVELOPE = "ENVELOPE"
 SIGNED_READ = "SIGNED_READ"
 SIGNED_IDENTITY = "SIGNED_IDENTITY"
 SIGNED_ADMIN = "SIGNED_ADMIN"
-DISABLED = "DISABLED"
 DEBUG_ONLY = "DEBUG_ONLY"
 
 # Intended policy for every registered route. A new route must be added here
@@ -55,7 +53,6 @@ DEBUG_ONLY = "DEBUG_ONLY"
 ROUTE_POLICY: Dict[str, str] = {
     # --- Public chain / node data -------------------------------------------
     "/api/get_address_from_username": PUBLIC,
-    "/api/get_agents": PUBLIC,
     "/api/get_chain_config": PUBLIC,
     "/api/get_circulating_supply": PUBLIC,
     "/api/get_circulation_stats": PUBLIC,
@@ -95,26 +92,13 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_inbox": PUBLIC,  # reply content is on chain
     "/api/get_preferences": PUBLIC,  # indexer DB (chain-derived)
     "/api/get_user_blocked": PUBLIC,  # indexer DB (chain-derived)
-    "/api/referrals/precheck": PUBLIC,  # pre-signup; takes username, no identity yet
     # Backend-owned but not credentials and not actions. Deliberate disclosure.
-    "/api/referrals/summary": PUBLIC,
     "/api/rewards/achievements": PUBLIC,
     "/api/rewards/summary": PUBLIC,
-    # --- Invite codes (feature-gated) ---------------------------------------
-    # REGISTRATION_INVITE_CODE_REQUIRED=false fleet-wide: get_invite_codes
-    # returns an empty list (installed clients still poll it and a 404 broke
-    # their Invites screen), validate_invite_code 404s. When the flag is true,
-    # get_invite_codes requires SIGNED_READ (bearer credentials);
-    # validate_invite_code stays callable for pre-signup visitors (no owner
-    # disclosure). Classified DISABLED so the parity test does not require
-    # live auth markers while the feature is off.
-    "/api/get_invite_codes": DISABLED,
-    "/api/validate_invite_code": DISABLED,
     # --- Authenticated writes / identity-bound state ------------------------
     "/api/rewards/claim": SIGNED_IDENTITY,  # multiplier applied at claim time
     "/api/mark_inbox_viewed": SIGNED_IDENTITY,
     "/api/seen_posts": SIGNED_IDENTITY,
-    "/api/referrals/precheck_opt_in": SIGNED_IDENTITY,
     "/api/core/register_push_token": SIGNED_IDENTITY,
     "/api/core/unregister_push_token": SIGNED_IDENTITY,
     # --- Admin (H-1) --------------------------------------------------------
@@ -193,7 +177,6 @@ _AUTH_CALLS = {
 # What each class requires of the detected marker set.
 _REQUIRED: Dict[str, Set[str]] = {
     PUBLIC: set(),
-    DISABLED: set(),
     DEBUG_ONLY: set(),
     ENVELOPE: {"nonce"},
     SIGNED_READ: {"sig"},
@@ -388,7 +371,7 @@ def test_reward_claim_authz(backend):
 
 
 # Reads that were overstated as H-2 private. Kept here as a documentation
-# assertion: they must remain PUBLIC (or DISABLED) so a future change that
+# assertion: they must remain PUBLIC so a future change that
 # re-gates them as SIGNED_IDENTITY without a real secret to protect fails the
 # parity test's intent rather than silently "fixing" a theater gate.
 _PUBLIC_BY_DESIGN = (
@@ -403,15 +386,12 @@ _PUBLIC_BY_DESIGN = (
 def test_cross_user_reads(backend):
     """H-2 reclassification: chain-derived / deliberate-disclosure reads stay public.
 
-    While REGISTRATION_INVITE_CODE_REQUIRED is false, get_invite_codes serves an
-    empty list and validate_invite_code 404s.
+    Invite codes and referrals were retired in v1.39.0 and must answer 410.
     """
     victim = str(_generate_wallet().address())
 
     for name, path, key in _PUBLIC_BY_DESIGN:
-        # referrals/precheck takes a username, not an address — use a dummy.
-        params = {"username": "nobody"} if name == "referrals_precheck" else {key: victim}
-        code, resp = _get(f"{backend}{path}", params=params)
+        code, resp = _get(f"{backend}{path}", params={key: victim})
         if code == 200:
             _pass(f"cross_user_read.{name}_public", code=code)
         elif code == 503:

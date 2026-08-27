@@ -1164,79 +1164,26 @@ def start_with_entrypoint(image_ref: str):
         status("All services running")
 
 
-REWARDS_POOL_KEY = "rewards_pool"
-# Quest payouts are single- to double-digit MIRAGE, so 5,000 covers a long run of
-# test claims. Kept deliberately small: this comes out of the validator account,
-# which is also the faucet the test suite funds its wallets from (~2.3M MIRAGE per
-# full setup), so an oversized pool starves wallet setup.
-LOCAL_POOL_FUNDING_UMIRAGE = 5_000_000_000
-
-
-def _extract_mirage_addr(text: str) -> str:
-    """Pull a mirage1 address out of miraged output.
-
-    miraged prints a `core/types: registered msg interfaces` banner before its
-    real output, so the address cannot be read as the whole of stdout.
-    """
-    match = re.search(r"\bmirage1[0-9a-z]{20,}\b", text or "")
-    return match.group(0) if match else ""
-
-
-def _miraged_key_address(key_name: str) -> str:
-    miraged = get_container_miraged_path()
-    out = run(
-        [
-            "bash",
-            "-lc",
-            f"docker exec mirage {miraged} keys show {key_name} -a "
-            f"--keyring-backend test --home /root/.mirage/node 2>/dev/null || true",
-        ],
-        capture=True,
-        check=False,
-    )
-    return _extract_mirage_addr(out)
-
-
-def enable_local_quests_payouts() -> str:
-    """Enable quests, payouts and debug endpoints, and provision a rewards pool key.
+def configure_local_backend_env() -> None:
+    """Point the container's backend.env at the v1.39 feature set.
 
     Local testnet only — this patches the container's backend.env, never a
-    deployed one. Without it the C-2 double-pay test seeds a pending reward,
-    nobody gets paid because payouts are off, and the concurrency race the test
-    exists to measure silently never runs.
+    deployed one. Quests, payouts and achievements were replaced by the creator
+    pool, and the backend refuses to start with any of them on, so the reset must
+    not leave the stale `true` values a pre-v1.39 backend.env carries.
 
-    Must run after prepare_local_node() (which puts the keyring in its final
-    place) and before start_with_entrypoint(), so the backend reads the pool
-    address on its first start and needs no restart.
-
-    Returns the rewards pool address.
+    Must run before start_with_entrypoint(), so the backend reads the final
+    values on its first start and needs no restart.
     """
-    status("Enabling quests + payouts for local testnet ...")
-    miraged = get_container_miraged_path()
-
-    pool_addr = _miraged_key_address(REWARDS_POOL_KEY)
-    if not pool_addr:
-        run(
-            [
-                "bash",
-                "-lc",
-                f"docker exec mirage {miraged} keys add {REWARDS_POOL_KEY} "
-                f"--keyring-backend test --home /root/.mirage/node",
-            ]
-        )
-        pool_addr = _miraged_key_address(REWARDS_POOL_KEY)
-    if not pool_addr:
-        raise RuntimeError(f"could not create or read the {REWARDS_POOL_KEY} key")
-    status(f"Rewards pool key: {pool_addr}")
+    status("Configuring backend.env for the local testnet ...")
 
     # sed the values that exist; append the ones this node's backend.env predates.
     settings = {
-        "QUESTS_ENABLED": "true",
-        "QUESTS_PAYOUTS_ENABLED": "true",
-        "ACHIEVEMENTS_ENABLED": "true",
+        "QUESTS_ENABLED": "false",
+        "QUESTS_PAYOUTS_ENABLED": "false",
+        "ACHIEVEMENTS_ENABLED": "false",
         "MEDIA_UPLOADS_ENABLED": "true",
         "BACKEND_DEBUG": "true",
-        "QUESTS_REWARDS_POOL_ADDRESS": pool_addr,
     }
     env_path = "/root/.mirage/env/backend.env"
     for key, value in settings.items():
@@ -1250,56 +1197,6 @@ def enable_local_quests_payouts() -> str:
                 f'else echo "{key}={value}" >> {env_path}; fi\'',
             ]
         )
-    return pool_addr
-
-
-def fund_local_rewards_pool(pool_addr: str, amount: int = LOCAL_POOL_FUNDING_UMIRAGE) -> None:
-    """Fund the local rewards pool from the validator key.
-
-    Runs after the chain is live. The backend reads the pool balance live from the
-    indexer DB on every claim, so no restart is needed after funding.
-    """
-    status(f"Funding rewards pool with {amount // 1_000_000:,} MIRAGE ...")
-    miraged = get_container_miraged_path()
-
-    from_addr = _miraged_key_address("validator")
-    if not from_addr:
-        raise RuntimeError("could not resolve the validator key address to fund the rewards pool")
-
-    send = (
-        f"docker exec mirage {miraged} tx bank send {from_addr} {pool_addr} {amount}umirage "
-        f"--home /root/.mirage/node --keyring-backend test --chain-id mirage-1 "
-        f"--yes --gas auto --gas-adjustment 1.5 --gas-prices 1000umirage -o json"
-    )
-    out = run(["bash", "-lc", f"{send} 2>&1 || true"], capture=True, check=False)
-    if "sequence mismatch" in (out or "").lower():
-        time.sleep(4)
-        out = run(["bash", "-lc", f"{send} 2>&1 || true"], capture=True, check=False)
-
-    # Bounded wait: the send is broadcast async, so poll the pool balance rather
-    # than trusting the broadcast response.
-    deadline = time.time() + 60
-    while time.time() < deadline:
-        bal = run(
-            [
-                "bash",
-                "-lc",
-                f"docker exec mirage {miraged} q bank balances {pool_addr} "
-                f"--home /root/.mirage/node -o json 2>/dev/null || true",
-            ],
-            capture=True,
-            check=False,
-        )
-        if re.search(r'"amount"\s*:\s*"([1-9]\d*)"', bal or ""):
-            status("Rewards pool funded")
-            return
-        time.sleep(3)
-
-    raise RuntimeError(
-        f"rewards pool {pool_addr} still has no balance after 60s; "
-        f"the C-2 no_double_pay test will not be able to prove a single payout. "
-        f"Last send output: {(out or '')[-400:]}"
-    )
 
 
 def find_latest_backup_tarball(source_host: str) -> Path:
@@ -1377,14 +1274,11 @@ def main():
         ]
     )
 
-    # Step 7.5: Local-only quests/payouts wiring, before the backend first starts
-    pool_addr = enable_local_quests_payouts()
+    # Step 7.5: Local-only backend.env wiring, before the backend first starts
+    configure_local_backend_env()
 
     # Step 8: Start container with normal entrypoint (handles ALL service orchestration)
     start_with_entrypoint(image_ref)
-
-    # Step 8.5: Fund the pool now that the chain is live
-    fund_local_rewards_pool(pool_addr)
 
     status("Local testnet reset: COMPLETE")
     print("Summary:")
@@ -1392,7 +1286,6 @@ def main():
     print("  - Validator:", val_addr)
     print("  - Valoper:", valoper)
     print("  - Valcons:", valcons_addr)
-    print("  - Rewards pool:", pool_addr, "(quests + payouts + debug enabled)")
 
 
 if __name__ == "__main__":

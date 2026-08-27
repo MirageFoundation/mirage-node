@@ -1875,7 +1875,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	//   - core.GetParams panics with CONSENSUS_FATAL on store-get / empty /
 	//     unmarshal / validate failure (no DefaultParams fallback).
 	//   - deductRelayGasFee, processSubscriptions and the PoW ante
-	//     (getUserLevel / checkReserveOrDowngrade / routePoWTx) return tagged
+	//     (getUserLevel / checkRelayQuotaHeadroom / routePoWTx) return tagged
 	//     CONSENSUS_FATAL errors on profile decode/missing failures, rejecting
 	//     the offending tx. Peers with the same corrupt bytes reject identically,
 	//     so consensus is preserved without silent skew.

@@ -168,6 +168,21 @@ export function useRewards() {
             setPendingInviteCodes(res.pending_invite_codes || 0);
             setClaimingAvailable(res.claiming_available !== false);
         } catch (err) {
+            if (err.status === 410) {
+                // v1.39.0 replaced quests with the creator pool and answers gone
+                // here. Without this the card renders "Unable to load quests" to
+                // every user instead of disappearing.
+                console.log('[useRewards] Rewards retired by this node (410); hiding quests');
+                setDisabled(true);
+                setDailyQuests([]);
+                setFlashQuest(null);
+                setPendingRewards([]);
+                setTotalMirage(0);
+                setTotalAfterMultiplier(0);
+                setPendingInviteCodes(0);
+                setLoading(false);
+                return;
+            }
             console.error('Failed to fetch rewards summary:', err);
             setError(err.message || 'Failed to load quests');
         } finally {
@@ -347,6 +362,12 @@ export function useAchievements() {
             const response = await Api.get('/rewards/achievements', { owner: userAddress });
             setAchievements(response.achievements || []);
         } catch (err) {
+            if (err.status === 410) {
+                console.log('[useAchievements] Achievements retired by this node (410)');
+                setAchievements([]);
+                setLoading(false);
+                return;
+            }
             console.error('Failed to fetch achievements:', err);
             setError(err.message || 'Failed to load achievements');
         } finally {

@@ -110,15 +110,15 @@ func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, 
 	return false, fmt.Sprintf("effective_paid user must skip PoW, addr=%s", addr), nil
 }
 
-// routePoWTx unifies the canUsePoW + checkReserveOrDowngrade decision used by
+// routePoWTx unifies the canUsePoW + checkRelayQuotaHeadroom decision used by
 // every PoW-eligible message branch in AnteHandle.
 //
 // Returns (canPoW, err):
 //   - err != nil: tx must be rejected (profile decode failure or malformed pubkey).
 //     The error string is logged with msgName context for triage.
 //   - canPoW == true: caller must run validatePoWBytesArgon2.
-//   - canPoW == false, err == nil: caller must skip PoW (paid path; gas deducted
-//     by the message handler, which also downgrades on exhausted reserve).
+//   - canPoW == false, err == nil: caller must skip PoW (paid path; the message
+//     handler consumes one daily relay quota unit per message).
 func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgName string, msgCount uint64) (canPoW bool, err error) {
 	allowed, _, lerr := d.canUsePoW(ctx, pubkey)
 	if lerr != nil {
@@ -127,8 +127,8 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 		return false, lerr
 	}
 	if !allowed {
-		if rerr := d.checkReserveOrDowngrade(ctx, pubkey, params, msgCount); rerr != nil {
-			ctx.Logger().Error("PoW: reserve/profile check failed", "msg", msgName, "err", rerr.Error())
+		if rerr := d.checkRelayQuotaHeadroom(ctx, pubkey, params, msgCount); rerr != nil {
+			ctx.Logger().Error("PoW: relay quota/profile check failed", "msg", msgName, "err", rerr.Error())
 			return false, rerr
 		}
 		return false, nil
@@ -136,14 +136,13 @@ func (d *PowDecorator) routePoWTx(ctx sdk.Context, pubkey []byte, params coretyp
 	return true, nil
 }
 
-// checkReserveOrDowngrade checks if a paid user has sufficient reserve for gas.
-// Ante must NOT reject on insufficient reserve and must NOT mutate state:
+// checkRelayQuotaHeadroom bounds how many messages a paid user may carry in one
+// transaction. It must NOT mutate state and must NOT reject a single-message tx:
 // baseapp discards ante mutations when the ante returns an error, which previously
-// wedged paid users (M-5). Insufficient reserve is logged here; the durable
-// downgrade lives in deductRelayGasFee on the handler path — so this function
-// returns nil for the insufficient-reserve case so the tx reaches the handler.
+// wedged paid users (M-5). Exhaustion of the daily relay quota is decided by
+// ConsumeSubscriberQuota on the handler path, which reverts the whole tx.
 // Returns an error only for CONSENSUS_FATAL profile failures or malformed pubkey.
-func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgCount uint64) error {
+func (d *PowDecorator) checkRelayQuotaHeadroom(ctx sdk.Context, pubkey []byte, params coretypes.Params, msgCount uint64) error {
 	if len(pubkey) != 33 {
 		return fmt.Errorf("invalid envelope_pubkey length: got %d, want 33", len(pubkey))
 	}
@@ -165,66 +164,59 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE addr=%s bytes=%d: %w", addr, len(bz), err)
 	}
 
-	// Free users don't need reserve check
-	if core.Level == 0 {
+	if !core.EffectivePaid {
 		return nil
 	}
 
-	// Admins (level >= 100) don't need reserve, they're manually appointed
+	// Admins (level >= 100) are manually appointed and not quota-bound.
 	if core.Level >= 100 {
 		return nil
 	}
 
-	// Calculate minimum required reserve (at least one tx worth)
-	minReserve := params.RelayMinGasPrice // Minimum 1 gas unit worth
-	if minReserve == 0 {
-		minReserve = 1
-	}
-
-	// A paid user may submit at most as many messages in one transaction as their
-	// reserve can actually pay for.
+	// A paid user may carry at most as many messages in one transaction as the
+	// daily relay quota still has room for.
 	//
-	// Routing is decided once per message from the level as it stood before any
-	// handler ran, and a paid user's PoW is waived at that point. So when message
-	// 1 exhausted the reserve, deductRelayGasFee wrote Level = 0 into the shared
-	// cache-wrapped store, messages 2..N read level 0 and were charged nothing —
-	// while the ante had already waived their proof of work. N was bounded only by
-	// transaction size and block gas (review L-5).
+	// Routing is decided once per message from the state as it stood before any
+	// handler ran, and a paid user's PoW is waived at that point, so without this
+	// bound N was limited only by transaction size and block gas (review L-5).
+	// The resource being spent is the daily relay quota: v1.39.0 burned every
+	// escrowed reserve and stopped funding ReserveFunds, so a bound derived from
+	// the reserve rejected every multi-message paid transaction outright.
 	//
-	// The single-message case is deliberately left alone: it must still reach the
-	// handler so the durable downgrade in deductRelayGasFee can happen. Rejecting
-	// it here is what wedged paid users in the earlier M-5, because baseapp
-	// discards ante mutations when the ante returns an error. Splitting into
-	// separate transactions therefore still works and still downgrades correctly.
+	// The single-message case is deliberately left alone: it must still reach
+	// ConsumeSubscriberQuota, which is what refuses the tx once the day is spent.
+	// Rejecting it here is what wedged paid users in the earlier M-5, because
+	// baseapp discards ante mutations when the ante returns an error.
 	if msgCount > 1 {
-		affordable := core.ReserveFunds / minReserve
-		if msgCount > affordable {
-			ctx.Logger().Error("checkReserveOrDowngrade: transaction carries more messages than the reserve can pay for",
-				"owner", addr, "level", core.Level, "reserve", core.ReserveFunds,
-				"min_per_msg", minReserve, "messages", msgCount, "affordable", affordable)
+		q, qerr := d.Keeper.GetSubscriberQuota(ctx, addr)
+		if qerr != nil {
+			return fmt.Errorf("CONSENSUS_FATAL:QUOTA_GET addr=%s: %w", addr, qerr)
+		}
+		used := q.Count
+		if q.UtcEpoch != coretypes.UTCEpoch(ctx.BlockTime().Unix()) {
+			used = 0
+		}
+		var remaining uint64
+		if params.SubscriberDailyRelayLimit > used {
+			remaining = params.SubscriberDailyRelayLimit - used
+		}
+		if msgCount > remaining {
+			ctx.Logger().Error("checkRelayQuotaHeadroom: transaction carries more messages than the daily relay quota allows",
+				"owner", addr, "level", core.Level, "messages", msgCount,
+				"limit", params.SubscriberDailyRelayLimit, "used", used, "remaining", remaining)
 			return fmt.Errorf(
-				"insufficient reserve: %d messages in one transaction but the reserve covers %d; submit them separately",
-				msgCount, affordable)
+				"insufficient relay quota: %d messages in one transaction but only %d remain today; submit them separately",
+				msgCount, remaining)
 		}
 	}
-
-	if core.ReserveFunds >= minReserve {
-		return nil // Sufficient reserve
-	}
-
-	ctx.Logger().Warn("checkReserveOrDowngrade: insufficient reserve; allowing tx so handler can downgrade",
-		"owner", addr,
-		"level", core.Level,
-		"reserve", core.ReserveFunds,
-		"min_required", minReserve)
 
 	return nil
 }
 
 // envelopeMsgCounts counts, per envelope pubkey, how many messages in this
-// transaction that pubkey submitted. checkReserveOrDowngrade needs it because
-// the reserve is spent per message but routing is decided per message against
-// the level before any handler ran (review L-5).
+// transaction that pubkey submitted. checkRelayQuotaHeadroom needs it because
+// the relay quota is spent per message but routing is decided per message against
+// the state before any handler ran (review L-5).
 func envelopeMsgCounts(msgs []sdk.Msg) map[string]uint64 {
 	counts := make(map[string]uint64, len(msgs))
 	for _, m := range msgs {

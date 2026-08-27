@@ -75,6 +75,7 @@ from tests.common import (
     _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
+    _do_create_community,
     _do_post,
     _do_post_with_nonce,
     _do_post_with_media,
@@ -998,7 +999,10 @@ def test_tx_status_matrix(backend: str):
     if unfollow_txh:
         _check("unfollow_user", unfollow_txh, "unfollow_user")
 
-    # 4. join_community (sub1 — higher limits)
+    # 4. join_community (sub1 — higher limits). Claim it as sub2 first: creating a
+    # community makes the creator its original curator, and the chain refuses to
+    # let a curator leave, which would strand step 5.
+    _do_create_community(backend, sub2, follow_topic)
     ftopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=True, skip_pow=True)
     ftopic_txh = _extract_tx_hash("join_community", ftopic_resp)
     if ftopic_txh:

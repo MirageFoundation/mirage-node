@@ -163,7 +163,7 @@ def test_indexer_topic_edit(backend: str):
     # being counted against the topic the root left behind.
     db_name = _get_indexer_db_name()
     rc, out = _docker_exec(
-        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT COALESCE(root_topic, '')
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT COALESCE(root_community, '')
 FROM posts WHERE LOWER(txhash) = LOWER('{comment_hash}');\\" 2>&1" """,
         timeout=15,
     )
@@ -1763,8 +1763,8 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
         # misattribution the finding described.
         with psycopg.connect(scoped_url, autocommit=True) as conn:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO posts(txhash, owner, topic, created_at) VALUES('legacy1','u','tech',1)")
-                cur.execute("ALTER TABLE posts ADD CONSTRAINT no_backfill CHECK (root_topic IS NULL)")
+                cur.execute("INSERT INTO posts(txhash, owner, community, created_at) VALUES('legacy1','u','tech',1)")
+                cur.execute("ALTER TABLE posts ADD CONSTRAINT no_backfill CHECK (root_community IS NULL)")
         try:
             with db.transaction(label="hardening_savepoint"):
                 resolved = db.get_root_topic_for_post("legacy1")
@@ -1813,11 +1813,11 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM posts")
                 cur.execute(
-                    "INSERT INTO posts(txhash, owner, topic, comment_count, created_at) " "VALUES('d0','u','tech',0,1)"
+                    "INSERT INTO posts(txhash, owner, community, comment_count, created_at) " "VALUES('d0','u','tech',0,1)"
                 )
                 for i in range(1, depth):
                     cur.execute(
-                        "INSERT INTO posts(txhash, owner, topic, target, comment_count, created_at) "
+                        "INSERT INTO posts(txhash, owner, community, target, comment_count, created_at) "
                         "VALUES(%s,'u','tech',%s,0,1)",
                         (f"d{i}", f"d{i - 1}"),
                     )
@@ -1838,7 +1838,7 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
                 cur.execute("DELETE FROM posts")
                 for i in range(3):
                     cur.execute(
-                        "INSERT INTO posts(txhash, owner, topic, root_topic, root_post_id, created_at) "
+                        "INSERT INTO posts(txhash, owner, community, root_community, root_post_id, created_at) "
                         "VALUES(%s,'attacker','tech','tech',%s,1)",
                         (f"p{i}", f"p{i}"),
                     )
@@ -1960,11 +1960,11 @@ SELECT s.owner, s.topic
 FROM user_topic_stats s
 LEFT JOIN (
   SELECT LOWER(v.owner) AS owner,
-         LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
+         LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS topic,
          SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
   FROM votes v
   JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-  WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
+  WHERE COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
     AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
   GROUP BY 1, 2
 ) d ON d.owner = s.owner AND d.topic = s.topic
@@ -2037,7 +2037,7 @@ def _indexer_hardening_startup_backfill_check() -> None:
         with psycopg.connect(scratch_url, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO posts (txhash, owner, topic, root_topic, root_post_id, created_at, deleted) "
+                    "INSERT INTO posts (txhash, owner, community, root_community, root_post_id, created_at, deleted) "
                     "VALUES (%s, %s, %s, %s, %s, %s, TRUE)",
                     (txhash, owner, topic, topic, txhash, 1700000000),
                 )
