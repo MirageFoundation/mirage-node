@@ -39,13 +39,11 @@ from tests.common import (
 #                 (must not land _guard_push_request on a read path)
 # SIGNED_IDENTITY signature plus the push-nonce replay guard (writes)
 # SIGNED_ADMIN    signature plus an admin level check
-# DEBUG_ONLY      must not be reachable in production
 PUBLIC = "PUBLIC"
 ENVELOPE = "ENVELOPE"
 SIGNED_READ = "SIGNED_READ"
 SIGNED_IDENTITY = "SIGNED_IDENTITY"
 SIGNED_ADMIN = "SIGNED_ADMIN"
-DEBUG_ONLY = "DEBUG_ONLY"
 
 # Intended policy for every registered route. A new route must be added here
 # deliberately, which is the point: this table is the control that makes an
@@ -92,28 +90,17 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_inbox": PUBLIC,  # reply content is on chain
     "/api/get_preferences": PUBLIC,  # indexer DB (chain-derived)
     "/api/get_user_blocked": PUBLIC,  # indexer DB (chain-derived)
-    # Backend-owned but not credentials and not actions. Deliberate disclosure.
-    "/api/rewards/achievements": PUBLIC,
-    "/api/rewards/summary": PUBLIC,
     # --- Authenticated writes / identity-bound state ------------------------
-    "/api/rewards/claim": SIGNED_IDENTITY,  # multiplier applied at claim time
     "/api/mark_inbox_viewed": SIGNED_IDENTITY,
     "/api/seen_posts": SIGNED_IDENTITY,
     "/api/core/register_push_token": SIGNED_IDENTITY,
     "/api/core/unregister_push_token": SIGNED_IDENTITY,
     # --- Admin (H-1) --------------------------------------------------------
-    "/api/admin/rewards/suspend": SIGNED_ADMIN,
-    "/api/admin/rewards/unsuspend": SIGNED_ADMIN,
     "/api/admin/stats/aggregate": SIGNED_ADMIN,
     "/api/admin/stats/export": SIGNED_ADMIN,
     "/api/core/resolve_report": SIGNED_ADMIN,
     "/api/get_reports": SIGNED_ADMIN,  # signed read + level; no nonce row
     "/api/get_stats": SIGNED_ADMIN,
-    # --- Debug (M-1) --------------------------------------------------------
-    "/api/rewards/debug": DEBUG_ONLY,
-    "/api/rewards/debug/complete": DEBUG_ONLY,
-    "/api/rewards/debug/reset": DEBUG_ONLY,
-    "/api/rewards/debug/set_completed": DEBUG_ONLY,
     # --- Relay endpoints: chain verifies the envelope -----------------------
     "/api/core/annotate": ENVELOPE,
     "/api/core/award": ENVELOPE,
@@ -177,7 +164,6 @@ _AUTH_CALLS = {
 # What each class requires of the detected marker set.
 _REQUIRED: Dict[str, Set[str]] = {
     PUBLIC: set(),
-    DEBUG_ONLY: set(),
     ENVELOPE: {"nonce"},
     SIGNED_READ: {"sig"},
     SIGNED_IDENTITY: {"sig", "guard"},
@@ -362,12 +348,27 @@ def test_admin_authz(backend):
 
 
 def test_reward_claim_authz(backend):
-    """Rewards claim was removed with quests in v1.39.0."""
-    code, resp = _post(f"{backend}/api/rewards/claim", {"owner": "x"})
-    if code == 410:
-        _pass("reward_claim_authz.gone")
-    else:
-        _fail("reward_claim_authz.gone", f"code={code} resp={resp}")
+    """The whole quest/reward surface was removed in v1.39.0 and must answer 410.
+
+    The claim endpoint moved tokens and the admin suspend/unsuspend pair moved a
+    user's earning ability, so a route that quietly came back — or a proxy that
+    answered for it — is worth catching. The reads are here too: they are what a
+    stale client polls, and a 200 from any of them means the retired quest tables
+    are being served from somewhere.
+    """
+    for name, call in (
+        ("claim", lambda: _post(f"{backend}/api/rewards/claim", {"owner": "x"})),
+        ("summary", lambda: _get(f"{backend}/api/rewards/summary", params={"address": "x"})),
+        ("achievements", lambda: _get(f"{backend}/api/rewards/achievements", params={"address": "x"})),
+        ("debug", lambda: _get(f"{backend}/api/rewards/debug", params={"address": "x"})),
+        ("admin_suspend", lambda: _post(f"{backend}/api/admin/rewards/suspend", {"address": "x"})),
+        ("admin_unsuspend", lambda: _post(f"{backend}/api/admin/rewards/unsuspend", {"address": "x"})),
+    ):
+        code, resp = call()
+        if code == 410:
+            _pass(f"reward_claim_authz.{name}_gone")
+        else:
+            _fail(f"reward_claim_authz.{name}_gone", f"expected 410, got {code}: {resp}")
 
 
 # Reads that were overstated as H-2 private. Kept here as a documentation

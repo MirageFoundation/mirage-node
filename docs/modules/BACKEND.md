@@ -103,10 +103,7 @@ web/backend/
 ├── bank.py             # Balance queries
 ├── params.py           # Chain parameter loading/caching
 ├── db.py               # Database connections (indexer RO + backend RW) and schema init
-├── quest_tracker.py    # Quest progress tracking (backend-owned)
-├── quest_settings.py   # Quest system constants
-├── quests.yaml         # Quest definitions
-├── reward_distributor.py # Token reward distribution
+├── curation.py         # Community curation lens resolution
 ├── similarity.py       # User similarity cache
 ├── user_last_seen.py   # DAU/MAU tracking via authenticated API hits
 ├── push_events.py      # Push notification deduplication helpers
@@ -114,7 +111,7 @@ web/backend/
 ├── routes/
 │   ├── public.py       # Read-only endpoints (feeds, profiles, search, stats)
 │   ├── core.py         # Write endpoints (post, vote, username, etc.)
-│   └── quests.py       # Quest/reward endpoints
+│   └── communities.py  # Community listing and curation endpoints
 └── logging_utils.py    # Structured logging
 ```
 
@@ -126,7 +123,7 @@ Routes are organized into Flask blueprints:
 |-----------|--------|---------|
 | `public_bp` | `/api/` | Read operations, no auth required |
 | `core_bp` | `/api/core/` | Write operations, requires meta-signature |
-| `quests_bp` | `/api/rewards/` | Quest/reward endpoints |
+| `communities_bp` | `/api/communities/` | Community listing and curation reads |
 
 ---
 
@@ -523,14 +520,9 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/search` | Full-text search |
 | `GET /api/get_welcome_stats` | Public stats: registered users, posts 24h, 7d active |
 | `GET /api/get_stats` | Admin stats (overview, signups tabs) |
-| `POST /api/signup` | Account creation (validates invite code) |
-| `GET /api/validate_invite_code` | Check invite code validity |
+| `POST /api/signup` | Account creation |
 | `GET /api/get_inbox` | Push notification inbox |
 | `POST /api/mark_inbox_viewed` | Mark inbox items as read |
-| `GET /api/rewards/summary` | Quest/reward progress |
-| `GET /api/rewards/achievements` | Achievement list |
-| `POST /api/rewards/claim` | Claim pending reward |
-| `GET /api/referral/stats` | Referrer's invite stats |
 
 ### Core Endpoints (Write)
 
@@ -618,14 +610,16 @@ The backend uses two separate PostgreSQL databases with strict ownership boundar
 │                                                                              │
 │  Indexer DB (mirage_indexer)      Backend DB (mirage_backend)                │
 │  ┌──────────────────────┐         ┌──────────────────────────────┐          │
-│  │ posts, votes, awards │         │ invite_codes, referral_*     │          │
-│  │ profiles, balances   │         │ user_daily_quests, pending_  │          │
-│  │ followed_*, blocked_*│         │   rewards, user_quest_state  │          │
-│  │ preferences          │         │ push_tokens, push_throttle   │          │
-│  │ supply_history       │         │ push_event_cursor/seen       │          │
-│  │ mentions, tx_index   │         │ reports, user_similarity_    │          │
-│  │ (chain-indexed data) │         │   cache, user_last_seen      │          │
-│  │                      │         │ user_inbox_state             │          │
+│  │ posts, votes, awards │         │ push_tokens, push_throttle   │          │
+│  │ profiles, balances   │         │ push_event_cursor/seen       │          │
+│  │ followed_*, blocked_*│         │ push_nonces, push_receipts   │          │
+│  │ preferences          │         │ inbox_events, user_inbox_    │          │
+│  │ supply_history       │         │   state, user_seen_posts     │          │
+│  │ mentions, tx_index   │         │ reports, stats_events,       │          │
+│  │ (chain-indexed data) │         │   stats_visitors             │          │
+│  │                      │         │ user_similarity_cache,       │          │
+│  │                      │         │   user_last_seen             │          │
+│  │                      │         │ image_catalog, image_views   │          │
 │  └──────────┬───────────┘         └──────────────┬───────────────┘          │
 │             │                                    │                          │
 │     READ-ONLY access                    READ-WRITE access                   │
@@ -812,7 +806,6 @@ Environment variables (set in `~/.mirage/env/backend.env`):
 - `INDEXER_DB_RO_URL` - Read-only connection to indexer DB (used by backend)
 - `BACKEND_DB_URL` - Backend-owned DB connection string
 - `CLIENT_HASH_SALT` - Salt for hashing client identifiers (compliance)
-- `REFERRALS_ENABLED` - Enable referral system endpoints (default: false)
 - `PUSH_NOTIFICATIONS_ENABLED` - Enable push notification system (default: false)
 - `PUSH_LISTENER_LOCK_PATH` - Lock file path for push listener singleton
 
@@ -829,7 +822,7 @@ Rate limiting is currently handled at the infrastructure level (nginx, cloud pro
 | Failure | Impact | Recovery |
 |---------|--------|----------|
 | Indexer DB unavailable | Read endpoints fail | Automatic reconnection |
-| Backend DB unavailable | Quests, push, stats fail | Automatic reconnection |
+| Backend DB unavailable | Push, stats, reports fail | Automatic reconnection |
 | Node RPC unavailable | All endpoints fail 503 | Backend waits for node |
 | Validator underfunded | Broadcasts fail | Fund validator account |
 | Chain params unavailable | Backend won't start | Chain must be accessible |

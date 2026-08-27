@@ -31,27 +31,14 @@ class IndexerUnavailable(RuntimeError):
 ERRORS = {
     # Registration / signup
     "registration_disabled": "registration is disabled on this node",
-    "invite_code_required": "invite code required for new account registration",
-    "invite_code_invalid": "invalid invite code",
-    "invite_code_used": "this invite code has already been used",
-    "invite_code_check_failed": "failed to validate invite code",
-    "invite_code_invalid_format": "invalid code format",
-    "invite_codes_not_required": "invite codes not required on this node",
-    "invite_codes_main_site_only": "invite codes only work on mirage.talk",
     "attribution_signature_invalid": "invite code and referrer must be signed",
     # Username
     "username_required": "username required",
     "username_too_short": "username too short",
     "username_too_long": "username too long",
     "username_invalid_format": "invalid username format",
-    # Referrals
-    "referral_requires_invite_codes": "referral links require invite codes",
-    "invalid_week_format": "invalid week format, use YYYY-Www (e.g. 2026-W13)",
-    "referral_data_incomplete": "referral data missing referred_at",
+    # Referrer attribution recorded at signup
     "referrer_not_found": "referrer not found",
-    "referrer_not_opted_in": "referrer has not enabled referral links",
-    "referrer_no_codes": "referrer has no available codes",
-    "referrer_already_used": "already used this referrer",
     "referrer_username_too_long": "referrer username too long",
     "referrer_username_invalid_format": "invalid referrer username format",
     "referrer_check_failed": "failed to validate referrer",
@@ -179,27 +166,15 @@ ERRORS = {
     # Reports / moderation
     "reason_too_long": "reason too long (max 200 chars)",
     "admin_required": "admin required",
-    "admin_and_target_required": "admin and target required",
-    "admin_target_duration_reason_required": "admin, target, duration_days, and reason required",
-    "suspended": "account suspended",
     # Search / query
     "query_required": "q parameter is required",
     "count_must_be_non_negative": "count must be >= 0",
     "invalid_amount": "invalid amount",
     "amount_must_be_positive": "amount must be positive",
-    "invalid_duration_days": "invalid duration_days",
     "invalid_month_format": "invalid month format, use YYYY-MM",
     "invalid_max_depth": "invalid max_depth",
     "unsupported_sort_mode": "unsupported sort mode",
-    # Quests
-    "quest_id_required": "quest_id required",
-    "unknown_quest_id": "unknown quest_id",
-    "quest_not_assigned": "quest not assigned",
-    "quest_already_completed": "quest already completed",
-    "no_rewards": "no rewards available",
-    "pool_not_configured": "reward pool not configured",
-    "payout_failed": "payout failed",
-    "payout_pending": "payout is still being confirmed",
+    # Misc service state
     "stats_event_disabled": "stats events disabled",
     "retry": "please retry",
     "not_configured": "service not configured",

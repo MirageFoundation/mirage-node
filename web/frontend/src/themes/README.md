@@ -105,7 +105,7 @@ Each file under **`src/views/`** is a facade named **`X.js`** that calls **`useT
 
 As of this writing, manifests include at least:
 
-`AgentsView`, `BlocksView`, `ChangeUsernameView`, `CreateAccountView`, `CreatePostView`, `DiscoverView`, `FollowsView`, `InboxView`, `LoginView`, `MainView`, `NetworkView`, `NotFoundView`, `ProfileView`, `ReferralsView`, `ReportsView`, `SearchResultsView`, `SettingsView`, `SignOutView`, `StatsView`, `SubscriptionView`, `ViewPostView`, `WelcomeView`.
+`AgentsView`, `BlocksView`, `ChangeUsernameView`, `CreateAccountView`, `CreatePostView`, `DiscoverView`, `FollowsView`, `InboxView`, `LoginView`, `MainView`, `NetworkView`, `NotFoundView`, `ProfileView`, `ReportsView`, `SearchResultsView`, `SettingsView`, `SignOutView`, `StatsView`, `SubscriptionView`, `ViewPostView`, `WelcomeView`.
 
 Adding a **new** top-level URL requires **`App.js`** `<Route>`, a **`src/views/NewThing.js`** facade, and **`routes.NewThing`** on **every** theme manifest.
 

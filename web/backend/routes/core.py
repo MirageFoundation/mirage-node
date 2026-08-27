@@ -28,14 +28,11 @@ import random
 import re
 import sys
 import time
-import threading
 from typing import Any, Dict
 
 from flask import Blueprint, g, jsonify, request, has_request_context
 from client_ip import get_trusted_client_ip as _get_trusted_client_ip
 from settings import (
-    ACHIEVEMENTS_ENABLED,
-    QUESTS_ENABLED,
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
     PUSH_NOTIFICATIONS_ENABLED,
@@ -213,36 +210,6 @@ GAS_BUFFER_MULTIPLIER = 1.25  # C-1: simulate skips some sig-verify cost vs Deli
 MAX_PUSH_TOKENS_PER_OWNER = 20
 PUSH_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
 PUSH_NONCE_TTL_SECONDS = 60 * 60
-
-
-# ── Quest tracker (lazy singleton, backend-owned DB) ────────────────────────
-_quest_tracker_instance = None
-_quest_tracker_lock = threading.Lock()
-
-
-def _get_quest_tracker():
-    """Lazy-init the backend quest tracker (uses connect_backend_db)."""
-    global _quest_tracker_instance
-    if _quest_tracker_instance is None:
-        with _quest_tracker_lock:
-            if _quest_tracker_instance is None:
-                from quest_tracker import QuestTracker
-
-                _quest_tracker_instance = QuestTracker(connect_backend_db)
-                logger().debug("Quest tracker initialized")
-    return _quest_tracker_instance
-
-
-def _track_quest_progress(user_addr: str, action_type: str, ts: int, **kwargs) -> None:
-    """Fire-and-forget quest progress update after a successful tx."""
-    if not QUESTS_ENABLED and not ACHIEVEMENTS_ENABLED:
-        logger().debug("quest.tracker.skipped action=%s (quests and achievements disabled)", action_type)
-        return
-    try:
-        qt = _get_quest_tracker()
-        qt.update_progress(user_addr, action_type, ts, **kwargs)
-    except Exception as e:
-        logger().warning("Quest progress tracking failed for %s/%s: %s", user_addr[:12], action_type, e)
 
 
 def _db_get_profile_level(addr: str) -> int | None:
@@ -641,28 +608,6 @@ def _get_post_owner(txhash: str) -> str | None:
             cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (txhash,))
             row = cur.fetchone()
             return (row[0] or "").strip().lower() if row and row[0] else None
-    except Exception:
-        return None
-
-
-def _get_post_quest_info(txhash: str) -> dict | None:
-    """Return quest-relevant info (owner, topic, root_post_id) for a post, or None on error."""
-    try:
-        with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT owner, COALESCE(root_community, community, ''), COALESCE(root_post_id, txhash) "
-                "FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1",
-                (txhash,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            return {
-                "owner": (row[0] or "").strip().lower(),
-                "topic": (row[1] or "").strip().lower(),
-                "root_post_id": (row[2] or "").strip().lower(),
-            }
     except Exception:
         return None
 
@@ -3950,46 +3895,6 @@ def core_post():
         except Exception:
             pass
 
-        now_ts = int(time.time())
-        quest_action = "comment" if target else "post"
-        comment_quest_kwargs = {
-            "content_length": len(content),
-        }
-        if target:
-            parent_info = _get_post_quest_info(target)
-            if not parent_info:
-                log_event(rid, "quest.comment.parent_missing", owner=user_addr, target=target)
-            else:
-                parent_topic = (parent_info.get("topic") or "").strip().lower()
-                comment_quest_kwargs["root_post_id"] = parent_info["root_post_id"]
-                comment_quest_kwargs["target_owner"] = parent_info["owner"]
-                if parent_topic:
-                    comment_quest_kwargs["topic"] = parent_topic
-                    comment_quest_kwargs["target_topic"] = parent_topic
-                else:
-                    log_event(rid, "quest.comment.parent_topic_missing", owner=user_addr, target=target)
-                if topic and topic != parent_topic:
-                    log_event(
-                        rid,
-                        "quest.comment.topic_override",
-                        owner=user_addr,
-                        target=target,
-                        request_topic=topic,
-                        parent_topic=parent_topic,
-                    )
-        else:
-            comment_quest_kwargs["topic"] = topic
-            comment_quest_kwargs["target_topic"] = topic
-        _track_quest_progress(user_addr, quest_action, now_ts, **comment_quest_kwargs)
-        if not target and topic:
-            _track_quest_progress(
-                user_addr,
-                "unique_topic_post",
-                now_ts,
-                topic=topic,
-                content_length=len(content),
-            )
-
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -4200,19 +4105,6 @@ def core_vote():
                 _log_user_action(username, client_ip, "vote", target_log, str(tx_hash or "").lower())
         except Exception:
             pass
-
-        now_ts = int(time.time())
-        post_info = _get_post_quest_info(target)
-        vote_quest_kwargs = dict(
-            target=target,
-            vote_direction=int(direction),
-            vote_is_change=False,
-        )
-        if post_info:
-            vote_quest_kwargs["target_topic"] = post_info["topic"]
-            vote_quest_kwargs["target_owner"] = post_info["owner"]
-        _track_quest_progress(user_addr, "vote", now_ts, **vote_quest_kwargs)
-        _track_quest_progress(user_addr, "balanced_vote", now_ts, **vote_quest_kwargs)
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:

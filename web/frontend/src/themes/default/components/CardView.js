@@ -18,6 +18,7 @@ import {
     HiOutlineClipboardDocument,
     HiOutlineDocumentText,
     HiOutlineArrowDownTray,
+    HiOutlineShieldExclamation,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
@@ -39,7 +40,6 @@ import usePostGifts from "../../../logic/usePostGifts";
 import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
-import { useAdminQuestActions } from "./AdminQuestActions";
 
 /**
  * CardView — Mirage-app inspired post card.
@@ -774,31 +774,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, []);
 
     /**
-     * Sub-plan 06.11 E — feed-row admin parity. Adds Mark deleted /
-     * Suspend / Unsuspend rows to the more-menu for admins viewing
-     * other users' posts on a quests-enabled node. Suspension status
-     * is fetched lazily the first time the menu opens.
+     * Sub-plan 06.11 E — feed-row admin parity. Adds the Mark-deleted row
+     * to the more-menu for admins viewing other users' posts.
      */
-    const {
-        isAdminVisible,
-        adminMenuItems,
-        dialogs: adminDialogs,
-        fetchUserSuspensionStatus: fetchAdminSuspensionStatus,
-    } = useAdminQuestActions({
-        post: safePost,
-        state,
-        updatePost,
-        onCloseMenu: closeAllMenus,
-    });
-    const adminSuspensionFetchedRef = useRef(false);
-    useEffect(() => {
-        if (!menuOpen) return;
-        if (adminSuspensionFetchedRef.current) return;
-        if (!isAdminVisible) return;
-        adminSuspensionFetchedRef.current = true;
-        try { fetchAdminSuspensionStatus(safePost && safePost.user_id); }
-        catch (_) { /* noop */ }
-    }, [menuOpen, isAdminVisible, fetchAdminSuspensionStatus, safePost]);
+    const isAdminVisible = (() => {
+        if (!isLoggedIn || isOwnPost || !postId || !safePost.user_id) return false;
+        try { return Number(Storage.load('user_level', '0')) >= 100; }
+        catch (_) { return false; }
+    })();
 
     const handleCardClick = useCallback((e) => {
         if (isInteractiveTarget(e.target)) return;
@@ -1408,17 +1391,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </MenuItemBtn>
                                     </>
                                 )}
-                                {isAdminVisible && adminMenuItems.map(item => (
-                                    <MenuItemBtn
-                                        key={item.key}
-                                        type="button"
-                                        $danger={item.danger || undefined}
-                                        onClick={(e) => { stop(e); item.onClick(); }}
-                                    >
-                                        {item.icon}
-                                        <span>{item.label}</span>
+                                {isAdminVisible && (
+                                    <MenuItemBtn type="button" $danger onClick={handleDelete}>
+                                        <HiOutlineShieldExclamation />
+                                        <span>Mark post deleted</span>
                                     </MenuItemBtn>
-                                ))}
+                                )}
                             </Menu>
                         )}
                     </PopoverRoot>
@@ -1569,8 +1547,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             />
             <ConfirmDialog
                 open={activeDialog === 'delete_post'}
-                title="Delete this post?"
-                message="This will permanently remove your post from every feed. This action cannot be undone."
+                title={isOwnPost ? 'Delete this post?' : 'Mark post as deleted?'}
+                message={isOwnPost
+                    ? 'This will permanently remove your post from every feed. This action cannot be undone.'
+                    : 'This will permanently remove this post from every feed. This action cannot be undone.'}
                 confirmLabel="Delete post"
                 confirmVariant="danger"
                 pending={dialogPending}
@@ -1623,12 +1603,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 }}
                 onCancel={cancelAward}
             />
-            {/**
-              * Sub-plan 06.11 E — Mark deleted / Suspend / Unsuspend
-              * dialogs for admin viewers. Rendered at the card root so
-              * the modal overlay sits above feed siblings.
-              */}
-            {adminDialogs}
         </Card>
     );
 }

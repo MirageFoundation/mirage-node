@@ -2,7 +2,6 @@ import { Helmet } from "react-helmet-async";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import QuestHeroCard from "../components/QuestHeroCard.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -893,7 +892,7 @@ const SidebarFloat = styled.aside`
     }
 `;
 
-/** Single bordered sidebar widget containing quests + submit */
+/** Single bordered sidebar widget containing submit */
 const SidebarBox = styled.div`
     box-sizing: border-box;
     background: ${({ theme }) => theme.colors.panel};
@@ -902,7 +901,7 @@ const SidebarBox = styled.div`
     flex-direction: column;
 `;
 
-/** Sidebar action link — same visual weight as the quest header strip */
+/** Sidebar action link — compact uppercase header strip weight */
 const SidebarAction = styled(Link)`
     display: block;
     box-sizing: border-box;
@@ -1183,7 +1182,6 @@ const MainView = ({
         openBrowsingEnabled,
         nodeConfigLoaded,
         inviteCodesEnabled,
-        questsEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
@@ -1192,9 +1190,7 @@ const MainView = ({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
-        questCardCollapsed,
         toggleInviteBanner,
-        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,
@@ -1613,7 +1609,6 @@ const MainView = ({
                             const sidebarContent = (
                                 <SidebarFloat>
                                     <SidebarBox>
-                                        {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
                                         <SidebarAction to={createPostLink}>Create a new post</SidebarAction>
                                     </SidebarBox>
                                 </SidebarFloat>

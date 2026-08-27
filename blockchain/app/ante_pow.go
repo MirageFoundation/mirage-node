@@ -757,7 +757,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
-
 		case *coretypes.MsgJoinCommunity:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgJoinCommunity", buildCanonV139("MsgJoinCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Community) }), verifyPoW)
 			if err != nil {
@@ -780,133 +779,175 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			}
 		case *coretypes.MsgCreateCommunity:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCommunity", buildCanonV139("MsgCreateCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeString(101, m.Title); w.writeString(102, m.Description); w.writeString(103, m.OriginalTeamName); w.writeString(104, m.Bio); w.writeString(105, m.Policy)
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Title)
+				w.writeString(102, m.Description)
+				w.writeString(103, m.OriginalTeamName)
+				w.writeString(104, m.Bio)
+				w.writeString(105, m.Policy)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCommunityMetadata:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCommunityMetadata", buildCanonV139("MsgSetCommunityMetadata", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeString(101, m.Title); w.writeString(102, m.Description)
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Title)
+				w.writeString(102, m.Description)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgTransferCommunity:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgTransferCommunity", buildCanonV139("MsgTransferCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeString(101, m.NewFounder)
+				w.writeString(100, m.Community)
+				w.writeString(101, m.NewFounder)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgCreateCurationTeam:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCurationTeam", buildCanonV139("MsgCreateCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeString(101, m.Name); w.writeString(102, m.Bio); w.writeString(103, m.Policy)
+				w.writeString(100, m.Community)
+				w.writeString(101, m.Name)
+				w.writeString(102, m.Bio)
+				w.writeString(103, m.Policy)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationTeamProfile:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationTeamProfile", buildCanonV139("MsgSetCurationTeamProfile", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Name); w.writeString(103, m.Bio); w.writeString(104, m.Policy)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Name)
+				w.writeString(103, m.Bio)
+				w.writeString(104, m.Policy)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgInviteCurator:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgInviteCurator", buildCanonV139("MsgInviteCurator", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgRevokeCuratorInvite:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgRevokeCuratorInvite", buildCanonV139("MsgRevokeCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgAcceptCuratorInvite:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgAcceptCuratorInvite", buildCanonV139("MsgAcceptCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgDeclineCuratorInvite:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgDeclineCuratorInvite", buildCanonV139("MsgDeclineCuratorInvite", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgLeaveCurationTeam:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgLeaveCurationTeam", buildCanonV139("MsgLeaveCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgRemoveCurator:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgRemoveCurator", buildCanonV139("MsgRemoveCurator", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgTransferCurationTeam:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgTransferCurationTeam", buildCanonV139("MsgTransferCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.NewOwner)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.NewOwner)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgDeleteCurationTeam:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgDeleteCurationTeam", buildCanonV139("MsgDeleteCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationPreference:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationPreference", buildCanonV139("MsgSetCurationPreference", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, uint64(m.Mode)); w.writeUvarint(102, m.PinnedTeamId)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, uint64(m.Mode))
+				w.writeUvarint(102, m.PinnedTeamId)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationPostHidden:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationPostHidden", buildCanonV139("MsgSetCurationPostHidden", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target); writeCanonBool(w, 103, m.Hidden)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				writeCanonBool(w, 103, m.Hidden)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationUserHidden:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationUserHidden", buildCanonV139("MsgSetCurationUserHidden", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.Target); writeCanonBool(w, 103, m.Hidden)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				writeCanonBool(w, 103, m.Hidden)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationThreadLocked:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationThreadLocked", buildCanonV139("MsgSetCurationThreadLocked", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); w.writeString(102, m.RootHash); writeCanonBool(w, 103, m.Locked)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.RootHash)
+				writeCanonBool(w, 103, m.Locked)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgSetCurationSubscriberOnly:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationSubscriberOnly", buildCanonV139("MsgSetCurationSubscriberOnly", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community); w.writeUvarint(101, m.TeamId); writeCanonBool(w, 102, m.Enabled)
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				writeCanonBool(w, 102, m.Enabled)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
 		case *coretypes.MsgClaimCreatorRewards:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgClaimCreatorRewards", buildCanonV139("MsgClaimCreatorRewards", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				for _, id := range m.EpochIds { w.writeUvarint(100, uint64(id)) }
+				for _, id := range m.EpochIds {
+					w.writeUvarint(100, uint64(id))
+				}
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
@@ -1449,7 +1490,6 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	}
 	return nil
 }
-
 
 func buildCanonV139(name string, pubkey, blockHash []byte, difficulty, ts, nonce uint64, fill func(*canonWriter)) []byte {
 	cw := newCanonWriter(name)

@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import styled, { css } from 'styled-components';
+import styled from 'styled-components';
 
 import { dicebearAvatarUrl } from '../../../utils/avatar';
 
@@ -9,7 +9,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *
  * Why one component:
  *   - Before this, every surface (TopBar, ProfileView, FollowsView,
- *     BlocksView, AgentsView, ReferralsView, SearchResultsView,
+ *     BlocksView, AgentsView, SearchResultsView,
  *     SearchDropdown, comment rows in ViewPostView) declared its own
  *     `styled.img` for the dicebear chip. The bg, padding, and image
  *     framing drifted from surface to surface.
@@ -30,9 +30,6 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  * Customisation:
  *   - `size` (px) drives both the wrapper footprint and the dicebear
  *     URL retina request. Defaults to 32.
- *   - `activeBorderColor` paints a 2px ring around the wrapper (used
- *     by ReferralsView leaderboard rows for the \"active this week\"
- *     state). Defaults off.
  *   - `paddingRatio` controls the inner inset around the identicon
  *     glyph as a fraction of `size`. Defaults to `0.2` (20%).
  *   - `shape` selects the wrapper outline:
@@ -66,12 +63,6 @@ const Wrapper = styled.span`
     padding: ${({ $size, $paddingRatio }) =>
         Math.round(($size || 0) * ($paddingRatio ?? DEFAULT_PADDING_RATIO))}px;
     overflow: hidden;
-    ${({ $activeBorderColor }) =>
-        $activeBorderColor
-            ? css`
-                  border: 2px solid ${$activeBorderColor};
-              `
-            : ''}
 `;
 
 const Img = styled.img`
@@ -91,7 +82,6 @@ const UserAvatar = forwardRef(function UserAvatar(
         size = 32,
         alt = '',
         loading = 'lazy',
-        activeBorderColor,
         shape = 'circle',
         radius = DEFAULT_ROUNDED_RADIUS_PX,
         paddingRatio = DEFAULT_PADDING_RATIO,
@@ -110,7 +100,6 @@ const UserAvatar = forwardRef(function UserAvatar(
             $shape={shape}
             $radius={radius}
             $paddingRatio={paddingRatio}
-            $activeBorderColor={activeBorderColor}
             className={className}
             style={style}
             title={title}

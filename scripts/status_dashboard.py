@@ -385,34 +385,6 @@ def min_non_zero(a: Optional[int], b: Optional[int]) -> Optional[int]:
     return a if a < b else b
 
 
-def parse_env_bool(value: Optional[str]) -> Optional[bool]:
-    if value is None:
-        return None
-    normalized = str(value).strip().lower().strip('"').strip("'")
-    if normalized in ("true", "1", "yes"):
-        return True
-    if normalized in ("false", "0", "no"):
-        return False
-    return None
-
-
-def load_env_file(path: Path) -> dict:
-    data = {}
-    content = path.read_text(encoding="utf-8")
-    for raw_line in content.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            data[key] = value
-    return data
-
-
 @dataclass
 class ServiceStatus:
     name: str
@@ -1724,83 +1696,6 @@ def check_earnings() -> ServiceStatus:
     return ServiceStatus(name="Earnings", status=Status.OK, message=message, details=details)
 
 
-def check_rewards() -> ServiceStatus:
-    """Check rewards/quest enablement consistency (backend + indexer)."""
-    details: dict = {}
-    env_path = Path.home() / ".mirage" / "env" / "backend.env"
-    details["backend_env"] = str(env_path)
-
-    try:
-        env_data = load_env_file(env_path)
-    except FileNotFoundError:
-        debug_log("rewards: backend.env missing")
-        return ServiceStatus(name="Rewards", status=Status.ERROR, message="backend.env missing", details=details)
-    except Exception as e:
-        debug_log(f"rewards: failed to read backend.env: {e}")
-        return ServiceStatus(
-            name="Rewards", status=Status.ERROR, message="backend.env read error", details={"error": str(e)[:20]}
-        )
-
-    backend_quests_raw = env_data.get("QUESTS_ENABLED")
-    backend_quests = parse_env_bool(backend_quests_raw)
-    if backend_quests is None:
-        debug_log(f"rewards: QUESTS_ENABLED invalid or missing: {backend_quests_raw!r}")
-        return ServiceStatus(
-            name="Rewards",
-            status=Status.ERROR,
-            message="QUESTS_ENABLED invalid",
-            details={"backend_env": str(env_path), "QUESTS_ENABLED": backend_quests_raw},
-        )
-
-    # Read payouts configuration
-    payouts_enabled_raw = env_data.get("QUESTS_PAYOUTS_ENABLED")
-    payouts_enabled = parse_env_bool(payouts_enabled_raw)
-    pool_address = env_data.get("QUESTS_REWARDS_POOL_ADDRESS", "").strip()
-
-    backend_debug_raw = env_data.get("BACKEND_DEBUG")
-    backend_debug = parse_env_bool(backend_debug_raw)
-    details.update(
-        {
-            "backend_quests_enabled": backend_quests,
-            "backend_debug": backend_debug,
-            "payouts_enabled": payouts_enabled,
-            "pool_address": pool_address or None,
-        }
-    )
-
-    # Query reward pool balance if address is configured
-    pool_balance = None
-    if pool_address:
-        pool_balance = _query_balance_rest(pool_address)
-        if pool_balance is not None:
-            details["pool_balance"] = pool_balance
-
-    details["indexer_quests_enabled"] = None
-
-    if backend_quests:
-        status = Status.OK
-        message = "Enabled"
-    else:
-        status = Status.OK
-        message = "Quests OFF"
-
-    # Payouts check: payouts OFF is only OK if backend quests are also OFF
-    if payouts_enabled is False and backend_quests:
-        status = Status.ERROR
-        message = "Payouts OFF"
-    elif payouts_enabled and not pool_address:
-        status = Status.ERROR
-        message = "No pool address"
-
-    debug_log(
-        "rewards: "
-        f"backend_quests={backend_quests} payouts_enabled={payouts_enabled} pool_address={bool(pool_address)} "
-        f"pool_balance={pool_balance} backend_debug={backend_debug} status={status.value} message={message}"
-    )
-
-    return ServiceStatus(name="Rewards", status=status, message=message, details=details)
-
-
 # Server balance thresholds (in MIRAGE, not umirage)
 SERVER_BALANCE_WARN = int(os.environ.get("MIRAGE_SERVER_BALANCE_WARN", "2000000"))  # 2MM
 SERVER_BALANCE_ERROR = int(os.environ.get("MIRAGE_SERVER_BALANCE_ERROR", "1000000"))  # 1MM
@@ -2081,58 +1976,6 @@ def check_endpoints() -> ServiceStatus:
         status=Status.ERROR,
         message="Some unreachable",
         details=details,
-    )
-
-
-def check_referrals() -> ServiceStatus:
-    """Check referral accrual daemon status."""
-    try:
-        result = subprocess.run(["pgrep", "-f", "referral_accrue.py"], capture_output=True, text=True)
-        process_running = result.returncode == 0
-        pid = result.stdout.strip().split()[0] if process_running and result.stdout.strip() else None
-    except Exception:
-        process_running = False
-        pid = None
-
-    if not process_running:
-        return ServiceStatus(name="Referrals", status=Status.ERROR, message="Not running", details={"running": False})
-
-    # Get additional info from database
-    db_url = os.environ.get(
-        "INDEXER_DB_URL", "postgresql://mirage_indexer:mirage_indexer@127.0.0.1:5432/mirage_indexer"
-    )
-
-    pending_count = 0
-    total_links = 0
-    total_accrued = 0
-    try:
-        with psycopg.connect(db_url, connect_timeout=2) as conn:
-            with conn.cursor() as cur:
-                # Count pending rewards
-                cur.execute("SELECT COUNT(*) FROM referral_pending_rewards " "WHERE status = 'pending'")
-                pending_count = cur.fetchone()[0]
-
-                # Count total referral links
-                cur.execute("SELECT COUNT(*) FROM referral_links")
-                total_links = cur.fetchone()[0]
-
-                # Count total accrued (completed payouts)
-                cur.execute("SELECT COUNT(*) FROM referral_pending_rewards " "WHERE status = 'completed'")
-                total_accrued = cur.fetchone()[0]
-    except Exception:
-        pass
-
-    return ServiceStatus(
-        name="Referrals",
-        status=Status.OK,
-        message="Running",
-        details={
-            "running": True,
-            "pending": pending_count,
-            "links": total_links,
-            "total_accrued": total_accrued,
-            "pid": pid,
-        },
     )
 
 
@@ -2969,7 +2812,6 @@ def collect_statuses() -> list[ServiceStatus]:
             check_validator(),
             check_earnings(),
             check_backend(),
-            check_rewards(),
             check_indexer(),
             check_endpoints(),
             check_disk_usage(),

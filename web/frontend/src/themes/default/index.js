@@ -15,7 +15,6 @@ import MarkdownRenderer from './components/MarkdownRenderer';
 import MediaGallery from './components/MediaGallery';
 import MobileBottomNav from './components/MobileBottomNav';
 import MobileHeader from './components/MobileHeader';
-import QuestHeroCard from './components/QuestHeroCard';
 import Sidebar from './components/Sidebar';
 import ShowMoreButton from './components/ShowMoreButton';
 import Skeleton, {
@@ -60,7 +59,6 @@ import MainView from './routes/MainView';
 import NetworkView from './routes/NetworkView';
 import NotFoundView from './routes/NotFoundView';
 import ProfileView from './routes/ProfileView';
-import ReferralsView from './routes/ReferralsView';
 import ReportsView from './routes/ReportsView';
 import SearchResultsView from './routes/SearchResultsView';
 import SettingsView from './routes/SettingsView';
@@ -83,7 +81,6 @@ const components = {
     MediaGallery,
     MobileBottomNav,
     MobileHeader,
-    QuestHeroCard,
     Sidebar,
     ShowMoreButton,
     Skeleton,
@@ -130,7 +127,6 @@ const routes = {
     NetworkView,
     NotFoundView,
     ProfileView,
-    ReferralsView,
     ReportsView,
     SearchResultsView,
     SettingsView,

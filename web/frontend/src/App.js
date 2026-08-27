@@ -1156,8 +1156,6 @@ class App extends Component {
                                             <Route path="/topics" element={<Navigate to="/communities" replace />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
-                                            <Route path="/referrals" element={<Navigate to="/home" replace />} />
-                                            <Route path="/referrals/:address" element={<Navigate to="/home" replace />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>

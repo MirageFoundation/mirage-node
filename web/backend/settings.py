@@ -9,7 +9,6 @@ Variables:
 
 import logging
 import os
-import re
 
 
 def require_bool_env(key: str) -> bool:
@@ -35,18 +34,6 @@ def require_int_env(key: str, minimum: int | None = None) -> int:
     return value
 
 
-def require_probability_env(key: str) -> float:
-    """Read a required probability env var in [0, 1]."""
-    raw = os.environ[key]  # KeyError if missing
-    try:
-        value = float(raw.strip())
-    except ValueError as e:
-        raise ValueError(f"Env var {key} must be a number, got '{raw}'") from e
-    if not 0.0 <= value <= 1.0:
-        raise ValueError(f"Env var {key} must be between 0 and 1, got {value}")
-    return value
-
-
 # ── Required env vars (validated at import time) ────────────────────────────
 
 REGISTRATION_ENABLED = require_bool_env("REGISTRATION_ENABLED")
@@ -57,43 +44,7 @@ if REGISTRATION_INVITE_CODE_REQUIRED:
     # than fail every registration at query time.
     raise ValueError("REGISTRATION_INVITE_CODE_REQUIRED must be false: invite codes were removed in v1.39")
 OPEN_BROWSING_ENABLED = require_bool_env("OPEN_BROWSING_ENABLED")
-QUESTS_ENABLED = require_bool_env("QUESTS_ENABLED")
-QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
-ACHIEVEMENTS_ENABLED = require_bool_env("ACHIEVEMENTS_ENABLED")
-if QUESTS_ENABLED or QUESTS_PAYOUTS_ENABLED or ACHIEVEMENTS_ENABLED:
-    # v1.39 replaced the quest board with the creator pool and dropped the quest,
-    # achievement and pending-reward tables. Leaving these on would run every
-    # tracking write against tables that no longer exist.
-    raise ValueError(
-        "QUESTS_ENABLED, QUESTS_PAYOUTS_ENABLED and ACHIEVEMENTS_ENABLED must be false: "
-        "quests and achievements were replaced by the creator pool in v1.39"
-    )
 PUSH_NOTIFICATIONS_ENABLED = require_bool_env("PUSH_NOTIFICATIONS_ENABLED")
-
-# Quest assignment shape. Every path that assigns or tracks quests reads these;
-# a second hardcoded copy used to keep quests running on nodes that had them off.
-QUESTS_DAILY_COUNT = require_int_env("QUESTS_DAILY_COUNT", minimum=0)
-QUESTS_FLASH_COUNT = require_int_env("QUESTS_FLASH_COUNT", minimum=0)
-QUESTS_FLASH_MIN_INTERVAL_HOURS = require_int_env("QUESTS_FLASH_MIN_INTERVAL_HOURS", minimum=0)
-QUESTS_FLASH_MAX_INTERVAL_HOURS = require_int_env("QUESTS_FLASH_MAX_INTERVAL_HOURS", minimum=0)
-if QUESTS_FLASH_MIN_INTERVAL_HOURS > QUESTS_FLASH_MAX_INTERVAL_HOURS:
-    raise ValueError(
-        "QUESTS_FLASH_MIN_INTERVAL_HOURS must not exceed QUESTS_FLASH_MAX_INTERVAL_HOURS "
-        f"(min={QUESTS_FLASH_MIN_INTERVAL_HOURS}, max={QUESTS_FLASH_MAX_INTERVAL_HOURS})"
-    )
-
-# Special quest gating. A zero chance means the quest is never offered, which is
-# how referral payouts are switched off.
-QUESTS_INVITE_RECRUIT_CHANCE = require_probability_env("QUESTS_INVITE_RECRUIT_CHANCE")
-QUESTS_INVITE_EARNER_CHANCE = require_probability_env("QUESTS_INVITE_EARNER_CHANCE")
-QUESTS_INVITE_EARNER_INTERVAL = require_int_env("QUESTS_INVITE_EARNER_INTERVAL", minimum=1)
-
-QUESTS_REWARDS_POOL_ADDRESS = os.environ.get("QUESTS_REWARDS_POOL_ADDRESS", "").strip().lower()
-if QUESTS_PAYOUTS_ENABLED and not re.fullmatch(r"mirage1[0-9a-z]{38}", QUESTS_REWARDS_POOL_ADDRESS):
-    raise ValueError(
-        "QUESTS_PAYOUTS_ENABLED=true requires QUESTS_REWARDS_POOL_ADDRESS to be a mirage1 address, "
-        f"got '{QUESTS_REWARDS_POOL_ADDRESS}'"
-    )
 
 # Public media uploads. Must only be true where a scanning edge (Bunny Shield
 # upload scanning) fronts uploads, so no unscanned media can reach the node. A
@@ -125,15 +76,7 @@ TRENDING_PUSH_ENABLED = require_bool_env("TRENDING_PUSH_ENABLED")
 ANDROID_BANNER_ENABLED = require_bool_env("ANDROID_BANNER_ENABLED")
 IOS_BANNER_ENABLED = require_bool_env("IOS_BANNER_ENABLED")
 
-# Moderation Settings
-# When false (default), standard moderation rules apply:
-# - Deleted posts are hidden
-# - Blocked posts from enabled agents are hidden
-# - Content from blocked users (by enabled agents) is hidden
-#
-# Set to true to override and show all content:
-
-# Show all posts, regardless of whether they are marked as deleted
+# Show all posts, regardless of whether they are marked as deleted.
 IGNORE_DELETIONS = False
 
 # New-user highlight: number of days after registration to show green "New User" badge.

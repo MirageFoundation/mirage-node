@@ -9,7 +9,6 @@ import Storage from '../../../utils/Storage';
 import { requireAccount } from '../../../utils/openBrowsing';
 import * as tx from "../../../utils/tx.js";
 import Api from '../../../utils/api';
-import { signPlainPayload } from '../../../utils/signPlain';
 import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../../../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../../../utils/FollowUsers';
 import { requireThemeColor } from "../../../utils/themeColor";
@@ -849,13 +848,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [nodeConfigTick, setNodeConfigTick] = useState(0);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(false);
-    const [isSuspending, setIsSuspending] = useState(false);
-    const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
-    const [suspendSuccess, setSuspendSuccess] = useState(null); // success message or null
-    const [confirmUnsuspend, setConfirmUnsuspend] = useState(false);
-    const [isUnsuspending, setIsUnsuspending] = useState(false);
-    const [userSuspendedStatus, setUserSuspendedStatus] = useState(null); // null = unknown, true/false = known
     const [followOverride, setFollowOverride] = useState(null);
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
     const [confirmDonate, setConfirmDonate] = useState(false);
@@ -895,17 +887,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         };
     }, []);
 
-    const nodeConfig = useMemo(() => {
-        void nodeConfigTick;
-        try {
-            const raw = localStorage.getItem('nodeConfig');
-            return raw ? JSON.parse(raw) : null;
-        } catch (_) {
-            return null;
-        }
-    }, [nodeConfigTick]);
-
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);
@@ -1000,13 +981,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleDeletePost = () => {
         setMenuOpen(false);
         if (!post || !post.post_id) return;
-        setConfirmSuspendQuests(false);
-        setSuspendSuccess(null);
         setConfirmDonate(false);
         setDonateMessage(null);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
         setConfirmDelete(true);
     };
 
@@ -1035,133 +1013,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const cancelDeletePost = () => {
         setConfirmDelete(false);
         setIsDeleting(false);
-    };
-
-    const handleSuspendFromQuests = () => {
-        setMenuOpen(false);
-        if (!post || !post.user_id) return;
-        setConfirmDelete(false);
-        setConfirmDonate(false);
-        setDonateMessage(null);
-        setConfirmBlockPost(false);
-        setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
-        setConfirmSuspendQuests(true);
-    };
-
-    const confirmSuspendFromQuests = async () => {
-        console.log('confirmSuspendFromQuests called', { post: post?.user_id, suspendDuration });
-        if (!post || !post.user_id) {
-            console.log('No post or user_id');
-            return;
-        }
-        const adminAddress = Storage.load('publicKey', '');
-        if (!adminAddress) {
-            console.log('No admin address');
-            return;
-        }
-
-        setIsSuspending(true);
-        try {
-            console.log('Making API call to suspend', { adminAddress, target: post.user_id, duration_days: suspendDuration });
-            const sig = await signPlainPayload(
-                (ts, n) => `admin_rewards_suspend:${adminAddress.toLowerCase()}:${ts}:${n}`
-            );
-            const response = await Api.post('/admin/rewards/suspend', {
-                admin: adminAddress,
-                target: post.user_id,
-                duration_days: suspendDuration,  // 0 = permanent
-                reason: 'Attempting to game the quest system',
-                ...sig,
-            });
-            console.log('Suspend response:', response);
-            if (response.success) {
-                const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
-                setConfirmSuspendQuests(false);
-                setUserSuspendedStatus(true); // Update status after successful suspend
-                setSuspendSuccess(`User suspended from quests ${durationText}`);
-                setTimeout(() => setSuspendSuccess(null), 4000);
-            } else {
-                alert(`Failed to suspend: ${response.error || response.message || 'Unknown error'}`);
-                setConfirmSuspendQuests(false);
-            }
-        } catch (err) {
-            console.error('Suspend error:', err);
-            alert(`Error suspending user: ${err.message || 'Unknown error'}`);
-            setConfirmSuspendQuests(false);
-        }
-        setIsSuspending(false);
-        setSuspendDuration(7); // Reset to default
-    };
-
-    const cancelSuspendFromQuests = () => {
-        setConfirmSuspendQuests(false);
-        setIsSuspending(false);
-    };
-
-    const fetchUserSuspensionStatus = async (userId) => {
-        if (!userId || !questsEnabled) {
-            setUserSuspendedStatus(null);
-            return;
-        }
-        try {
-            const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
-            setUserSuspendedStatus(response.suspended === true);
-        } catch (err) {
-            console.error('Error fetching suspension status:', err);
-            setUserSuspendedStatus(null);
-        }
-    };
-
-    const handleUnsuspendFromQuests = () => {
-        setMenuOpen(false);
-        if (!post || !post.user_id) return;
-        setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
-        setConfirmDonate(false);
-        setDonateMessage(null);
-        setConfirmBlockPost(false);
-        setConfirmBlockUser(false);
-        setConfirmUnsuspend(true);
-    };
-
-    const confirmUnsuspendFromQuests = async () => {
-        if (!post || !post.user_id) return;
-        const adminAddress = Storage.load('publicKey', '');
-        if (!adminAddress) {
-            alert('You must be logged in');
-            return;
-        }
-
-        setIsUnsuspending(true);
-        try {
-            const sig = await signPlainPayload(
-                (ts, n) => `admin_rewards_unsuspend:${adminAddress.toLowerCase()}:${ts}:${n}`
-            );
-            const response = await Api.post('/admin/rewards/unsuspend', {
-                admin: adminAddress,
-                target: post.user_id,
-                ...sig,
-            });
-            if (response.success) {
-                setConfirmUnsuspend(false);
-                setUserSuspendedStatus(false); // Update status after successful unsuspend
-                setSuspendSuccess('User unsuspended from quests');
-                setTimeout(() => setSuspendSuccess(null), 4000);
-            } else {
-                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
-                setConfirmUnsuspend(false);
-            }
-        } catch (err) {
-            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
-            setConfirmUnsuspend(false);
-        }
-        setIsUnsuspending(false);
-    };
-
-    const cancelUnsuspendFromQuests = () => {
-        setConfirmUnsuspend(false);
-        setIsUnsuspending(false);
     };
 
     // Close menu when clicking outside
@@ -1202,12 +1053,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (!post || !post.user_id) return;
         if (!requireAccount('donate')) return;
         setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
-        setSuspendSuccess(null);
         setDonateMessage(null);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
         setConfirmGiftSub(false);
         setDonateAmountRaw("10000");
         setConfirmDonate(true);
@@ -1261,12 +1109,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const target = post.user_id;
         console.debug('[CardView] gift-subscribe.confirm', { target, level });
         setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
-        setSuspendSuccess(null);
         setConfirmDonate(false);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
         setConfirmAward(false);
         setGiftSubMessage(null);
         setConfirmGiftSub({ level, target, loading: true, expiryLabel: null, error: null });
@@ -1469,10 +1314,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (!post || !post.post_id) return;
         // Close any open confirmation dialogs
         setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
         setConfirmDonate(false);
         setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
         setConfirmBlockPost(true);
     };
 
@@ -1502,10 +1345,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (!post || (!post.user_id && !post.author)) return;
         // Close any open confirmation dialogs
         setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
         setConfirmDonate(false);
         setConfirmBlockPost(false);
-        setConfirmUnsuspend(false);
         setConfirmBlockUser(true);
     };
 
@@ -1538,11 +1379,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (!topicName) return;
         // Close any open confirmation dialogs
         setConfirmDelete(false);
-        setConfirmSuspendQuests(false);
         setConfirmDonate(false);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
-        setConfirmUnsuspend(false);
         setBlockTopicInput(topicName);
         setConfirmBlockTopic(true);
     };
@@ -2252,11 +2091,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             top: rect.bottom + 4,
                                             left: rect.right - 180 // 180 is min-width of dropdown
                                         });
-                                        // Fetch suspension status for admins
-                                        if (isAdmin && post?.user_id && questsEnabled) {
-                                            setUserSuspendedStatus(null); // Reset while loading
-                                            fetchUserSuspensionStatus(post.user_id);
-                                        }
                                     }
                                     setMenuOpen(!menuOpen);
                                 }}
@@ -2312,15 +2146,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </>
                                     )}
                                     {!isOwnPost && isAdmin && (
-                                        <>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                                            {questsEnabled && userSuspendedStatus !== true && (
-                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
-                                            )}
-                                            {questsEnabled && userSuspendedStatus === true && (
-                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>🛡️ Unsuspend from quests</MenuItem>
-                                            )}
-                                        </>
+                                        <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
                                     )}
                                 </MenuDropdown>,
                                 document.body
@@ -2568,60 +2394,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 </ConfirmButtons>
                             </div>
                         </BlockConfirmMessage>
-                    )}
-                    {confirmSuspendQuests && (
-                        <BlockConfirmMessage>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
-                                <select
-                                    value={suspendDuration}
-                                    onChange={(e) => setSuspendDuration(Number(e.target.value))}
-                                    style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #d97706', background: '#fef3c7', color: '#92400e', fontWeight: 500 }}
-                                >
-                                    <option value={1}>1 day</option>
-                                    <option value={3}>3 days</option>
-                                    <option value={7}>7 days</option>
-                                    <option value={30}>30 days</option>
-                                    <option value={0}>Permanent</option>
-                                </select>
-                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                    <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
-                                        {isSuspending ? 'Suspending...' : 'Suspend'}
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
-                                </ConfirmButtons>
-                            </div>
-                        </BlockConfirmMessage>
-                    )}
-                    {confirmUnsuspend && (
-                        <BlockConfirmMessage>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
-                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                    <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
-                                        {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
-                                    </Button>
-                                    <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
-                                </ConfirmButtons>
-                            </div>
-                        </BlockConfirmMessage>
-                    )}
-                    {suspendSuccess && (
-                        <div style={{
-                            background: 'rgba(34, 197, 94, 0.1)',
-                            border: '1px solid #22c55e',
-                            borderRadius: '3px',
-                            padding: '0.75rem 1rem',
-                            margin: '0.5rem 0.5rem 0.5rem 0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            color: '#16a34a',
-                            fontSize: '0.8rem',
-                        }}>
-                            <span>✓</span>
-                            {suspendSuccess}
-                        </div>
                     )}
                     {confirmDonate && (
                         <BlockConfirmMessage>

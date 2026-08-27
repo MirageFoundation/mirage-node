@@ -1165,12 +1165,11 @@ def start_with_entrypoint(image_ref: str):
 
 
 def configure_local_backend_env() -> None:
-    """Point the container's backend.env at the v1.39 feature set.
+    """Turn on the settings the local suites need.
 
     Local testnet only — this patches the container's backend.env, never a
-    deployed one. Quests, payouts and achievements were replaced by the creator
-    pool, and the backend refuses to start with any of them on, so the reset must
-    not leave the stale `true` values a pre-v1.39 backend.env carries.
+    deployed one. Media uploads are exercised by the backend suite, and debug
+    logging is what makes a failed probe diagnosable from the container log.
 
     Must run before start_with_entrypoint(), so the backend reads the final
     values on its first start and needs no restart.
@@ -1179,9 +1178,6 @@ def configure_local_backend_env() -> None:
 
     # sed the values that exist; append the ones this node's backend.env predates.
     settings = {
-        "QUESTS_ENABLED": "false",
-        "QUESTS_PAYOUTS_ENABLED": "false",
-        "ACHIEVEMENTS_ENABLED": "false",
         "MEDIA_UPLOADS_ENABLED": "true",
         "BACKEND_DEBUG": "true",
     }

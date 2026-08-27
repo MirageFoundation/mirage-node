@@ -229,25 +229,6 @@ def test_backend_hardening(backend: str):
         "print('OK' if ok else ('BAD', wrong))\n",
     )
 
-    # ── H-3 / L-1: quest completion holds a per-owner advisory lock ──────
-    _probe(
-        "backend_hardening.quest_progress_locks_per_owner",
-        "import contextlib, quest_tracker\n"
-        "keys = []\n"
-        "@contextlib.contextmanager\n"
-        "def fake(key):\n"
-        "    keys.append(key)\n"
-        "    raise RuntimeError('stop-after-lock')\n"
-        "    yield None\n"
-        "quest_tracker._locked_transaction = fake\n"
-        "t = quest_tracker.QuestTracker.__new__(quest_tracker.QuestTracker)\n"
-        "try:\n"
-        "    t._increment_daily_progress('mirage1abc', None, 20000, 1)\n"
-        "except RuntimeError:\n"
-        "    pass\n"
-        "print('OK' if keys == ['quest_assignment:mirage1abc'] else ('BAD', keys))\n",
-    )
-
     # ── M-1: push is suppressed for blocked actors and deleted sources ───
     _probe(
         "backend_hardening.push_block_lookup_fails_closed",

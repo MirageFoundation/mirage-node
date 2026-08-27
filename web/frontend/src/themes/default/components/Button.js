@@ -186,7 +186,7 @@ const getVariantStyles = (variant, theme) => {
             `;
         case 'warning':
             /* No dedicated warning token pair in R2; use danger tokens since most "warning" usages
-               are confirm-destructive actions (Block user, Delete post, Suspend, Report). */
+               are confirm-destructive actions (Block user, Delete post, Report). */
             return css`
                 background: ${theme.colors.buttonDangerBg};
                 color: ${theme.colors.voteDown};

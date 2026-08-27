@@ -654,7 +654,6 @@ export function useMain({
         } catch (_) { }
     }, [nodeConfig]);
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
     // Open browsing: when on, logged-out visitors fetch & read the feed/topics
     // (account prompts only fire on write/social actions). When off, behavior is
     // unchanged: logged-out users get the welcome/invite screen, no content fetch.
@@ -710,25 +709,11 @@ export function useMain({
             return true;
         }
     });
-    const [questCardCollapsed, setQuestCardCollapsed] = useState(() => {
-        try {
-            return Storage.load('quest_card_collapsed', false);
-        } catch (_) {
-            return false;
-        }
-    });
     const toggleInviteBanner = () => {
         const next = !inviteBannerCollapsed;
         setInviteBannerCollapsed(next);
         try {
             Storage.save('invite_banner_collapsed', next);
-        } catch (_) { }
-    };
-    const toggleQuestCard = () => {
-        const next = !questCardCollapsed;
-        setQuestCardCollapsed(next);
-        try {
-            Storage.save('quest_card_collapsed', next);
         } catch (_) { }
     };
 
@@ -765,7 +750,6 @@ export function useMain({
             }
         })();
 
-        // Listen for invite codes updates (e.g., when claimed from quests)
         const handleInviteCodesUpdated = () => {
             loadInviteCodes();
         };
@@ -1872,7 +1856,6 @@ export function useMain({
         snoozeModerationReminder,
         isLoggedIn,
         inviteCodesEnabled,
-        questsEnabled,
         openBrowsingEnabled,
         nodeConfigLoaded,
         showAndroidBanner,
@@ -1883,9 +1866,7 @@ export function useMain({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
-        questCardCollapsed,
         toggleInviteBanner,
-        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,

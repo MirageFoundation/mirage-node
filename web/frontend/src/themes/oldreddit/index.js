@@ -14,7 +14,6 @@ import MarkdownEditor from './components/MarkdownEditor';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import MediaGallery from './components/MediaGallery';
 import MobileBottomNav from './components/MobileBottomNav';
-import QuestHeroCard from './components/QuestHeroCard';
 import StickerPicker from './components/StickerPicker';
 import Toast from './components/Toast';
 import Tooltip, { InfoIcon, tooltipStyles } from './components/Tooltip';
@@ -44,7 +43,6 @@ import MainView from './routes/MainView';
 import NetworkView from './routes/NetworkView';
 import NotFoundView from './routes/NotFoundView';
 import ProfileView from './routes/ProfileView';
-import ReferralsView from './routes/ReferralsView';
 import ReportsView from './routes/ReportsView';
 import SearchResultsView from './routes/SearchResultsView';
 import SettingsView from './routes/SettingsView';
@@ -69,7 +67,6 @@ const components = {
     MediaGallery,
     MobileBottomNav,
     MobileHeader: NullComponent,
-    QuestHeroCard,
     Sidebar: NullComponent,
     StickerPicker,
     Toast,
@@ -103,7 +100,6 @@ const routes = {
     NetworkView,
     NotFoundView,
     ProfileView,
-    ReferralsView,
     ReportsView,
     SearchResultsView,
     SettingsView,

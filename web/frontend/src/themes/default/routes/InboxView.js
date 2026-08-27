@@ -377,8 +377,7 @@ const DonationAmount = styled.div`
      * line-height) so donation rows do not read as visually heavier
      * than every other inbox message. Color stays on the shared
      * voteUp green token (#16A34A) used for positive-amount
-     * indicators across the app (vote pills, success banners, quest
-     * claim state). */
+     * indicators across the app (vote pills, success banners). */
     color: ${({ theme }) => theme.colors.voteUp};
     font-size: 0.68rem;
     line-height: 1.5;

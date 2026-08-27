@@ -16,6 +16,7 @@ import {
     HiOutlineDocumentText,
     HiOutlinePencilSquare,
     HiOutlineTrash,
+    HiOutlineShieldExclamation,
 } from "react-icons/hi2";
 
 import * as tx from "../../../utils/tx";
@@ -27,7 +28,6 @@ import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./Gif
 import usePostGifts from "../../../logic/usePostGifts";
 import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
-import { useAdminQuestActions } from "./AdminQuestActions";
 
 /**
  * PostMenu — default Plan 06.3 polish round 3
@@ -279,31 +279,14 @@ export function MoreMenuChip({
     const handleToggle = useCallback(e => { stop(e); setOpen(v => !v); }, []);
 
     /**
-     * Sub-plan 06.11 E — feed-row admin parity. Adds Mark deleted /
-     * Suspend / Unsuspend rows for admins viewing other users' posts
-     * on a quests-enabled node. Suspension status is fetched lazily the
-     * first time the menu opens (mirrors bluemoon).
+     * Sub-plan 06.11 E — feed-row admin parity. Adds the Mark-deleted row
+     * for admins viewing other users' posts.
      */
-    const {
-        isAdminVisible,
-        adminMenuItems,
-        dialogs: adminDialogs,
-        fetchUserSuspensionStatus,
-    } = useAdminQuestActions({
-        post,
-        state,
-        updatePost,
-        onCloseMenu: close,
-    });
-    const suspensionFetchedRef = useRef(false);
-    useEffect(() => {
-        if (!open) return;
-        if (suspensionFetchedRef.current) return;
-        if (!isAdminVisible) return;
-        suspensionFetchedRef.current = true;
-        try { fetchUserSuspensionStatus(post && post.user_id); }
-        catch (_) { /* noop */ }
-    }, [open, isAdminVisible, fetchUserSuspensionStatus, post]);
+    const isAdminVisible = (() => {
+        if (!isLoggedIn || isOwnPost || !postId || !authorAddress) return false;
+        try { return Number(Storage.load('user_level', '0')) >= 100; }
+        catch (_) { return false; }
+    })();
 
     const handleCopyLink = useCallback(e => {
         stop(e); setOpen(false);
@@ -516,25 +499,21 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                             </>
                         )}
-                        {isAdminVisible && adminMenuItems.length > 0 && adminMenuItems.map(item => (
-                            <MenuItemBtn
-                                key={item.key}
-                                type="button"
-                                $danger={item.danger || undefined}
-                                onClick={(e) => { stop(e); item.onClick(); }}
-                            >
-                                {item.icon}
-                                <span>{item.label}</span>
+                        {isAdminVisible && (
+                            <MenuItemBtn type="button" $danger onClick={handleDelete}>
+                                <HiOutlineShieldExclamation />
+                                <span>Mark post deleted</span>
                             </MenuItemBtn>
-                        ))}
+                        )}
                     </Menu>
                 )}
             </PopoverRoot>
-            {adminDialogs}
             <ConfirmDialog
                 open={deleteDialogOpen}
-                title="Delete this post?"
-                message="This will mark the post as deleted on-chain. You can't undo this action."
+                title={isOwnPost ? 'Delete this post?' : 'Mark post as deleted?'}
+                message={isOwnPost
+                    ? "This will mark the post as deleted on-chain. You can't undo this action."
+                    : 'This will permanently remove this post from every feed. This action cannot be undone.'}
                 confirmLabel="Delete post"
                 confirmVariant="danger"
                 pending={deletePending}

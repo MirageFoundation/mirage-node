@@ -8,13 +8,6 @@
 const ERROR_MAP = {
     // Registration / signup
     registration_disabled: "Registration is currently disabled on this node.",
-    invite_code_required: "An invite code is required to create an account.",
-    invite_code_invalid: "That invite code is not valid.",
-    invite_code_used: "That invite code has already been used.",
-    invite_code_check_failed: "Could not validate the invite code. Please try again.",
-    invite_code_invalid_format: "Invite code format is invalid.",
-    invite_codes_not_required: "Invite codes are not required on this node.",
-    invite_codes_main_site_only: "Invite codes only work on mirage.talk.",
     attribution_signature_invalid: "Could not verify your invite code. Please reload and try again.",
 
     // Username
@@ -25,13 +18,7 @@ const ERROR_MAP = {
     username_taken: "That username is already taken.",
 
     // Referrals
-    referral_requires_invite_codes: "Referral links require invite codes to be enabled.",
-    referral_data_incomplete: "Referral data is incomplete. Please try again later.",
-    invalid_week_format: "Invalid week format. Use YYYY-Www (e.g. 2026-W13).",
     referrer_not_found: "Referrer not found.",
-    referrer_not_opted_in: "This referrer has not enabled referral links.",
-    referrer_no_codes: "This referrer has no invite codes left.",
-    referrer_already_used: "You already used this referrer.",
     referrer_username_too_long: "Referrer username is too long.",
     referrer_username_invalid_format: "Invalid referrer username format.",
     referrer_check_failed: "Could not validate the referrer. Please try again.",
@@ -218,10 +205,7 @@ const ERROR_MAP = {
     // Reports / moderation
     reason_too_long: "Report reason is too long (max 200 characters).",
     admin_required: "Admin address is required.",
-    admin_and_target_required: "Admin and target are required.",
-    admin_target_duration_reason_required: "Admin, target, duration, and reason are required.",
     owner_required: "Owner is required.",
-    suspended: "Your account is suspended.",
 
     // Search / query
     query_required: "Query parameter is required.",
@@ -229,7 +213,6 @@ const ERROR_MAP = {
     invalid_amount: "Invalid amount.",
     amount_must_be_positive: "Amount must be positive.",
     amount_too_small: "Amount is below the minimum.",
-    invalid_duration_days: "Invalid duration.",
     invalid_month_format: "Invalid month format (use YYYY-MM).",
     invalid_max_depth: "Invalid max depth.",
     unsupported_sort_mode: "Unsupported sort mode.",
@@ -243,19 +226,11 @@ const ERROR_MAP = {
     image_type_only: "Only image uploads are supported.",
     invalid_video_uid: "Invalid video UID.",
     not_configured: "Service is not configured.",
-    pool_not_configured: "Pool is not configured.",
-    no_rewards: "No rewards available.",
-    payout_failed: "Payout failed.",
-    payout_pending: "Your payout is being confirmed on chain. Your rewards are safe — check back in a moment.",
     retry: "Please retry the request.",
     stats_event_disabled: "Stats events are disabled on this node.",
     invalid_user_level: "Invalid user level.",
 
     // Quests
-    quest_id_required: "Quest ID is required.",
-    unknown_quest_id: "Unknown quest ID.",
-    quest_not_assigned: "Quest is not assigned for today.",
-    quest_already_completed: "Quest already completed.",
 
     // Chain rejects
     transaction_rejected: "Transaction rejected.",

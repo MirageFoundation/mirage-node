@@ -4,7 +4,6 @@ import Sidebar from "../components/Sidebar.js";
 import TopBar from "../components/TopBar.js";
 import Button from "../components/Button.js";
 import MobileHeader from "../components/MobileHeader.js";
-import QuestHeroCard from "../components/QuestHeroCard.js";
 import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
@@ -987,7 +986,6 @@ const MainView = ({
         openBrowsingEnabled,
         nodeConfigLoaded,
         inviteCodesEnabled,
-        questsEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
@@ -996,9 +994,7 @@ const MainView = ({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
-        questCardCollapsed,
         toggleInviteBanner,
-        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,
@@ -1251,9 +1247,6 @@ const MainView = ({
                             </InviteBannerButton>
                         </InviteBannerContentWrapper>}
                     </InviteOnlyBanner>}
-
-                    {/* Quest hero card - only when quests are enabled on this node */}
-                    {isLoggedIn && questsEnabled && (urlTopic === 'home' || urlTopic === 'following') && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} size={cardSize} />}
 
                     {/* Android app banner - shown once for Android users until dismissed */}
                     {showHero && showAndroidBanner && <AndroidAppHero role="region" aria-label="Android app available">

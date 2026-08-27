@@ -44,8 +44,6 @@ from settings import (
     REGISTRATION_INVITE_CODE_REQUIRED,
     OPEN_BROWSING_ENABLED,
     MEDIA_UPLOADS_ENABLED,
-    QUESTS_ENABLED,
-    QUESTS_PAYOUTS_ENABLED,
     NEW_USER_HIGHLIGHT_DAYS,
     PUSH_NOTIFICATIONS_ENABLED,
     ANDROID_BANNER_ENABLED,
@@ -3931,8 +3929,6 @@ def _build_node_config() -> dict:
         "registration_enabled": REGISTRATION_ENABLED,
         "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
         "open_browsing_enabled": OPEN_BROWSING_ENABLED,
-        "quests_enabled": QUESTS_ENABLED,
-        "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
         "push_notifications_enabled": PUSH_NOTIFICATIONS_ENABLED,
         "android_banner_enabled": ANDROID_BANNER_ENABLED,
@@ -8421,49 +8417,6 @@ def _get_stats_analytics(rid: int):
         return safe_error(e)
 
 
-def _get_stats_rewards(rid: int):
-    """Reward tables were dropped with quests in v1.39.0."""
-    log_event(rid, "get_stats.rewards.retired")
-    return jsonify(
-        {
-            "summary": {
-                "total_rewards": 0,
-                "claimed_count": 0,
-                "pending_count": 0,
-                "total_amount": 0,
-                "claimed_amount": 0,
-                "pending_amount": 0,
-                "first_reward_at": None,
-                "last_reward_at": None,
-                "pool_balance": 0,
-                "quest_payouts_enabled": False,
-                "daily_rate": 0,
-            },
-            "users": [],
-        }
-    )
-
-
-def _get_stats_rewards_history(rid: int):
-    """Reward tables were dropped with quests in v1.39.0."""
-    log_event(rid, "get_stats.rewards_history.retired")
-    return jsonify({"rewards": [], "has_more": False})
-
-
-def _get_stats_signups(rid: int):
-    """Invite codes were dropped with referrals in v1.39.0."""
-    log_event(rid, "get_stats.signups.retired")
-    return jsonify(
-        {
-            "signups": [],
-            "total_used": 0,
-            "total_available": 0,
-            "unique_referrers": 0,
-            "top_referrers": [],
-        }
-    )
-
-
 def _get_stats_subscribers(rid: int):
     """Return subscribers grouped by tier with activity stats."""
     try:
@@ -8686,7 +8639,7 @@ def get_welcome_stats():
 
 @public_bp.route("/api/get_stats")
 def get_stats():
-    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts, analytics, rewards."""
+    """Return stats for the stats page. Supports tabs: overview (default), subscribers, accounts, analytics."""
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
@@ -8699,19 +8652,18 @@ def get_stats():
     if _err is not None:
         return _err[0], _err[1]
 
-    # Route to tab-specific handlers
-    if tab == "signups":
-        return _get_stats_signups(rid)
-    elif tab == "subscribers":
+    # Route to tab-specific handlers. The signup and reward tabs read the invite,
+    # referral and quest tables v1.39.0 dropped; they answer 410 like the rest of
+    # that surface rather than serving zeros a reader would take for real data.
+    if tab in ("signups", "rewards", "rewards_history"):
+        log_event(rid, "get_stats.tab_retired", tab=tab)
+        return api_error_code("gone", 410)
+    if tab == "subscribers":
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
         return get_stats_accounts(rid)
     elif tab == "analytics":
         return _get_stats_analytics(rid)
-    elif tab == "rewards":
-        return _get_stats_rewards(rid)
-    elif tab == "rewards_history":
-        return _get_stats_rewards_history(rid)
 
     # Check cache for overview stats
     now = int(time.time())

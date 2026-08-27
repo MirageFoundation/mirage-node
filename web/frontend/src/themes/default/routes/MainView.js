@@ -13,7 +13,6 @@ import { FaGooglePlay, FaApple } from "react-icons/fa6";
 import { getThemeFamily } from "../../../registry/theme";
 import Button from "../components/Button.js";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
-import QuestHeroCard from "../components/QuestHeroCard.js";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
@@ -300,8 +299,8 @@ const InviteBannerButton = styled.button`
         cursor: not-allowed;
     }
 `;
-/* Vertical breathing room between the invite banner and the quest card
- * so they don't visually collide. */
+/* Vertical breathing room between the invite banner and the section
+ * below it so they don't visually collide. */
 const HomeSectionSpacer = styled.div`
     height: 0.6rem;
 
@@ -732,7 +731,7 @@ const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     }
 
     /* Red tint — mirrors the danger palette used elsewhere in default
-     * (ReferralsView danger cards, Settings danger buttons): a soft
+     * (Settings danger buttons): a soft
      * voteDownBg wash + buttonDangerBorder outline so the consent
      * prompt reads as a cautionary NSFW-flavored card. */
     background: ${({ theme }) => theme.name === 'light'
@@ -869,7 +868,7 @@ const NsfwHeroNote = styled.div`
 
 // ============================================================
 // App-download hero cards (Android + iPhone) — default theme
-// Visuals match the QuestHeroCard language: flat panel on `bg`,
+// Visuals match the hero-card language: flat panel on `bg`,
 // 1px `border`, 8px radius, icon tile + title/subtitle header,
 // gradient CTA button, neutral dismiss pill.
 // ============================================================
@@ -950,7 +949,7 @@ const AndroidHeroButtons = styled.div`
     flex-wrap: wrap;
 `;
 
-/* Primary CTA — platform-tinted gradient, matches QuestHeroCard's
+/* Primary CTA — platform-tinted gradient, using the shared hero
  * `CtaButton` geometry (7px radius, 0.42rem × 0.75rem padding). */
 const AndroidHeroButton = styled.a`
     display: inline-flex;
@@ -1425,7 +1424,6 @@ const MainView = ({
         openBrowsingEnabled,
         nodeConfigLoaded,
         inviteCodesEnabled,
-        questsEnabled,
         showAndroidBanner,
         showIPhoneBanner,
         inviteModalOpen,
@@ -1434,9 +1432,7 @@ const MainView = ({
         welcomeStats,
         welcomeStatsStale,
         inviteBannerCollapsed,
-        questCardCollapsed,
         toggleInviteBanner,
-        toggleQuestCard,
         nextAvailableCode,
         availableCodeCount,
         handleOpenInviteModal,
@@ -1774,10 +1770,7 @@ const MainView = ({
                                     </InviteContent>}
                                 </InviteOnlyBanner>}
 
-                                {/* Quest hero card - shown below invite codes on home/following */}
-                                {inviteCodesEnabled && questsEnabled && <HomeSectionSpacer />}
-                                {questsEnabled && <QuestHeroCard collapsed={questCardCollapsed} onToggleCollapse={toggleQuestCard} />}
-                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && (inviteCodesEnabled || questsEnabled) && <HomeSectionSpacer />}
+                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && inviteCodesEnabled && <HomeSectionSpacer />}
                                 {isLoggedIn && urlTopic === 'home' && showModerationReminder && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Moderation reminder">
                                     <NsfwHeroHeader>
                                         <NsfwHeroIconTile aria-hidden="true">
@@ -1840,9 +1833,6 @@ const MainView = ({
                             {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
                             {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
                             the default theme (which disables hero cards) still surfaces it. */}
-                            {/* Match the Invite↔Quest spacing (HomeSectionSpacer) so the
-                            Quest↔NSFW gap reads identical to the Invite↔Quest gap. */}
-                            {isLoggedIn && urlTopic === 'home' && showNsfwHero && questsEnabled && <HomeSectionSpacer />}
                             {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
                                 <NsfwHeroHeader>
                                     <NsfwHeroIconTile aria-hidden="true">

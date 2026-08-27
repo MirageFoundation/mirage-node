@@ -41,8 +41,6 @@ _log = logging.getLogger("node")
 _STARTUP_LOG_INTERVAL_SEC = 30.0
 _STARTUP_MAX_BACKOFF_SEC = 30.0
 
-REWARDS_POOL_KEY_NAME = "rewards_pool"
-
 
 @dataclass
 class Runtime:
@@ -58,11 +56,6 @@ class Runtime:
     validator_operator_address: str
     validator_consensus_address: str
     min_gas_price_umirage: float
-    # Rewards-pool signer, loaded only when QUESTS_PAYOUTS_ENABLED is true.
-    rewards_pool_addr: Optional[str] = None
-    rewards_pool_pubkey_bytes: Optional[bytes] = None
-    rewards_pool_privkey_bytes: Optional[bytes] = None
-    rewards_pool_account_number: Optional[int] = None
 
 
 _RUNTIME: Optional[Runtime] = None
@@ -345,29 +338,6 @@ def _export_privkey_bytes(key_name: str) -> bytes:
     return pk
 
 
-def resolve_rewards_pool_signer(api_url: str, key_name: str, expected_address: str) -> Tuple[bytes, bytes, str, int]:
-    """Load the rewards-pool signer once at startup.
-
-    Returns (privkey_bytes, pubkey_bytes, address, account_number). The derived
-    address must equal the configured pool address — a mismatch means payouts
-    would be signed by the wrong account, so it is a hard startup failure.
-    """
-    from cosmpy.crypto.keypairs import PrivateKey as _Priv
-
-    privkey = _export_privkey_bytes(key_name)
-    pubkey = _Priv(privkey).public_key.public_key_bytes
-    address = derive_address_from_pubkey(pubkey)
-    if not address:
-        raise RuntimeError(f"rewards pool key {key_name} produced no address")
-    if address != str(expected_address or "").strip().lower():
-        raise RuntimeError(
-            f"rewards pool key {key_name} address {address} does not match "
-            f"QUESTS_REWARDS_POOL_ADDRESS {expected_address}"
-        )
-    account_number = resolve_account_number(api_url, address)
-    return privkey, pubkey, address, account_number
-
-
 def resolve_chain_id() -> str:
     cfg = get_config()
     home = cfg.get_node_config()["home"]
@@ -479,15 +449,6 @@ def initialize_runtime() -> Runtime:
     validator_consensus_address = _derive_valcons_from_pubkey(_get_node_consensus_pubkey_bytes())
     min_gas_price = _load_min_gas_price_umirage()
 
-    from settings import QUESTS_PAYOUTS_ENABLED, QUESTS_REWARDS_POOL_ADDRESS
-
-    pool_privkey = pool_pubkey = pool_addr = pool_account_number = None
-    if QUESTS_PAYOUTS_ENABLED:
-        pool_privkey, pool_pubkey, pool_addr, pool_account_number = resolve_rewards_pool_signer(
-            api_url, REWARDS_POOL_KEY_NAME, QUESTS_REWARDS_POOL_ADDRESS
-        )
-        _log.info("rewards pool signer loaded addr=%s account_number=%d", pool_addr, pool_account_number)
-
     _RUNTIME = Runtime(
         rpc_url=rpc_url,
         api_url=api_url,
@@ -501,10 +462,6 @@ def initialize_runtime() -> Runtime:
         validator_operator_address=validator_operator_address,
         validator_consensus_address=validator_consensus_address,
         min_gas_price_umirage=min_gas_price,
-        rewards_pool_addr=pool_addr,
-        rewards_pool_pubkey_bytes=pool_pubkey,
-        rewards_pool_privkey_bytes=pool_privkey,
-        rewards_pool_account_number=pool_account_number,
     )
     return _RUNTIME
 
@@ -529,8 +486,6 @@ __all__ = [
     "resolve_validator_payer_address",
     "resolve_validator_pubkey_bytes",
     "resolve_validator_privkey_bytes",
-    "resolve_rewards_pool_signer",
-    "REWARDS_POOL_KEY_NAME",
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",

@@ -94,13 +94,6 @@ export function useViewPost({
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteMessages, setDeleteMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [deletedPosts, setDeletedPosts] = useState(new Set()); // Track successfully deleted posts to hide them
-    const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(null); // { userId, postId }
-    const [isSuspending, setIsSuspending] = useState(false);
-    const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
-    const [suspendSuccess, setSuspendSuccess] = useState({}); // { postId: message }
-    const [confirmUnsuspendQuests, setConfirmUnsuspendQuests] = useState(null); // { userId, postId }
-    const [isUnsuspending, setIsUnsuspending] = useState(false);
-    const [userSuspendedMap, setUserSuspendedMap] = useState({}); // { userId: true/false/null }
     const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
     const [donateAmount, setDonateAmount] = useState("10000");
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
@@ -155,7 +148,6 @@ export function useViewPost({
             return null;
         }
     }, [nodeConfigTick]);
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
     const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
@@ -984,154 +976,6 @@ export function useViewPost({
         setConfirmDeletePost(null);
         clearBlockMessages();
     };
-    const handleSuspendFromQuests = (userId, postId, username) => {
-        if (!userId) return;
-        clearBlockMessages();
-        setConfirmBlockPost(null);
-        setConfirmBlockUser(null);
-        setConfirmDeletePost(null);
-        setConfirmReportPost(null);
-        setConfirmDonate(null);
-        setConfirmUnsuspendQuests(null);
-        const trimmed = typeof username === 'string' ? username.trim() : '';
-        setConfirmSuspendQuests({
-            userId,
-            postId,
-            username: trimmed || null
-        });
-    };
-    const confirmSuspendFromQuests = async () => {
-        const userId = confirmSuspendQuests?.userId;
-        const postId = confirmSuspendQuests?.postId;
-        if (!userId) return;
-        const adminAddress = state.publicKey;
-        if (!adminAddress) return;
-        setIsSuspending(true);
-        try {
-            const sig = await signPlainPayload(
-                (ts, n) => `admin_rewards_suspend:${adminAddress.toLowerCase()}:${ts}:${n}`
-            );
-            const response = await Api.post('/admin/rewards/suspend', {
-                admin: adminAddress,
-                target: userId,
-                duration_days: suspendDuration,
-                // 0 = permanent
-                reason: 'Attempting to game the quest system',
-                ...sig,
-            });
-            if (response.success) {
-                const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
-                setConfirmSuspendQuests(null);
-                setUserSuspendedMap(prev => ({
-                    ...prev,
-                    [userId]: true
-                }));
-                if (postId) {
-                    setSuspendSuccess(prev => ({
-                        ...prev,
-                        [postId]: `User suspended from quests ${durationText}`
-                    }));
-                }
-                setTimeout(() => {
-                    setSuspendSuccess(prev => {
-                        const updated = {
-                            ...prev
-                        };
-                        if (postId) delete updated[postId];
-                        return updated;
-                    });
-                }, 4000);
-            } else {
-                alert(`Failed to suspend: ${response.error || response.message || 'Unknown error'}`);
-                setConfirmSuspendQuests(null);
-            }
-        } catch (err) {
-            alert(`Error suspending user: ${err.message || 'Unknown error'}`);
-            setConfirmSuspendQuests(null);
-        }
-        setIsSuspending(false);
-        setSuspendDuration(7); // Reset to default
-    };
-    const cancelSuspendFromQuests = () => {
-        setConfirmSuspendQuests(null);
-    };
-    const fetchUserSuspensionStatus = async userId => {
-        if (!userId || !questsEnabled) return;
-        try {
-            const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
-            setUserSuspendedMap(prev => ({
-                ...prev,
-                [userId]: response.suspended === true
-            }));
-        } catch (err) {
-            console.error('Error fetching suspension status:', err);
-        }
-    };
-    const handleUnsuspendFromQuests = (userId, postId, username) => {
-        if (!userId) return;
-        clearBlockMessages();
-        setConfirmBlockPost(null);
-        setConfirmBlockUser(null);
-        setConfirmDeletePost(null);
-        setConfirmReportPost(null);
-        setConfirmSuspendQuests(null);
-        const trimmed = typeof username === 'string' ? username.trim() : '';
-        setConfirmUnsuspendQuests({
-            userId,
-            postId,
-            username: trimmed || null
-        });
-    };
-    const confirmUnsuspendFromQuests = async () => {
-        const userId = confirmUnsuspendQuests?.userId;
-        const postId = confirmUnsuspendQuests?.postId;
-        if (!userId) return;
-        const adminAddress = state.publicKey;
-        if (!adminAddress) return;
-        setIsUnsuspending(true);
-        try {
-            const sig = await signPlainPayload(
-                (ts, n) => `admin_rewards_unsuspend:${adminAddress.toLowerCase()}:${ts}:${n}`
-            );
-            const response = await Api.post('/admin/rewards/unsuspend', {
-                admin: adminAddress,
-                target: userId,
-                ...sig,
-            });
-            if (response.success) {
-                setConfirmUnsuspendQuests(null);
-                setUserSuspendedMap(prev => ({
-                    ...prev,
-                    [userId]: false
-                }));
-                if (postId) {
-                    setSuspendSuccess(prev => ({
-                        ...prev,
-                        [postId]: 'User unsuspended from quests'
-                    }));
-                }
-                setTimeout(() => {
-                    setSuspendSuccess(prev => {
-                        const updated = {
-                            ...prev
-                        };
-                        if (postId) delete updated[postId];
-                        return updated;
-                    });
-                }, 4000);
-            } else {
-                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
-                setConfirmUnsuspendQuests(null);
-            }
-        } catch (err) {
-            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
-            setConfirmUnsuspendQuests(null);
-        }
-        setIsUnsuspending(false);
-    };
-    const cancelUnsuspendFromQuests = () => {
-        setConfirmUnsuspendQuests(null);
-    };
     const handleDonate = (userAddress, postId) => {
         if (!userAddress) {
             return;
@@ -1154,8 +998,6 @@ export function useViewPost({
         setConfirmBlockUser(null);
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
-        setConfirmSuspendQuests(null);
-        setConfirmUnsuspendQuests(null);
         setConfirmGiftSub(null);
         setConfirmDonate({
             userId: userAddress,
@@ -1197,8 +1039,6 @@ export function useViewPost({
         setConfirmBlockUser(null);
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
-        setConfirmSuspendQuests(null);
-        setConfirmUnsuspendQuests(null);
         setConfirmAward(null);
         setConfirmGiftSub({
             userId: userAddress,
@@ -2809,14 +2649,6 @@ export function useViewPost({
         isDeleting,
         deleteMessages,
         deletedPosts,
-        confirmSuspendQuests,
-        isSuspending,
-        suspendDuration,
-        setSuspendDuration,
-        suspendSuccess,
-        confirmUnsuspendQuests,
-        isUnsuspending,
-        userSuspendedMap,
         confirmDonate,
         setConfirmDonate,
         donateAmount,
@@ -2843,7 +2675,6 @@ export function useViewPost({
         theme,
         location,
         navigate,
-        questsEnabled,
         openBrowsingEnabled,
         nodeConfigLoaded: Boolean(nodeConfig),
         isMobile,
@@ -2904,13 +2735,6 @@ export function useViewPost({
         handleDeletePost,
         confirmDeletePostAction,
         cancelDeletePost,
-        handleSuspendFromQuests,
-        confirmSuspendFromQuests,
-        cancelSuspendFromQuests,
-        fetchUserSuspensionStatus,
-        handleUnsuspendFromQuests,
-        confirmUnsuspendFromQuests,
-        cancelUnsuspendFromQuests,
         handleDonate,
         handleGiftSubscription,
         confirmGiftSubAction,

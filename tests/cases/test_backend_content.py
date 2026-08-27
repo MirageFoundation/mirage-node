@@ -1496,4 +1496,3 @@ def test_anon_visibility(backend: str) -> None:
         "rp._guest_feed_cache.clear()\n"
         "print('OK' if ok else ('BAD', hit, again))\n",
     )
-

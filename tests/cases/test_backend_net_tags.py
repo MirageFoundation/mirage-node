@@ -297,32 +297,6 @@ def _test_tx_builder_emits_one_memo() -> None:
         "print('OK' if tagged.memo and payout.memo == '' else ('BAD', tagged.memo, payout.memo))\n",
     )
 
-    # The production payout path must pass the exclusion through its estimate,
-    # simulation build and final build. Spies make this independent of chain
-    # state while exercising RewardDistributor.build_payout_tx itself.
-    _probe(
-        "net_tags.payout_path_declares_exclusion",
-        "import sys, types\n"
-        "sys.path.insert(0, '/opt/mirage')\n"
-        "sys.path.insert(0, '/opt/mirage/web/backend')\n"
-        "import reward_distributor as rd\n"
-        "calls = []\n"
-        "addr = 'mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5'\n"
-        "rt = types.SimpleNamespace(rewards_pool_privkey_bytes=b'x'*32, rewards_pool_pubkey_bytes=b'y'*33,\n"
-        "    rewards_pool_account_number=1, rewards_pool_addr=addr, min_gas_price_umirage=1)\n"
-        "rd.require_runtime = lambda: rt\n"
-        "rd.estimate_total_gas_limit = lambda *a, **kw: (calls.append(('estimate', kw)), 100000)[1]\n"
-        "rd.build_signed_tx = lambda *a, **kw: (calls.append(('build', kw)), (b'tx', 1893456000000000000))[1]\n"
-        "rd.simulate_gas = lambda tx: 50000\n"
-        "rd.chain_head = lambda: (100, 0.0)\n"
-        "obj = rd.RewardDistributor.__new__(rd.RewardDistributor)\n"
-        "obj.pool_address = addr\n"
-        "obj.get_pool_balance = lambda: 10**30\n"
-        "obj.build_payout_tx(addr, 1)\n"
-        "ok = len(calls) == 3 and all(c[1].get('include_request_memo') is False for c in calls)\n"
-        "print('OK' if ok else ('BAD', calls))\n",
-    )
-
     # One request, many builds, identical bytes.
     _probe(
         "net_tags.memo_stable_within_request",

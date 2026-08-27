@@ -924,14 +924,6 @@ function ViewPostView({
         isDeleting,
         deleteMessages,
         deletedPosts,
-        confirmSuspendQuests,
-        isSuspending,
-        suspendDuration,
-        setSuspendDuration,
-        suspendSuccess,
-        confirmUnsuspendQuests,
-        isUnsuspending,
-        userSuspendedMap,
         confirmDonate,
         donateAmount,
         donateMessages,
@@ -954,7 +946,6 @@ function ViewPostView({
         theme,
         location,
         navigate,
-        questsEnabled,
         openBrowsingEnabled,
         nodeConfigLoaded,
         isMobile,
@@ -1015,13 +1006,6 @@ function ViewPostView({
         handleDeletePost,
         confirmDeletePostAction,
         cancelDeletePost,
-        handleSuspendFromQuests,
-        confirmSuspendFromQuests,
-        cancelSuspendFromQuests,
-        fetchUserSuspensionStatus,
-        handleUnsuspendFromQuests,
-        confirmUnsuspendFromQuests,
-        cancelUnsuspendFromQuests,
         handleDonate,
         handleGiftSubscription,
         confirmGiftSubAction,
@@ -1330,84 +1314,6 @@ function ViewPostView({
                 </div>
             </BlockConfirmMessage>;
         }
-        if (confirmSuspendQuests?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>Suspend this user from quests:</span>
-                    <select value={suspendDuration} onChange={e => setSuspendDuration(Number(e.target.value))} style={{
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '4px',
-                        border: `1px solid ${theme.colors.warningBorder}`,
-                        background: theme.colors.warningBg,
-                        color: theme.colors.warning,
-                        fontWeight: 500
-                    }}>
-                        <option value={1}>1 day</option>
-                        <option value={3}>3 days</option>
-                        <option value={7}>7 days</option>
-                        <option value={30}>30 days</option>
-                        <option value={0}>Permanent</option>
-                    </select>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
-                            {isSuspending ? 'Suspending...' : 'Suspend'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (confirmUnsuspendQuests?.postId === post.post_id) {
-            return <BlockConfirmMessage>
-                <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.6rem',
-                    width: '100%'
-                }}>
-                    <span style={{
-                        whiteSpace: 'nowrap'
-                    }}>Unsuspend this user from quests?</span>
-                    <ConfirmButtons style={{
-                        marginLeft: 'auto',
-                        flexShrink: 0,
-                        width: 'auto'
-                    }}>
-                        <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
-                            {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
-                    </ConfirmButtons>
-                </div>
-            </BlockConfirmMessage>;
-        }
-        if (suspendSuccess[post.post_id]) {
-            return <div style={{
-                background: theme.colors.successBg,
-                border: `1px solid ${theme.colors.successBorder}`,
-                borderRadius: '4px',
-                padding: '0.75rem 1rem',
-                margin: '0.5rem 0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                color: theme.colors.success,
-                fontSize: '0.8rem'
-            }}>
-                {suspendSuccess[post.post_id]}
-            </div>;
-        }
         if (confirmReportPost === post.post_id) {
             return <BlockConfirmMessage>
                 <span>Report illegal content only (CSAM, credible threats, doxxing, etc). Wrong topic, untagged adult content, low quality, or anything you just don't like will be ignored. To filter those out, follow a moderation agent. Agents are how moderation works on Mirage for everyone.</span>
@@ -1686,7 +1592,6 @@ function ViewPostView({
         })());
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
-        const userSuspendedStatus = post.user_id ? userSuspendedMap[post.user_id] : undefined;
         const handleMenuClick = e => {
             e.stopPropagation();
             if (!isOpen) {
@@ -1697,9 +1602,6 @@ function ViewPostView({
                         top: rect.bottom + 4,
                         left: Math.max(10, rect.right - 180)
                     });
-                }
-                if (isAdmin && post.user_id && questsEnabled) {
-                    fetchUserSuspensionStatus(post.user_id);
                 }
             }
             setOpenMenuId(isOpen ? null : post.post_id);
@@ -1773,20 +1675,10 @@ function ViewPostView({
                         setOpenMenuId(null);
                         handleReport(post.post_id);
                     }}>Report</MenuItem>}
-                    {isAdmin && <>
-                        <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleDeletePost(post.post_id);
-                        }} data-danger="true">Mark post deleted</MenuItem>
-                        {questsEnabled && userSuspendedStatus !== true && <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleSuspendFromQuests(post.user_id, post.post_id);
-                        }} data-danger="true">Suspend from quests</MenuItem>}
-                        {questsEnabled && userSuspendedStatus === true && <MenuItem onClick={() => {
-                            setOpenMenuId(null);
-                            handleUnsuspendFromQuests(post.user_id, post.post_id);
-                        }}>Unsuspend from quests</MenuItem>}
-                    </>}
+                    {isAdmin && <MenuItem onClick={() => {
+                        setOpenMenuId(null);
+                        handleDeletePost(post.post_id);
+                    }} data-danger="true">Mark post deleted</MenuItem>}
                 </>}
             </MenuDropdown>, document.body)}
         </MenuContainer>;
