@@ -1723,13 +1723,22 @@ def test_fleet_url_validation(backend):
         "gone.example": [],
     }
 
-    def _fake_getaddrinfo(host, port, *_args, **_kwargs):
-        ips = dns_map.get(host)
+    original = fleet_url.socket.getaddrinfo
+
+    def _fake_getaddrinfo(host, port, *args, **kwargs):
+        # `fleet_url.socket` is the socket module itself, so this stub is installed
+        # process-wide for as long as it is in place. Categories run in parallel
+        # threads, and answering "Name or service not known" for every host outside
+        # dns_map took down whichever unrelated test happened to be making an HTTP
+        # request at the time — including calls to 127.0.0.1. Only the hosts this
+        # test names are stubbed; everything else resolves for real.
+        if host not in dns_map:
+            return original(host, port, *args, **kwargs)
+        ips = dns_map[host]
         if not ips:
             raise socket.gaierror(-2, "Name or service not known")
         return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (ip, port)) for ip in ips]
 
-    original = fleet_url.socket.getaddrinfo
     fleet_url.socket.getaddrinfo = _fake_getaddrinfo
     try:
         rejected = {
