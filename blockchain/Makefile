@@ -7,7 +7,14 @@ GOVULNCHECK := go run golang.org/x/vuln/cmd/govulncheck@v1.6.0
 # Verify module and auto-downloaded toolchain checksums even if a host-level Go
 # configuration disabled the checksum database.
 export GOSUMDB := sum.golang.org
-export GOTOOLCHAIN := auto
+# Pin to go.mod's `go` line. GOTOOLCHAIN=auto on a newer host compiler (Go 1.27+)
+# keeps that compiler, and bytedance/sonic then disables its amd64/arm64 assembly
+# ("environment is not suitable") and falls back to encoding/json. Snapshot chunk
+# hashes change, so a node built with the newer compiler would serve state-sync
+# chunks that a 1.25-built peer cannot join, and test-store fails on the golden
+# checksums.
+GO_VERSION := $(shell awk '/^go / { print $$2; exit }' go.mod)
+export GOTOOLCHAIN := go$(GO_VERSION)
 
 VERSION_FILE := $(CURDIR)/../VERSION
 # do not override user values
