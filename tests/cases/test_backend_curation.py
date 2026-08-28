@@ -47,7 +47,7 @@ def test_curation_backend(backend: str) -> None:
     else:
         txh = _tx_ok(free_resp)
         if txh:
-            status = _wait_tx_status(backend, txh)
+            status = _wait_tx_status(backend, txh, require_details=False)
             if status and status.get("success") is False:
                 _pass("curation.backend_free_create_rejected")
             else:
@@ -62,7 +62,7 @@ def test_curation_backend(backend: str) -> None:
     if unjoined.get("error"):
         _pass("curation.backend_unjoined_create_rejected")
     elif unjoined_tx:
-        status = _wait_tx_status(backend, unjoined_tx)
+        status = _wait_tx_status(backend, unjoined_tx, require_details=False)
         if status and status.get("success") is False:
             _pass("curation.backend_unjoined_create_rejected")
         else:
@@ -81,7 +81,7 @@ def test_curation_backend(backend: str) -> None:
     if join_resp.get("error") or int(join_resp.get("code", 0) or 0) != 0 or not join_tx:
         _fail("curation.backend_join", f"resp={join_resp}")
         return
-    if not _wait_tx_status(backend, join_tx):
+    if not _wait_tx_status(backend, join_tx, expect_type="join_community", require_details=False):
         _fail("curation.backend_join_indexed", f"tx={join_tx}")
         return
     _pass("curation.backend_join")
@@ -95,7 +95,9 @@ def test_curation_backend(backend: str) -> None:
     if not create_tx:
         _fail("curation.backend_create", f"resp={create_resp}")
         return
-    if not _wait_tx_status(backend, create_tx):
+    if not _wait_tx_status(
+        backend, create_tx, expect_type="create_curation_team", require_details=False
+    ):
         _fail("curation.backend_create_indexed", f"tx={create_tx}")
         return
     _pass("curation.backend_create")
@@ -145,7 +147,9 @@ def test_curation_backend(backend: str) -> None:
     pref = _do_set_curation_preference(backend, sub, slug, mode=1, pinned_team_id=team_id, skip_pow=True)
     pref_tx = _tx_ok(pref)
     if pref_tx:
-        _wait_tx_status(backend, pref_tx)
+        _wait_tx_status(
+            backend, pref_tx, expect_type="set_curation_preference", require_details=False
+        )
         _pass("curation.backend_preference_pin")
     elif pref.get("error"):
         _fail("curation.backend_preference_pin", f"resp={pref}")
@@ -159,7 +163,9 @@ def test_curation_backend(backend: str) -> None:
     if not hide_tx:
         _fail("curation.backend_hide_post", f"resp={hide}")
         return
-    if not _wait_tx_status(backend, hide_tx):
+    if not _wait_tx_status(
+        backend, hide_tx, expect_type="set_curation_post_hidden", require_details=False
+    ):
         _fail("curation.backend_hide_post_indexed", f"tx={hide_tx}")
         return
     _pass("curation.backend_hide_post")
