@@ -89,8 +89,7 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
         "target": target,
         "amount": amount,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/send_tokens", payload)
     return resp
 
@@ -164,8 +163,7 @@ def _do_post(
         "content": content,
         "tag": tag,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/post", payload)
     resp = resp or {}
     if resp.get("error"):
@@ -220,8 +218,7 @@ def _do_post_at_timestamp(
         "content": content,
         "tag": tag,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/post", payload)
     return code, (resp or {})
 
@@ -277,8 +274,7 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
         "target": target,
         "direction": direction,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/vote", payload)
     return resp
 
@@ -314,8 +310,7 @@ def _do_vote_with_nonce(
         "target": target,
         "direction": direction,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/vote", payload)
     return resp or {}
 
@@ -373,8 +368,7 @@ def _do_edit(
         "tag": tag,
         "override": override_hash,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/edit", payload)
     return resp
 
@@ -468,8 +462,7 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
         "pow_difficulty": d,
         "target": target,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/delete_post", payload)
     return resp
 
@@ -499,8 +492,7 @@ def _do_delete_user(backend: str, wallet, target_addr: str, skip_pow: bool = Fal
         "pow_difficulty": d,
         "target": target_addr,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     return _post(f"{backend}/api/core/delete_user", payload)
 
 
@@ -532,8 +524,7 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
         "target": addr,
         "user": user_addr,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
@@ -567,8 +558,7 @@ def _do_follow_user_with_nonce(
         "target": addr,
         "user": user_addr,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
@@ -601,8 +591,7 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
         "pow_difficulty": d,
         "community": slug,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
@@ -639,8 +628,7 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
         "pow_difficulty": d,
         "target": target,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
@@ -678,8 +666,7 @@ def _do_block_with_nonce(
         "pow_difficulty": d,
         "target": target,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
 
@@ -713,8 +700,7 @@ def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_p
         "target": addr,
         "community": slug,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     print(f"    [debug] {endpoint} community={slug} difficulty={d}")
     _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp
@@ -751,8 +737,7 @@ def _do_set_username_raw(
         "target": addr,
         "username": username,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/set_username", payload)
     return resp
 
@@ -783,8 +768,7 @@ def _do_set_biography(backend: str, wallet, biography: str, skip_pow: bool = Fal
         "target": addr,
         "biography": biography,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/set_biography", payload)
     return resp
 
@@ -815,8 +799,7 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
         "target": target,
         "reason": reason,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/report", payload)
     return resp
 
@@ -886,8 +869,7 @@ def _do_post_with_media(
         "tag": tag,
         "media": media,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/post", payload)
     txh = str((resp or {}).get("tx_hash", "") or "").lower()
     return txh if txh else None
@@ -1252,8 +1234,7 @@ def _do_create_curation_team(
         "name": name,
         "description": description,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/create_curation_team", payload)
     return resp or {}
 
@@ -1290,8 +1271,7 @@ def _do_set_curation_preference(
         "mode": int(mode),
         "pinned_team_id": int(pinned_team_id),
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/set_curation_preference", payload)
     return resp or {}
 
@@ -1330,8 +1310,7 @@ def _do_set_curation_post_hidden(
         "target": target,
         "hidden": bool(hidden),
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/set_curation_post_hidden", payload)
     return resp or {}
 
@@ -1370,8 +1349,7 @@ def _do_set_curation_team_profile(
         "name": name,
         "description": description,
     }
-    if not skip_pow:
-        payload["pow"] = int(proof)
+    payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/set_curation_team_profile", payload)
     return resp or {}
 
