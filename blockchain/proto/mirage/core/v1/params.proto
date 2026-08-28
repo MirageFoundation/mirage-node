@@ -157,10 +157,9 @@ message Params {
   uint64 max_curators_per_team = 57;
   uint64 max_pending_curator_invites_per_team = 58;
   uint64 max_pending_curator_invites_per_user = 59;
-  uint64 max_community_title_length = 60;
-  uint64 max_community_description_length = 61;
+  reserved 60, 61; // were community title and description limits
   uint64 max_curation_team_name_length = 62;
-  uint64 max_curation_team_bio_length = 63;
+  uint64 max_curation_team_description_length = 63;
   uint64 max_curation_team_policy_length = 64;
   uint64 subscription_transitions_per_block = 65;
   uint64 curation_prune_keys_per_block = 66;

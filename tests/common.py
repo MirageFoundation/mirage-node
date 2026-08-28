@@ -67,13 +67,11 @@ from shared.canon import (  # noqa: E402
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
     canon_base_annotate as _canon_base_annotate_raw,
-    canon_base_create_community as _canon_base_create_community_raw,
     canon_base_join_community as _canon_base_join_community_raw,
     canon_base_leave_community as _canon_base_leave_community_raw,
     canon_base_block_community as _canon_base_block_community_raw,
     canon_base_unblock_community as _canon_base_unblock_community_raw,
     canon_signed_with_pow,
-    canon_attribution,
 )
 
 DEFAULT_BACKEND = "http://127.0.0.1:80"

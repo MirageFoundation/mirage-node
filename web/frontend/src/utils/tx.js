@@ -162,40 +162,14 @@ export async function getPendingDeletes() {
     return h.getPendingDeletes();
 }
 
-// Agent tracking
-export async function addAgentListener(fn) {
+export async function addCurationListener(fn) {
     const h = await getHandler();
-    return h.addAgentListener(fn);
+    return h.addCurationListener(fn);
 }
 
-export async function getPendingAgents() {
+export async function getPendingCuration() {
     const h = await getHandler();
-    return h.getPendingAgents();
-}
-
-export async function isPendingAgent(agentAddress) {
-    const h = await getHandler();
-    return h.isPendingAgent(agentAddress);
-}
-
-export async function getPendingAgentInfo(agentAddress) {
-    const h = await getHandler();
-    return h.getPendingAgentInfo(agentAddress);
-}
-
-export async function enableAgent(agentAddress) {
-    const h = await getHandler();
-    return h.enableAgent(agentAddress);
-}
-
-export async function disableAgent(agentAddress) {
-    const h = await getHandler();
-    return h.disableAgent(agentAddress);
-}
-
-export async function setAgents(agents, opts) {
-    const h = await getHandler();
-    return h.setAgents(agents, opts);
+    return h.getPendingCuration();
 }
 
 export function needsChainConfigRefresh() {
@@ -236,9 +210,9 @@ export async function cacheUserStatus(data) {
 }
 
 // Transactional actions
-export async function createUser(username, inviteCode = "", referrerUsername = "") {
+export async function createUser(username) {
     const h = await getHandler();
-    return h.createUser(username, inviteCode, referrerUsername);
+    return h.createUser(username);
 }
 
 export async function setUsername(username) {
@@ -249,6 +223,81 @@ export async function setUsername(username) {
 export async function setBiography(biography) {
     const h = await getHandler();
     return h.setBiography(biography);
+}
+
+export async function createCuratorTeam(community, name, description, policy) {
+    const h = await getHandler();
+    return h.createCuratorTeam(community, name, description, policy);
+}
+
+export async function updateCurationTeam(community, teamId, name, description, policy) {
+    const h = await getHandler();
+    return h.updateCurationTeam(community, teamId, name, description, policy);
+}
+
+export async function inviteCurationTeamMember(community, teamId, invitee) {
+    const h = await getHandler();
+    return h.inviteCurationTeamMember(community, teamId, invitee);
+}
+
+export async function revokeCurationTeamInvitation(community, teamId, invitee) {
+    const h = await getHandler();
+    return h.revokeCurationTeamInvitation(community, teamId, invitee);
+}
+
+export async function respondCurationTeamInvitation(community, teamId, accept) {
+    const h = await getHandler();
+    return h.respondCurationTeamInvitation(community, teamId, accept);
+}
+
+export async function removeCurationTeamMember(community, teamId, member) {
+    const h = await getHandler();
+    return h.removeCurationTeamMember(community, teamId, member);
+}
+
+export async function leaveCurationTeam(community, teamId) {
+    const h = await getHandler();
+    return h.leaveCurationTeam(community, teamId);
+}
+
+export async function transferCurationTeamLeadership(community, teamId, newLeader) {
+    const h = await getHandler();
+    return h.transferCurationTeamLeadership(community, teamId, newLeader);
+}
+
+export async function deleteCurationTeam(community, teamId) {
+    const h = await getHandler();
+    return h.deleteCurationTeam(community, teamId);
+}
+
+export async function moderateCurationPost(community, teamId, postId, hidden) {
+    const h = await getHandler();
+    return h.moderateCurationPost(community, teamId, postId, hidden);
+}
+
+export async function moderateCurationUser(community, teamId, user, hidden) {
+    const h = await getHandler();
+    return h.moderateCurationUser(community, teamId, user, hidden);
+}
+
+export async function setCurationThreadLocked(community, teamId, rootHash, locked) {
+    const h = await getHandler();
+    return h.setCurationThreadLocked(community, teamId, rootHash, locked);
+}
+
+export async function setCurationSubscriberOnly(community, teamId, enabled) {
+    const h = await getHandler();
+    return h.setCurationSubscriberOnly(community, teamId, enabled);
+}
+
+export async function setCurationPreference(community, mode, pinnedTeamId) {
+    const h = await getHandler();
+    return h.setCurationPreference(community, mode, pinnedTeamId);
+}
+
+export async function claimCreatorRewards(epochIds) {
+    const h = await getHandler();
+    return h.claimCreatorRewards(epochIds);
 }
 
 export async function createPost(topic, title, content, tag = "", media = []) {

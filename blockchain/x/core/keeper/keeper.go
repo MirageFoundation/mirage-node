@@ -512,61 +512,7 @@ func (k Keeper) deleteAllSetEntries(ctx sdk.Context, prefix, owner string) error
 	return nil
 }
 
-// ── Ordered set helpers (enabled_agents) ───────────────────────────────
-
-// addOrderedEntry adds an entry with a monotonically increasing position.
-// Returns false if already present.
-func (k Keeper) addOrderedEntry(ctx sdk.Context, prefix, owner, entry string) (bool, error) {
-	store := k.storeService.OpenKVStore(ctx)
-	ek := entryKey(prefix, owner, entry)
-	existing, err := store.Get(ek)
-	if err != nil {
-		return false, err
-	}
-	if len(existing) > 0 {
-		return false, nil // already present
-	}
-	// Get next sequence (position). A failed sequence read would restart
-	// positions at zero on this node and reorder the list against peers.
-	sk := seqKey(prefix, owner)
-	sb, err := store.Get(sk)
-	if err != nil {
-		return false, fmt.Errorf("sequence read failed for %s/%s: %w", prefix, owner, err)
-	}
-	seq, err := getUint64(sb)
-	if err != nil {
-		return false, fmt.Errorf("sequence decode failed for %s/%s: %w", prefix, owner, err)
-	}
-	nextSeq, err := types.CheckedAddUint64(seq, 1)
-	if err != nil {
-		return false, fmt.Errorf("sequence overflow for %s/%s: %w", prefix, owner, err)
-	}
-	if err := store.Set(ek, putUint64(seq)); err != nil {
-		return false, err
-	}
-	if err := store.Set(sk, putUint64(nextSeq)); err != nil {
-		return false, err
-	}
-	ck := countKey(prefix, owner)
-	cb, err := store.Get(ck)
-	if err != nil {
-		return false, fmt.Errorf("count read failed for %s/%s: %w", prefix, owner, err)
-	}
-	cnt, err := getUint32(cb)
-	if err != nil {
-		return false, fmt.Errorf("count decode failed for %s/%s: %w", prefix, owner, err)
-	}
-	if cnt == math.MaxUint32 {
-		return false, fmt.Errorf("count overflow for %s/%s", prefix, owner)
-	}
-	cnt++
-	return true, store.Set(ck, putUint32(cnt))
-}
-
-// removeOrderedEntry removes an entry. Gaps in position values are harmless.
-func (k Keeper) removeOrderedEntry(ctx sdk.Context, prefix, owner, entry string) error {
-	return k.removeSetEntry(ctx, prefix, owner, entry)
-}
+// ── Ordered set helpers ────────────────────────────────────────────────
 
 // listOrderedEntries returns entries sorted by their position value (ascending).
 func (k Keeper) listOrderedEntries(ctx sdk.Context, prefix, owner string) ([]string, error) {
@@ -610,28 +556,7 @@ func (k Keeper) listOrderedEntries(ctx sdk.Context, prefix, owner string) ([]str
 	return out, nil
 }
 
-// replaceAllOrderedEntries deletes all existing entries and writes new ones
-// with positions 0, 1, 2, ... Resets seq = len(entries).
-func (k Keeper) replaceAllOrderedEntries(ctx sdk.Context, prefix, owner string, entries []string) error {
-	if err := k.deleteAllSetEntries(ctx, prefix, owner); err != nil {
-		return err
-	}
-	if len(entries) == 0 {
-		return nil
-	}
-	store := k.storeService.OpenKVStore(ctx)
-	for i, e := range entries {
-		if err := store.Set(entryKey(prefix, owner, e), putUint64(uint64(i))); err != nil {
-			return err
-		}
-	}
-	if err := store.Set(countKey(prefix, owner), putUint32(uint32(len(entries)))); err != nil {
-		return err
-	}
-	return store.Set(seqKey(prefix, owner), putUint64(uint64(len(entries))))
-}
-
-// ── Deque helpers (blocked_users, blocked_posts, blocked_topics) ───────
+// ── Deque helpers (blocked_users, blocked_posts) ───────────────────────
 
 // addDequeEntry adds an entry with a monotonically increasing sequence.
 // If the entry already exists, it is a no-op (returns false).
@@ -772,60 +697,13 @@ func (k Keeper) DeleteAllFollowedUsers(ctx sdk.Context, owner string) error {
 	return k.deleteAllSetEntries(ctx, types.FollowedUsersPrefix, owner)
 }
 
-// ── Followed Topics (unordered set, hard cap) ──────────────────────────
-
-func (k Keeper) AddFollowedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
-	return k.addSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
-}
-
-func (k Keeper) RemoveFollowedTopic(ctx sdk.Context, owner, topic string) error {
-	return k.removeSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
-}
-
-func (k Keeper) HasFollowedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
-	return k.hasSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
-}
-
-func (k Keeper) CountFollowedTopics(ctx sdk.Context, owner string) (uint32, error) {
-	return k.countSetEntries(ctx, types.FollowedTopicsPrefix, owner)
-}
-
-func (k Keeper) ListFollowedTopics(ctx sdk.Context, owner string) ([]string, error) {
-	return k.listSetEntries(ctx, types.FollowedTopicsPrefix, owner)
-}
+// ── Followed Topics (retired in v1.39.0; drained by MigrateV139) ───────
 
 func (k Keeper) DeleteAllFollowedTopics(ctx sdk.Context, owner string) error {
 	return k.deleteAllSetEntries(ctx, types.FollowedTopicsPrefix, owner)
 }
 
-// ── Enabled Agents (ordered set, hard cap) ─────────────────────────────
-
-func (k Keeper) AddEnabledAgent(ctx sdk.Context, owner, agent string) (bool, error) {
-	return k.addOrderedEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
-}
-
-func (k Keeper) RemoveEnabledAgent(ctx sdk.Context, owner, agent string) error {
-	return k.removeOrderedEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
-}
-
-func (k Keeper) HasEnabledAgent(ctx sdk.Context, owner, agent string) (bool, error) {
-	return k.hasSetEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
-}
-
-func (k Keeper) CountEnabledAgents(ctx sdk.Context, owner string) (uint32, error) {
-	return k.countSetEntries(ctx, types.EnabledAgentsPrefix, owner)
-}
-
-// ListEnabledAgentsOrdered returns agents sorted by the order they were enabled.
-func (k Keeper) ListEnabledAgentsOrdered(ctx sdk.Context, owner string) ([]string, error) {
-	return k.listOrderedEntries(ctx, types.EnabledAgentsPrefix, owner)
-}
-
-// ReplaceAllEnabledAgents atomically replaces the entire agents list,
-// preserving the order of the provided slice.
-func (k Keeper) ReplaceAllEnabledAgents(ctx sdk.Context, owner string, agents []string) error {
-	return k.replaceAllOrderedEntries(ctx, types.EnabledAgentsPrefix, owner, agents)
-}
+// ── Enabled Agents (retired in v1.39.0; drained by MigrateV139) ────────
 
 func (k Keeper) DeleteAllEnabledAgents(ctx sdk.Context, owner string) error {
 	return k.deleteAllSetEntries(ctx, types.EnabledAgentsPrefix, owner)
@@ -883,27 +761,7 @@ func (k Keeper) DeleteAllBlockedPosts(ctx sdk.Context, owner string) error {
 	return k.deleteAllSetEntries(ctx, types.BlockedPostsPrefix, owner)
 }
 
-// ── Blocked Topics (deque) ─────────────────────────────────────────────
-
-func (k Keeper) AddBlockedTopicDeque(ctx sdk.Context, owner, topic string, maxCap uint32) (bool, error) {
-	return k.addDequeEntry(ctx, types.BlockedTopicsPrefix, owner, topic, maxCap)
-}
-
-func (k Keeper) RemoveBlockedTopic(ctx sdk.Context, owner, topic string) error {
-	return k.removeSetEntry(ctx, types.BlockedTopicsPrefix, owner, topic)
-}
-
-func (k Keeper) HasBlockedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
-	return k.hasSetEntry(ctx, types.BlockedTopicsPrefix, owner, topic)
-}
-
-func (k Keeper) CountBlockedTopics(ctx sdk.Context, owner string) (uint32, error) {
-	return k.countSetEntries(ctx, types.BlockedTopicsPrefix, owner)
-}
-
-func (k Keeper) ListBlockedTopics(ctx sdk.Context, owner string) ([]string, error) {
-	return k.listOrderedEntries(ctx, types.BlockedTopicsPrefix, owner)
-}
+// ── Blocked Topics (retired in v1.39.0; drained by MigrateV139) ────────
 
 func (k Keeper) DeleteAllBlockedTopics(ctx sdk.Context, owner string) error {
 	return k.deleteAllSetEntries(ctx, types.BlockedTopicsPrefix, owner)

@@ -32,9 +32,9 @@ The indexer is a Python service that transforms raw blockchain data into a denor
 - Applying business logic (validation, authorization, denormalization)
 - Persisting processed data to PostgreSQL with appropriate indexes
 
-**Key Design Principle:** The indexer is the single source of truth for chain-derived data. It enforces authorization rules that the blockchain intentionally delegates (e.g., who can delete which posts), applies complex vote weighting algorithms, and maintains derived data structures (preferences, topic stats) that enable personalized feeds.
+**Key Design Principle:** The indexer is the queryable projection of chain-derived data. It enforces authorization rules that the blockchain intentionally delegates, applies vote weighting, and maintains derived preferences, community statistics, curator teams, and lens state for personalized feeds.
 
-**Database Ownership:** The indexer writes exclusively to the `mirage_indexer` database. All backend-owned operational data (quests, rewards, push notifications, invite codes, reports, similarity cache, user activity tracking) lives in a separate `mirage_backend` database that the indexer never touches. The backend reads from the indexer DB via a read-only PostgreSQL role (`mirage_indexer_ro`).
+**Database Ownership:** The indexer writes exclusively to the `mirage_indexer` database. Backend-owned operational data such as push notifications, reports, similarity cache, and user activity tracking lives in the separate `mirage_backend` database. The backend reads from the indexer DB via the read-only `mirage_indexer_ro` role.
 
 ---
 
@@ -42,10 +42,10 @@ The indexer is a Python service that transforms raw blockchain data into a denor
 
 ### Why an Indexer?
 
-The blockchain's Cosmos SDK storage model uses a key-value store optimized for consensus and state proofs, not for application queries. Consider a simple query: "Get the 50 most recent posts in topic X, excluding blocked users, weighted by vote score." On-chain, this would require:
+The blockchain's Cosmos SDK storage model uses a key-value store optimized for consensus and state proofs, not for application queries. Consider a simple query: "Get the 50 most recent posts in community X through this viewer's selected lens." On-chain, this would require:
 
-1. Iterating all posts (no topic index)
-2. Checking each post's topic field
+1. Iterating all posts (no community feed index)
+2. Checking each post's community field
 3. Loading user preferences for blocked users
 4. Computing vote aggregates per post
 5. Sorting and paginating
@@ -378,21 +378,6 @@ CREATE TABLE user_similarity_cache (
     computed_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     PRIMARY KEY (owner, similar_user)
-);
-
--- Agent edit overlays (MsgAnnotate)
-CREATE TABLE agent_edits (
-    post_txhash TEXT NOT NULL,
-    agent_address TEXT NOT NULL,
-    edit_txhash TEXT NOT NULL,
-    topic TEXT,             -- NULL = no change; '' = clear
-    title TEXT,
-    content TEXT,
-    tag TEXT,
-    media TEXT,             -- JSON list or NULL
-    appendix TEXT,          -- Agent commentary note
-    edited_at BIGINT NOT NULL,
-    PRIMARY KEY (post_txhash, agent_address)
 );
 
 -- Per-user per-topic voting stats (for vote weighting)

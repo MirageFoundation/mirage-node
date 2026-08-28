@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"encoding/binary"
 	"fmt"
 	"unicode/utf8"
 
@@ -9,21 +10,22 @@ import (
 	"mirage/x/core/types"
 )
 
-func (k Keeper) CreateAlternativeTeam(ctx sdk.Context, owner, slug, name, bio, policy string) (uint64, error) {
+func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, description, policy string) (uint64, error) {
 	params := k.GetParams(ctx)
+	if _, err := types.CanonicalAccBytes(owner); err != nil {
+		return 0, err
+	}
+	if err := types.ValidateCommunitySlug(slug, params.MinCommunitySize, params.MaxCommunitySize); err != nil {
+		return 0, err
+	}
 	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
 		return 0, err
 	}
-	if uint64(utf8.RuneCountInString(bio)) > params.MaxCurationTeamBioLength {
-		return 0, fmt.Errorf("bio exceeds max_curation_team_bio_length")
+	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
+		return 0, fmt.Errorf("description exceeds max_curation_team_description_length")
 	}
 	if uint64(utf8.RuneCountInString(policy)) > params.MaxCurationTeamPolicyLength {
 		return 0, fmt.Errorf("policy exceeds max_curation_team_policy_length")
-	}
-	if _, found, err := k.GetCommunity(ctx, slug); err != nil {
-		return 0, err
-	} else if !found {
-		return 0, fmt.Errorf("community not claimed: %s", slug)
 	}
 	core, found, err := k.loadProfile(ctx, owner)
 	if err != nil {
@@ -41,13 +43,6 @@ func (k Keeper) CreateAlternativeTeam(ctx sdk.Context, owner, slug, name, bio, p
 		return 0, err
 	} else if occupied {
 		return 0, fmt.Errorf("already a curator in this community")
-	}
-	hasMarker, err := k.storeHas(ctx, types.KeyCurationCreated(slug, owner))
-	if err != nil {
-		return 0, err
-	}
-	if hasMarker {
-		return 0, fmt.Errorf("already created an alternative team in this community")
 	}
 	norm := types.NormalizeTeamNameKey(name)
 	if taken, err := k.storeHas(ctx, types.KeyCurationTeamName(slug, norm)); err != nil {
@@ -73,15 +68,11 @@ func (k Keeper) CreateAlternativeTeam(ctx sdk.Context, owner, slug, name, bio, p
 	if next == 0 {
 		next = 1
 	}
-	order, _, err := k.getU64Key(ctx, []byte(types.PfxCommunitySeq))
+	nextID, err := types.CheckedAddUint64(next, 1)
 	if err != nil {
 		return 0, err
 	}
-	order++
-	if err := k.setU64Key(ctx, []byte(types.PfxCommunitySeq), order); err != nil {
-		return 0, err
-	}
-	if err := k.setU64Key(ctx, types.KeyCurationTeamNext(slug), next+1); err != nil {
+	if err := k.setU64Key(ctx, types.KeyCurationTeamNext(slug), nextID); err != nil {
 		return 0, err
 	}
 	team := &types.CurationTeam{
@@ -89,10 +80,10 @@ func (k Keeper) CreateAlternativeTeam(ctx sdk.Context, owner, slug, name, bio, p
 		TeamId:          next,
 		Owner:           owner,
 		Name:            name,
-		Bio:             bio,
+		Description:     description,
 		Policy:          policy,
 		CreatedHeight:   ctx.BlockHeight(),
-		CreatedOrder:    order,
+		CreatedOrder:    next,
 		NextMemberOrder: 2,
 	}
 	if err := k.SetCurationTeam(ctx, team); err != nil {
@@ -111,22 +102,15 @@ func (k Keeper) CreateAlternativeTeam(ctx sdk.Context, owner, slug, name, bio, p
 	if err := k.storeSet(ctx, types.KeyCurationTeamName(slug, norm), putU64(next)); err != nil {
 		return 0, err
 	}
-	if err := k.storeSet(ctx, types.KeyCurationCreated(slug, owner), []byte{1}); err != nil {
-		return 0, err
-	}
-	if err := k.writeEligibleIndex(ctx, team); err != nil {
-		return 0, err
-	}
-	if err := k.writeSupportIndex(ctx, team); err != nil {
-		return 0, err
-	}
-	if err := k.recomputeCrown(ctx, slug); err != nil {
-		return 0, err
-	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_created",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", next)),
 		sdk.NewAttribute("owner", owner),
+		sdk.NewAttribute("name", name),
+		sdk.NewAttribute("description", description),
+		sdk.NewAttribute("policy", policy),
+		sdk.NewAttribute("created_height", fmt.Sprintf("%d", team.CreatedHeight)),
+		sdk.NewAttribute("created_order", fmt.Sprintf("%d", team.CreatedOrder)),
 	))
 	return next, nil
 }
@@ -141,6 +125,12 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 	}
 	if team.Owner != actor {
 		return fmt.Errorf("only the team owner may invite")
+	}
+	if target == actor {
+		return fmt.Errorf("team owner is already a curator")
+	}
+	if _, err := types.CanonicalAccBytes(target); err != nil {
+		return err
 	}
 	params := k.GetParams(ctx)
 	core, found, err := k.loadProfile(ctx, target)
@@ -160,25 +150,27 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 	} else if occupied {
 		return fmt.Errorf("invitee already curates in this community")
 	}
-	members := 0
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), 0, func(_, _ []byte) error {
-		members++
-		return nil
-	}); err != nil {
+	if has, err := k.storeHas(ctx, types.KeyCurationInvite(slug, teamID, target)); err != nil {
+		return err
+	} else if has {
+		return fmt.Errorf("invitation already pending")
+	}
+	members, err := k.countTeamMembers(ctx, slug, teamID, params.MaxCuratorsPerTeam)
+	if err != nil {
 		return err
 	}
-	if uint64(members) >= params.MaxCuratorsPerTeam {
+	if members >= params.MaxCuratorsPerTeam {
 		return fmt.Errorf("team is full")
 	}
-	pendingTeam := 0
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), 0, func(_, _ []byte) error {
-		pendingTeam++
-		return nil
-	}); err != nil {
+	pendingTeam, err := k.countTeamInvites(ctx, slug, teamID, params.MaxCuratorsPerTeam)
+	if err != nil {
 		return err
 	}
-	if uint64(pendingTeam) >= params.MaxPendingCuratorInvitesPerTeam {
+	if pendingTeam >= params.MaxPendingCuratorInvitesPerTeam {
 		return fmt.Errorf("too many pending invites for this team")
+	}
+	if members+pendingTeam >= params.MaxCuratorsPerTeam {
+		return fmt.Errorf("accepted curators plus pending invitations reached team capacity")
 	}
 	pc, _, err := k.getU32Key(ctx, types.KeyCurationInviteCount(target))
 	if err != nil {
@@ -186,11 +178,6 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 	}
 	if uint64(pc) >= params.MaxPendingCuratorInvitesPerUser {
 		return fmt.Errorf("too many pending invites for this user")
-	}
-	if has, err := k.storeHas(ctx, types.KeyCurationInvite(slug, teamID, target)); err != nil {
-		return err
-	} else if has {
-		return nil
 	}
 	if err := k.storeSet(ctx, types.KeyCurationInvite(slug, teamID, target), []byte(actor)); err != nil {
 		return err
@@ -205,12 +192,84 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
 		sdk.NewAttribute("target", target),
+		sdk.NewAttribute("inviter", actor),
+		sdk.NewAttribute("status", "pending"),
 	))
 	return nil
 }
 
+func (k Keeper) countTeamMembers(ctx sdk.Context, slug string, teamID, max uint64) (uint64, error) {
+	var count uint64
+	err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), int(max)+1, func(_, _ []byte) error {
+		count++
+		if count > max {
+			return fmt.Errorf("team member count exceeds configured maximum")
+		}
+		return nil
+	})
+	return count, err
+}
+
+func (k Keeper) countTeamInvites(ctx sdk.Context, slug string, teamID, max uint64) (uint64, error) {
+	var count uint64
+	err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), int(max)+1, func(_, _ []byte) error {
+		count++
+		if count > max {
+			return fmt.Errorf("team invitation count exceeds configured maximum")
+		}
+		return nil
+	})
+	return count, err
+}
+
 func (k Keeper) ClearInvite(ctx sdk.Context, slug string, teamID uint64, target string) error {
+	if _, err := types.CanonicalAccBytes(target); err != nil {
+		return err
+	}
+	has, err := k.storeHas(ctx, types.KeyCurationInvite(slug, teamID, target))
+	if err != nil {
+		return err
+	}
+	if !has {
+		return fmt.Errorf("no pending invitation")
+	}
 	return k.clearInvite(ctx, slug, teamID, target)
+}
+
+func (k Keeper) ClearPendingInvitationsForTarget(ctx sdk.Context, target string) error {
+	params := k.GetParams(ctx)
+	type invitation struct {
+		slug   string
+		teamID uint64
+	}
+	var pending []invitation
+	pfx := types.KeyCurationInviteRevPrefix(target)
+	if err := k.iterPrefixKeys(ctx, pfx, int(params.MaxPendingCuratorInvitesPerUser)+1, func(key, _ []byte) error {
+		if uint64(len(pending)) >= params.MaxPendingCuratorInvitesPerUser {
+			return fmt.Errorf("pending invitation count exceeds configured maximum")
+		}
+		rest := key[len(pfx):]
+		if len(rest) < 2 {
+			return fmt.Errorf("malformed reverse invitation key")
+		}
+		n := int(binary.BigEndian.Uint16(rest[:2]))
+		if len(rest) != 2+n+8 {
+			return fmt.Errorf("malformed reverse invitation key")
+		}
+		pending = append(pending, invitation{
+			slug:   string(rest[2 : 2+n]),
+			teamID: binary.BigEndian.Uint64(rest[2+n:]),
+		})
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, inv := range pending {
+		if err := k.clearInvite(ctx, inv.slug, inv.teamID, target); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (k Keeper) RequireTeamOwner(ctx sdk.Context, actor, slug string, teamID uint64) (*types.CurationTeam, error) {
@@ -219,6 +278,103 @@ func (k Keeper) RequireTeamOwner(ctx sdk.Context, actor, slug string, teamID uin
 
 func (k Keeper) RequireTeamCurator(ctx sdk.Context, actor, slug string, teamID uint64) (*types.CurationTeam, error) {
 	return k.requireTeamActor(ctx, actor, slug, teamID, false)
+}
+
+func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, teamID uint64, name, description, policy string) error {
+	team, err := k.RequireTeamOwner(ctx, actor, slug, teamID)
+	if err != nil {
+		return err
+	}
+	params := k.GetParams(ctx)
+	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
+		return err
+	}
+	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
+		return fmt.Errorf("description exceeds max_curation_team_description_length")
+	}
+	if uint64(utf8.RuneCountInString(policy)) > params.MaxCurationTeamPolicyLength {
+		return fmt.Errorf("policy exceeds max_curation_team_policy_length")
+	}
+	oldNorm := types.NormalizeTeamNameKey(team.Name)
+	newNorm := types.NormalizeTeamNameKey(name)
+	if oldNorm != newNorm {
+		nameKey := types.KeyCurationTeamName(slug, newNorm)
+		if taken, err := k.storeHas(ctx, nameKey); err != nil {
+			return err
+		} else if taken {
+			return fmt.Errorf("team name already used in this community")
+		}
+		if err := k.storeDelete(ctx, types.KeyCurationTeamName(slug, oldNorm)); err != nil {
+			return err
+		}
+		if err := k.storeSet(ctx, nameKey, putU64(teamID)); err != nil {
+			return err
+		}
+	}
+	team.Name = name
+	team.Description = description
+	team.Policy = policy
+	if err := k.SetCurationTeam(ctx, team); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_profile_updated",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("owner", team.Owner),
+		sdk.NewAttribute("name", team.Name),
+		sdk.NewAttribute("description", team.Description),
+		sdk.NewAttribute("policy", team.Policy),
+	))
+	return nil
+}
+
+func (k Keeper) TransferCurationTeamOwner(ctx sdk.Context, actor, slug string, teamID uint64, newOwner string) error {
+	if _, err := k.RequireTeamOwner(ctx, actor, slug, teamID); err != nil {
+		return err
+	}
+	return k.SetCurationTeamOwner(ctx, slug, teamID, newOwner)
+}
+
+func (k Keeper) SetCurationTeamOwner(ctx sdk.Context, slug string, teamID uint64, newOwner string) error {
+	team, found, err := k.GetCurationTeam(ctx, slug, teamID)
+	if err != nil {
+		return err
+	}
+	if !found || !k.teamLive(team) {
+		return fmt.Errorf("team not found")
+	}
+	if newOwner == team.Owner {
+		return fmt.Errorf("new owner is already the team owner")
+	}
+	if _, err := types.CanonicalAccBytes(newOwner); err != nil {
+		return err
+	}
+	core, found, err := k.loadProfile(ctx, newOwner)
+	if err != nil {
+		return err
+	}
+	if !found || !core.EffectivePaid {
+		return fmt.Errorf("new owner must be an active subscriber")
+	}
+	member, err := k.storeHas(ctx, types.KeyCurationTeamMember(slug, teamID, newOwner))
+	if err != nil {
+		return err
+	}
+	if !member {
+		return fmt.Errorf("new owner must be an accepted curator")
+	}
+	oldOwner := team.Owner
+	team.Owner = newOwner
+	if err := k.SetCurationTeam(ctx, team); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_owner_changed",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("old_owner", oldOwner),
+		sdk.NewAttribute("new_owner", newOwner),
+	))
+	return nil
 }
 
 func (k Keeper) clearInvite(ctx sdk.Context, slug string, teamID uint64, target string) error {
@@ -240,12 +396,17 @@ func (k Keeper) clearInvite(ctx sdk.Context, slug string, teamID uint64, target 
 }
 
 func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID uint64) error {
-	has, err := k.storeHas(ctx, types.KeyCurationInvite(slug, teamID, actor))
+	inviteKey := types.KeyCurationInvite(slug, teamID, actor)
+	has, err := k.storeHas(ctx, inviteKey)
 	if err != nil {
 		return err
 	}
 	if !has {
 		return fmt.Errorf("no pending invitation")
+	}
+	inviter, err := k.storeGet(ctx, inviteKey)
+	if err != nil {
+		return err
 	}
 	team, ok, err := k.GetCurationTeam(ctx, slug, teamID)
 	if err != nil {
@@ -260,6 +421,11 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 	}
 	if !found || !core.EffectivePaid {
 		return fmt.Errorf("must be an active subscriber")
+	}
+	if _, joined, err := k.GetPreference(ctx, actor, slug); err != nil {
+		return err
+	} else if !joined {
+		return fmt.Errorf("must join community before accepting an invitation")
 	}
 	if _, occupied, err := k.getU64Key(ctx, types.KeyCurationTeamUser(actor, slug)); err != nil {
 		return err
@@ -278,8 +444,22 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 	if uint64(cur) >= tier.MaxCurationMemberships {
 		return fmt.Errorf("curation membership cap reached")
 	}
+	members, err := k.countTeamMembers(ctx, slug, teamID, params.MaxCuratorsPerTeam)
+	if err != nil {
+		return err
+	}
+	if members >= params.MaxCuratorsPerTeam {
+		return fmt.Errorf("team is full")
+	}
 	order := team.NextMemberOrder
-	team.NextMemberOrder++
+	if order == 0 {
+		return fmt.Errorf("invalid next curator accepted order")
+	}
+	nextOrder, err := types.CheckedAddUint64(order, 1)
+	if err != nil {
+		return err
+	}
+	team.NextMemberOrder = nextOrder
 	if err := k.SetCurationTeam(ctx, team); err != nil {
 		return err
 	}
@@ -300,11 +480,31 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
 		sdk.NewAttribute("address", actor),
+		sdk.NewAttribute("accepted_order", fmt.Sprintf("%d", order)),
+		sdk.NewAttribute("member_count", fmt.Sprintf("%d", members+1)),
+	))
+	ctx.EventManager().EmitEvent(sdk.NewEvent("curator_invitation_accepted",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("target", actor),
+		sdk.NewAttribute("inviter", string(inviter)),
+		sdk.NewAttribute("status", "accepted"),
 	))
 	return nil
 }
 
 func (k Keeper) RemoveCuratorFromTeam(ctx sdk.Context, slug string, teamID uint64, target string, emit string) error {
+	if _, err := types.CanonicalAccBytes(target); err != nil {
+		return err
+	}
+	var member types.CurationTeamMember
+	found, err := k.getProto(ctx, types.KeyCurationTeamMember(slug, teamID, target), &member)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("curator is not a member of this team")
+	}
 	if err := k.storeDelete(ctx, types.KeyCurationTeamMember(slug, teamID, target)); err != nil {
 		return err
 	}
@@ -314,11 +514,18 @@ func (k Keeper) RemoveCuratorFromTeam(ctx sdk.Context, slug string, teamID uint6
 	if _, err := k.addCheckedU32(ctx, types.KeyCurationTeamUserCount(target), -1); err != nil {
 		return err
 	}
+	params := k.GetParams(ctx)
+	memberCount, err := k.countTeamMembers(ctx, slug, teamID, params.MaxCuratorsPerTeam)
+	if err != nil {
+		return err
+	}
 	if emit != "" {
 		ctx.EventManager().EmitEvent(sdk.NewEvent(emit,
 			sdk.NewAttribute("community", slug),
 			sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
 			sdk.NewAttribute("address", target),
+			sdk.NewAttribute("accepted_order", fmt.Sprintf("%d", member.AcceptedOrder)),
+			sdk.NewAttribute("member_count", fmt.Sprintf("%d", memberCount)),
 		))
 	}
 	return nil
@@ -332,20 +539,13 @@ func (k Keeper) DeleteCurationTeam(ctx sdk.Context, slug string, teamID uint64) 
 	if !ok || !k.teamLive(team) {
 		return fmt.Errorf("team not found")
 	}
-	if err := k.removeSupportIndex(ctx, team); err != nil {
-		return err
-	}
-	if err := k.deleteEligibleIndex(ctx, team); err != nil {
-		return err
-	}
-	if team.SupporterCount > 0 {
-		if _, err := k.addCheckedU64(ctx, types.KeyCommunitySupport(slug), int64(team.SupporterCount)); err != nil {
-			return err
-		}
-		team.SupporterCount = 0
-	}
+	params := k.GetParams(ctx)
+	previousSubscriberCount := team.SubscriberCount
 	var members []string
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), 0, func(key, _ []byte) error {
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), int(params.MaxCuratorsPerTeam)+1, func(key, _ []byte) error {
+		if uint64(len(members)) >= params.MaxCuratorsPerTeam {
+			return fmt.Errorf("team member count exceeds configured maximum")
+		}
 		addr := sdk.AccAddress(key[len(key)-20:]).String()
 		members = append(members, addr)
 		return nil
@@ -358,7 +558,10 @@ func (k Keeper) DeleteCurationTeam(ctx sdk.Context, slug string, teamID uint64) 
 		}
 	}
 	var invitees []string
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), 0, func(key, _ []byte) error {
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), int(params.MaxCuratorsPerTeam)+1, func(key, _ []byte) error {
+		if uint64(len(invitees)) >= params.MaxCuratorsPerTeam {
+			return fmt.Errorf("team invitation count exceeds configured maximum")
+		}
 		addr := sdk.AccAddress(key[len(key)-20:]).String()
 		invitees = append(invitees, addr)
 		return nil
@@ -373,16 +576,16 @@ func (k Keeper) DeleteCurationTeam(ctx sdk.Context, slug string, teamID uint64) 
 	if err := k.storeDelete(ctx, types.KeyCurationTeamName(slug, types.NormalizeTeamNameKey(team.Name))); err != nil {
 		return err
 	}
+	team.SubscriberCount = 0
 	team.DeletedHeight = ctx.BlockHeight()
 	if err := k.SetCurationTeam(ctx, team); err != nil {
-		return err
-	}
-	if err := k.recomputeCrown(ctx, slug); err != nil {
 		return err
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_deleted",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("deleted_height", fmt.Sprintf("%d", team.DeletedHeight)),
+		sdk.NewAttribute("previous_subscriber_count", fmt.Sprintf("%d", previousSubscriberCount)),
 	))
 	return nil
 }
@@ -413,6 +616,9 @@ func (k Keeper) SetCurationActionHiddenPost(ctx sdk.Context, slug string, teamID
 }
 
 func (k Keeper) SetCurationActionHiddenUser(ctx sdk.Context, slug string, teamID uint64, target, actor string, hidden bool) error {
+	if _, err := types.CanonicalAccBytes(target); err != nil {
+		return err
+	}
 	key := types.KeyHiddenUser(slug, teamID, target)
 	if hidden {
 		if err := k.storeSet(ctx, key, []byte(actor)); err != nil {
@@ -439,6 +645,7 @@ func (k Keeper) SetCurationThreadLocked(ctx sdk.Context, slug string, teamID uin
 		return err
 	}
 	key := types.KeyThreadLock(slug, teamID, h)
+	var lockSequence uint64
 	if locked {
 		seq, _, err := k.getU64Key(ctx, []byte(types.PfxPostSeq))
 		if err != nil {
@@ -447,16 +654,20 @@ func (k Keeper) SetCurationThreadLocked(ctx sdk.Context, slug string, teamID uin
 		if err := k.storeSet(ctx, key, putU64(seq)); err != nil {
 			return err
 		}
+		lockSequence = seq
 	} else {
 		if err := k.storeDelete(ctx, key); err != nil {
 			return err
 		}
 	}
+	// The indexer applies locks by comparing each post's global sequence against
+	// the stored cut-off, so the committed sequence has to travel with the event.
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_thread_locked",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
 		sdk.NewAttribute("target", root),
 		sdk.NewAttribute("locked", fmt.Sprintf("%t", locked)),
+		sdk.NewAttribute("lock_sequence", fmt.Sprintf("%d", lockSequence)),
 		sdk.NewAttribute("actor", actor),
 	))
 	return nil

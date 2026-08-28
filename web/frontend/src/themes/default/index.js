@@ -45,7 +45,6 @@ import {
     MediaRemoveButton,
 } from './components/MediaAttachmentLayout';
 
-import AgentsView from './routes/AgentsView';
 import BlocksView from './routes/BlocksView';
 import ChangeUsernameView from './routes/ChangeUsernameView';
 import CreateAccountView from './routes/CreateAccountView';
@@ -113,7 +112,6 @@ const components = {
 };
 
 const routes = {
-    AgentsView,
     BlocksView,
     ChangeUsernameView,
     CreateAccountView,
@@ -154,7 +152,7 @@ const defaultManifest = {
     config: {
         showHeroCards: false,
         mapHomeSortMode: true,
-        profileTabs: ['profile', 'submissions', 'comments', 'algo'],
+        profileTabs: ['profile', 'submissions', 'comments', 'algo', 'earnings'],
         profileDefaultTab: 'profile',
         profileUsesListFeed: true,
         profileHideFilterSelect: true,

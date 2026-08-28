@@ -238,7 +238,6 @@ func TestIsRelayMessage(t *testing.T) {
 		&coretypes.MsgSetAutoRenewal{},
 		&coretypes.MsgAward{},
 		&coretypes.MsgSetBiography{},
-		&coretypes.MsgCreateCommunity{},
 		&coretypes.MsgClaimCreatorRewards{},
 	}
 	for _, m := range relayMsgs {
@@ -254,6 +253,9 @@ func TestIsRelayMessage(t *testing.T) {
 		&coretypes.MsgBlockTopic{},
 		&coretypes.MsgUnblockTopic{},
 		&coretypes.MsgAnnotate{},
+		&coretypes.MsgCreateCommunity{},
+		&coretypes.MsgSetCommunityMetadata{},
+		&coretypes.MsgTransferCommunity{},
 	}
 	for _, m := range retiredMsgs {
 		require.False(t, isRelayMessage(m), "expected retired non-relay: %T", m)

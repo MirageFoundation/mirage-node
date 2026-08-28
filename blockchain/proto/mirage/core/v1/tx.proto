@@ -89,9 +89,6 @@ service Msg {
   // SetBiography sets a biography for an address (subscriber-only feature).
   rpc SetBiography(MsgSetBiography) returns (MsgSetBiographyResponse);
 
-  rpc CreateCommunity(MsgCreateCommunity) returns (MsgCreateCommunityResponse);
-  rpc SetCommunityMetadata(MsgSetCommunityMetadata) returns (MsgSetCommunityMetadataResponse);
-  rpc TransferCommunity(MsgTransferCommunity) returns (MsgTransferCommunityResponse);
   rpc CreateCurationTeam(MsgCreateCurationTeam) returns (MsgCreateCurationTeamResponse);
   rpc SetCurationTeamProfile(MsgSetCurationTeamProfile) returns (MsgSetCurationTeamProfileResponse);
   rpc InviteCurator(MsgInviteCurator) returns (MsgInviteCuratorResponse);
@@ -109,8 +106,6 @@ service Msg {
   rpc SetCurationSubscriberOnly(MsgSetCurationSubscriberOnly) returns (MsgSetCurationSubscriberOnlyResponse);
   rpc ClaimCreatorRewards(MsgClaimCreatorRewards) returns (MsgClaimCreatorRewardsResponse);
 
-  rpc GovCreateCommunity(MsgGovCreateCommunity) returns (MsgGovCreateCommunityResponse);
-  rpc GovSetCommunityFounder(MsgGovSetCommunityFounder) returns (MsgGovSetCommunityFounderResponse);
   rpc GovCreateCurationTeam(MsgGovCreateCurationTeam) returns (MsgGovCreateCurationTeamResponse);
   rpc GovSetCurationTeamOwner(MsgGovSetCurationTeamOwner) returns (MsgGovSetCurationTeamOwnerResponse);
   rpc GovSetCuratorMembership(MsgGovSetCuratorMembership) returns (MsgGovSetCuratorMembershipResponse);
@@ -975,7 +970,7 @@ message MsgCreateCurationTeam {
   bytes envelope_signature = 10;
   string community = 100;
   string name = 101;
-  string bio = 102;
+  string description = 102;
   string policy = 103;
 }
 
@@ -994,7 +989,7 @@ message MsgSetCurationTeamProfile {
   string community = 100;
   uint64 team_id = 101;
   string name = 102;
-  string bio = 103;
+  string description = 103;
   string policy = 104;
 }
 
@@ -1264,7 +1259,7 @@ message MsgGovCreateCurationTeam {
   string community = 2;
   string owner = 3;
   string name = 4;
-  string bio = 5;
+  string description = 5;
   string policy = 6;
 }
 

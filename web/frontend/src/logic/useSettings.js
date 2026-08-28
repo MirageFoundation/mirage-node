@@ -4,8 +4,6 @@ import { useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import seedVault from "../utils/SeedVault";
 import { deleteUser } from "../utils/tx";
-import Api from "../utils/api";
-import { signPlainPayload } from "../utils/signPlain";
 import usePendingDeletes from "./usePendingDeletes.js";
 import { formatError } from "../utils/errorMessages";
 import { normalizeThemeId, DEFAULT_THEME_ID } from "../registry/theme";
@@ -238,24 +236,6 @@ export function useSettings({
             return false;
         }
     });
-    const [referralPrecheckEnabled, setReferralPrecheckEnabled] = useState(() => {
-        try {
-            return Storage.load('referral_precheck_enabled', false) === true;
-        } catch (_) {
-            return false;
-        }
-    });
-    const [referralPrecheckBusy, setReferralPrecheckBusy] = useState(false);
-    const [referralPrecheckError, setReferralPrecheckError] = useState('');
-    const [referralPrecheckSuccess, setReferralPrecheckSuccess] = useState('');
-    const [inviteCodesRequired, setInviteCodesRequired] = useState(() => {
-        try {
-            const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
-            return !!nc.registration_invite_code_required;
-        } catch (_) {
-            return false;
-        }
-    });
 
     // ── Security: seed storage mode ────────────────────────────────────────
     const [seedMode, setSeedMode] = useState(() => seedVault.getMode());
@@ -456,35 +436,6 @@ export function useSettings({
         }
     }, [seedMode, commitModeSwitch]);
 
-    useEffect(() => {
-        const readConfig = () => {
-            try {
-                const nc = JSON.parse(localStorage.getItem('nodeConfig') || '{}');
-                setInviteCodesRequired(!!nc.registration_invite_code_required);
-            } catch (_) {
-                setInviteCodesRequired(false);
-            }
-        };
-        window.addEventListener('nodeConfigUpdated', readConfig);
-        return () => window.removeEventListener('nodeConfigUpdated', readConfig);
-    }, []);
-    useEffect(() => {
-        if (!state.publicKey) return;
-        let cancelled = false;
-        Api.get('get_user_status', {
-            address: state.publicKey,
-            _cb: Date.now()
-        }).then(data => {
-            if (cancelled || !data) return;
-            if (typeof data.referral_precheck_enabled === 'boolean') {
-                setReferralPrecheckEnabled(data.referral_precheck_enabled);
-                Storage.save('referral_precheck_enabled', data.referral_precheck_enabled);
-            }
-        }).catch(() => { });
-        return () => {
-            cancelled = true;
-        };
-    }, [state.publicKey]);
     const handleThemeIdChange = e => {
         const newId = normalizeThemeId(e.target.value);
         setThemeId(newId);
@@ -504,32 +455,6 @@ export function useSettings({
                 mode: newMode
             }
         }));
-    };
-    const handleReferralPrecheckToggle = async nextVal => {
-        if (!state.publicKey || referralPrecheckBusy) return;
-        setReferralPrecheckBusy(true);
-        setReferralPrecheckError('');
-        setReferralPrecheckSuccess('');
-        try {
-            const addr = state.publicKey.toLowerCase();
-            const sig = await signPlainPayload((ts, n) => `referrals_precheck_opt_in:${addr}:${nextVal ? 1 : 0}:${ts}:${n}`);
-            const res = await Api.post('referrals/precheck_opt_in', {
-                address: state.publicKey,
-                enabled: !!nextVal,
-                ...sig
-            });
-            if (!res || res.precheck_enabled !== !!nextVal) {
-                throw new Error('Unexpected response');
-            }
-            setReferralPrecheckEnabled(!!nextVal);
-            Storage.save('referral_precheck_enabled', !!nextVal);
-            setReferralPrecheckSuccess('Saved.');
-            setTimeout(() => setReferralPrecheckSuccess(''), 3000);
-        } catch (e) {
-            setReferralPrecheckError(String(e?.message || e || 'Failed to update'));
-        } finally {
-            setReferralPrecheckBusy(false);
-        }
     };
     const handleCollapseThresholdChange = e => {
         const raw = e.target.value;
@@ -637,11 +562,6 @@ export function useSettings({
         setShowTagGore,
         showTagDeath,
         setShowTagDeath,
-        referralPrecheckEnabled,
-        referralPrecheckBusy,
-        referralPrecheckError,
-        referralPrecheckSuccess,
-        inviteCodesRequired,
         seedMode,
         prfSupported,
         secPassword,
@@ -679,7 +599,6 @@ export function useSettings({
         handleModeSelect,
         handleThemeIdChange,
         handleThemeModeChange,
-        handleReferralPrecheckToggle,
         handleCollapseThresholdChange,
         handleSidebarTopicsLimitChange,
         handleSidebarPeopleLimitChange,

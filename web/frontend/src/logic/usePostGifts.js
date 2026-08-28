@@ -187,7 +187,7 @@ export default function usePostGifts({ post, updatePost } = {}) {
             alert('Please log in to gift a subscription');
             return;
         }
-        const level = authorLevel >= 10 ? 10 : 1;
+        const level = 1;
         setConfirmDonate(null);
         setConfirmAward(null);
         setConfirmGiftSub({
@@ -306,8 +306,7 @@ export default function usePostGifts({ post, updatePost } = {}) {
             const result = await tx.subscribe(giftLevel, 0, userAddress);
             setConfirmGiftSub(null);
             if (result && result.success) {
-                const isAgent = giftLevel === 10;
-                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                let msg = 'Subscription gifted!';
                 msg += ` ${expiryLabel}`;
                 setGiftSubMessage({ type: 'success', message: msg });
             } else {

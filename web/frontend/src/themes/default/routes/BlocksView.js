@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import { useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Navigate, useLocation } from "react-router-dom";
@@ -273,7 +274,7 @@ const LoadingSpinner = styled.div`
 `;
 
 const TABS = [
-    { id: 'topics', label: 'Topics' },
+    { id: 'topics', label: 'Communities' },
     { id: 'users', label: 'Users' },
     { id: 'posts', label: 'Posts' },
 ];
@@ -422,9 +423,9 @@ export default function BlocksView({ state }) {
                     <StateIcon>
                         <HiNoSymbol />
                     </StateIcon>
-                    <StateTitle>No blocked topics</StateTitle>
+                    <StateTitle>No blocked communities</StateTitle>
                     <StateMessage>
-                        Topics you block stop appearing in your feed. You can block a topic from any post header.
+                        Communities you block stop appearing in your feed. You can block a community from any post header.
                     </StateMessage>
                 </StateBlock>
             )}
@@ -434,7 +435,7 @@ export default function BlocksView({ state }) {
                     {visibleTopics.map(topic => {
                         const isPending = isTopicPending(topic);
                         const status = formatTopicStatus(topic);
-                        const topicUrl = `/t/${encodeURIComponent(topic)}`;
+                        const topicUrl = communityPath(topic);
                         return (
                             <Row
                                 key={topic}
@@ -449,7 +450,7 @@ export default function BlocksView({ state }) {
                                     <HiHashtag />
                                 </LeadingIcon>
                                 <Identity>
-                                    <IdentityTitle>{topic}</IdentityTitle>
+                                    <IdentityTitle>{communityLabel(topic)}</IdentityTitle>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
                                     <Button

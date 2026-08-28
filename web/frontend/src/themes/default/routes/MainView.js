@@ -1,13 +1,8 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import { Helmet } from "react-helmet-async";
 import { useCallback, useEffect, useState } from "react";
 import {
     HiNoSymbol,
-    HiChevronDown,
-    HiXMark,
-    HiClipboardDocument,
-    HiCheck,
-    HiLink,
-    HiShare,
 } from "react-icons/hi2";
 import { FaGooglePlay, FaApple } from "react-icons/fa6";
 import { getThemeFamily } from "../../../registry/theme";
@@ -17,7 +12,7 @@ import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { FeedSortToggle, FeedViewToggle, loadViewMode, saveViewMode, VIEW_MODE_CHANGE_EVENT } from "../ListFeedView.js";
 import { FeedCardSkeletonList, FeedCardSkeleton, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
-import styled, { keyframes, useTheme } from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import * as tx from "../../../utils/tx";
@@ -25,12 +20,11 @@ import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopi
 import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
+import CurationLensPicker from "../components/CurationLensPicker";
+import AccountStatusNotices from "../components/AccountStatusNotices";
 
 // Mobile header branding for home/following feeds
 
-// Invite-only card — adapted from mirage-mobile-app `InviteCodesCard`:
-// clean panel surface, icon tile + title/subtitle + count badge + chevron header,
-// collapsed body = subtitle paragraph + brand-blue "Share Invite Code" CTA.
 const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
@@ -109,569 +103,6 @@ const FeedSkeletonColumn = styled.div.attrs(({ $feedViewMode }) => ({
     }
 `;
 
-const InviteOnlyBanner = styled.div`
-    /* Match the post CardView exactly (border-radius: 8px; margin: 4px 0)
-     * so this banner aligns with the feed column and shares the same bg. */
-    box-sizing: border-box;
-    width: 100%;
-    max-width: 100%;
-    align-self: flex-start;
-    margin: 4px 0;
-    /* Match the main page bg so the banner blends with the feed
-     * (no "floating card" look). */
-    background: ${({ theme }) => requireThemeColor(theme, 'bg')};
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    border-radius: 8px;
-    overflow: hidden;
-    box-shadow: none;
-
-    @media (max-width: 600px) {
-        border-radius: 6px;
-    }
-`;
-const InviteHeaderButton = styled.button`
-    all: unset;
-    box-sizing: border-box;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding: 0.4rem 1rem;
-    cursor: pointer;
-    user-select: none;
-    transition: background 0.15s ease;
-
-    &:hover {
-        background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.02)'
-        : 'rgba(255, 255, 255, 0.03)'};
-    }
-
-    &:focus-visible {
-        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
-        outline-offset: -2px;
-    }
-
-    @media (max-width: 600px) {
-        padding: 0.35rem 0.85rem;
-    }
-`;
-const InviteTitleRow = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    flex: 1;
-    min-width: 0;
-`;
-const InviteIconTile = styled.div`
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    border-radius: 7px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.8rem;
-    line-height: 1;
-    color: #667eea;
-    background: transparent;
-`;
-const InviteTitleStack = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-    flex: 1;
-`;
-const InviteTitleText = styled.div`
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: ${({ theme }) => requireThemeColor(theme, 'text')};
-    line-height: 1.2;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-`;
-const InviteSubtitleText = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    line-height: 1.2;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-`;
-const InviteHeaderRight = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    flex-shrink: 0;
-`;
-const InviteCountBadge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 18px;
-    padding: 0.08rem 0.35rem;
-    border-radius: 999px;
-    font-size: 0.58rem;
-    font-weight: 800;
-    font-variant-numeric: tabular-nums;
-    color: #667eea;
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(102, 126, 234, 0.14)'
-        : 'rgba(102, 126, 234, 0.24)'};
-`;
-/* Match the post-card chevron (HiChevronDown from react-icons/hi2).
- * Rotates -90deg when the panel is collapsed. */
-const InviteChevron = styled(HiChevronDown)`
-    display: inline-flex;
-    width: 14px;
-    height: 14px;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    transition: transform 0.2s ease;
-    transform: rotate(${({ $collapsed }) => ($collapsed ? '-90deg' : '0deg')});
-`;
-const InviteContent = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.85rem;
-    padding: 0.1rem 1rem 0.75rem;
-
-    @media (max-width: 600px) {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 0.6rem;
-        padding: 0.1rem 0.85rem 0.7rem;
-    }
-`;
-const InviteSubtitleBody = styled.div`
-    flex: 1;
-    min-width: 0;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.64rem;
-    line-height: 1.35;
-`;
-const InviteBannerButton = styled.button`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    flex-shrink: 0;
-    width: auto;
-    padding: 0.42rem 0.75rem;
-    font-size: 0.68rem;
-    font-weight: 700;
-    line-height: 1;
-    font-family: inherit;
-    color: #FFFFFF;
-    background: ${({ theme }) => requireThemeColor(theme, 'followBtnBg')};
-    border: none;
-    border-radius: 7px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
-
-    & > svg {
-        width: 0.85em;
-        height: 0.85em;
-    }
-
-    @media (max-width: 600px) {
-        width: 100%;
-    }
-
-    &:hover:not(:disabled) {
-        background: ${({ theme }) => requireThemeColor(theme, 'followBtnBgHover')};
-        transform: translateY(-1px);
-    }
-
-    &:active:not(:disabled) {
-        transform: translateY(0);
-    }
-
-    &:disabled {
-        background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.05)'
-        : 'rgba(255, 255, 255, 0.06)'};
-        color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-        cursor: not-allowed;
-    }
-`;
-/* Vertical breathing room between the invite banner and the section
- * below it so they don't visually collide. */
-const HomeSectionSpacer = styled.div`
-    height: 0.6rem;
-
-    @media (max-width: 768px) {
-        height: 0.5rem;
-    }
-`;
-
-// ──────────────────────────────────────────────────────────────────────────
-// Invite Code Modal — default-aligned share sheet.
-//
-// Visual language matches the rest of the theme's modals (ConfirmDialog /
-// OptionModal / GiftDialogs):
-//   • `panel` surface on `overlay` dim, 14px radius, fade-in + slide-up.
-//   • Header / Body / Footer with 1px `border` dividers between sections.
-//   • Primary CTA uses the shared `gradient` token; secondary rows sit on
-//     `surface2` neutrals so they read as chrome, not decoration.
-//   • Icons come from `react-icons/hi2` (HiXMark, HiClipboardDocument,
-//     HiCheck, HiLink, HiShare) — no raw emoji glyphs in controls.
-// ──────────────────────────────────────────────────────────────────────────
-
-const inviteFadeIn = keyframes`
-    from { opacity: 0; }
-    to   { opacity: 1; }
-`;
-
-const inviteSlideUp = keyframes`
-    from { transform: translateY(8px); opacity: 0; }
-    to   { transform: translateY(0);   opacity: 1; }
-`;
-
-const InviteModalOverlay = styled.div`
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1rem;
-    background: ${({ theme }) => theme.colors.overlay};
-    animation: ${inviteFadeIn} 0.15s ease;
-`;
-
-const InviteModalContent = styled.div`
-    background: ${({ theme }) => theme.colors.panel};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 14px;
-    width: 100%;
-    max-width: 440px;
-    max-height: calc(100vh - 2rem);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-    animation: ${inviteSlideUp} 0.2s ease;
-`;
-
-const InviteModalHeader = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-`;
-
-const InviteModalHeroIcon = styled.div`
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #FFFFFF;
-    background: ${({ theme }) => theme.colors.gradient};
-
-    svg {
-        width: 20px;
-        height: 20px;
-        fill: #FFFFFF;
-    }
-`;
-
-// Mirage app brand mark — palm tree glyph (same SVG as LoggedOutPromptCard /
-// AuthPageShell so the invite modal feels like a first-party Mirage surface).
-const MiragePalmTreeIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 527.41 593.64" aria-hidden="true">
-        <path d="M85.03,197.11c-.77-.41-1.02,1.23-1.27,1.98-.89,4.66-1.97,9.3-2.97,13.74-4.2,16.58-.74,36.06-12.57,49.79-19.98,21.05-35.86,46.61-49.24,72.25-2.54,4.08-5,14.71-9.37,11.16-10.87-20.06-10.77-56.33-8.13-80.05,8.11-74.35,64.71-133.17,140.39-137.47,25.49-1.82,51.61,1.9,75.05,12.03,4.28,1.83,3.56-.9,1.44-3.38-14.47-18.53-32.09-34.46-50.45-48.97-6.85-5.97,2.67-9.75,4.16-15.29-.57-2.2-4.03-.86-6.05-.95-5.01.31-11.57.58-15.54-.33-9.76-3.12-17.1-10.88-26.25-15.46-2.83-1.81-7.17-3.15-8.24-6.48-.16-4.05,3.86-8.93,5.99-12.27,4.72-5.67.85-5.42-4.33-3.97-6.1,1.49-12.2,4.27-18.51,4.21-8.89-.62-19.71-5.44-28.83-7.13-10.53-2.21-21.48-3.4-32.19-4.48-1.55-.15-3.18-.2-4.71-.48-1.54-.26-2.54-.96-2.43-1.92.18-1.21,1.22-2.15,2.13-2.92,12.76-9.25,31.39-14.68,45.47-17.65,87.21-17.38,152.37,47.81,181.95,123.22.62.03,1.13-1.02,1.55-2.36.56-1.92,1.07-3.92,1.74-5.79C288.75,45.92,362.99-15.54,441.97,3.5c13.15,2.8,26.57,8.26,38.43,14.69,3.05,2.01,5.62,3.08,6.83,5.59.2.77-.49,1.33-1.99,1.58-1.8.29-4.39.29-6.49.37-27.45.93-54.01,10.14-75.58,27.36-5.24,4.36-12.11,1.67-18.25.55-3.09-.75-6.54-.66-10.08-.72-2.63.05-6.46-.29-8.81.48-.61.3-.68.76-.27,1.32,3.71,3.17,10.62,6.8,13.43,10.29,1.92,2.1.07,4.3-1.96,5.72-27.33,20.52-55.82,41.74-78,68.06-3.59,4.29-1.27,4.95,3.04,2.8,101.2-46.59,244.69,12.48,222.91,138.05-1.12,4.66-2.51,9.22-4.48,13.59-1.59,3.35-3.35,5.73-7.15,2.78-8.67-6.91-16.19-15.31-24-23.21-13.03-13.67-27.22-26.21-42.42-37.49-9.29-6.31-15.87-10.04-16.58-22.27-1.12-8.18-3.49-16.18-5.39-24.18-.61-2.73-1.76-3.87-3.15-.85-2.97,5.04-4.39,22.37-9.19,23.78-4.76.73-8.88-4.31-13.09-6-39.7-21.77-83.93-26.94-128.72-25.07-4.85.08-6.56,4.21-7.78,8.3-39.34,131.64-2.05,288.21,88.55,390.43,5.01,4.53,6.1,11.99-3.63,13.79-35.93.13-72.02.82-107.94-.04-9-.37-19.77,1.45-23.34-9.2-21.22-77.97-26.49-159.48-23.41-240.19,1.04-22.78,3.56-45.49,8.02-67.89,6.36-31.78,16.54-63.02,32.21-91.36,2.95-4.91-2.26-4.82-5.58-4.85-8.36-.08-17.58.72-26.01,1.57-38.68,4.18-71.21,22.85-100.3,47.6-2.41,1.7-5.2,5.72-8.19,5.7-2.89-1.86-2.41-6.9-3.35-9.94-1.36-7.2-2.46-14.46-3.74-21.64-.48-1.8-.37-4.37-1.43-5.85l-.05-.05Z" />
-    </svg>
-);
-
-const InviteModalTitleStack = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-    flex: 1;
-`;
-
-const InviteModalTitle = styled.h2`
-    font-size: 0.82rem;
-    font-weight: 700;
-    color: ${({ theme }) => theme.colors.text};
-    margin: 0;
-    line-height: 1.3;
-`;
-
-const InviteModalSubtitle = styled.div`
-    font-size: 0.7rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-    line-height: 1.35;
-`;
-
-const InviteModalClose = styled.button`
-    background: transparent;
-    border: none;
-    color: ${({ theme }) => theme.colors.subtleText};
-    cursor: pointer;
-    padding: 0;
-    width: 32px;
-    height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    flex-shrink: 0;
-    transition: background 0.12s ease, color 0.12s ease;
-
-    svg {
-        width: 20px;
-        height: 20px;
-    }
-
-    &:hover {
-        color: ${({ theme }) => theme.colors.text};
-        background: ${({ theme }) => theme.colors.hoverBg};
-    }
-
-    &:focus,
-    &:focus-visible {
-        outline: none;
-        box-shadow: none;
-    }
-`;
-
-const InviteModalBody = styled.div`
-    padding: 0.85rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    overflow-y: auto;
-`;
-
-const InviteCodeDisplay = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    background: ${({ theme }) => theme.colors.surface2};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 10px;
-    padding: 0.65rem 0.8rem;
-`;
-
-const InviteCodeStack = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    min-width: 0;
-    flex: 1;
-`;
-
-const InviteCodeLabel = styled.div`
-    font-size: 0.55rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
-
-const InviteCodeText = styled.div`
-    font-size: 1.1rem;
-    font-weight: 700;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    color: ${({ theme }) => theme.colors.text};
-    letter-spacing: 0.1em;
-    line-height: 1.2;
-    word-break: break-all;
-
-    @media (max-width: 400px) {
-        font-size: 1rem;
-        letter-spacing: 0.08em;
-    }
-`;
-
-const InviteCodeCopyIcon = styled.button`
-    appearance: none;
-    width: 34px;
-    height: 34px;
-    flex-shrink: 0;
-    border-radius: 8px;
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    background: ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.panel};
-    color: ${({ theme, $copied }) =>
-        $copied ? theme.colors.voteUp : theme.colors.text};
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-
-    svg {
-        width: 16px;
-        height: 16px;
-    }
-
-    &:hover {
-        background: ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-    }
-
-    &:focus,
-    &:focus-visible {
-        outline: none;
-        box-shadow: none;
-    }
-`;
-
-// Primary action row: Copy Link (neutral) + Share (gradient CTA).
-const InvitePrimaryActions = styled.div`
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-
-    @media (max-width: 380px) {
-        grid-template-columns: 1fr;
-    }
-`;
-
-const InviteActionButton = styled.button`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    padding: 0.6rem 0.75rem;
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 600;
-    line-height: 1;
-    color: ${({ theme, $copied }) =>
-        $copied ? theme.colors.voteUp : theme.colors.text};
-    background: ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.surface2};
-    border: 1px solid ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.border};
-    border-radius: 9px;
-    cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-
-    svg {
-        width: 15px;
-        height: 15px;
-    }
-
-    &:hover:not(:disabled) {
-        background: ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
-        border-color: ${({ theme, $copied }) =>
-        $copied ? theme.colors.buttonSuccessBg : theme.colors.borderStrong};
-    }
-
-    &:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-    }
-
-    &:focus,
-    &:focus-visible {
-        outline: none;
-        box-shadow: none;
-    }
-`;
-
-const InvitePrimaryCta = styled(InviteActionButton)`
-    background: ${({ theme }) => theme.colors.followBtnBg};
-    border: none;
-    color: #FFFFFF;
-
-    &:hover:not(:disabled) {
-        background: ${({ theme }) => theme.colors.followBtnBgHover};
-        border: none;
-    }
-
-    &:active {
-        filter: brightness(0.98);
-    }
-`;
-
-const InviteSocialDivider = styled.div`
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0.1rem 0 0;
-    font-size: 0.55rem;
-    font-weight: 700;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: ${({ theme }) => theme.colors.subtleText};
-
-    &::before,
-    &::after {
-        content: '';
-        flex: 1;
-        height: 1px;
-        background: ${({ theme }) => theme.colors.border};
-    }
-`;
-
-const InviteSocialGrid = styled.div`
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 0.5rem;
-
-    @media (max-width: 380px) {
-        grid-template-columns: 1fr;
-    }
-`;
-
-const InviteSocialButton = styled.a`
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.45rem;
-    padding: 0.55rem 0.7rem;
-    font-family: inherit;
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1;
-    text-decoration: none;
-    color: ${({ theme }) => theme.colors.text};
-    background: ${({ theme }) => theme.colors.surface2};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
-
-    &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
-        border-color: ${({ theme }) => theme.colors.borderStrong};
-        color: ${({ theme }) => theme.colors.text};
-        text-decoration: none;
-    }
-`;
-
-const InviteModalFooter = styled.div`
-    padding: 0.6rem 1rem 0.75rem;
-    border-top: 1px solid ${({ theme }) => theme.colors.border};
-    text-align: center;
-    font-size: 0.65rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-`;
-
-const InviteNoCodesText = styled.div`
-    text-align: center;
-    padding: 0.85rem 0;
-    color: ${({ theme }) => theme.colors.subtleText};
-    font-size: 0.75rem;
-    line-height: 1.5;
-`;
-
 // Top feed title row for home/following feeds — matches InboxView HeaderRow spacing
 const HomeFeedTitleBar = styled.div`
     box-sizing: border-box;
@@ -687,8 +118,8 @@ const HomeFeedTitleBar = styled.div`
 `;
 
 // NSFW welcome hero — default: compact, app-style card using the
-// Mirage gradient accent. Matches the visual language of InviteOnlyBanner
-// (blends with page bg, rounded 8px, themed border) and TopicHeroCard.
+// Mirage gradient accent. Blends with the page bg (rounded 8px, themed
+// border) and matches the visual language of TopicHeroCard.
 const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
@@ -1332,6 +763,22 @@ const TopicHeroDescription = styled.div`
     }
 `;
 
+const CommunityLensBar = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    font-size: 0.68rem;
+    @media (max-width: 600px) {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 0.5rem 0;
+    }
+`;
+
 /**
  * EmptyHomeCard — flat full-width strip, aligned with list feed surface
  */
@@ -1370,7 +817,7 @@ const EmptyHomeBody = styled.div`
 const EmptyHomeMessage = () => <EmptyHomeCard role="region" aria-label="Empty home feed">
     <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
     <EmptyHomeBody>
-        Follow a few topics to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/topics">topics</InlineLink> to get started.
+        Follow a few communities to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/communities">communities</InlineLink> to get started.
     </EmptyHomeBody>
 </EmptyHomeCard>;
 
@@ -1417,33 +864,17 @@ const MainView = ({
         dismissAndroidBanner,
         dismissIPhoneBanner,
         showNsfwHero,
-        showModerationReminder,
-        dismissModerationReminder,
-        snoozeModerationReminder,
         isLoggedIn,
         openBrowsingEnabled,
         nodeConfigLoaded,
-        inviteCodesEnabled,
         showAndroidBanner,
         showIPhoneBanner,
-        inviteModalOpen,
-        setInviteModalOpen,
-        inviteCodeCopied,
         welcomeStats,
         welcomeStatsStale,
-        inviteBannerCollapsed,
-        toggleInviteBanner,
-        nextAvailableCode,
-        availableCodeCount,
-        handleOpenInviteModal,
-        handleCopyInviteCode,
-        handleNativeShare,
-        canNativeShare,
-        getShareUrl,
-        getShareText,
         handleNsfwChoice,
         bottomSentinelRef,
-        loadMore
+        loadMore,
+        setFeedLens,
     } = useMain({
         state,
         setPosts,
@@ -1451,6 +882,9 @@ const MainView = ({
         setTopic,
         routeTopic
     });
+    const handleLensChange = useCallback((lens, teamId) => {
+        setFeedLens({ lens, teamId });
+    }, [setFeedLens]);
     // Open browsing: guests may read the feed too. Content-rendering branches use
     // canBrowse; logged-in-only chrome (heroes, banners) keeps using isLoggedIn.
     // Until the node config has loaded we don't yet know if open browsing is on,
@@ -1467,42 +901,6 @@ const MainView = ({
         setFeedViewMode(next);
         saveViewMode(next);
     }, []);
-    // Local UI state for invite modal "Copy Code" button (distinct from "Copy Link")
-    const [rawCodeCopied, setRawCodeCopied] = useState(false);
-    const handleCopyRawInviteCode = useCallback(async () => {
-        const code = nextAvailableCode?.code;
-        if (!code) return;
-        try {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(code);
-            } else {
-                const ta = document.createElement('textarea');
-                ta.value = code;
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-            }
-            setRawCodeCopied(true);
-            setTimeout(() => setRawCodeCopied(false), 2000);
-        } catch (_err) {
-            /* clipboard denied — silent */
-        }
-    }, [nextAvailableCode]);
-    // Close the invite modal on Escape — matches ConfirmDialog / OptionModal.
-    useEffect(() => {
-        if (!inviteModalOpen) return undefined;
-        const onKey = (e) => {
-            if (e.key === 'Escape' || e.key === 'Esc') {
-                e.preventDefault();
-                setInviteModalOpen(false);
-            }
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [inviteModalOpen, setInviteModalOpen]);
     if (error) {
         return <StyledError>{error}</StyledError>;
     }
@@ -1524,8 +922,8 @@ const MainView = ({
             header = <PostHeaderCard role="region" aria-label="Post context">
                 <PostHeaderText>
                     Posted in{' '}
-                    <TopicLinkInHeader to={`/t/${p.topic}`} title={`View #${p.topic}`}>
-                        #{p.topic}
+                    <TopicLinkInHeader to={communityPath(p.topic)} title={`View ${communityLabel(p.topic)}`}>
+                        {communityLabel(p.topic)}
                     </TopicLinkInHeader>{' '}
                     (
                     <HeaderInlineLink href="#" onClick={async e => {
@@ -1654,9 +1052,9 @@ const MainView = ({
         }
 
         // Full-width main column + shell header (no left sidebar; old Reddit style)
-        const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : `#${urlTopic}`;
+        const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : communityLabel(urlTopic);
         const noPostsMessage = urlTopic === 'following'
-            ? 'No posts available. Follow users or topics to populate this feed.'
+            ? 'No posts available. Follow users or communities to populate this feed.'
             : 'No posts available';
         return <ContentGrid>
             <Helmet>
@@ -1670,7 +1068,7 @@ const MainView = ({
 
                             {isLoggedIn && isCurrentTopic && showHero && !isUrlTopicBlocked && <TopicHeroCard>
                                 <TopicHeroHeader>
-                                    <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
+                                    <TopicHeroTitle>{communityLabel(urlTopic)}</TopicHeroTitle>
                                     <HomeFeedModeInline>
                                         <HomeFeedModeSelect value={homeSortMode} onChange={e => {
                                             const mode = e.target.value;
@@ -1711,9 +1109,18 @@ const MainView = ({
                                     </HomeFeedModeInline>
                                 </TopicHeroHeader>
                                 <TopicHeroDescription>
-                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from users actively contributing to this topic.
+                                    Community feed for {communityLabel(urlTopic)}. Follow this community to stay up to date with the latest posts, discussions, and updates from users actively contributing here.
                                 </TopicHeroDescription>
                             </TopicHeroCard>}
+
+                            {isLoggedIn && isCurrentTopic && !isUrlTopicBlocked && <CommunityLensBar>
+                                <strong>{communityLabel(urlTopic)}</strong>
+                                <CurationLensPicker
+                                    community={urlTopic}
+                                    viewer={viewerAddress}
+                                    onChange={handleLensChange}
+                                />
+                            </CommunityLensBar>}
 
                             {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
                                 {/* Keep only the feed title row at the top for home/following. */}
@@ -1728,71 +1135,7 @@ const MainView = ({
                                         </HomeFeedModeInline>
                                     </HomeFeedHeaderRow>
                                 </HomeFeedTitleBar>
-                                {/* Invite-only banner - shown only when invite codes are enabled on this node */}
-                                {inviteCodesEnabled && <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
-                                    <InviteHeaderButton
-                                        type="button"
-                                        onClick={toggleInviteBanner}
-                                        aria-expanded={!inviteBannerCollapsed}
-                                    >
-                                        <InviteTitleRow>
-                                            <InviteIconTile aria-hidden="true">🎁</InviteIconTile>
-                                            <InviteTitleStack>
-                                                <InviteTitleText>Invite Codes</InviteTitleText>
-                                                <InviteSubtitleText>
-                                                    {availableCodeCount > 0
-                                                        ? `${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} available`
-                                                        : 'No codes left'}
-                                                </InviteSubtitleText>
-                                            </InviteTitleStack>
-                                        </InviteTitleRow>
-                                        <InviteHeaderRight>
-                                            {availableCodeCount > 0 && (
-                                                <InviteCountBadge>{availableCodeCount}</InviteCountBadge>
-                                            )}
-                                            <InviteChevron $collapsed={inviteBannerCollapsed} aria-hidden="true" />
-                                        </InviteHeaderRight>
-                                    </InviteHeaderButton>
-                                    {!inviteBannerCollapsed && <InviteContent>
-                                        <InviteSubtitleBody>
-                                            {availableCodeCount > 0 ? "We've given you some invite codes to share with friends. Use them wisely." : "You're out of invite codes for now. We might drop some more soon — stay tuned!"}
-                                        </InviteSubtitleBody>
-                                        <InviteBannerButton
-                                            type="button"
-                                            onClick={handleOpenInviteModal}
-                                            disabled={availableCodeCount === 0}
-                                        >
-                                            {availableCodeCount > 0 && <HiShare aria-hidden="true" />}
-                                            {availableCodeCount > 0
-                                                ? 'Share Invite Code'
-                                                : 'No Codes Left'}
-                                        </InviteBannerButton>
-                                    </InviteContent>}
-                                </InviteOnlyBanner>}
-
-                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && inviteCodesEnabled && <HomeSectionSpacer />}
-                                {isLoggedIn && urlTopic === 'home' && showModerationReminder && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Moderation reminder">
-                                    <NsfwHeroHeader>
-                                        <NsfwHeroIconTile aria-hidden="true">
-                                            <NsfwHeroEmoji>🛡️</NsfwHeroEmoji>
-                                        </NsfwHeroIconTile>
-                                        <NsfwHeroTitle>Mirage moderation is opt-in</NsfwHeroTitle>
-                                    </NsfwHeroHeader>
-                                    <NsfwHeroDescription>
-                                        Mirage does not hide legal content by default just because it is messy, spammy, offensive, or low quality. If your feed feels too unruly, enable moderation agents — each one filters a specific kind of unwanted content. For example, <strong>SafeSpaceBot</strong> rewrites hostile posts into kinder language, and <strong>AntiSpamBot</strong> hides spam and low-effort posts. Mix and match as many as you like.
-                                    </NsfwHeroDescription>
-                                    <NsfwHeroButtons>
-                                        <NsfwHeroButton as={Link} to="/agents" $variant="yes" onClick={dismissModerationReminder}>
-                                            Choose agents
-                                        </NsfwHeroButton>
-                                        <NsfwHeroButton $variant="no" onClick={dismissModerationReminder}>
-                                            I understand
-                                        </NsfwHeroButton>
-                                        <NsfwHeroButton $variant="no" onClick={snoozeModerationReminder}>
-                                            Remind me later
-                                        </NsfwHeroButton>
-                                    </NsfwHeroButtons>
-                                </NsfwWelcomeHero>}
+                                <AccountStatusNotices />
                             </FeedHeroColumn>}
 
                             {/* Android app banner - shown once for Android users until dismissed */}
@@ -1863,13 +1206,13 @@ const MainView = ({
                          * (see block rendered just after <TopicHeroCard>). */}
 
                             {/* Blocked topic state — takes precedence over loading/empty states */}
-                            {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked topic">
+                            {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked community">
                                 <BlockedTopicIcon aria-hidden="true">
                                     <HiNoSymbol />
                                 </BlockedTopicIcon>
-                                <BlockedTopicTitle>#{urlTopic} is blocked</BlockedTopicTitle>
+                                <BlockedTopicTitle>{communityLabel(urlTopic)} is blocked</BlockedTopicTitle>
                                 <BlockedTopicMessage>
-                                    Posts tagged with this topic are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
+                                    Posts in this community are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
                                 </BlockedTopicMessage>
                                 <BlockedTopicActions>
                                     {/* Standalone state panel — use `size="md"`
@@ -1883,7 +1226,7 @@ const MainView = ({
                                             try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
                                         }}
                                     >
-                                        Unblock #{urlTopic}
+                                        Unblock {communityLabel(urlTopic)}
                                     </Button>
                                 </BlockedTopicActions>
                             </BlockedTopicState>}
@@ -1911,7 +1254,7 @@ const MainView = ({
                                 aria-label="Welcome to Mirage"
                                 title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
                                 description={urlTopic === 'following'
-                                    ? 'Sign in to unlock your following feed and keep up with the users and topics you care about.'
+                                    ? 'Sign in to unlock your following feed and keep up with the users and communities you care about.'
                                     : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
                                 stats={welcomeStats && welcomeStats.userCount > 0 ? [
                                     { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },
@@ -1946,7 +1289,7 @@ const MainView = ({
                                 const showFeedToolbar = urlTopic === 'all' || isTopicFeed;
                                 let feedTitle = null;
                                 if (urlTopic === 'all') feedTitle = 'All';
-                                else if (isTopicFeed) feedTitle = `#${urlTopic}`;
+                                else if (isTopicFeed) feedTitle = communityLabel(urlTopic);
                                 return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                             })()}
 
@@ -1967,121 +1310,6 @@ const MainView = ({
                     </MainFeedPanel>
                 </FeedCol>
             </FeedRailRow>
-
-            {/* Invite Code Modal */}
-            {inviteModalOpen && (
-                <InviteModalOverlay
-                    role="presentation"
-                    onClick={() => setInviteModalOpen(false)}
-                >
-                    <InviteModalContent
-                        role="dialog"
-                        aria-modal="true"
-                        aria-label="Share invite code"
-                        onClick={e => e.stopPropagation()}
-                    >
-                        <InviteModalHeader>
-                            <InviteModalHeroIcon aria-hidden="true">
-                                <MiragePalmTreeIcon />
-                            </InviteModalHeroIcon>
-                            <InviteModalTitleStack>
-                                <InviteModalTitle>Share Invite Code</InviteModalTitle>
-                                <InviteModalSubtitle>Invite a friend to join Mirage</InviteModalSubtitle>
-                            </InviteModalTitleStack>
-                            <InviteModalClose
-                                type="button"
-                                onClick={() => setInviteModalOpen(false)}
-                                aria-label="Close invite modal"
-                                title="Close"
-                            >
-                                <HiXMark aria-hidden="true" />
-                            </InviteModalClose>
-                        </InviteModalHeader>
-
-                        <InviteModalBody>
-                            {nextAvailableCode ? (
-                                <>
-                                    <InviteCodeDisplay>
-                                        <InviteCodeStack>
-                                            <InviteCodeLabel>Invite code</InviteCodeLabel>
-                                            <InviteCodeText>{nextAvailableCode.code}</InviteCodeText>
-                                        </InviteCodeStack>
-                                        <InviteCodeCopyIcon
-                                            type="button"
-                                            $copied={rawCodeCopied}
-                                            onClick={handleCopyRawInviteCode}
-                                            aria-label={rawCodeCopied ? 'Copied' : 'Copy code'}
-                                            title={rawCodeCopied ? 'Copied!' : 'Copy code'}
-                                        >
-                                            {rawCodeCopied ? <HiCheck /> : <HiClipboardDocument />}
-                                        </InviteCodeCopyIcon>
-                                    </InviteCodeDisplay>
-
-                                    <InvitePrimaryActions>
-                                        <InviteActionButton
-                                            type="button"
-                                            onClick={handleCopyInviteCode}
-                                            $copied={inviteCodeCopied}
-                                            title="Copy share link"
-                                        >
-                                            {inviteCodeCopied ? <HiCheck /> : <HiLink />}
-                                            {inviteCodeCopied ? 'Copied!' : 'Copy link'}
-                                        </InviteActionButton>
-                                        <InvitePrimaryCta
-                                            type="button"
-                                            onClick={canNativeShare ? handleNativeShare : handleCopyInviteCode}
-                                            title={canNativeShare ? 'Share via…' : 'Share link'}
-                                        >
-                                            <HiShare />
-                                            Share
-                                        </InvitePrimaryCta>
-                                    </InvitePrimaryActions>
-
-                                    <InviteSocialDivider>or share on</InviteSocialDivider>
-                                    <InviteSocialGrid>
-                                        <InviteSocialButton
-                                            href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            Twitter / X
-                                        </InviteSocialButton>
-                                        <InviteSocialButton
-                                            href={`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(getShareText())}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            Telegram
-                                        </InviteSocialButton>
-                                        <InviteSocialButton
-                                            href={`https://wa.me/?text=${encodeURIComponent(getShareText() + ' ' + getShareUrl())}`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                        >
-                                            WhatsApp
-                                        </InviteSocialButton>
-                                        <InviteSocialButton
-                                            href={`mailto:?subject=${encodeURIComponent('Join me on Mirage!')}&body=${encodeURIComponent(getShareText() + '\n\n' + getShareUrl())}`}
-                                        >
-                                            Email
-                                        </InviteSocialButton>
-                                    </InviteSocialGrid>
-                                </>
-                            ) : (
-                                <InviteNoCodesText>
-                                    You don't have any invite codes available. Check back later!
-                                </InviteNoCodesText>
-                            )}
-                        </InviteModalBody>
-
-                        {nextAvailableCode && (
-                            <InviteModalFooter>
-                                {availableCodeCount} invite{availableCodeCount !== 1 ? 's' : ''} remaining
-                            </InviteModalFooter>
-                        )}
-                    </InviteModalContent>
-                </InviteModalOverlay>
-            )}
         </ContentGrid>;
     };
     return showPosts();

@@ -274,12 +274,10 @@ func DefaultParams() Params {
 		AwardConfigs:     DefaultAwardConfigs(),
 
 		MaxCuratorsPerTeam:                  10,
-		MaxPendingCuratorInvitesPerTeam:     20,
+		MaxPendingCuratorInvitesPerTeam:     10,
 		MaxPendingCuratorInvitesPerUser:     100,
-		MaxCommunityTitleLength:             100,
-		MaxCommunityDescriptionLength:       2000,
 		MaxCurationTeamNameLength:           64,
-		MaxCurationTeamBioLength:            280,
+		MaxCurationTeamDescriptionLength:    280,
 		MaxCurationTeamPolicyLength:         4000,
 		SubscriptionTransitionsPerBlock:     100,
 		CurationPruneKeysPerBlock:           500,
@@ -306,10 +304,8 @@ func HistoricalDefaultParams() Params {
 	p.MaxCuratorsPerTeam = 0
 	p.MaxPendingCuratorInvitesPerTeam = 0
 	p.MaxPendingCuratorInvitesPerUser = 0
-	p.MaxCommunityTitleLength = 0
-	p.MaxCommunityDescriptionLength = 0
 	p.MaxCurationTeamNameLength = 0
-	p.MaxCurationTeamBioLength = 0
+	p.MaxCurationTeamDescriptionLength = 0
 	p.MaxCurationTeamPolicyLength = 0
 	p.SubscriptionTransitionsPerBlock = 0
 	p.CurationPruneKeysPerBlock = 0
@@ -547,12 +543,10 @@ func (p Params) ValidateV139() error {
 		max  uint64
 	}{
 		{"max_curators_per_team", p.MaxCuratorsPerTeam, 1, 10},
-		{"max_pending_curator_invites_per_team", p.MaxPendingCuratorInvitesPerTeam, p.MaxCuratorsPerTeam, 100},
+		{"max_pending_curator_invites_per_team", p.MaxPendingCuratorInvitesPerTeam, 1, p.MaxCuratorsPerTeam},
 		{"max_pending_curator_invites_per_user", p.MaxPendingCuratorInvitesPerUser, 1, 1000},
-		{"max_community_title_length", p.MaxCommunityTitleLength, 1, 100000},
-		{"max_community_description_length", p.MaxCommunityDescriptionLength, 1, 100000},
 		{"max_curation_team_name_length", p.MaxCurationTeamNameLength, 1, 100000},
-		{"max_curation_team_bio_length", p.MaxCurationTeamBioLength, 1, 100000},
+		{"max_curation_team_description_length", p.MaxCurationTeamDescriptionLength, 1, 100000},
 		{"max_curation_team_policy_length", p.MaxCurationTeamPolicyLength, 1, 100000},
 		{"subscription_transitions_per_block", p.SubscriptionTransitionsPerBlock, 1, 100000},
 		{"curation_prune_keys_per_block", p.CurationPruneKeysPerBlock, 1, 100000},

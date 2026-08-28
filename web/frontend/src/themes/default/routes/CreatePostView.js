@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { HiTrash, HiChevronLeft, HiChevronRight, HiChevronDown, HiArrowUpTray } from "react-icons/hi2";
@@ -768,31 +768,23 @@ const PostBtn = styled.button`
     &:disabled { opacity: 0.55; cursor: not-allowed; }
 `;
 
-/* Guidance note shown when user selects/creates a new (unknown) topic.
- * Amber advisory palette, intentionally softer than `FieldError` so it reads
- * as guidance rather than an error. Fill is ~6% alpha to match `FieldError`
- * treatment and keep the amber text as the primary signal. */
-const NewTopicNote = styled.div`
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    padding: 0.55rem 0.75rem;
-    border: 1px solid rgba(245, 158, 11, 0.35);
-    border-radius: 10px;
-    background: rgba(245, 158, 11, 0.06);
-    color: #f59e0b;
+const CommunityHint = styled.div`
+    margin-top: 0.35rem;
+    color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.7rem;
     font-weight: 500;
-    line-height: 1.45;
+    line-height: 1.4;
 
-    &::before {
-        content: '⚠';
-        line-height: 1.2;
-        font-size: 0.78rem;
-        flex: 0 0 auto;
+    a {
+        color: ${({ theme }) => theme.colors.link};
+        text-decoration: none;
+        font-weight: 600;
+
+        &:hover {
+            color: ${({ theme }) => theme.colors.linkHover};
+            text-decoration: underline;
+        }
     }
-
-    b { color: #fbbf24; font-weight: 600; }
 `;
 
 /* Content counter row — right-aligned beneath the body editor.
@@ -882,7 +874,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                 role="region"
                                 aria-label="Create a post on Mirage"
                                 title="Sign in to post on Mirage"
-                                description="Create an account or sign in to publish posts, join topics, and participate on-chain."
+                                description="Create an account or sign in to publish posts, join communities, and participate on-chain."
                                 stats={getCachedWelcomeStats()}
                                 links={[
                                     { label: 'Watch Introduction (YouTube)', href: 'https://www.youtube.com/watch?v=TOvP32ihQ0M', external: true },
@@ -945,7 +937,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     const [linkUrl, setLinkUrl] = useState('');
     const [linkOpen, setLinkOpen] = useState(false);
     const [slideIndex, setSlideIndex] = useState(0);
-    const [topicIsNew, setTopicIsNew] = useState(false);
     /* Picker-attached image (GIF / sticker). Single-slot, mirrors the
      * comments reply editor's `replyAttachedUrl` pattern. The body
      * textarea stays clean; the URL is prepended to `contentValue` at
@@ -1138,14 +1129,6 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
             setLinkOpen(true);
         }
         if (submitError) setSubmitError('');
-    };
-
-    /* Wrap the hook's topic change handler so we can surface a guidance
-     * note when the user picks the "Create #xyz" option in TopicSelector. */
-    const wrappedTopicChange = e => {
-        const meta = e?.meta || {};
-        setTopicIsNew(!!meta.isNew);
-        handleTopicChange(e);
     };
 
     const tierLabel = limits.isAdmin ? 'admin' : (limits.willPayFee ? 'paid tier' : 'free tier');
@@ -1445,18 +1428,14 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                     value={topicValue}
                                     maxLength={limits.maxTopic}
                                     minLength={limits.minTopic}
-                                    onChange={wrappedTopicChange}
+                                    onChange={handleTopicChange}
                                     disabled={isSubmitting}
-                                    aria-label="Topic"
+                                    aria-label="Community"
                                 />
 
-                                {topicIsNew && (
-                                    <NewTopicNote role="note">
-                                        <span>
-                                            Topics are communities centered around specific interests. Posting in the wrong topic may affect your overall trust status on Mirage. Make sure to post into the right category!
-                                        </span>
-                                    </NewTopicNote>
-                                )}
+                                <CommunityHint>
+                                    Don&apos;t see yours? <Link to="/communities/new">Create a community</Link>
+                                </CommunityHint>
 
                                 <Field>
                                     <InputShell>

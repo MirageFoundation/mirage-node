@@ -1102,6 +1102,73 @@ class DatabaseManager:
                     values,
                 )
 
+    def update_post_protocol_metadata(self, txhash: str, metadata: dict) -> None:
+        """Persist the chain's absolute protocol-1 post metadata."""
+        target = str(txhash).strip().lower()
+        root_hash = str(metadata["root_hash"]).strip().lower()
+        community = str(metadata["community"]).strip().lower()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE posts
+                    SET community = %s,
+                        root_community = %s,
+                        root_txhash = %s,
+                        root_post_id = %s,
+                        post_sequence = %s,
+                        created_height = %s,
+                        created_epoch = %s,
+                        author_was_paid_at_creation = %s,
+                        deleted_height = NULLIF(%s, 0),
+                        deleted_epoch = NULLIF(%s, 0)
+                    WHERE LOWER(txhash) = %s AND protocol_version = 1
+                    """,
+                    (
+                        community,
+                        community,
+                        root_hash,
+                        root_hash,
+                        int(metadata["global_sequence"]),
+                        int(metadata["created_height"]),
+                        int(metadata["created_epoch"]),
+                        bool(metadata["author_was_paid_at_creation"]),
+                        int(metadata["deleted_height"]),
+                        int(metadata["deleted_epoch"]),
+                        target,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise RuntimeError(f"protocol-1 metadata target is missing from posts: {target}")
+
+    def update_subscription_runtime(self, owner: str, runtime: dict) -> None:
+        """Persist quota and renewal state in the existing profile columns."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE profiles
+                    SET subscriber_quota_epoch=%s,
+                        subscriber_quota_used=%s,
+                        renewal_next_attempt=%s,
+                        renewal_last_attempt_epoch=%s,
+                        renewal_warning_expiry=%s,
+                        renewal_warning_sent=%s
+                    WHERE LOWER(owner)=LOWER(%s)
+                    """,
+                    (
+                        int(runtime["quota_epoch"]),
+                        int(runtime["quota_used"]),
+                        int(runtime["renewal_next_attempt"]),
+                        int(runtime["renewal_last_attempt_epoch"]),
+                        int(runtime["renewal_expiry"]),
+                        bool(runtime["renewal_warning_sent"]),
+                        owner,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    raise RuntimeError(f"subscription runtime profile is missing: {owner}")
+
     def delete_mentions_for_post(self, post_txhash: str) -> None:
         """Delete all mentions for a post (used before re-extracting on edit)."""
         with self._connect() as conn:

@@ -67,11 +67,14 @@ Same as ordered set but with **eviction**: when over cap, the entry with the low
 | Prefix | List Type | Keeper Methods |
 |--------|-----------|----------------|
 | `fu/` | Followed users (unordered set) | `AddFollowedUser`, `RemoveFollowedUser`, `HasFollowedUser`, `CountFollowedUsers`, `ListFollowedUsers`, `DeleteAllFollowedUsers` |
-| `ft/` | Followed topics (unordered set) | `AddFollowedTopic`, `RemoveFollowedTopic`, `HasFollowedTopic`, `CountFollowedTopics`, `ListFollowedTopics`, `DeleteAllFollowedTopics` |
-| `ea/` | Enabled agents (ordered set) | `AddEnabledAgent`, `RemoveEnabledAgent`, `HasEnabledAgent`, `CountEnabledAgents`, `ListEnabledAgentsOrdered`, `ReplaceAllEnabledAgents`, `DeleteAllEnabledAgents` |
+| `ft/` | Followed topics — retired in v1.39.0 | `DeleteAllFollowedTopics` |
+| `ea/` | Enabled agents — retired in v1.39.0 | `DeleteAllEnabledAgents` |
 | `bu/` | Blocked users (deque) | `AddBlockedUserDeque`, `RemoveBlockedUser`, `HasBlockedUser`, `CountBlockedUsers`, `ListBlockedUsers`, `DeleteAllBlockedUsers` |
 | `bp/` | Blocked posts (deque) | `AddBlockedPostDeque`, `RemoveBlockedPost`, `HasBlockedPost`, `CountBlockedPosts`, `ListBlockedPosts`, `DeleteAllBlockedPosts` |
-| `bt/` | Blocked topics (deque) | `AddBlockedTopicDeque`, `RemoveBlockedTopic`, `HasBlockedTopic`, `CountBlockedTopics`, `ListBlockedTopics`, `DeleteAllBlockedTopics` |
+| `bt/` | Blocked topics — retired in v1.39.0 | `DeleteAllBlockedTopics` |
+
+The three retired prefixes are drained by `MigrateV139` and their messages are rejected by
+`RetiredMsgDecorator`; only the `DeleteAll*` sweeps remain, called from `DeleteUserState`.
 
 Legacy JSON-blob prefixes (`plist_agents/`, `plist_users/`, etc.) are kept for compile-time compatibility with the v1.3.0-tiers historical upgrade handler and for migration reads.
 
@@ -108,7 +111,7 @@ message InitialProfile {
 }
 ```
 
-For `initial_profiles`, lists are written as per-entry keys using `ReplaceAllEnabledAgents`, `AddFollowedUser`, `AddBlockedUserDeque`, etc.
+For `initial_profiles`, lists are written as per-entry keys using `AddFollowedUser`, `AddBlockedUserDeque`, etc.
 
 ## Indexer Database
 
@@ -138,7 +141,7 @@ The `get_profile` API returns scalar fields from the chain and list fields from 
 ### List Fields
 
 1. Add new prefix constant in `x/core/types/keys.go`
-2. Add public per-entry methods in `x/core/keeper/keeper.go` (using the generic `addSetEntry`/`addDequeEntry`/`addOrderedEntry` helpers)
+2. Add public per-entry methods in `x/core/keeper/keeper.go` (using the generic `addSetEntry`/`addDequeEntry` helpers)
 3. Add field to `InitialProfile` in `genesis.proto`
 4. Update `InitGenesis` to import the new list using per-entry methods
 5. Run `make proto-gen`

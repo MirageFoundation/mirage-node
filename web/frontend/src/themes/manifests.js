@@ -11,12 +11,12 @@
  * Required `components` keys for App-level facades: see REQUIRED_THEME_COMPONENT_KEYS in src/registry/theme.js.
  */
 
-import bluemoonManifest from './bluemoon/index';
-import onyxManifest from './onyx/index';
-import oldredditManifest from './oldreddit/index';
 import defaultManifest from './default/index';
 
-export const THEME_MANIFESTS = [bluemoonManifest, defaultManifest, onyxManifest, oldredditManifest];
+// Only `default` is registered. The other families stay on disk so they can
+// be wired back later; shipping them means every visible-copy change has to
+// land in four places at once.
+export const THEME_MANIFESTS = [defaultManifest];
 
 /** Map old persisted theme_id values → current manifest id (renames only). */
 export const LEGACY_THEME_IDS = Object.freeze({

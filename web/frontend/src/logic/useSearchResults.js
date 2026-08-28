@@ -100,7 +100,9 @@ export function useSearchResults({
             try {
                 const params = {
                     q: query,
-                    limit: 10
+                    limit: 10,
+                    lens: 'effective',
+                    scope: 'current',
                 };
                 if (viewerAddress) params.address = viewerAddress;
                 params.allowed_tags = getAllowedTagsParam();
@@ -139,7 +141,9 @@ export function useSearchResults({
                 q: query,
                 type: 'topics',
                 limit: 10,
-                offset: topicsOffset
+                offset: topicsOffset,
+                lens: 'effective',
+                scope: 'current',
             };
             if (viewerAddress) params.address = viewerAddress;
             params.allowed_tags = getAllowedTagsParam();
@@ -165,7 +169,9 @@ export function useSearchResults({
                 q: query,
                 type: 'users',
                 limit: 10,
-                offset: usersOffset
+                offset: usersOffset,
+                lens: 'effective',
+                scope: 'current',
             };
             if (viewerAddress) params.address = viewerAddress;
             params.allowed_tags = getAllowedTagsParam();
@@ -191,7 +197,9 @@ export function useSearchResults({
                 q: query,
                 type: 'posts',
                 limit: 10,
-                offset: postsOffset
+                offset: postsOffset,
+                lens: 'effective',
+                scope: 'current',
             };
             if (viewerAddress) params.address = viewerAddress;
             params.allowed_tags = getAllowedTagsParam();

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -66,7 +65,7 @@ func (am AppModule) JoinCommunity(ctx context.Context, req *types.MsgJoinCommuni
 	if err := types.ValidateCommunitySlug(slug, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 		return nil, err
 	}
-	if err := am.k.JoinCommunity(sdkCtx, owner, slug, core.EffectivePaid, uint32(tier.MaxJoinedCommunities), true); err != nil {
+	if err := am.k.JoinCommunity(sdkCtx, owner, slug, uint32(tier.MaxJoinedCommunities)); err != nil {
 		return nil, err
 	}
 	return &types.MsgJoinCommunityResponse{}, nil
@@ -92,131 +91,15 @@ func (am AppModule) LeaveCommunity(ctx context.Context, req *types.MsgLeaveCommu
 }
 
 func (am AppModule) CreateCommunity(ctx context.Context, req *types.MsgCreateCommunity) (*types.MsgCreateCommunityResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	owner, err := am.envelopeOwner(req)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := am.requirePaid(sdkCtx, owner, "CreateCommunity"); err != nil {
-		return nil, err
-	}
-	if err := am.consumeQuota(sdkCtx, owner); err != nil {
-		return nil, err
-	}
-	if err := am.k.CreateCommunity(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTitle(), req.GetDescription(), req.GetOriginalTeamName(), req.GetBio(), req.GetPolicy()); err != nil {
-		return nil, err
-	}
-	return &types.MsgCreateCommunityResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgCreateCommunity is not accepted after v1.39.0")
 }
 
 func (am AppModule) SetCommunityMetadata(ctx context.Context, req *types.MsgSetCommunityMetadata) (*types.MsgSetCommunityMetadataResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	isGov := req.GetAuthority() == govAuthority()
-	var owner string
-	var err error
-	if isGov {
-		owner = req.GetAuthority()
-	} else {
-		owner, err = am.envelopeOwner(req)
-		if err != nil {
-			return nil, err
-		}
-		if err := am.consumeQuota(sdkCtx, owner); err != nil {
-			return nil, err
-		}
-	}
-	slug := strings.TrimSpace(req.GetCommunity())
-	comm, found, err := am.k.GetCommunity(sdkCtx, slug)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("community not found")
-	}
-	if !isGov && comm.CurrentFounder != owner {
-		return nil, fmt.Errorf("only the current founder may set metadata")
-	}
-	params := am.k.GetParams(sdkCtx)
-	if uint64(utf8.RuneCountInString(req.GetTitle())) > params.MaxCommunityTitleLength {
-		return nil, fmt.Errorf("title too long")
-	}
-	if uint64(utf8.RuneCountInString(req.GetDescription())) > params.MaxCommunityDescriptionLength {
-		return nil, fmt.Errorf("description too long")
-	}
-	comm.Title = req.GetTitle()
-	comm.Description = req.GetDescription()
-	if err := am.k.SetCommunity(sdkCtx, comm); err != nil {
-		return nil, err
-	}
-	sdkCtx.EventManager().EmitEvent(sdk.NewEvent("community_metadata_updated",
-		sdk.NewAttribute("community", slug),
-	))
-	return &types.MsgSetCommunityMetadataResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgSetCommunityMetadata is not accepted after v1.39.0")
 }
 
 func (am AppModule) TransferCommunity(ctx context.Context, req *types.MsgTransferCommunity) (*types.MsgTransferCommunityResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	isGov := req.GetAuthority() == govAuthority()
-	var owner string
-	var err error
-	if isGov {
-		owner = req.GetAuthority()
-	} else {
-		owner, err = am.envelopeOwner(req)
-		if err != nil {
-			return nil, err
-		}
-		if err := am.consumeQuota(sdkCtx, owner); err != nil {
-			return nil, err
-		}
-	}
-	slug := strings.TrimSpace(req.GetCommunity())
-	comm, found, err := am.k.GetCommunity(sdkCtx, slug)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("community not found")
-	}
-	if !isGov && comm.CurrentFounder != owner {
-		return nil, fmt.Errorf("only the current founder may transfer")
-	}
-	newFounder := strings.TrimSpace(req.GetNewFounder())
-	if _, err := types.CanonicalAccBytes(newFounder); err != nil {
-		return nil, err
-	}
-	paid, err := am.k.IsEffectivePaid(sdkCtx, newFounder)
-	if err != nil {
-		return nil, err
-	}
-	if !paid {
-		return nil, fmt.Errorf("new founder must be an active subscriber")
-	}
-	old := comm.CurrentFounder
-	if err := am.k.StoreService().OpenKVStore(sdkCtx).Delete(types.KeyCommunityFounder(old, slug)); err != nil {
-		return nil, err
-	}
-	comm.CurrentFounder = newFounder
-	if err := am.k.SetCommunity(sdkCtx, comm); err != nil {
-		return nil, err
-	}
-	if err := am.k.StoreService().OpenKVStore(sdkCtx).Set(types.KeyCommunityFounder(newFounder, slug), []byte{1}); err != nil {
-		return nil, err
-	}
-	if orig, ok, err := am.k.GetCurationTeam(sdkCtx, slug, comm.OriginalTeamId); err != nil {
-		return nil, err
-	} else if ok && orig.Owner == old && orig.DeletedHeight == 0 {
-		orig.Owner = newFounder
-		if err := am.k.SetCurationTeam(sdkCtx, orig); err != nil {
-			return nil, err
-		}
-	}
-	sdkCtx.EventManager().EmitEvent(sdk.NewEvent("community_founder_transferred",
-		sdk.NewAttribute("community", slug),
-		sdk.NewAttribute("old_founder", old),
-		sdk.NewAttribute("new_founder", newFounder),
-	))
-	return &types.MsgTransferCommunityResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgTransferCommunity is not accepted after v1.39.0")
 }
 
 func (am AppModule) BlockCommunity(ctx context.Context, req *types.MsgBlockCommunity) (*types.MsgBlockCommunityResponse, error) {
@@ -240,6 +123,12 @@ func (am AppModule) BlockCommunity(ctx context.Context, req *types.MsgBlockCommu
 	pat := strings.TrimSpace(req.GetCommunity())
 	if err := validateBlockedTopicPattern(pat, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
 		return nil, err
+	}
+	// A zero cap means the list is disabled, exactly as it does for blocked
+	// users and posts. AddBlockedCommunity treats zero as "never evict", so
+	// without this guard a zero limit would instead permit an unbounded list.
+	if tier.MaxBlockedCommunities == 0 {
+		return nil, fmt.Errorf("blocked community limit is zero for level %d", core.Level)
 	}
 	if err := am.k.AddBlockedCommunity(sdkCtx, owner, pat, uint32(tier.MaxBlockedCommunities)); err != nil {
 		return nil, err
@@ -277,7 +166,7 @@ func (am AppModule) CreateCurationTeam(ctx context.Context, req *types.MsgCreate
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	if _, err := am.k.CreateAlternativeTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetBio(), req.GetPolicy()); err != nil {
+	if _, err := am.k.CreateCurationTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
 		return nil, err
 	}
 	return &types.MsgCreateCurationTeamResponse{}, nil
@@ -297,30 +186,10 @@ func (am AppModule) SetCurationTeamProfile(ctx context.Context, req *types.MsgSe
 			return nil, err
 		}
 	}
-	slug := strings.TrimSpace(req.GetCommunity())
-	var team *types.CurationTeam
-	if !isGov {
-		var err2 error
-		team, err2 = am.k.RequireTeamOwner(sdkCtx, owner, slug, req.GetTeamId())
-		if err2 != nil {
-			return nil, err2
-		}
-	} else {
-		var ok bool
-		var err2 error
-		team, ok, err2 = am.k.GetCurationTeam(sdkCtx, slug, req.GetTeamId())
-		if err2 != nil || !ok {
-			return nil, fmt.Errorf("team not found")
-		}
+	if isGov {
+		return nil, fmt.Errorf("governance team profile changes must use a team recovery message")
 	}
-	params := am.k.GetParams(sdkCtx)
-	if err := types.ValidateCurationTeamName(req.GetName(), params.MaxCurationTeamNameLength); err != nil {
-		return nil, err
-	}
-	team.Name = req.GetName()
-	team.Bio = req.GetBio()
-	team.Policy = req.GetPolicy()
-	if err := am.k.SetCurationTeam(sdkCtx, team); err != nil {
+	if err := am.k.UpdateCurationTeamProfile(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
 		return nil, err
 	}
 	return &types.MsgSetCurationTeamProfileResponse{}, nil
@@ -362,6 +231,13 @@ func (am AppModule) RevokeCuratorInvite(ctx context.Context, req *types.MsgRevok
 	if err := am.k.ClearInvite(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.TrimSpace(req.GetTarget())); err != nil {
 		return nil, err
 	}
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent("curator_invitation_revoked",
+		sdk.NewAttribute("community", strings.TrimSpace(req.GetCommunity())),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", req.GetTeamId())),
+		sdk.NewAttribute("target", strings.TrimSpace(req.GetTarget())),
+		sdk.NewAttribute("inviter", owner),
+		sdk.NewAttribute("status", "revoked"),
+	))
 	return &types.MsgRevokeCuratorInviteResponse{}, nil
 }
 
@@ -389,9 +265,21 @@ func (am AppModule) DeclineCuratorInvite(ctx context.Context, req *types.MsgDecl
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	if err := am.k.ClearInvite(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), owner); err != nil {
+	slug := strings.TrimSpace(req.GetCommunity())
+	inviter, err := am.k.GetRaw(sdkCtx, types.KeyCurationInvite(slug, req.GetTeamId(), owner))
+	if err != nil {
 		return nil, err
 	}
+	if err := am.k.ClearInvite(sdkCtx, slug, req.GetTeamId(), owner); err != nil {
+		return nil, err
+	}
+	sdkCtx.EventManager().EmitEvent(sdk.NewEvent("curator_invitation_declined",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", req.GetTeamId())),
+		sdk.NewAttribute("target", owner),
+		sdk.NewAttribute("inviter", string(inviter)),
+		sdk.NewAttribute("status", "declined"),
+	))
 	return &types.MsgDeclineCuratorInviteResponse{}, nil
 }
 
@@ -448,16 +336,7 @@ func (am AppModule) TransferCurationTeam(ctx context.Context, req *types.MsgTran
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	team, err := am.k.RequireTeamOwner(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
-	if err != nil {
-		return nil, err
-	}
-	paid, err := am.k.IsEffectivePaid(sdkCtx, strings.TrimSpace(req.GetNewOwner()))
-	if err != nil || !paid {
-		return nil, fmt.Errorf("new owner must be an active subscriber")
-	}
-	team.Owner = strings.TrimSpace(req.GetNewOwner())
-	if err := am.k.SetCurationTeam(sdkCtx, team); err != nil {
+	if err := am.k.TransferCurationTeamOwner(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.TrimSpace(req.GetNewOwner())); err != nil {
 		return nil, err
 	}
 	return &types.MsgTransferCurationTeamResponse{}, nil
@@ -465,19 +344,16 @@ func (am AppModule) TransferCurationTeam(ctx context.Context, req *types.MsgTran
 
 func (am AppModule) DeleteCurationTeam(ctx context.Context, req *types.MsgDeleteCurationTeam) (*types.MsgDeleteCurationTeamResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	isGov := req.GetAuthority() == govAuthority()
 	slug := strings.TrimSpace(req.GetCommunity())
-	if !isGov {
-		owner, err := am.envelopeOwner(req)
-		if err != nil {
-			return nil, err
-		}
-		if err := am.consumeQuota(sdkCtx, owner); err != nil {
-			return nil, err
-		}
-		if _, err := am.k.RequireTeamOwner(sdkCtx, owner, slug, req.GetTeamId()); err != nil {
-			return nil, err
-		}
+	owner, err := am.envelopeOwner(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := am.consumeQuota(sdkCtx, owner); err != nil {
+		return nil, err
+	}
+	if _, err := am.k.RequireTeamOwner(sdkCtx, owner, slug, req.GetTeamId()); err != nil {
+		return nil, err
 	}
 	if err := am.k.DeleteCurationTeam(sdkCtx, slug, req.GetTeamId()); err != nil {
 		return nil, err
@@ -506,7 +382,7 @@ func (am AppModule) SetCurationPreference(ctx context.Context, req *types.MsgSet
 
 func (am AppModule) SetCurationPostHidden(ctx context.Context, req *types.MsgSetCurationPostHidden) (*types.MsgSetCurationPostHiddenResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	actor, err := am.curationActor(sdkCtx, req.GetAuthority(), req)
+	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +394,7 @@ func (am AppModule) SetCurationPostHidden(ctx context.Context, req *types.MsgSet
 
 func (am AppModule) SetCurationUserHidden(ctx context.Context, req *types.MsgSetCurationUserHidden) (*types.MsgSetCurationUserHiddenResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	actor, err := am.curationActor(sdkCtx, req.GetAuthority(), req)
+	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +406,7 @@ func (am AppModule) SetCurationUserHidden(ctx context.Context, req *types.MsgSet
 
 func (am AppModule) SetCurationThreadLocked(ctx context.Context, req *types.MsgSetCurationThreadLocked) (*types.MsgSetCurationThreadLockedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	actor, err := am.curationActor(sdkCtx, req.GetAuthority(), req)
+	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
 	if err != nil {
 		return nil, err
 	}
@@ -542,23 +418,16 @@ func (am AppModule) SetCurationThreadLocked(ctx context.Context, req *types.MsgS
 
 func (am AppModule) SetCurationSubscriberOnly(ctx context.Context, req *types.MsgSetCurationSubscriberOnly) (*types.MsgSetCurationSubscriberOnlyResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	isGov := req.GetAuthority() == govAuthority()
 	slug := strings.TrimSpace(req.GetCommunity())
-	var actor string
-	if isGov {
-		actor = req.GetAuthority()
-	} else {
-		var err error
-		actor, err = am.envelopeOwner(req)
-		if err != nil {
-			return nil, err
-		}
-		if err := am.consumeQuota(sdkCtx, actor); err != nil {
-			return nil, err
-		}
-		if _, err := am.k.RequireTeamOwner(sdkCtx, actor, slug, req.GetTeamId()); err != nil {
-			return nil, err
-		}
+	actor, err := am.envelopeOwner(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := am.consumeQuota(sdkCtx, actor); err != nil {
+		return nil, err
+	}
+	if _, err := am.k.RequireTeamOwner(sdkCtx, actor, slug, req.GetTeamId()); err != nil {
+		return nil, err
 	}
 	team, ok, err := am.k.GetCurationTeam(sdkCtx, slug, req.GetTeamId())
 	if err != nil || !ok {
@@ -581,15 +450,15 @@ type envelopeMsg interface {
 	GetEnvelopePubkey() []byte
 }
 
-func (am AppModule) curationActor(ctx sdk.Context, authority string, req envelopeMsg) (string, error) {
-	if authority == govAuthority() {
-		return authority, nil
-	}
+func (am AppModule) curationActor(ctx sdk.Context, req envelopeMsg, slug string, teamID uint64) (string, error) {
 	owner, err := am.envelopeOwner(req)
 	if err != nil {
 		return "", err
 	}
 	if err := am.consumeQuota(ctx, owner); err != nil {
+		return "", err
+	}
+	if _, err := am.k.RequireTeamCurator(ctx, owner, slug, teamID); err != nil {
 		return "", err
 	}
 	return owner, nil

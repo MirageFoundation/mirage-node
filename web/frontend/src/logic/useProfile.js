@@ -14,6 +14,7 @@ import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCac
 import { formatMirage, formatMirageCompact } from "../utils/formatters";
 import { usePendingSends } from "./usePendingSends.js";
 import { usePendingSubscribes } from "./usePendingSubscribes.js";
+import { communityLabel } from "../utils/community";
 
 // (no footer actions here; sign out moved to header menu)
 
@@ -582,22 +583,14 @@ export function useProfile({
         return `${year}-${month}-${day} ${hours}:${minutes} ${tz}`;
     };
     const getTierName = level => {
-        const names = {
-            0: 'Free',
-            1: 'Subscriber',
-            10: 'Agent'
-        };
         if (level >= 100) return 'Admin';
-        return names[level] || 'Free';
+        if (level >= 1) return 'Subscriber';
+        return 'Free';
     };
     const getTierColor = level => {
-        const colors = {
-            0: '#6B7280',
-            1: '#F59E0B',
-            10: '#EF4444'
-        };
         if (level >= 100) return '#EF4444';
-        return colors[level] || colors[0];
+        if (level >= 1) return '#F59E0B';
+        return '#6B7280';
     };
     const formatSubscriptionExpiry = timestamp => {
         if (!timestamp || timestamp <= 0) return null;
@@ -635,7 +628,7 @@ export function useProfile({
         parts.push(`posted ${formatElapsed(post.timestamp)} ago`);
         const isComment = post.target && post.target.trim() !== '';
         if (!isComment) {
-            const topicPart = post.topic ? `#${post.topic}` : 'no topic';
+            const topicPart = post.topic ? communityLabel(post.topic) : 'no community';
             parts.push(`in ${topicPart}`);
         }
         const rawPoints = typeof post.points === 'number' ? post.points : Number(post.points) || 0;
@@ -885,7 +878,7 @@ export function useProfile({
             return;
         }
         if (isSubscribePending(profileAddress)) return;
-        const level = (userLevel >= 10) ? 10 : 1;
+        const level = 1;
         console.debug('[ProfileView] gift-subscribe.confirm', { target: profileAddress, level });
         setConfirmDonate(false);
         setDonateMessage(null);
@@ -950,8 +943,7 @@ export function useProfile({
             const result = await tx.subscribe(giftLevel, 0, target);
             setConfirmGiftSub(null);
             if (result.success) {
-                const isAgent = giftLevel === 10;
-                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                let msg = 'Subscription gifted!';
                 msg += ` ${expiryLabel}`;
                 setGiftSubMessage({ type: 'success', message: msg });
             } else {

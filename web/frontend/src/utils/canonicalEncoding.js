@@ -60,30 +60,6 @@ export function concat(...arrs) {
     return out;
 }
 
-/**
- * Canonical bytes for backend-only attribution fields that ride along with a
- * relayed message.
- *
- * invite_code and referrer_username drive the referral reward ledger but cannot
- * enter the chain envelope, whose shape the ante fixes, so they used to be
- * appended to the POST body after the signature was computed — signed payload
- * narrower than the body acted upon. They get their own signature instead,
- * bound to the envelope nonce so it cannot be lifted onto another request.
- *
- * Must stay byte-identical to canon_attribution in shared/canon.py.
- */
-export function canonicalAttribution({ action, target, invite_code, referrer_username, nonce }) {
-    const parts = [
-        'mirage.attribution.v1',
-        String(action || ''),
-        String(target || '').toLowerCase(),
-        String(invite_code || ''),
-        String(referrer_username || ''),
-        String(nonce || 0),
-    ];
-    return new TextEncoder().encode(parts.join('\u0000'));
-}
-
 // Build canonical bytes for any message type.
 // Handles the common envelope (prefix, pubkey, block_hash, difficulty, pow, timestamp, nonce)
 // then appends message-specific payload fields.

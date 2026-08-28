@@ -19,6 +19,7 @@ import { requireAccount } from "../utils/openBrowsing";
 import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
+import { communityLabel } from "../utils/community";
 import { signPlainPayload } from "../utils/signPlain";
 export const pickCard = requireThemeColor;
 
@@ -423,7 +424,7 @@ export function useViewPost({
     const handleTopicFollowToggle = async topic => {
         const t = String(topic || '').trim().toLowerCase();
         if (!t || isTopicPending(t)) return;
-        if (!requireAccount('follow topics')) return;
+        if (!requireAccount('follow communities')) return;
         const wasSubscribed = isSubscribedTopic(topic);
         // Optimistic update
         if (wasSubscribed) {
@@ -438,10 +439,10 @@ export function useViewPost({
         try {
             if (wasSubscribed) {
                 await unsubscribe(viewerAddress, topic);
-                updateNotification(`Unfollowed topic #${t}`);
+                updateNotification(`Unfollowed ${communityLabel(t)}`);
             } else {
                 await subscribe(viewerAddress, topic);
-                updateNotification(`Now following topic #${t}`);
+                updateNotification(`Now following ${communityLabel(t)}`);
             }
             invalidateTopicsCache();
             setSubToggleTick(x => x + 1);
@@ -531,10 +532,10 @@ export function useViewPost({
             const chain = JSON.parse(localStorage.getItem('chainConfig') || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
-            // Admins (>=100) map to the agent tier on-chain (see LevelToTierIndex
-            // in params.go); they are NOT uncapped — the chain enforces the agent
-            // tier's max_content_length. Show that real cap.
+            const tierIndex = userLevel === 0 ? 0 : 1;
+            // Admins (>=100) map to the subscriber tier on-chain (see
+            // LevelToTierIndex in params.go); they are NOT uncapped — the chain
+            // enforces that tier's max_content_length. Show that real cap.
             const isAdmin = userLevel >= 100;
             const tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxContent = parseInt(tier.max_content_length) || 0;
@@ -743,7 +744,7 @@ export function useViewPost({
     const handleBlockTopic = (topicName, postId) => {
         const t = (topicName || "").trim().toLowerCase();
         if (!t) {
-            showBlockError("Invalid topic");
+            showBlockError("Invalid community");
             return;
         }
         clearBlockMessages();
@@ -764,12 +765,12 @@ export function useViewPost({
         try {
             const result = await tx.blockTopic(topicName);
             if (result.success) {
-                showBlockSuccess("Topic blocked successfully!");
+                showBlockSuccess("Community blocked successfully!");
             } else {
-                showBlockError(`Failed to block topic: ${result.error}`);
+                showBlockError(`Failed to block community: ${result.error}`);
             }
         } catch (error) {
-            console.error("Block topic error:", error);
+            console.error("Block community error:", error);
             showBlockError(`Error: ${error.message || error}`);
         } finally {
             setIsBlocking(false);
@@ -1018,7 +1019,7 @@ export function useViewPost({
             alert('Please log in to gift a subscription');
             return;
         }
-        const level = (Number(authorLevel) || 0) >= 10 ? 10 : 1;
+        const level = 1;
         console.debug('[ViewPostView] gift-subscribe.confirm', {
             target: userAddress,
             postId,
@@ -1150,8 +1151,7 @@ export function useViewPost({
             const result = await tx.subscribe(giftLevel, 0, userAddress);
             setConfirmGiftSub(null);
             if (result.success) {
-                const isAgent = giftLevel === 10;
-                let msg = isAgent ? 'Agent subscription gifted!' : 'Subscription gifted!';
+                let msg = 'Subscription gifted!';
                 msg += ` ${expiryLabel}`;
                 setGiftSubMessages(prev => ({
                     ...prev,
@@ -1969,7 +1969,9 @@ export function useViewPost({
                             if (result && result.success && result.indexed) {
                                 const data = await Api.get('get_comments', {
                                     post_id: postId,
-                                    address: viewerAddress
+                                    address: viewerAddress,
+                                    lens: 'effective',
+                                    scope: 'current',
                                 });
                                 if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                     try { Api.invalidate('get_comments'); } catch (_) { }
@@ -2219,7 +2221,9 @@ export function useViewPost({
             try { Storage.remove('bootstrap_view'); } catch (_) { }
             Api.get('get_comments', {
                 post_id,
-                address: viewerAddress
+                address: viewerAddress,
+                lens: 'effective',
+                scope: 'current',
             }).then(data => {
                 applyCommentsData(data);
             }).catch(error => {
@@ -2329,7 +2333,9 @@ export function useViewPost({
                     try {
                         const data = await Api.get('get_comments', {
                             post_id: normalizedPostId,
-                            address: viewerAddress
+                            address: viewerAddress,
+                            lens: 'effective',
+                            scope: 'current',
                         });
                         if (data && data.root && data.root.post_id) {
                             applyIndexedPost(

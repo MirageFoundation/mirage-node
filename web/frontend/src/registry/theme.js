@@ -4,7 +4,7 @@
  * @see ../themes/manifests.js — import manifests there only; this file builds lookups + helpers.
  */
 
-import { THEME_MANIFESTS, LEGACY_THEME_IDS } from '../themes/manifests';
+import { THEME_MANIFESTS } from '../themes/manifests';
 
 export const THEMES = {};
 THEME_MANIFESTS.forEach((m) => { THEMES[m.id] = m; });
@@ -81,11 +81,11 @@ export const DEFAULT_THEME_ID = 'default';
  * @param {unknown} id
  * @returns {string}
  */
-export function normalizeThemeId(id) {
-    // Uncomment the line below to lock every user to the default theme
-    // (ignores persisted theme_id and any selection from Settings).
-    // return DEFAULT_THEME_ID;
-    if (id == null || typeof id !== 'string') return DEFAULT_THEME_ID;
+export function normalizeThemeId(_id) {
+    // Other families are unregistered. Any persisted theme_id is rewritten
+    // to default so a leftover `onyx` / `bluemoon` / `oldreddit` value
+    // cannot reach getThemeFamily and blow up first paint.
+    return DEFAULT_THEME_ID;
     const t = id.trim();
     if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_IDS, t)) {
         return LEGACY_THEME_IDS[t];

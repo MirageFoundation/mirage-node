@@ -34,7 +34,6 @@ from flask import Blueprint, g, jsonify, request, has_request_context
 from client_ip import get_trusted_client_ip as _get_trusted_client_ip
 from settings import (
     REGISTRATION_ENABLED,
-    REGISTRATION_INVITE_CODE_REQUIRED,
     PUSH_NOTIFICATIONS_ENABLED,
 )
 from google.protobuf.any_pb2 import Any as AnyPB
@@ -46,19 +45,12 @@ from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
 from shared.datatypes import (
     MsgSetUsername,
     MsgSetBiography,
-    MsgEnableAgent,
-    MsgDisableAgent,
-    MsgSetAgents,
     MsgFollowUser,
     MsgUnfollowUser,
-    MsgFollowTopic,
-    MsgUnfollowTopic,
     MsgBlockPost,
     MsgUnblockPost,
     MsgBlockUser,
     MsgUnblockUser,
-    MsgBlockTopic,
-    MsgUnblockTopic,
     MsgDelete,
     MsgDeleteUser,
     MsgSendTokens,
@@ -69,9 +61,6 @@ from shared.datatypes import (
     MsgSubscribe,
     MsgSetAutoRenewal,
     MsgAward,
-    MsgCreateCommunity,
-    MsgSetCommunityMetadata,
-    MsgTransferCommunity,
     MsgJoinCommunity,
     MsgLeaveCommunity,
     MsgBlockCommunity,
@@ -105,26 +94,18 @@ from user_last_seen import update_user_last_seen
 from shared.inbox import record_inbox_event, follow_event_key, donation_event_key, subscription_gift_event_key
 from pow import (
     argon2_digest,
-    canon_attribution,
     canon_base_post,
     canon_base_edit,
     canon_base_annotate,
     canon_base_vote,
     canon_base_set_username,
     canon_base_set_biography,
-    canon_base_enable_agent,
-    canon_base_disable_agent,
-    canon_base_set_agents,
     canon_base_follow_user,
     canon_base_unfollow_user,
-    canon_base_follow_topic,
-    canon_base_unfollow_topic,
     canon_base_block_post,
     canon_base_unblock_post,
     canon_base_block_user,
     canon_base_unblock_user,
-    canon_base_block_topic,
-    canon_base_unblock_topic,
     canon_base_report,
     canon_base_delete,
     canon_base_delete_user,
@@ -141,9 +122,6 @@ from shared.canon import (
     canon_base_leave_community,
     canon_base_block_community,
     canon_base_unblock_community,
-    canon_base_create_community,
-    canon_base_set_community_metadata,
-    canon_base_transfer_community,
     canon_base_create_curation_team,
     canon_base_set_curation_preference,
     canon_base_claim_creator_rewards,
@@ -897,37 +875,6 @@ def core_set_username():
         if not re.fullmatch(r"[A-Za-z0-9-]+", username):
             return api_error_code("username_invalid_format")
 
-        invite_code = str(data.get("invite_code", "")).strip().upper()
-        has_direct_code = bool(invite_code and len(invite_code) == 9 and invite_code[4] == "-")
-        # Keep the value as received: the attribution signature covers what the client
-        # sent, not what this handler later decides to ignore.
-        received_referrer = str(data.get("referrer_username", "")).strip()
-        raw_referrer = "" if has_direct_code else received_referrer
-        referrer_is_address = raw_referrer.lower().startswith("mirage1")
-        referrer_max_length = 64 if referrer_is_address else max_u
-        if raw_referrer and len(raw_referrer) > referrer_max_length:
-            if REGISTRATION_INVITE_CODE_REQUIRED:
-                return api_error_code("referrer_username_too_long")
-            log_event(
-                rid,
-                "set_username.profile_referral_skipped",
-                reason="referrer_username_too_long",
-                referrer=raw_referrer,
-                user=user_addr,
-            )
-            raw_referrer = ""
-        if raw_referrer and not re.fullmatch(r"[A-Za-z0-9-]+", raw_referrer):
-            if REGISTRATION_INVITE_CODE_REQUIRED:
-                return api_error_code("referrer_username_invalid_format")
-            log_event(
-                rid,
-                "set_username.profile_referral_skipped",
-                reason="referrer_username_invalid_format",
-                referrer=raw_referrer,
-                user=user_addr,
-            )
-            raw_referrer = ""
-
         # Free users require PoW; subscribers skip PoW (chain uses reserve)
         if not is_subscriber(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
@@ -968,32 +915,10 @@ def core_set_username():
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
 
-        # invite_code and referrer_username drive the referral reward path but cannot
-        # go into the chain envelope, whose shape the ante fixes. They carry their own
-        # signature so the signed payload is as wide as the body acted on.
-        if invite_code or received_referrer:
-            attribution_sig = str(data.get("attribution_signature", "")).strip()
-            if not attribution_sig:
-                log_event(rid, "set_username.attribution_signature_missing", user=user_addr)
-                return api_error_code("attribution_signature_invalid")
-            try:
-                attr_sig_dec = base64.b64decode(attribution_sig)
-            except Exception:
-                return api_error_code("attribution_signature_invalid")
-            attr_signed = canon_attribution(
-                "set_username",
-                user_addr,
-                invite_code,
-                received_referrer,
-                nonce,
-            )
-            if not _verify_signature(pub_dec, attr_sig_dec, attr_signed):
-                log_event(rid, "set_username.attribution_signature_invalid", user=user_addr)
-                return api_error_code("attribution_signature_invalid")
-
-        referrer_username = raw_referrer
-        referrer_address = ""
-        referrer_skip_reason = ""
+        # invite_code, referrer_username and attribution_signature are accepted and
+        # ignored: v1.39 dropped invite_codes, referral_links and every reward that
+        # attribution fed. A stale client may still send them, and rejecting it for
+        # a feature that no longer exists would block the signup outright.
 
         # Check if this is a new user (no existing profile/username)
         is_new_user = False
@@ -1013,55 +938,6 @@ def core_set_username():
         if not REGISTRATION_ENABLED and is_new_user:
             log_event(rid, "set_username.registration_disabled", user=user_addr, username=username)
             return api_error_code("registration_disabled", 403)
-
-        # An explicit invite code owns attribution. Otherwise resolve the profile
-        # share referrer independently of invite and reward configuration.
-        if is_new_user and referrer_username and not has_direct_code:
-            try:
-                with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-                    cur = conn.cursor()
-                    if referrer_is_address:
-                        cur.execute(
-                            "SELECT owner FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
-                            (referrer_username,),
-                        )
-                    else:
-                        cur.execute(
-                            "SELECT owner FROM profiles WHERE LOWER(username) = LOWER(%s) LIMIT 1",
-                            (referrer_username,),
-                        )
-                    row = cur.fetchone()
-                    if not row:
-                        log_event(rid, "set_username.referrer_not_found", referrer=referrer_username, user=user_addr)
-                        if REGISTRATION_INVITE_CODE_REQUIRED:
-                            return api_error_code("referrer_not_found")
-                        referrer_skip_reason = "referrer_not_found"
-                    else:
-                        referrer_address = row[0].lower()
-                        if referrer_address == user_addr.lower():
-                            if REGISTRATION_INVITE_CODE_REQUIRED:
-                                return api_error_code("self_referral")
-                            referrer_skip_reason = "self_referral"
-                            referrer_address = ""
-                        else:
-                            log_event(
-                                rid,
-                                "set_username.referrer_resolved",
-                                referrer=referrer_username,
-                                address=referrer_address,
-                                user=user_addr,
-                            )
-                if referrer_skip_reason:
-                    log_event(
-                        rid,
-                        "set_username.profile_referral_skipped",
-                        reason=referrer_skip_reason,
-                        referrer=referrer_username,
-                        user=user_addr,
-                    )
-            except Exception as ref_err:
-                log_event(rid, "set_username.referrer_resolve_error", error=str(ref_err))
-                return api_error_code("referrer_check_failed", 500)
 
         msg = MsgSetUsername()
         # authority is the validator/node address relaying this transaction, NOT the user's address
@@ -1099,13 +975,6 @@ def core_set_username():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/set_username", "MsgSetUsername", code, tx_hash, raw_log, extra)
-
-        # v1.39 pays no referral or signup reward, so there is nothing to persist
-        # for an attributed signup: referral_links, referral_user_settings and
-        # invite_codes are all dropped. The resolved referrer is logged above and
-        # that is the whole of the retained attribution.
-        if referrer_address and is_new_user and code == 0:
-            log_event(rid, "set_username.profile_referral_attributed", referrer=referrer_address, user=user_addr)
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
@@ -1259,377 +1128,6 @@ def core_set_biography():
         log_event(rid, "set_biography.err", error=err_str)
         msg, status = _classify_exception(err_str)
         return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/enable_agent", methods=["POST"])
-def core_enable_agent():
-    rid = next_request_id()
-    log_event(rid, "enable_agent.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        log_event(rid, "enable_agent.data", data=data)
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        agent = str(data.get("agent", "").strip())
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        has_difficulty = "pow_difficulty" in data
-        has_pow = "pow" in data
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64 and agent):
-            return jsonify({"error": "missing required fields"}), 400
-        if not _is_valid_mirage_addr(agent):
-            return api_error_code("invalid_agent_address")
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-        if user_addr.lower() == agent.lower():
-            log_event(rid, "enable_agent.self_not_allowed", agent=agent, user_addr=user_addr)
-            return api_error_code("cannot_enable_self_as_agent")
-
-        # Check if agent is already enabled (indexer DB)
-        try:
-            if _db_list_contains("enabled_agents", user_addr, "agent", agent):
-                log_event(rid, "enable_agent.already_enabled", agent=agent, user_addr=user_addr)
-                return api_error_code("agent_already_enabled")
-        except Exception as db_err:
-            log_event(rid, "enable_agent.db_error", error=str(db_err))
-            return jsonify({"error": "indexer DB unavailable"}), 503
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            required = _min_required_difficulty()
-            if int(difficulty) < int(required):
-                return jsonify({"error": "insufficient pow (precheck)"}), 400
-            if not _is_hex64(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            if not is_valid_recent_block_hash(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            try:
-                base = canon_base_enable_agent(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None and not check_pow_target(
-                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
-                ):
-                    return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "enable_agent", _pow_exc)
-        else:
-            _log_subscriber_pow_ignored(rid, "enable_agent", difficulty, proof, has_difficulty, has_pow)
-
-        msg = MsgEnableAgent()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = user_addr
-        msg.agent = agent
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgEnableAgent"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "agent": agent,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/enable_agent", "MsgEnableAgent", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "enable_agent.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/disable_agent", methods=["POST"])
-def core_disable_agent():
-    rid = next_request_id()
-    log_event(rid, "disable_agent.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        agent = str(data.get("agent", "").strip())
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64 and agent):
-            return jsonify({"error": "missing required fields"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            required = _min_required_difficulty()
-            if int(difficulty) < int(required):
-                return jsonify({"error": "insufficient pow (precheck)"}), 400
-            if not _is_hex64(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            if not is_valid_recent_block_hash(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            try:
-                base = canon_base_disable_agent(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None and not check_pow_target(
-                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
-                ):
-                    return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "disable_agent", _pow_exc)
-        else:
-            _log_subscriber_pow_ignored(rid, "disable_agent", difficulty, proof)
-
-        msg = MsgDisableAgent()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = user_addr
-        msg.agent = agent
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgDisableAgent"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "agent": agent,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/disable_agent", "MsgDisableAgent", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "disable_agent.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/set_agents", methods=["POST"])
-def core_set_agents():
-    rid = next_request_id()
-    log_event(rid, "set_agents.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        log_event(rid, "set_agents.data", data=data)
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        agents_raw = data.get("agents")
-        if not isinstance(agents_raw, list):
-            return api_error_code("agents_must_be_array")
-        agents = [str(a).strip().lower() for a in agents_raw]
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64):
-            return jsonify({"error": "missing required fields"}), 400
-
-        for a in agents:
-            if not _is_valid_mirage_addr(a):
-                return jsonify({"error": "invalid agent address", "agent": a}), 400
-
-        seen = set()
-        for a in agents:
-            if a in seen:
-                return jsonify({"error": "duplicate agent", "agent": a}), 400
-            seen.add(a)
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        if user_addr.lower() in agents:
-            return api_error_code("cannot_set_self_as_agent")
-
-        # Enforce max_enabled_agents from chain params (fail hard if missing)
-        params = expect_params()
-        tiers = params.get("tiers")
-        if not isinstance(tiers, list) or not tiers:
-            return api_error_code("missing_tier_config", 500)
-
-        try:
-            user_level = _db_get_profile_level(user_addr)
-        except Exception as db_err:
-            log_event(rid, "set_agents.db_error", error=str(db_err))
-            return jsonify({"error": "indexer DB unavailable"}), 503
-        if user_level is None:
-            return api_error_code("missing_profile_level", 500)
-
-        idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
-        if idx < 0 or idx >= len(tiers):
-            return jsonify({"error": "invalid user level", "user_level": user_level}), 500
-        tier_cfg = tiers[idx] or {}
-        if "max_enabled_agents" not in tier_cfg:
-            return api_error_code("missing_max_agents", 500)
-        max_agents = int(tier_cfg.get("max_enabled_agents"))
-        if len(agents) > max_agents:
-            log_event(rid, "set_agents.limit_exceeded", count=len(agents), max=max_agents)
-            return jsonify({"error": "too many agents", "count": len(agents), "max": max_agents}), 400
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            required = _min_required_difficulty()
-            if int(difficulty) < int(required):
-                return jsonify({"error": "insufficient pow (precheck)"}), 400
-            if not _is_hex64(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            if not is_valid_recent_block_hash(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-            try:
-                base = canon_base_set_agents(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None and not check_pow_target(
-                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
-                ):
-                    return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "set_agents", _pow_exc)
-        else:
-            _log_subscriber_pow_ignored(rid, "set_agents", difficulty, proof)
-
-        msg = MsgSetAgents()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = user_addr
-        for a in agents:
-            msg.agents.append(a)
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgSetAgents"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        payload_size = sum(len(a) for a in agents)
-        gas_est = int(estimate_total_gas_limit(body_bytes, payload_size))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "agents": agents,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/set_agents", "MsgSetAgents", code, tx_hash, raw_log, extra)
-        log_event(rid, "set_agents.ok", tx_hash=tx_hash, count=len(agents))
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "set_agents.err", error=str(e))
-        msg_str, status = _classify_exception(str(e))
-        return jsonify({"error": msg_str}), status
 
 
 @core_bp.route("/api/core/block_post", methods=["POST"])
@@ -2068,234 +1566,6 @@ def core_unblock_user():
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/block_topic", methods=["POST"])
-def core_block_topic():
-    rid = next_request_id()
-    log_event(rid, "block_topic.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        log_event(rid, "block_topic.data", data=data)
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        topic = str(data.get("topic", "").strip()).lower()
-
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        import re
-
-        if not topic:
-            return jsonify({"error": "invalid topic format"}), 400
-        # Allow * as glob wildcard anywhere in blocked topic patterns
-        _topic_alpha = topic.replace("*", "")
-        if not _topic_alpha or not re.fullmatch(r"[a-z0-9]+", _topic_alpha):
-            return jsonify({"error": "invalid topic format"}), 400
-        if "**" in topic:
-            return jsonify({"error": "invalid topic format"}), 400
-        # The chain bounds the alphanumerics but leaves the wildcards free, so a
-        # 35-character topic limit still admits 34 of them. That was the input to
-        # the backend's backtracking matcher; the matcher is linear now, but the
-        # SQL pre-filter's LIKE is not, so the count stays bounded at the door.
-        if count_wildcards(topic) > MAX_TOPIC_WILDCARDS:
-            log_event(rid, "block_topic.too_many_wildcards", wildcards=count_wildcards(topic))
-            return api_error_code("topic_too_many_wildcards")
-
-        p = expect_params()
-        min_topic = int(p.get("min_topic_size", 2))
-        max_topic = int(p.get("max_topic_size", 35))
-        if len(_topic_alpha) < min_topic:
-            return jsonify({"error": "topic too short"}), 400
-        if len(_topic_alpha) > max_topic:
-            return jsonify({"error": "topic too long"}), 400
-
-        if not (pub_b64 and sig_b64):
-            log_event(rid, "block_topic.missing_fields", has_pubkey=bool(pub_b64), has_sig=bool(sig_b64))
-            return jsonify({"error": "missing required fields"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        # Check if topic is already blocked (indexer DB)
-        try:
-            if _db_list_contains("blocked_topics", user_addr, "target", topic):
-                log_event(rid, "block_topic.already_blocked", topic=topic, user_addr=user_addr)
-                return jsonify({"error": "topic is already blocked"}), 400
-        except Exception as db_err:
-            log_event(rid, "block_topic.db_error", error=str(db_err))
-            return jsonify({"error": "indexer DB unavailable"}), 503
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            try:
-                base = canon_base_block_topic(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None:
-                    effective_required = _effective_difficulty(int(difficulty))
-                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
-                        return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "block_topic", _pow_exc)
-        else:
-            _log_subscriber_pow_ignored(rid, "block_topic", difficulty, proof)
-
-        msg = MsgBlockTopic()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = int(timestamp)
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = ""
-        msg.topic = topic
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgBlockTopic"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "topic": topic,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/block_topic", "MsgBlockTopic", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "block_topic.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/unblock_topic", methods=["POST"])
-def core_unblock_topic():
-    rid = next_request_id()
-    log_event(rid, "unblock_topic.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        topic = str(data.get("topic", "").strip()).lower()
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64 and topic):
-            return jsonify({"error": "missing required fields"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            try:
-                base = canon_base_unblock_topic(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None:
-                    effective_required = _effective_difficulty(int(difficulty))
-                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
-                        return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "unblock_topic", _pow_exc)
-        else:
-            _log_subscriber_pow_ignored(rid, "unblock_topic", difficulty, proof)
-
-        msg = MsgUnblockTopic()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = int(timestamp)
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = ""
-        msg.topic = topic
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgUnblockTopic"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "topic": topic,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/unblock_topic", "MsgUnblockTopic", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "unblock_topic.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
 @core_bp.route("/api/core/follow_user", methods=["POST"])
 def core_follow_user():
     rid = next_request_id()
@@ -2520,197 +1790,6 @@ def core_unfollow_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_user.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/follow_topic", methods=["POST"])
-def core_follow_topic():
-    rid = next_request_id()
-    log_event(rid, "follow_topic.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        target = str(data.get("target", "").strip()).lower()
-        topic = str(data.get("topic", "").strip()).lower()
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        timestamp = _client_timestamp(rid, "follow_topic", data)
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64 and target and topic):
-            return jsonify({"error": "missing required fields"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        # Check if topic is already followed (indexer DB)
-        try:
-            if _db_list_contains("followed_topics", user_addr, "topic", topic):
-                log_event(rid, "follow_topic.already_followed", topic=topic, user_addr=user_addr)
-                return jsonify({"error": "topic is already followed"}), 400
-        except Exception as db_err:
-            log_event(rid, "follow_topic.db_error", error=str(db_err))
-            return jsonify({"error": "indexer DB unavailable"}), 503
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            try:
-                base = canon_base_follow_topic(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None:
-                    effective_required = _effective_difficulty(int(difficulty))
-                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
-                        return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "follow_topic", _pow_exc)
-
-        msg = MsgFollowTopic()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = target
-        msg.topic = topic
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgFollowTopic"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "target": target,
-                "topic": topic,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/follow_topic", "MsgFollowTopic", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "follow_topic.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/unfollow_topic", methods=["POST"])
-def core_unfollow_topic():
-    rid = next_request_id()
-    log_event(rid, "unfollow_topic.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        pub_b64 = str(data.get("pubkey", "").strip())
-        sig_b64 = str(data.get("signature", "").strip())
-        target = str(data.get("target", "").strip()).lower()
-        topic = str(data.get("topic", "").strip()).lower()
-        last_block_hash = str(data.get("last_block_hash", "").strip())
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        timestamp = _client_timestamp(rid, "unfollow_topic", data)
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-
-        if not (pub_b64 and sig_b64 and target and topic):
-            return jsonify({"error": "missing required fields"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields"}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        if not is_subscriber(user_addr):
-            try:
-                base = canon_base_unfollow_topic(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce
-                )
-                digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None:
-                    effective_required = _effective_difficulty(int(difficulty))
-                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
-                        return jsonify({"error": "insufficient pow (precheck)"}), 400
-            except Exception as _pow_exc:
-                _log_pow_precheck_error(rid, "unfollow_topic", _pow_exc)
-
-        msg = MsgUnfollowTopic()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.target = target
-        msg.topic = topic
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgUnfollowTopic"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(topic)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "target": target,
-                "topic": topic,
-                "last_block_hash": last_block_hash,
-                "difficulty": int(difficulty),
-                "proof": int(proof),
-            }
-            return _tx_error(rid, "core/unfollow_topic", "MsgUnfollowTopic", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "unfollow_topic.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 
@@ -5196,131 +4275,6 @@ def core_unblock_community():
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/create_community", methods=["POST"])
-def core_create_community():
-    rid = next_request_id()
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        env, err, status = _parse_relay_envelope(data)
-        if env is None:
-            return err, status
-        community = str(data.get("community", "")).strip().lower()
-        title = str(data.get("title", "") or "")
-        description = str(data.get("description", "") or "")
-        original_team_name = str(data.get("original_team_name", "") or "")
-        bio = str(data.get("bio", "") or "")
-        policy = str(data.get("policy", "") or "")
-        if not community:
-            return jsonify({"error": "community required"}), 400
-        pow_err = _maybe_pow_precheck(
-            rid,
-            "create_community",
-            env,
-            canon_base_create_community,
-            community,
-            title,
-            description,
-            original_team_name,
-            bio,
-            policy,
-        )
-        if pow_err:
-            return pow_err
-        msg = MsgCreateCommunity()
-        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
-        msg.community = community
-        msg.title = title
-        msg.description = description
-        msg.original_team_name = original_team_name
-        msg.bio = bio
-        msg.policy = policy
-        return _broadcast_core_msg(
-            rid,
-            "create_community",
-            "/mirage.core.v1.MsgCreateCommunity",
-            msg,
-            len(community) + len(title),
-            env["user_addr"],
-        )
-    except Exception as e:
-        log_event(rid, "create_community.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/set_community_metadata", methods=["POST"])
-def core_set_community_metadata():
-    rid = next_request_id()
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        env, err, status = _parse_relay_envelope(data)
-        if env is None:
-            return err, status
-        community = str(data.get("community", "")).strip().lower()
-        title = str(data.get("title", "") or "")
-        description = str(data.get("description", "") or "")
-        if not community:
-            return jsonify({"error": "community required"}), 400
-        pow_err = _maybe_pow_precheck(
-            rid, "set_community_metadata", env, canon_base_set_community_metadata, community, title, description
-        )
-        if pow_err:
-            return pow_err
-        msg = MsgSetCommunityMetadata()
-        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
-        msg.community = community
-        msg.title = title
-        msg.description = description
-        return _broadcast_core_msg(
-            rid,
-            "set_community_metadata",
-            "/mirage.core.v1.MsgSetCommunityMetadata",
-            msg,
-            len(community),
-            env["user_addr"],
-        )
-    except Exception as e:
-        log_event(rid, "set_community_metadata.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-@core_bp.route("/api/core/transfer_community", methods=["POST"])
-def core_transfer_community():
-    rid = next_request_id()
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        env, err, status = _parse_relay_envelope(data)
-        if env is None:
-            return err, status
-        community = str(data.get("community", "")).strip().lower()
-        new_founder = str(data.get("new_founder", "")).strip().lower()
-        if not community or not new_founder:
-            return jsonify({"error": "community and new_founder required"}), 400
-        pow_err = _maybe_pow_precheck(
-            rid, "transfer_community", env, canon_base_transfer_community, community, new_founder
-        )
-        if pow_err:
-            return pow_err
-        msg = MsgTransferCommunity()
-        _fill_envelope(msg, env, require_runtime().validator_payer_addr)
-        msg.community = community
-        msg.new_founder = new_founder
-        return _broadcast_core_msg(
-            rid, "transfer_community", "/mirage.core.v1.MsgTransferCommunity", msg, len(community), env["user_addr"]
-        )
-    except Exception as e:
-        log_event(rid, "transfer_community.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
 @core_bp.route("/api/core/create_curation_team", methods=["POST"])
 def core_create_curation_team():
     rid = next_request_id()
@@ -5333,12 +4287,12 @@ def core_create_curation_team():
             return err, status
         community = str(data.get("community", "")).strip().lower()
         name = str(data.get("name", "") or "")
-        bio = str(data.get("bio", "") or "")
+        description = str(data.get("description", "") or "")
         policy = str(data.get("policy", "") or "")
         if not community or not name:
             return jsonify({"error": "community and name required"}), 400
         pow_err = _maybe_pow_precheck(
-            rid, "create_curation_team", env, canon_base_create_curation_team, community, name, bio, policy
+            rid, "create_curation_team", env, canon_base_create_curation_team, community, name, description, policy
         )
         if pow_err:
             return pow_err
@@ -5346,7 +4300,7 @@ def core_create_curation_team():
         _fill_envelope(msg, env, require_runtime().validator_payer_addr)
         msg.community = community
         msg.name = name
-        msg.bio = bio
+        msg.description = description
         msg.policy = policy
         return _broadcast_core_msg(
             rid,
@@ -5478,8 +4432,8 @@ def _curation_team_route(path, log_name, type_url, msg_cls, fields):
                 msg.new_owner = str(data.get("new_owner", "")).strip().lower()
             if "name" in fields:
                 msg.name = str(data.get("name", "") or "")
-            if "bio" in fields:
-                msg.bio = str(data.get("bio", "") or "")
+            if "description" in fields:
+                msg.description = str(data.get("description", "") or "")
             if "policy" in fields:
                 msg.policy = str(data.get("policy", "") or "")
             if "hidden" in fields:
@@ -5504,7 +4458,7 @@ _curation_team_route(
     "set_curation_team_profile",
     "/mirage.core.v1.MsgSetCurationTeamProfile",
     MsgSetCurationTeamProfile,
-    {"community", "team_id", "name", "bio", "policy"},
+    {"community", "team_id", "name", "description", "policy"},
 )
 _curation_team_route(
     "/api/core/invite_curator",

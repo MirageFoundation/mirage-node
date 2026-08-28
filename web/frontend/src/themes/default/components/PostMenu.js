@@ -13,7 +13,6 @@ import {
     HiOutlineFlag,
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
-    HiOutlineDocumentText,
     HiOutlinePencilSquare,
     HiOutlineTrash,
     HiOutlineShieldExclamation,
@@ -23,10 +22,10 @@ import * as tx from "../../../utils/tx";
 import { follow, unfollow, isFollowing } from "../../../utils/FollowUsers";
 import { subscribe, unsubscribe, isSubscribed } from "../../../utils/Subscriptions";
 import Storage from "../../../utils/Storage";
+import { communityLabel } from "../../../utils/community";
 import ConfirmDialog from "./ConfirmDialog";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import usePostGifts from "../../../logic/usePostGifts";
-import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
 
 /**
@@ -256,8 +255,6 @@ export function MoreMenuChip({
 
     const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
     const linkTarget = postId ? `/p/${postId}` : '#';
-    const showingOriginal = useShowOriginal(postId);
-    const hasAgentOriginal = !!(post && (post.original_title || post.original_content));
 
     const computedFollowingUser = (() => {
         if (!isLoggedIn || !authorAddress) return false;
@@ -301,9 +298,8 @@ export function MoreMenuChip({
     const handleCopyText = useCallback(e => {
         stop(e); setOpen(false);
         const parts = [];
-        const useOrig = showingOriginal;
-        const titleStr = (useOrig && post && typeof post.original_title === 'string') ? post.original_title : (post && post.title);
-        const contentStr = (useOrig && post && typeof post.original_content === 'string') ? post.original_content : (post && post.content);
+        const titleStr = post && post.title;
+        const contentStr = post && post.content;
         if (typeof titleStr === 'string' && titleStr.trim()) parts.push(titleStr.trim());
         if (typeof contentStr === 'string' && contentStr.trim()) parts.push(contentStr.trim());
         const text = parts.join('\n\n');
@@ -315,12 +311,7 @@ export function MoreMenuChip({
                 setTimeout(() => setTextCopied(false), 2000);
             }
         } catch (_) { /* noop */ }
-    }, [post, showingOriginal]);
-
-    const handleToggleOriginal = useCallback(e => {
-        stop(e); setOpen(false);
-        toggleShowOriginal(postId);
-    }, [postId]);
+    }, [post]);
 
     const handleEdit = useCallback(e => {
         stop(e); setOpen(false);
@@ -365,7 +356,7 @@ export function MoreMenuChip({
     const handleFollowTopic = useCallback(async e => {
         stop(e); setOpen(false);
         if (!topic) return;
-        if (!requireAccount('follow topics')) return;
+        if (!requireAccount('follow communities')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {
@@ -406,9 +397,7 @@ export function MoreMenuChip({
         AWARD_TYPES: awardTypes,
         getAwardCost,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
     } = gifts;
     const authorLabelShort = (post && typeof post.username === 'string' && post.username.trim())
         ? `@${post.username.trim()}`
@@ -457,12 +446,6 @@ export function MoreMenuChip({
                             <HiOutlineClipboardDocument />
                             <span>{textCopied ? 'Copied!' : 'Copy text'}</span>
                         </MenuItemBtn>
-                        {hasAgentOriginal && (
-                            <MenuItemBtn type="button" onClick={handleToggleOriginal}>
-                                <HiOutlineDocumentText />
-                                <span>{showingOriginal ? 'Show modified' : 'Show original'}</span>
-                            </MenuItemBtn>
-                        )}
                         {isLoggedIn && isOwnPost && (
                             <>
                                 <MenuItemBtn type="button" onClick={handleEdit}>
@@ -483,7 +466,7 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleFollowTopic}>
                                     <HiOutlineHashtag />
-                                    <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
+                                    <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleGiveAward}>
                                     <HiOutlineSparkles />
@@ -535,8 +518,8 @@ export function MoreMenuChip({
                 open={!!confirmGiftSub}
                 recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : authorLabelShort}
                 level={confirmGiftSub?.level}
-                feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
-                feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+                feeLabel={subFeeLabel}
+                feeUmirage={subFeeUmirage}
                 loading={!!confirmGiftSub?.loading}
                 expiryLabel={confirmGiftSub?.expiryLabel}
                 error={confirmGiftSub?.error}
@@ -658,7 +641,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
                         </MenuItemBtn>
                         <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_topic')}>
                             <HiOutlineNoSymbol />
-                            <span>Block topic</span>
+                            <span>Block community</span>
                         </MenuItemBtn>
                         <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'report')}>
                             <HiOutlineFlag />
@@ -689,9 +672,9 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
             />
             <ConfirmDialog
                 open={activeDialog === 'block_topic'}
-                title={`Block #${topic || 'topic'}?`}
-                message="Posts tagged with this topic will stop appearing in your Home and discovery feeds."
-                confirmLabel="Block topic"
+                title={`Block ${communityLabel(topic || 'community')}?`}
+                message="Posts in this community will stop appearing in your Home and discovery feeds."
+                confirmLabel="Block community"
                 confirmVariant="danger"
                 pending={pending}
                 onConfirm={confirmBlockTopic}
@@ -700,7 +683,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
             <ConfirmDialog
                 open={activeDialog === 'report'}
                 title="🚨 Report illegal content only"
-                message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about wrong topic, untagged adult content, low quality, or anything you just don't like will be dismissed. To filter those out of your feed, follow a moderation agent. Agents are how content moderation works on Mirage for everyone."
+                message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about the wrong community, untagged adult content, low quality, or anything you just don't like will be dismissed. Hide those from your feed with blocks and community filters."
                 confirmLabel="Report"
                 confirmVariant="warning"
                 pending={pending}

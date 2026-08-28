@@ -20,7 +20,11 @@ type RetiredMsgDecorator struct{}
 
 func (d RetiredMsgDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
 	retired := coretypes.RetiredMsgTypeURLs()
-	for _, msg := range tx.GetMsgs() {
+	msgs, err := transitiveMsgs(tx)
+	if err != nil {
+		return ctx, err
+	}
+	for _, msg := range msgs {
 		if _, ok := retired[sdk.MsgTypeURL(msg)]; ok {
 			return ctx, fmt.Errorf("retired message type %s is not accepted after v1.39.0", sdk.MsgTypeURL(msg))
 		}

@@ -31,9 +31,6 @@ from tests.common import (
     _canon_base_unfollow_user_raw,
     _canon_base_follow_topic_raw,
     _canon_base_unfollow_topic_raw,
-    _canon_base_enable_agent_raw,
-    _canon_base_disable_agent_raw,
-    _canon_base_set_agents_raw,
     _canon_base_block_post_raw,
     _canon_base_unblock_post_raw,
     _canon_base_block_user_raw,
@@ -46,13 +43,11 @@ from tests.common import (
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
     _canon_base_annotate_raw,
-    _canon_base_create_community_raw,
     _canon_base_join_community_raw,
     _canon_base_leave_community_raw,
     _canon_base_block_community_raw,
     _canon_base_unblock_community_raw,
     canon_signed_with_pow,
-    canon_attribution,
     sign_canonical,
     compute_pow,
     get_status,
@@ -60,69 +55,6 @@ from tests.common import (
     INDEX_TIMEOUT_SEC,
 )
 from cosmpy.aerial.wallet import LocalWallet
-
-_CLAIMED_COMMUNITIES: set[str] = set()
-
-
-def _do_create_community(backend: str, wallet, community: str) -> dict:
-    addr = str(wallet.address())
-    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-    pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
-    nonce = _fresh_nonce()
-    title = community
-    description = "test community"
-    team = "orig"
-    bio = "bio"
-    policy = "policy"
-    base = _canon_base_create_community_raw(
-        pub, _lb_bytes(lb), 0, ts, community, title, description, team, bio, policy, nonce
-    )
-    signed = canon_signed_with_pow(base, 0)
-    sig = sign_canonical(wallet, signed)
-    payload = {
-        "pubkey": _b64(pub),
-        "signature": _b64(sig),
-        "last_block_hash": lb,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "community": community,
-        "title": title,
-        "description": description,
-        "original_team_name": team,
-        "bio": bio,
-        "policy": policy,
-    }
-    _, resp = _post(f"{backend}/api/core/create_community", payload)
-    return resp or {}
-
-
-def _ensure_community_claimed(backend: str, community: str) -> None:
-    slug = (community or "").strip().lower()
-    if not slug or slug in _CLAIMED_COMMUNITIES:
-        return
-    from tests.common import WALLETS
-
-    claimer = WALLETS.get("sub1")
-    if claimer is None:
-        return
-    resp = _do_create_community(backend, claimer, slug)
-    err = str(resp.get("error") or resp.get("raw_log") or "").lower()
-    txh = str(resp.get("tx_hash") or "").lower()
-    if txh:
-        delivered = _wait_tx_deliver(txh)
-        if delivered is None or delivered[0] != 0:
-            if delivered and "already claimed" in (delivered[1] or "").lower():
-                _CLAIMED_COMMUNITIES.add(slug)
-                return
-            _debug(f"create_community failed slug={slug} deliver={delivered} resp={resp}")
-            return
-        _CLAIMED_COMMUNITIES.add(slug)
-        return
-    if "already claimed" in err or "already" in err:
-        _CLAIMED_COMMUNITIES.add(slug)
-
 
 def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
     """Send tokens from wallet to target address via the backend API."""
@@ -197,8 +129,6 @@ def _do_post(
     backend: str, wallet, topic: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
 ) -> str | None:
     """Create a post/comment and return the tx_hash or None."""
-    if not target:
-        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -255,8 +185,6 @@ def _do_post_at_timestamp(
     skip_pow: bool = False,
 ) -> tuple[int, dict]:
     """Create a post with an explicit envelope timestamp; return (status, body)."""
-    if not target:
-        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -641,8 +569,6 @@ def _do_follow_user_with_nonce(
 def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
     """Join or leave a community (legacy helper name used by existing tests)."""
     slug = (topic or "").strip().lower()
-    if follow:
-        _ensure_community_claimed(backend, slug)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -792,10 +718,6 @@ def _do_set_username_raw(
     wallet,
     username: str,
     skip_pow: bool = False,
-    invite_code: str | None = None,
-    referrer_username: str | None = None,
-    omit_attribution_signature: bool = False,
-    tamper_referrer_after_signing: str | None = None,
 ) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
@@ -824,20 +746,6 @@ def _do_set_username_raw(
     }
     if not skip_pow:
         payload["pow"] = int(proof)
-    code_clean = str(invite_code).strip().upper() if invite_code else ""
-    referrer_clean = str(referrer_username).strip() if referrer_username else ""
-    if code_clean:
-        payload["invite_code"] = code_clean
-    if referrer_clean:
-        payload["referrer_username"] = referrer_clean
-    if (code_clean or referrer_clean) and not omit_attribution_signature:
-        # These drive the referral reward path but cannot enter the chain envelope,
-        # so they carry a second signature bound to the same envelope nonce.
-        payload["attribution_signature"] = _b64(
-            sign_canonical(wallet, canon_attribution("set_username", addr, code_clean, referrer_clean, nonce))
-        )
-    if tamper_referrer_after_signing is not None:
-        payload["referrer_username"] = tamper_referrer_after_signing
     code, resp = _post(f"{backend}/api/core/set_username", payload)
     return resp
 
@@ -906,71 +814,6 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
     return resp
 
 
-def _do_enable_agent(backend: str, wallet, agent_addr: str, enable: bool = True, skip_pow: bool = False) -> dict:
-    """Enable or disable an agent."""
-    addr = str(wallet.address())
-    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-    pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
-    nonce = _fresh_nonce()
-    d = 0 if skip_pow else diff
-    canon_fn = _canon_base_enable_agent_raw if enable else _canon_base_disable_agent_raw
-    endpoint = "enable_agent" if enable else "disable_agent"
-
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, agent_addr, nonce)
-    if skip_pow:
-        proof = 0
-    else:
-        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    signed = canon_signed_with_pow(base, int(proof))
-    sig = sign_canonical(wallet, signed)
-    payload = {
-        "pubkey": _b64(pub),
-        "signature": _b64(sig),
-        "last_block_hash": lb,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": d,
-        "target": addr,
-        "agent": agent_addr,
-    }
-    if not skip_pow:
-        payload["pow"] = int(proof)
-    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
-    return resp
-
-
-def _do_set_agents(backend: str, wallet, agents: list[str], skip_pow: bool = False) -> dict:
-    """Atomically set the user's enabled agents list."""
-    addr = str(wallet.address())
-    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-    pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
-    nonce = _fresh_nonce()
-    d = 0 if skip_pow else diff
-
-    base = _canon_base_set_agents_raw(pub, _lb_bytes(lb), d, ts, addr, agents, nonce)
-    if skip_pow:
-        proof = 0
-    else:
-        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    signed = canon_signed_with_pow(base, int(proof))
-    sig = sign_canonical(wallet, signed)
-    payload = {
-        "pubkey": _b64(pub),
-        "signature": _b64(sig),
-        "last_block_hash": lb,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": d,
-        "agents": agents,
-    }
-    if not skip_pow:
-        payload["pow"] = int(proof)
-    code, resp = _post(f"{backend}/api/core/set_agents", payload)
-    return resp
-
-
 def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
     """Toggle auto-renewal for a subscriber."""
     addr = str(wallet.address())
@@ -1007,8 +850,6 @@ def _do_post_with_media(
     skip_pow: bool = False,
 ) -> str | None:
     """Create a post with media attachments; returns tx_hash or None."""
-    if not target:
-        _ensure_community_claimed(backend, topic)
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -1061,7 +902,9 @@ def _wait_list_count(
     until count <= expected (after unfollow/disable).
     Returns the actual count observed.
     """
-    endpoint = "get_user_followed" if list_key.startswith("followed_") or list_key == "joined_communities" else "get_profile"
+    endpoint = (
+        "get_user_followed" if list_key.startswith("followed_") or list_key == "joined_communities" else "get_profile"
+    )
     deadline = time.perf_counter() + timeout
     actual = 0
     while time.perf_counter() < deadline:

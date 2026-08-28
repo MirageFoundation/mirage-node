@@ -37,7 +37,7 @@ from tests.backend_helpers import (
     _do_edit, _do_annotate, _do_delete, _do_delete_user,
     _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
     _do_set_username_raw, _do_set_biography, _do_report,
-    _do_enable_agent, _do_set_agents, _do_set_auto_renewal,
+    _do_set_auto_renewal,
     _do_send_tokens, _do_award,
     _wait_indexed, _wait_username, _wait_list_count,
     _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,

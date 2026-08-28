@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { css } from "styled-components";
@@ -65,7 +66,7 @@ import { usePendingFollows } from "../../../logic/useFollowState.js";
 
 const TABS = [
     { id: "posts", label: "Posts" },
-    { id: "topics", label: "Topics" },
+    { id: "topics", label: "Communities" },
     { id: "users", label: "Users" },
 ];
 
@@ -705,7 +706,7 @@ export default function SearchResultsView({ state }) {
             }
             const t = String(topic || "").trim();
             if (!t) return;
-            if (!requireAccount('follow topics')) return;
+            if (!requireAccount('follow communities')) return;
             if (!viewerAddressLower) return;
             const lower = t.toLowerCase();
             if (isFollowTopicPending(lower)) return;
@@ -724,7 +725,7 @@ export default function SearchResultsView({ state }) {
                 }
             } catch (err) {
                 alert(
-                    `Error ${wasFollowing ? "unfollowing" : "following"} topic: ${err?.message || err
+                    `Error ${wasFollowing ? "unfollowing" : "following"} community: ${err?.message || err
                     }`
                 );
             }
@@ -869,23 +870,23 @@ export default function SearchResultsView({ state }) {
     // `MobileOnly` wrapper.
     const mobileTrending = (
         <MobileOnly>
-            <TrendingSectionLabel>Trending topics</TrendingSectionLabel>
+            <TrendingSectionLabel>Trending communities</TrendingSectionLabel>
             {isLoadingTrending ? (
-                <TrendingEmpty>Loading trending topics…</TrendingEmpty>
+                <TrendingEmpty>Loading trending communities…</TrendingEmpty>
             ) : trendingTopics.length === 0 ? (
-                <TrendingEmpty>No trending topics available</TrendingEmpty>
+                <TrendingEmpty>No trending communities available</TrendingEmpty>
             ) : (
                 <TrendingList>
                     {trendingTopics.map((topic) => (
                         <RowItem
                             key={`trending-${topic.topic}`}
-                            to={`/t/${encodeURIComponent(topic.topic)}`}
+                            to={communityPath(topic.topic)}
                         >
                             <RowIcon>
                                 <HiOutlineFire />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{topic.topic}</RowPrimary>
+                                <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
                                 <RowMeta>
                                     {formatPostCount(
                                         topic.post_count || topic.count
@@ -976,7 +977,7 @@ export default function SearchResultsView({ state }) {
                                 role="region"
                                 aria-label="Search on Mirage"
                                 title={query ? "Sign in to search Mirage" : "Search Mirage"}
-                                description="Create an account or sign in to search topics, users, and posts."
+                                description="Create an account or sign in to search communities, users, and posts."
                                 stats={getCachedWelcomeStats()}
                                 links={[
                                     {
@@ -1015,7 +1016,7 @@ export default function SearchResultsView({ state }) {
                         </StateIcon>
                         <StateTitle>Search Mirage</StateTitle>
                         <StateMessage>
-                            Use the search bar to find posts, topics, and users.
+                            Use the search bar to find posts, communities, and users.
                         </StateMessage>
                     </StateBlock>
                 </DesktopOnly>
@@ -1075,7 +1076,7 @@ export default function SearchResultsView({ state }) {
                     <StateTitle>No results found</StateTitle>
                     <StateMessage>
                         Try a different keyword, or remove filters. You can also search by
-                        username (`@name`) or topic (`#topic`).
+                        username (`@name`) or community (`[name]`).
                     </StateMessage>
                 </StateBlock>
             </>
@@ -1091,7 +1092,7 @@ export default function SearchResultsView({ state }) {
                     </StateIcon>
                     <StateTitle>No posts found</StateTitle>
                     <StateMessage>
-                        Try the Topics or Users tab, or search with different keywords.
+                        Try the Communities or Users tab, or search with different keywords.
                     </StateMessage>
                 </StateBlock>
             );
@@ -1141,8 +1142,8 @@ export default function SearchResultsView({ state }) {
                     <StateIcon>
                         <HiOutlineHashtag />
                     </StateIcon>
-                    <StateTitle>No topics found</StateTitle>
-                    <StateMessage>Try a different topic name.</StateMessage>
+                    <StateTitle>No communities found</StateTitle>
+                    <StateMessage>Try a different community name.</StateMessage>
                 </StateBlock>
             );
         }
@@ -1156,13 +1157,13 @@ export default function SearchResultsView({ state }) {
                     return (
                         <RowItem
                             key={`topic-${topicName}`}
-                            to={`/t/${encodeURIComponent(topicName)}`}
+                            to={communityPath(topicName)}
                         >
                             <RowIcon>
                                 <HiOutlineHashtag />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{topicName}</RowPrimary>
+                                <RowPrimary>{communityLabel(topicName)}</RowPrimary>
                                 <RowMeta>
                                     {formatPostCount(topic.post_count) || "No posts yet"}
                                 </RowMeta>

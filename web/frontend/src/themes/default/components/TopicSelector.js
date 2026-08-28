@@ -2,9 +2,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import styled from "styled-components";
 import { HiChevronDown } from "react-icons/hi2";
 import Storage from '../../../utils/Storage';
-import { getAllowedTags, getAllowedTagsParam } from '../../../utils/ContentTags';
+import { getAllowedTags } from '../../../utils/ContentTags';
 import Api from '../../../utils/api';
-import { fetchFollowedTopics } from '../../../utils/Subscriptions';
+import { communityLabel, stripCommunityPrefix } from '../../../utils/community';
 
 const Container = styled.div`
     position: relative;
@@ -65,14 +65,6 @@ const ButtonContent = styled.div`
     gap: 0.3rem;
     min-width: 0;
     overflow: hidden;
-`;
-
-/** Must match control font size — a larger # was stretching the row vs placeholder-only / title input. */
-const TopicIcon = styled.span`
-    font-size: inherit;
-    line-height: inherit;
-    flex-shrink: 0;
-    color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 const TopicName = styled.span`
@@ -197,21 +189,6 @@ const TopicItem = styled.div`
 
     &:hover {
         background-color: ${({ theme }) => theme.colors.menuSelectedBg};
-        color: ${({ theme }) => theme.colors.menuItemHoverText};
-    }
-`;
-
-const TopicItemIcon = styled.span`
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    font-size: 0.8rem;
-    color: ${({ theme }) => theme.colors.subtleText};
-
-    ${TopicItem}:hover & {
         color: ${({ theme }) => theme.colors.menuItemHoverText};
     }
 `;
@@ -362,8 +339,10 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
     const sanitize = useCallback((val) => {
         try {
             const s = String(val || '')
-                .replace(/[^a-zA-Z0-9]/g, '')
-                .toLowerCase();
+                .toLowerCase()
+                .replace(/[^a-z0-9-]/g, '')
+                .replace(/--+/g, '-')
+                .replace(/^-+|-+$/g, '');
             return s.slice(0, effectiveMaxLength);
         } catch (_) {
             return '';
@@ -379,23 +358,24 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
             setIsLoading(!hadCache);
             try {
                 if (viewerAddress) {
-                    const followed = await fetchFollowedTopics(viewerAddress);
-                    setFollowedTopics(followed || []);
+                    const joined = await Api.get('communities', { joined_by: viewerAddress, limit: 100 });
+                    const slugs = Array.isArray(joined?.items)
+                        ? joined.items.map(i => String(i.community || '').trim()).filter(Boolean)
+                        : [];
+                    setFollowedTopics(slugs);
                 }
 
-                // Always fetch fresh from backend - it filters by min/max topic size
-                // Show all topics when selecting for posting
                 try {
-                    const data = await Api.get('get_topics', { limit: 100, min_posts: 1, allowed_tags: getAllowedTagsParam() });
-                    if (data && Array.isArray(data.topics)) {
-                        const topicsWithCounts = data.topics
-                            .filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '')
+                    const data = await Api.get('communities', { limit: 100 });
+                    if (data && Array.isArray(data.items)) {
+                        const topicsWithCounts = data.items
+                            .filter(t => t && t.community && typeof t.community === 'string' && t.community.trim() !== '')
                             .map(t => ({
-                                topic: t.topic,
-                                count: t.post_count || t.count || 0,
-                                flags: t.flags || {},
-                                dominant_tag: t.dominant_tag || '',
-                                dominant_ratio: t.dominant_ratio || 0
+                                topic: t.community,
+                                count: 0,
+                                flags: {},
+                                dominant_tag: '',
+                                dominant_ratio: 0
                             }));
                         Storage.save("topics", {
                             topics: topicsWithCounts.map(t => t.topic),
@@ -445,7 +425,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
     }, []);
 
     // Filter topics based on search (strip leading # for matching)
-    const searchLower = searchValue.toLowerCase().trim().replace(/^#+/, '');
+    const searchLower = stripCommunityPrefix(searchValue.toLowerCase());
     const sanitizedSearch = sanitize(searchValue);
     const showSearchResults = isOpen && sanitizedSearch.length >= minSearchLength;
 
@@ -462,17 +442,17 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
 
         const handle = setTimeout(async () => {
             try {
-                const data = await Api.get('search_topics', { q: sanitizedSearch, limit: 20, allowed_tags: getAllowedTagsParam() }, { timeoutMs: 8000 });
+                const data = await Api.get('communities', { query: sanitizedSearch, limit: 20 }, { timeoutMs: 8000 });
                 if (searchRequestId.current !== requestId) return;
-                const topics = Array.isArray(data?.topics) ? data.topics : [];
-                const normalized = topics
-                    .filter(t => t && t.topic && typeof t.topic === 'string')
+                const items = Array.isArray(data?.items) ? data.items : [];
+                const normalized = items
+                    .filter(t => t && t.community && typeof t.community === 'string')
                     .map(t => ({
-                        topic: t.topic,
-                        count: t.post_count || t.count || 0,
-                        flags: t.flags || {},
-                        dominant_tag: t.dominant_tag || '',
-                        dominant_ratio: t.dominant_ratio || 0
+                        topic: t.community,
+                        count: 0,
+                        flags: {},
+                        dominant_tag: '',
+                        dominant_ratio: 0
                     }));
                 setSearchResults(normalized);
             } catch (_) {
@@ -537,7 +517,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
     const allItems = [
         ...filteredFollowed.map(t => ({ type: 'followed', topic: t })),
         ...filteredAllTopics.map(t => ({ type: 'all', topic: t })),
-        ...(isNewTopic ? [{ type: 'create', topic: sanitizedSearch }] : [])
+        ...(isNewTopic ? [{ type: 'new', topic: sanitizedSearch }] : [])
     ];
 
     const getTopicFlags = useCallback((topic) => {
@@ -592,6 +572,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
 
     const handleSelect = (topic, focusNext = false, isNew = false) => {
         const sanitized = sanitize(topic);
+        if (isNew) console.debug('[TopicSelector] selected new slug', { slug: sanitized });
         onChange({
             target: { value: sanitized },
             meta: { ...getTopicMeta(topic), isNew: !!isNew },
@@ -643,7 +624,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
             e.preventDefault();
             if (highlightedIndex >= 0 && highlightedIndex < allItems.length) {
                 const pick = allItems[highlightedIndex];
-                handleSelect(pick.topic, true, pick.type === 'create');
+                handleSelect(pick.topic, true, pick.type === 'new');
             } else if (sanitizedSearch) {
                 handleSelect(sanitizedSearch, true, isNewTopic);
             }
@@ -682,12 +663,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                 >
                     <ButtonContent>
                         {value ? (
-                            <>
-                                <TopicIcon>#</TopicIcon>
-                                <TopicName>{value}</TopicName>
-                            </>
+                            <TopicName>{communityLabel(value)}</TopicName>
                         ) : (
-                            <Placeholder>Select a topic</Placeholder>
+                            <Placeholder>Select a community</Placeholder>
                         )}
                     </ButtonContent>
                     <ChevronWrap aria-hidden="true" $expanded={false}>
@@ -699,7 +677,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                     <SearchInput
                         ref={searchInputRef}
                         type="text"
-                        placeholder="Search topics or create one"
+                        placeholder="Search or enter a community slug"
                         value={searchValue}
                         onChange={(e) => {
                             setSearchValue(e.target.value);
@@ -714,14 +692,14 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                     <Dropdown>
                         <ResultsContainer ref={dropdownRef}>
                             {isLoading ? (
-                                <EmptyState>Loading topics...</EmptyState>
+                                <EmptyState>Loading communities...</EmptyState>
                             ) : isSearching && showSearchResults && searchResults.length === 0 ? (
-                                <EmptyState>Searching topics...</EmptyState>
+                                <EmptyState>Searching communities...</EmptyState>
                             ) : (
                                 <>
                                     {filteredFollowed.length > 0 && (
                                         <>
-                                            <SectionHeader>Your Topics</SectionHeader>
+                                            <SectionHeader>Your communities</SectionHeader>
                                             {filteredFollowed.map((topic) => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
@@ -734,8 +712,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                                         $highlighted={highlightedIndex === idx}
                                                         onClick={() => handleSelect(topic)}
                                                     >
-                                                        <TopicItemIcon>#</TopicItemIcon>
-                                                        <TopicItemName>{topic}</TopicItemName>
+                                                        <TopicItemName>{communityLabel(topic)}</TopicItemName>
                                                         <TopicMetaGroup>
                                                             {flagLabels.length > 0 && (
                                                                 <FlagBadge>{flagLabels.join(', ')}</FlagBadge>
@@ -753,7 +730,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                     {filteredAll.length > 0 && (
                                         <>
                                             <SectionHeader>
-                                                {searchLower ? 'Search Results' : 'Popular Topics'}
+                                                {searchLower ? 'Search Results' : 'Popular communities'}
                                             </SectionHeader>
                                             {filteredAll.map((topicObj) => {
                                                 itemIndex++;
@@ -768,8 +745,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                                         $highlighted={highlightedIndex === idx}
                                                         onClick={() => handleSelect(topic)}
                                                     >
-                                                        <TopicItemIcon>#</TopicItemIcon>
-                                                        <TopicItemName>{topic}</TopicItemName>
+                                                        <TopicItemName>{communityLabel(topic)}</TopicItemName>
                                                         <TopicMetaGroup>
                                                             {flagLabels.length > 0 && (
                                                                 <FlagBadge>{flagLabels.join(', ')}</FlagBadge>
@@ -786,7 +762,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
 
                                     {isNewTopic && (
                                         <CreateNewSection>
-                                            <SectionHeader>Create New</SectionHeader>
+                                            <SectionHeader>New slug</SectionHeader>
                                             {(() => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
@@ -797,7 +773,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                                         onClick={() => handleSelect(sanitizedSearch, false, true)}
                                                     >
                                                         <CreateNewIcon>+</CreateNewIcon>
-                                                        <CreateNewLabel>Create #{sanitizedSearch}</CreateNewLabel>
+                                                        <CreateNewLabel>Use {communityLabel(sanitizedSearch)}</CreateNewLabel>
                                                     </CreateNewItem>
                                                 );
                                             })()}
@@ -806,7 +782,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
 
                                     {!isLoading && filteredFollowed.length === 0 && filteredAll.length === 0 && !isNewTopic && (
                                         <EmptyState>
-                                            {searchLower ? 'No topics found. Type to create a new one.' : 'Start typing to search or create a topic.'}
+                                            {searchLower ? 'No listed community found. Use any valid slug.' : 'Start typing to search or enter a community slug.'}
                                         </EmptyState>
                                     )}
                                 </>

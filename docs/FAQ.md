@@ -10,14 +10,14 @@ through the crowd. The difference is what Mirage removes by design: power modera
 enforcement, shadow bans, and the endless rulebooks where each community feels like a
 different legal system.
 
-On Mirage, nobody can be banned from the entire network. There is no global agent layer
-that can wipe your account, quarantine a topic, or silently throttle you. A node can choose
+On Mirage, nobody can be banned from the entire network. There is no global moderation layer
+that can wipe your account, quarantine a community, or silently throttle you. A node can choose
 what it shows locally for legal or policy reasons, but it cannot erase you from Mirage as a
 whole, and you can switch nodes seamlessly without having to start over.
 
-Moderation is voluntary and personal. You choose what you want filtered by enabling
-agents you trust, blocking users or topics, and shaping your own feed. If you want an
-unfiltered view, you can choose that too. Control sits with the user, not with a small group of gatekeepers.
+Moderation is voluntary and personal. You choose what you want filtered by blocking users or
+communities and shaping your own feed. If you want an unfiltered view, you can choose that
+too. Control sits with the user, not with a small group of gatekeepers.
 
 Mirage is built as a network, not a single site. Multiple independent nodes can host Mirage
 frontends, index content, and serve users.
@@ -44,9 +44,9 @@ touching tokens.
 
 ### Mirage looks and feels like Reddit - what is different?
 
-Yes. Mirage is designed to feel familiar on day 1. You have topics that function like
-subreddits, you post links or text, you comment in threads, you upvote and downvote, you
-browse feeds, you follow what you care about, and you ignore what you do not.
+Yes. Mirage is designed to feel familiar on day 1. You have communities, you post links or
+text, you comment in threads, you upvote and downvote, you browse feeds, you follow what you
+care about, and you ignore what you do not.
 
 What changes is everything users hate about modern platforms. There is no central company
 that can quietly rewrite the rules, throttle posts, or flip the site into an ad funnel.
@@ -61,12 +61,12 @@ Switching nodes is seamless and does not change your content or account. Your fe
 by your actions, what you follow, what you vote on, what you block, and who you choose to
 trust, not by a hidden engagement algorithm.
 
-If you want moderation, you opt into it by enabling agents. If you want less filtering,
+If you want more filtering, you block users and communities. If you want less filtering,
 you choose that too. You are not stuck under one set of rules written by strangers.
 
 ### I just want Reddit, but without the bullshit?
 
-That is the entire point of Mirage. Mirage keeps what worked about Reddit: topic-based
+That is the entire point of Mirage. Mirage keeps what worked about Reddit:
 communities, posts, comments, voting, discovery, and pseudonymity. What it removes are the
 things users grew to hate: power moderators, opaque enforcement, shadow bans, endless rule
 creep, and being locked under one company’s decisions.
@@ -115,7 +115,7 @@ Paying only buys convenience, not power.
 
 The “catch” is that there is no safety net where a platform can quietly fix things for you.
 You own your account via a seed phrase, so you are responsible for it. There is no central
-agent to clean up the entire network for everyone, so moderation is opt-in and user
+authority to clean up the entire network for everyone, so moderation is personal and user
 driven.
 
 There is no ad revenue to subsidize abuse, so basic usage costs a small amount of compute
@@ -134,7 +134,7 @@ Yes.
 
 Mirage is built so you do not have to care about crypto at all.
 
-You can use Mirage like a normal forum. Browse topics, read posts, comment, and vote. There
+You can use Mirage like a normal forum. Browse communities, read posts, comment, and vote. There
 is no wallet to install, no tokens to buy, and no crypto concepts you need to understand.
 
 Everything happens inside the website. The blockchain exists in the background to prevent
@@ -175,12 +175,12 @@ by control.
 
 ### How is moderation handled?
 
-Mirage has no global agents. There are no power moderators with god mode over a topic, and
-there is no central authority that can decide what the entire network is allowed to say.
+Mirage has no global moderators. There are no power moderators with god mode over a
+community, and there is no central authority that can decide what the entire network is
+allowed to say.
 
 Moderation is voluntary and personal. You control what you see by blocking users, blocking
-topics, and shaping your feed. If you want curated moderation, you can enable agents you
-trust, meaning you can opt into their filters and blocked lists.
+communities, and shaping your feed.
 
 If you want an unfiltered view, you can choose that too.
 
@@ -209,14 +209,12 @@ burger. Different node, same Mirage.
 Mirage does not appoint a global referee for what is “acceptable”. On centralized platforms,
 the definition of acceptable always flows from whoever has power, and it changes constantly.
 
-Mirage is built to avoid that. There is no global agent class, no universal rulebook,
+Mirage is built to avoid that. There is no global moderator class, no universal rulebook,
 and no network wide ban button. If you find a post offensive or inappropriate, you control
 your own experience.
 
-You can block the user, block the topic, and remove it from your feed immediately. If you
-want stronger filtering, you can opt into moderation by enabling agents you trust,
-meaning their blocked lists and filters apply to what you see. If you want less filtering,
-you simply do not opt in.
+You can block the user, block the community, and remove it from your feed immediately. If
+you want less filtering, you simply do not block.
 
 The point is choice.
 
@@ -233,10 +231,10 @@ You can set filters so those categories are hidden or blurred, and you can chang
 settings anytime. This is about personal control, not a global decision about what everyone
 is allowed to see. Tagging is voluntary.
 
-But the incentive is built into the system. Content that does not fit a topic gets
+But the incentive is built into the system. Content that does not fit a community gets
 downvoted, suppressed, and ignored. If someone wants maximum visibility and engagement, they
-are encouraged to post in the right topic and use the right tags, because the crowd will
-punish off topic or mislabeled content.
+are encouraged to post in the right community and use the right tags, because the crowd will
+punish off-community or mislabeled content.
 
 ### What are the default safety settings for new users?
 
@@ -251,7 +249,7 @@ The goal is user control with sensible defaults.
 
 Yes, Mirage is built around user controlled filtering.
 
-You can block users, block topics, and apply content filters.
+You can block users, block communities, and apply content filters.
 
 Over time, more granular controls like keyword mutes and advanced filtering can be layered
 in without needing global moderation.
@@ -261,10 +259,6 @@ in without needing global moderation.
 You do not have to. Mirage supports multiple layers of control.
 
 You can do nothing and just use basic filters and blocks yourself.
-
-You can enable trusted human agents.
-
-You can enable automated agent bots.
 
 You can use a node with stricter local policies.
 
@@ -390,25 +384,24 @@ That includes CSAM, credible violent threats, doxxing, and similar serious abuse
 
 This is intentionally narrower than ordinary moderation. Mirage does not turn “I dislike
 this” into “delete this everywhere”. Taste, culture, and preference are handled by filters,
-blocks, agents, and node choice. Illegal content is handled as a compliance issue.
+blocks, and node choice. Illegal content is handled as a compliance issue.
 
 ### What should I report?
 
 Report illegal content: CSAM, credible violent threats, doxxing, direct criminal abuse,
 and similar serious issues.
 
-Do not use reports for legal adult content, rude opinions, low quality posts, wrong topics,
-spam, or content you simply do not want to see. Those should be handled with settings,
-blocks, votes, topics, and agents.
+Do not use reports for legal adult content, rude opinions, low quality posts, wrong
+communities, spam, or content you simply do not want to see. Those should be handled with
+settings, blocks, votes, and communities.
 
 ### Should I report porn?
 
 Usually no.
 
-Legal adult content is handled through content settings and agents, not illegal-content
-reports. If adult content is untagged, mislabeled, or showing up in places you do not want
-it, use filters, block the user, block the topic, or enable an agent that catches adult
-content mislabeling.
+Legal adult content is handled through content settings, not illegal-content reports. If
+adult content is untagged, mislabeled, or showing up in places you do not want it, use
+filters, block the user, or block the community.
 
 If the content is illegal, report it.
 
@@ -420,166 +413,45 @@ Mirage supports content tags like adult, sensitive, violence, gore, and death. I
 you can choose which categories you want to see. If adult content is disabled, posts tagged
 as adult are filtered out of normal feeds.
 
-You can also block individual posts, users, and topics. Blocking is personal. It changes
-your feed without creating a rule for everyone else.
+You can also block individual posts, users, and communities. Blocking is personal. It
+changes your feed without creating a rule for everyone else.
 
 ### What if the uploader does not tag adult content correctly?
 
 Then settings alone are not enough, because settings can only filter the tag the system
 sees.
 
-That is what agents are for. An agent can inspect posts and apply its own moderation layer
-for users who enable it. If an uploader fails to tag adult content, an agent can tag it as
-adult, hide it, block the user, or otherwise change how that post appears for users who
-trust that agent.
+Block the post or the user. Downvote mislabeled posts so they drop in the feed. If a
+community keeps attracting untagged adult content, leave it or block it.
 
-So the model is not “trust every uploader to tag correctly”. The model is uploader tags,
-user settings, votes, blocks, and opt-in agents that can correct bad tagging.
+Mirage does not appoint a global tagger. The model is uploader tags, user settings, votes,
+and personal blocks.
 
 ### Are adult-content filters perfect?
 
-No. They are only as good as the tags and agents you choose.
+No. They are only as good as the tags people apply.
 
 Mirage does not pretend legal adult content can be perfectly classified by a central robot
-without creating a global moderation authority. If you want stricter filtering, enable
-stricter agents. If an agent does a bad job, disable it and use a better one.
+without creating a global moderation authority. If you want stricter filtering, tighten
+your content settings and use blocks.
 
-### What is an agent?
+### Were agents removed?
 
-An agent is an opt-in moderation account.
+Yes. Mirage no longer has an Agent subscription tier, an Agents page, or opt-in
+moderation overlays from other accounts.
 
-Agents are not global moderators. They do not control the network. They publish a version of
-the feed: tags, blocks, edits, translations, warnings, hidden posts, or notes. Users decide
-which agents they trust.
+Moderation is personal: you follow communities, block users, posts, and communities, and
+use your own content filters. Nodes can still apply local display rules for legal reasons.
+Nobody publishes a feed overlay that other users enable.
 
-If you enable an agent, that agent’s decisions affect your feed. If you disable it, they
-stop affecting your feed.
-
-This lets Mirage have moderation without creating one central moderation authority.
-
-### What can agents do?
-
-Agents can tag posts, including posts the uploader failed to tag correctly. They can hide
-posts from users who follow that agent. They can publish blocked posts, blocked users, and
-blocked topics. They can add notes or appendices. They can rewrite or translate posts for
-users who opt into that agent’s version.
-
-For example, AntiSpamBot can hide spam and low effort posts. A different agent could focus
-on adult content mislabeling. Another could focus on scams, reposts, doxxing, bot behavior,
-or low quality engagement farming.
-
-### Can agents edit my posts?
-
-They cannot edit your original post.
-
-An agent can publish an overlay for users who enabled that agent. That overlay might retag
-the post, rewrite it, translate it, hide it, or attach a note. Users who did not enable that
-agent are not forced to see the overlay.
-
-Think of it as an optional lens, not a rewrite of history.
-
-### Can agents censor me?
-
-Not globally.
-
-An agent can hide or rewrite your post for users who enabled that agent. It cannot delete
-your account, ban you from the network, or force everyone to see its version.
-
-If an agent is bad, users disable it. If an agent is useful, users follow it. That is the
-whole point.
-
-### How do I enable an agent?
-
-Open the Agents page, choose the agents you want, and enable them. Your enabled agents are
-part of your Mirage profile, so the choice follows you across nodes.
-
-You can enable more than one agent. If your tier has an enabled-agent limit and you hit it,
-disable one before adding another.
-
-### How do I decide which agents to trust?
-
-Treat agents like feed tools, not authorities.
-
-Look at what they claim to do, how active they are, whether their decisions improve your
-feed, and whether they match your preferences. A strict anti-spam agent may be great for one
-user and too aggressive for another.
-
-The answer is not to find the one true moderator. The answer is to compose the moderation
-layer you want.
-
-### What if two agents disagree?
-
-Then your enabled-agent order matters. Mirage applies the moderation layers you chose, not a
-global rule that everyone must accept.
-
-If the result is not what you want, reorder or disable agents. Disagreement between agents
-is expected. Mirage handles it by giving users choice instead of forcing consensus on taste.
-
-### How do I become an agent?
-
-Agent is a subscription tier.
-
-Mirage has Free, Subscriber, and Agent tiers. To become an agent, open the Subscription page,
-choose the Agent plan, and pay for it with MIRAGE inside the app. Subscriptions renew on
-chain using MIRAGE. If renewal fails, or if you cancel and the subscription expires, your
-account falls back to Free.
-
-Once your account is on the Agent tier, it can appear on the Agents page. Other users can
-enable or disable you. You can moderate manually through the app, or automate your
-moderation with a bot or API workflow.
-
-Being an agent does not give you power over everyone. It gives you the ability to publish a
-moderation layer that other users may choose to use.
-
-### Can I become an agent without buying crypto?
-
-Potentially, yes.
-
-Mirage is designed so users can earn MIRAGE through participation on nodes that run rewards
-or quests, then spend that MIRAGE on subscriptions. The path is simple: use Mirage, earn
-MIRAGE through a participating node, open Subscription, upgrade to Agent, and build a useful
-moderation layer.
-
-You do not need an exchange account just to understand or use Mirage.
-
-### Is Agent tier pay to moderate?
-
-No, because agents do not get global moderation power.
-
-Agent tier is paid because it creates network load and unlocks advanced publishing tools.
-It lets an account publish a moderation layer. It does not let that account rule a topic,
-delete other users, ban users from Mirage, or force its decisions on everyone.
-
-The market test is usefulness. Users enable agents that help them and disable agents that do
-not.
-
-### Can agents be automated bots?
-
-Yes. Agents can be human-run, bot-run, or a mix of both.
-
-That is intentional. Some moderation tasks are better handled by automation, like spam
-patterns, reposts, suspicious link behavior, or adult-content mislabeling. Other tasks need
-human judgment. Mirage supports both without making either one mandatory for everyone.
-
-### What is AntiSpamBot?
-
-AntiSpamBot is an example of an agent focused on spam and low quality content. Users who
-enable it can have spammy or low effort posts hidden from their feed.
-
-The important part is not that AntiSpamBot is special. The important part is the pattern:
-agents compete to be useful. Users choose the ones that work.
-
-### What is the difference between reports, blocks, filters, and agents?
+### What is the difference between reports, blocks, and filters?
 
 Reports are for illegal content and admin review.
 
-Blocks are personal. They remove a post, user, or topic from your own experience.
+Blocks are personal. They remove a post, user, or community from your own experience.
 
 Filters are personal content preferences, such as whether you want adult or gore content in
 your feed.
-
-Agents are opt-in moderation layers created by other users or bots. They can tag, hide,
-block, rewrite, translate, or annotate content for users who enable them.
 
 Those tools solve different problems. Mirage keeps them separate so legal preference does
 not become global censorship.
@@ -844,10 +716,10 @@ appointing a central authority to hand out blue checkmarks, because that authori
 exactly the kind of gatekeeper Mirage exists to avoid.
 
 Instead, authorship on Mirage is cryptographic. Every post is signed by your key, so you can
-always prove what you actually wrote, and a fake account cannot produce your signature. On top
-of that, agents can flag suspected impersonation for users who enable them. So the model is
-simple: your real name is unforgeable, your real posts are provable, and lookalike accounts are
-handled by signatures and opt-in agents rather than by a central identity office.
+always prove what you actually wrote, and a fake account cannot produce your signature. The
+model is simple: your real name is unforgeable, your real posts are provable, and lookalike
+accounts are handled by signatures and personal blocks rather than by a central identity
+office.
 
 ### Will my posts be scraped or used to train AI?
 
@@ -900,7 +772,7 @@ It is stored off chain by nodes and indexers based on retention policies.
 In practice, most nodes will keep basically all content because it is what users expect from
 a forum.
 
-That is why switching nodes is seamless, you still see the same topics, the same posts, the
+That is why switching nodes is seamless, you still see the same communities, the same posts, the
 same comment threads, and your experience does not reset. Even your feed shaping and
 preferences still behave consistently because the network content is the same and your
 account is the same.
@@ -959,24 +831,41 @@ engagement engine deciding what you should see behind your back.
 
 ### How do communities work on Mirage?
 
-Mirage uses topics as the unit of community. A topic is essentially a community, similar to
-a subreddit, but conceptually closer to a hashtag because it is a simple global label that
-routes posts into one shared conversation across the entire network. Each post has a single
-topic, so content stays organized and discoverable instead of being scattered across
-multiple labels.
+Communities are named spaces, shown as [slug], like [test]. Each post belongs to one
+community, so content stays organized and discoverable. Every valid slug is already a
+community: there is no registration, claim, title, founder, or owner. Posting to a new valid
+slug starts an uncurated community immediately.
 
-Topics are network wide and not owned by a node, which is why switching nodes does not break
-communities.
+Anyone can follow a community and post in it. A community becomes curated when at least one
+live curator team exists for its slug. Teams publish their own description and policy, but
+no team owns or officially represents the community.
 
-### Can topics be taken over, censored, or renamed?
+Communities are network wide and not owned by a node, which is why switching nodes does not
+break them.
 
-No one can “take over” a topic in the Reddit moderator sense, because there is no agent
-ownership model. A topic is a network wide label and conversation stream.
+### What are curator teams and lenses?
 
-Nodes can choose to filter what they display locally, but they cannot rename topics for the
-network or seize control over who is allowed to participate globally. If you want to avoid a
-node’s filtering or presentation choices, you switch nodes seamlessly and keep the same
-account and access to the same topics.
+A curator team is an optional group of up to ten paid users who maintain one view of a
+community. Its leader can invite curators, and each invitee must accept before joining. Team
+curators can hide posts or users from that team's view and lock threads. Those actions never
+erase the underlying content or change another team's view.
+
+You choose the lens you want: the node default, a specific team, or Uncensored. The node
+default is the live team with the most paid subscribers, with older teams winning ties.
+Choosing a specific team is a personal preference. If that team disappears, Mirage returns
+you to the node default; if no live team remains, the community is simply uncurated and the
+default view is uncensored.
+
+### Can communities be taken over, censored, or renamed?
+
+No one can “take over” a community in the Reddit moderator sense. A community is a
+network-wide conversation stream. Starting one does not give Reddit-style god mode over
+everyone who posts there.
+
+Nodes can choose to filter what they display locally, but they cannot rename communities
+for the network or seize control over who is allowed to participate globally. If you want
+to avoid a node’s filtering or presentation choices, you switch nodes seamlessly and keep
+the same account and access to the same communities.
 
 ### Can I edit or delete my posts?
 
@@ -1076,18 +965,10 @@ posting patterns, and low effort spam. The difference is that on Reddit they usu
 by posting a comment, “this is a repost”, “this looks automated”, “this account is
 suspicious”, and the user still has to sift through garbage.
 
-On Mirage, you can directly opt into these defenses. If you enable an agent or a
-trusted agent profile, their filters and block decisions can apply to your feed
-automatically. Your feed becomes clean by default, based on the moderation layer you choose.
-
-If you want stricter filtering, you follow stricter bots. If you want minimal filtering, you
-follow none. No single party decides for everyone.
-
-This also creates real competition. Different bots and moderation profiles will be better at
-different problems. Some focus on repost detection.
-
-Some focus on farmed engagement. Some focus on low quality link spam. Some focus on adult
-content mislabeling.
+On Mirage, you control your own feed with blocks, content filters, and the communities you
+follow. No single party decides for everyone. Independent builders can still write tools
+against the public API, but they do not get a privileged agent tier or a feed overlay that
+other users enable.
 
 Users gravitate toward what works, and bad moderation becomes irrelevant because users stop
 following it.
@@ -1277,7 +1158,7 @@ No extensions, no wallet plugins.
 
 ### Do you have a roadmap, and where do I follow progress?
 
-Yes. The best place for announcements is Mirage itself in the topic #mirage.
+Yes. The best place for announcements is Mirage itself in the community [mirage].
 
 You can view it from any running node, for example
 [https://mirage.talk/t/mirage](https://mirage.talk/t/mirage).
@@ -1295,7 +1176,7 @@ X: [https://x.com/getmirage](https://x.com/getmirage)
 ### Is Mirage finished, or is it still evolving?
 
 Mirage is live and usable today, but it is intentionally evolving. The core network,
-posting, voting, topics, and identity are in place.
+posting, voting, communities, and identity are in place.
 
 At the same time, features like DMs, notifications, richer moderation tooling, more clients,
 and mobile apps are actively being built. The goal is not a “finished” platform frozen in
@@ -1393,19 +1274,14 @@ power users can pay for convenience without turning Mirage into a pay to speak p
 
 ### What subscription tiers exist?
 
-Mirage currently has three normal tiers: Free, Subscriber, and Agent.
+Mirage currently has two tiers: Free and Subscriber.
 
-Free is the default. It lets you browse, post, comment, vote, follow topics, follow users,
-block content, and enable a limited number of agents. Free users use browser proof of work
-for transactions.
+Free is the default. It lets you browse, post, comment, vote, follow communities, follow
+users, and block content. Free users use browser proof of work for transactions.
 
 Subscriber is the convenience tier. It removes proof of work delays, removes the Anon prefix
-from usernames, increases limits, and unlocks profile features like biography, avatar, and
-banner.
-
-Agent is the advanced moderation tier. It includes Subscriber features and lets your account
-appear on the Agents page. Agent accounts can publish opt-in moderation layers that tag,
-hide, block, rewrite, translate, or annotate posts for users who enable them.
+from usernames, increases limits, unlocks profile features like biography, avatar, and
+banner, and lets paid users lead or join curator teams.
 
 ### How do subscriptions work?
 
@@ -1432,37 +1308,21 @@ company’s policies.
 This does not mean users have to become traders. Participating nodes can reward real usage
 with MIRAGE, so users can earn enough inside the product to pay for upgrades.
 
-### What are reserve funds?
-
-Reserve funds are MIRAGE held internally by the chain for relayed gas and subscription
-activity while you are subscribed.
-
-The short version is that subscriptions do two things: part of the payment is burned, and
-part is reserved so the network can keep processing your paid-tier actions without asking
-you to manually pay fees every time. The UI shows both your spendable balance and your
-reserve.
-
-Reserve funds are not a separate wallet you spend directly. They are infrastructure funds
-used by the protocol.
-
 ### Can someone gift me a subscription?
 
 Yes. Mirage supports gifting subscriptions. The sender pays the MIRAGE, and the recipient
 receives the subscription.
 
 That is useful because Mirage does not require users to buy tokens from an exchange. A node,
-friend, community, or reward program can fund upgrades for useful users or agents.
+friend, or community can fund a subscription for someone else.
 
 ### Does paying for a subscription buy moderation power?
 
 No.
 
-Subscriber buys convenience. Agent lets you publish a moderation layer. Neither gives you
-global control over other users.
-
-Even an Agent account cannot ban users from Mirage, seize a topic, delete accounts, or force
-its moderation choices on everyone. Users must choose to enable an agent before that agent
-affects their feed.
+Subscriber buys convenience. It does not give you global control over other users. A
+subscriber cannot ban users from Mirage, seize a community, delete accounts, or force
+everyone else to see the feed their way.
 
 ### What happens when my subscription expires?
 
@@ -1471,7 +1331,7 @@ and you return to Free.
 
 Your account does not disappear. Your posts do not disappear. You simply lose paid-tier
 convenience and features going forward, such as instant posting, higher limits, clean-name
-eligibility, and Agent publishing capabilities.
+eligibility, and curator-team membership.
 
 ### Where can I buy the MIRAGE token?
 
@@ -1502,12 +1362,8 @@ user-friendly.
 Nodes can then share part of those rewards with users. This is how normal users earn MIRAGE
 today. Instead of requiring you to buy tokens, nodes can reward participation directly.
 
-For example, some nodes like mirage.talk run a rewards funding pool and daily quests. You
-might see quests like “write 2 comments today”, “vote on 10 posts”, or similar engagement
-goals. Completing them pays you MIRAGE for being an active user.
-
-Over time, that can be enough to fund your own subscription and unlock upgrades without ever
-buying anything.
+Some nodes share rewards with users for real participation. Over time, that can be enough
+to fund your own subscription and unlock upgrades without ever buying anything.
 
 So the short version is: the network pays nodes for real usage, nodes compete for users, and
 many nodes choose to share rewards with users to accelerate growth and reward genuine
@@ -1517,9 +1373,9 @@ participation.
 
 Yes. You do not need to buy crypto.
 
-You can earn MIRAGE on participating nodes through rewards pools and quests, then use that
-MIRAGE inside the product to pay for a subscription. The intent is that normal users can
-fund upgrades through participation rather than exchanges.
+You can earn MIRAGE on participating nodes through rewards, then use that MIRAGE inside
+the product to pay for a subscription. The intent is that normal users can fund upgrades
+through participation rather than exchanges.
 
 ### Is MIRAGE a crypto scam / rugpull?
 
@@ -1560,9 +1416,8 @@ or moderation power. The MIRAGE token is the network incentive layer.
 
 Validators and node operators earn MIRAGE for providing infrastructure and keeping the
 network online. That creates a competitive market for better nodes, better uptime, better
-UX. Many nodes share part of their rewards with users through reward pools and quests, so
-normal users can earn MIRAGE through participation and use it to pay for subscriptions and
-upgrades.
+UX. Many nodes share part of their rewards with users through reward pools, so normal users
+can earn MIRAGE through participation and use it to pay for subscriptions and upgrades.
 
 MIRAGE also enables governance. Holding MIRAGE gives you a path to influence network
 parameters and upgrades. That governance utility is part of what gives the token durable
@@ -1615,7 +1470,7 @@ identity, your followers, and your history are the hostages that make the ads pr
 Mirage destroys that at the root. The code is open source and the network is shared, so the
 instant any node starts serving ads, anyone can run the exact same network without them. And
 because your identity is portable, you switch to the ad-free version in seconds and keep your
-account, your followers, your topics, and your content. Same network, just no ads.
+account, your followers, your communities, and your content. Same network, just no ads.
 
 That is not a promise we are asking you to trust. It is plain economics. An ad-funded node
 has to compete against a free, ad-free copy of literally the same network, serving the same
@@ -1854,7 +1709,7 @@ Moderation is opt-in. Infrastructure competes. Authority does not.
 ### How is Mirage different from Mastodon?
 
 Mastodon is often mentioned because it is the most visible decentralized social network, but
-it is a poor fit for Reddit-style discussion. Mastodon is not topic-centric. Discovery is
+it is a poor fit for Reddit-style discussion. Mastodon is not community-centric. Discovery is
 weak.
 
 Long-form threaded discussion is clumsy. Conversations fragment quickly, and finding
@@ -1865,8 +1720,8 @@ Instance politics, blocklists, moderation spillover, and admin authority dominat
 experience. Many Reddit refugees try Mastodon, then leave once they realize it is not built
 for discussion.
 
-Mirage is built around topics, threads, voting, and discovery from the ground up. One topic
-per post. Transparent ranking.
+Mirage is built around communities, threads, voting, and discovery from the ground up. One
+community per post. Transparent ranking.
 
 High-signal discussion by design. And again, no federation lock-in. Nodes do not decide who
 you can talk to.
@@ -1879,18 +1734,18 @@ infrastructure.
 Hacker News is centralized, curated, and deliberately exclusionary. HN works because it has
 a narrow focus and a very strong moderation culture. That is also its limitation.
 
-Discussion is shaped heavily by agents and community norms, topics outside a specific
-intellectual and cultural lane are discouraged, and rule enforcement is opaque by design. If
-you fall outside that lane, there is no recourse and no exit except leaving entirely. Hacker
-News also relies on a single operator.
+Discussion is shaped heavily by community norms, posts outside a specific intellectual and
+cultural lane are discouraged, and rule enforcement is opaque by design. If you fall outside
+that lane, there is no recourse and no exit except leaving entirely. Hacker News also relies
+on a single operator.
 
 There is one site, one database, one authority, one set of rules. If moderation norms shift,
 users adapt or disappear. Mirage takes the opposite approach.
 
-It does not try to enforce a single global culture or taste. Topics are broad, moderation is
-opt-in, and there is no central authority deciding what discussion should look like
-everywhere. If you want a tightly curated experience similar to HN, you can enable
-agents, bots, or nodes that enforce that style.
+It does not try to enforce a single global culture or taste. Communities are broad,
+moderation is personal, and there is no central authority deciding what discussion should
+look like everywhere. If you want a tightly curated experience similar to HN, you can follow
+narrow communities and use blocks and filters.
 
 If you do not, you do not have to. Hacker News works by filtering users out. Mirage works
 by letting users self-select without being trapped.

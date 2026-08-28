@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
@@ -23,7 +24,6 @@ import { getCachedWelcomeStats } from "../../../utils/welcomeStatsCache";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
-import { useShowOriginal, isShowingOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { normalizeTag } from "../../../utils/ContentTags";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
@@ -1789,9 +1789,7 @@ function ViewPostView({
         AWARD_TYPES,
         giftSubscriptionLabel,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
         getAwardCost,
         handleGiveAward,
         confirmAwardAction,
@@ -1818,11 +1816,6 @@ function ViewPostView({
         state,
         updatePost
     });
-
-    // Subscribe to "Show original" toggle changes for any post in this view.
-    // Per-post checks below use `isShowingOriginal(post.post_id)`; this hook
-    // call is only here to trigger a re-render when any toggle flips.
-    useShowOriginal();
 
     // Inline block/report popover (parity with feed CardView's block chip).
     // Anchored next to the share button in the action bar for each post /
@@ -1966,6 +1959,8 @@ function ViewPostView({
                 const data = await Api.get('get_comments', {
                     post_id: blockedPostIdLower,
                     address: viewerAddress,
+                    lens: 'effective',
+                    scope: 'current',
                 });
                 if (
                     data && data.root && data.root.post_id
@@ -2359,15 +2354,12 @@ function ViewPostView({
                             }
                         } catch (_) { /* noop */ }
                     };
-                    const showingOriginalForPost = isShowingOriginal(post.post_id);
-                    const hasAgentOriginalForPost = !!(post.original_title || post.original_content);
                     const handleCopyText = () => {
                         setOpenMenuId(null);
                         try {
                             const parts = [];
-                            const useOrig = showingOriginalForPost;
-                            const titleStr = useOrig && typeof post.original_title === 'string' ? post.original_title : post.title;
-                            const contentStr = useOrig && typeof post.original_content === 'string' ? post.original_content : post.content;
+                            const titleStr = post.title;
+                            const contentStr = post.content;
                             if (titleStr && String(titleStr).trim()) parts.push(String(titleStr).trim());
                             if (contentStr && String(contentStr).trim()) parts.push(String(contentStr).trim());
                             const text = parts.join('\n\n');
@@ -2375,10 +2367,6 @@ function ViewPostView({
                                 navigator.clipboard.writeText(text);
                             }
                         } catch (_) { /* noop */ }
-                    };
-                    const handleToggleOriginal = () => {
-                        setOpenMenuId(null);
-                        toggleShowOriginal(post.post_id);
                     };
                     const mediaUrlsForDownload = (() => {
                         if (Array.isArray(post.media) && post.media.length > 0) return post.media;
@@ -2403,12 +2391,6 @@ function ViewPostView({
                                 <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}</span>
                             </MenuItem>
                         ))}
-                        {hasAgentOriginalForPost && (
-                            <MenuItem onClick={handleToggleOriginal}>
-                                <HiOutlineDocumentText />
-                                <span>{showingOriginalForPost ? 'Show modified' : 'Show original'}</span>
-                            </MenuItem>
-                        )}
                         {isOwnPost && <>
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2442,7 +2424,7 @@ function ViewPostView({
                                 handleTopicFollowToggle(post.topic);
                             }}>
                                 <HiOutlineHashtag />
-                                <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
+                                <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
                             </MenuItem>}
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2567,7 +2549,7 @@ function ViewPostView({
                                     handleBlockTopic(post.topic, post.post_id);
                                 }}>
                                     <HiOutlineNoSymbol />
-                                    <span>Block topic</span>
+                                    <span>Block community</span>
                                 </MenuItem>}
                                 <MenuItem data-danger="true" onClick={() => {
                                     setOpenBlockMenuId(null);
@@ -3082,7 +3064,7 @@ function ViewPostView({
                                 const isTopicInProgress = isTopicPending(topicLower);
                                 const hasValidAccount = state.publicKey && state.publicKey !== 'guest';
                                 return <TopicHeroWrapper>
-                                    <TopicHeroCard role="region" aria-label="Topic context">
+                                    <TopicHeroCard role="region" aria-label="Community context">
                                         {/* Mobile: Top row with Back button and Follow button */}
                                         <TopicHeroTopRow>
                                             <BackButton onClick={goBackToFeed} style={{
@@ -3147,7 +3129,7 @@ function ViewPostView({
                                                 }}
                                                 disabled={isTopicInProgress}
                                             >
-                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow #${displayTopic}` : `Following #${displayTopic}`) : `Follow #${displayTopic}`}
+                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow ${communityLabel(displayTopic)}` : `Following ${communityLabel(displayTopic)}`) : `Follow ${communityLabel(displayTopic)}`}
                                             </TopicFollowButton>}
                                         </TopicAction>
                                     </TopicHeroCard>
@@ -3178,7 +3160,7 @@ function ViewPostView({
                                                     <MobileRootMetaBottom>
                                                         {(() => {
                                                             const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                            return topicLabel ? <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink> : null;
+                                                            return topicLabel ? <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink> : null;
                                                         })()}
                                                         <MetaSeparator>·</MetaSeparator>
                                                         <span>{formatElapsed(post.timestamp)} ago</span>
@@ -3254,7 +3236,7 @@ function ViewPostView({
                                                             const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                                                             return topicLabel ? <>
                                                                 <MetaSeparator>·</MetaSeparator>
-                                                                <StyledTopicLink to={`/t/${encodeURIComponent(topicLabel.toLowerCase())}`}>#{topicLabel}</StyledTopicLink>
+                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
                                                             </> : null;
                                                         })()}
                                                         {(() => {
@@ -3301,15 +3283,6 @@ function ViewPostView({
                                                                 edited {formatElapsed(post.edited_ts)} ago
                                                             </Tooltip>
                                                         </>}
-                                                        {post.agent_edited && <>
-                                                            <MetaSeparator>·</MetaSeparator>
-                                                            <span style={{
-                                                                opacity: 0.5,
-                                                                fontStyle: 'italic'
-                                                            }}>
-                                                                agent modified
-                                                            </span>
-                                                        </>}
                                                     </MetaInfoRowLeft>
                                                     {renderPostMenu(post)}
                                                 </DesktopMetaInfoRow>
@@ -3318,8 +3291,6 @@ function ViewPostView({
                                                 {isRoot && <>
                                                     <RootTitleRow>
                                                         {(() => {
-                                                            const showOrig = isShowingOriginal(post && post.post_id);
-                                                            if (showOrig && post && post.original_title) return post.original_title;
                                                             if (post && post.title) return post.title;
                                                             if (mergedRoot && mergedRoot.title) return mergedRoot.title;
                                                             if (root && root.title) return root.title;
@@ -3333,14 +3304,7 @@ function ViewPostView({
                                                 {(() => {
                                                     const isFocusedPost = post.post_id === root?.post_id;
                                                     const baseDisplayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
-                                                    const showOrig = isShowingOriginal(post && post.post_id);
-                                                    const displayPost = showOrig
-                                                        ? {
-                                                            ...baseDisplayPost,
-                                                            title: baseDisplayPost && baseDisplayPost.original_title != null ? baseDisplayPost.original_title : (baseDisplayPost && baseDisplayPost.title),
-                                                            content: baseDisplayPost && baseDisplayPost.original_content != null ? baseDisplayPost.original_content : (baseDisplayPost && baseDisplayPost.content),
-                                                        }
-                                                        : baseDisplayPost;
+                                                    const displayPost = baseDisplayPost;
                                                     const displayContent = displayPost.content || '';
                                                     const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
                                                     const displayMediaMeta = Array.isArray(displayPost.media_meta) ? displayPost.media_meta : [];
@@ -3396,41 +3360,6 @@ function ViewPostView({
                                                     </StyledContentArea>;
                                                 })()}
 
-                                                {/* Agent annotation appendices */}
-                                                {!isCollapsed && post.appendices && post.appendices.length > 0 && post.appendices.map((a, idx) => {
-                                                    const label = a.agent_username || a.agent || 'Agent';
-                                                    // Appendices are authored by agent-tier accounts
-                                                    // (level 10). Color the @label so the agent tier
-                                                    // is visible in the inline byline.
-                                                    const appendixTierColor = getAuthorColor(Number(a.agent_level) || 10);
-                                                    const appendixTierTooltip = getAuthorTooltip(Number(a.agent_level) || 10);
-                                                    return <div key={`appx-${idx}`} style={{
-                                                        margin: '0.5rem 0'
-                                                    }}>
-                                                        <div style={{
-                                                            marginBottom: '0.2rem'
-                                                        }}>
-                                                            <Link to={`/u/${label}`} title={appendixTierTooltip || undefined} style={{
-                                                                textDecoration: 'underline',
-                                                                fontSize: '0.6rem',
-                                                                color: appendixTierColor || theme.colors?.textMuted || theme.colors?.textSecondary || '#888'
-                                                            }}>@{label}</Link>
-                                                            <span style={{
-                                                                color: theme.colors?.textMuted || '#888',
-                                                                fontSize: '0.6rem'
-                                                            }}>:</span>
-                                                        </div>
-                                                        <div style={{
-                                                            padding: '0.4rem 0.65rem',
-                                                            borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
-                                                            background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
-                                                            borderRadius: '0 6px 6px 0',
-                                                            fontSize: '0.85em'
-                                                        }}>
-                                                            <MarkdownRenderer text={a.text} />
-                                                        </div>
-                                                    </div>;
-                                                })}
                                                 {/* Action bar with horizontal votes */}
                                                 {!isCollapsed && <>
                                                     {state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit' ? <>
@@ -3527,8 +3456,8 @@ function ViewPostView({
                 const giftSubLabel = confirmGiftSub?.username
                     ? `@${confirmGiftSub.username}`
                     : (confirmGiftSub?.userId ? String(confirmGiftSub.userId) : 'this user');
-                const giftSubFeeLabel = confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel;
-                const giftSubFeeUmirage = confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage;
+                const giftSubFeeLabel = subFeeLabel;
+                const giftSubFeeUmirage = subFeeUmirage;
                 const donateBusy = isSendPending(confirmDonate?.userId);
                 const giftSubBusy = isSubscribePending(confirmGiftSub?.userId);
                 return <>
@@ -3554,9 +3483,9 @@ function ViewPostView({
                     />
                     <ConfirmDialog
                         open={!!confirmBlockTopic}
-                        title={`Block #${confirmBlockTopic?.topic || 'topic'}?`}
-                        message="Posts tagged with this topic will stop appearing in your Home and discovery feeds."
-                        confirmLabel="Block topic"
+                        title={`Block ${communityLabel(confirmBlockTopic?.topic || 'community')}?`}
+                        message="Posts in this community will stop appearing in your Home and discovery feeds."
+                        confirmLabel="Block community"
                         confirmVariant="danger"
                         pending={isBlocking}
                         onConfirm={confirmBlockTopicAction}
@@ -3597,7 +3526,7 @@ function ViewPostView({
                     <ConfirmDialog
                         open={!!confirmReportPost}
                         title="🚨 Report illegal content only"
-                        message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about wrong topic, untagged adult content, low quality, or anything you just don't like will be dismissed. To filter those out of your feed, follow a moderation agent. Agents are how content moderation works on Mirage for everyone."
+                        message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about the wrong community, untagged adult content, low quality, or anything you just don't like will be dismissed. Hide those from your feed with blocks and community filters."
                         confirmLabel="Report"
                         confirmVariant="warning"
                         pending={isReporting}

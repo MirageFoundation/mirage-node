@@ -98,3 +98,18 @@ export function formatMirageBalance(umirage) {
     // < 1M: show full number with commas
     return mirage.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
+
+/**
+ * Format a unix timestamp (seconds) as a short relative age, e.g. "5m ago".
+ */
+export function formatTimeAgo(unixSeconds) {
+    if (!unixSeconds) return null;
+    const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+    if (diff < 0) return 'just now';
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
+    if (diff < 31536000) return `${Math.floor(diff / 2592000)}mo ago`;
+    return `${Math.floor(diff / 31536000)}y ago`;
+}

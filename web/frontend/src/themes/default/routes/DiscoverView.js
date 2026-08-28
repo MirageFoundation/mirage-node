@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
@@ -59,7 +60,7 @@ const DiscoverWrap = styled.div`
 const HeaderRow = styled.div`
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: space-between;
     gap: 0.75rem;
     padding: 0.25rem 1rem 0.5rem;
 
@@ -213,24 +214,6 @@ const Row = styled.div`
     }
 `;
 
-const RowIconWrap = styled.span`
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.surface2};
-    border: 1px solid ${({ theme }) => theme.colors.border};
-    color: ${({ theme }) => theme.colors.subtleText};
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-
-    svg {
-        width: 15px;
-        height: 15px;
-    }
-`;
-
 const RowMain = styled.div`
     flex: 1;
     min-width: 0;
@@ -335,16 +318,15 @@ const FootHint = styled.div`
     }
 `;
 
-function formatCountMeta(t) {
-    const posts = Number(t.post_count || 0);
-    const comments = Number(t.comment_count || 0);
-    return `${posts.toLocaleString()} post${posts === 1 ? '' : 's'} · ${comments.toLocaleString()} comment${comments === 1 ? '' : 's'}`;
+function formatRowMeta(t) {
+    if (!t.curated) return `Uncurated · ${t.post_count} posts`;
+    return `Curated · ${t.live_team_count} teams · ${t.post_count} posts · Default: ${t.default_team.name} (${t.default_team.subscriber_count} subscribers)`;
 }
 
-function getToggleLabel({ isFollowing, hovering, pending, status }) {
-    if (pending) return status || (isFollowing ? 'Unfollowing…' : 'Following…');
-    if (isFollowing) return hovering ? 'Unfollow' : 'Following';
-    return 'Follow';
+function getToggleLabel({ isJoined, hovering, pending, status }) {
+    if (pending) return status || (isJoined ? 'Leaving…' : 'Joining…');
+    if (isJoined) return hovering ? 'Leave' : 'Joined';
+    return 'Join';
 }
 
 export default function DiscoverView({ state }) {
@@ -356,6 +338,7 @@ export default function DiscoverView({ state }) {
         searchResults,
         isSearching,
         loading,
+        error,
         hoverTopic,
         setHoverTopic,
         isTopicPending,
@@ -367,7 +350,7 @@ export default function DiscoverView({ state }) {
     const renderShell = (body) => (
         <ContentGrid>
             <Helmet>
-                <title>Topics | Mirage</title>
+                <title>Communities | Mirage</title>
             </Helmet>
             <FeedRailRow $feedViewMode="card">
                 <FeedCol>
@@ -389,17 +372,20 @@ export default function DiscoverView({ state }) {
     const headerBlock = (
         <>
             <HeaderRow>
-                <HeaderTitle>Topics</HeaderTitle>
+                <HeaderTitle>Communities</HeaderTitle>
+                <Button to="/curator-teams/new" variant="primary" size="sm">
+                    Create curator team
+                </Button>
             </HeaderRow>
             <SearchRow>
                 <SearchField>
                     <HiMagnifyingGlass className="search-icon" aria-hidden="true" />
                     <SearchInput
                         type="search"
-                        placeholder="Search topics"
+                        placeholder="Search communities"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
-                        aria-label="Search topics"
+                        aria-label="Search communities"
                     />
                     {hasQuery && (
                         <ClearButton
@@ -424,6 +410,10 @@ export default function DiscoverView({ state }) {
         );
     }
 
+    if (error) {
+        return renderShell(<><HeaderRow><HeaderTitle>Communities</HeaderTitle></HeaderRow><StateBlock><StateTitle>Couldn’t load communities</StateTitle><StateMessage>{error}</StateMessage></StateBlock></>);
+    }
+
     const topicsEmpty = filteredTopics.length === 0 && searchResults.length === 0 && !isSearching;
 
     if (topicsEmpty) {
@@ -435,13 +425,16 @@ export default function DiscoverView({ state }) {
                         <HiHashtag />
                     </StateIcon>
                     <StateTitle>
-                        {hasQuery ? 'No topics match your search' : 'No topics yet'}
+                        {hasQuery ? 'No communities match your search' : 'No communities yet'}
                     </StateTitle>
                     <StateMessage>
                         {hasQuery
-                            ? 'Try a different keyword or check your spelling.'
-                            : 'Topics will appear here as the community creates them.'}
+                            ? 'Try a different slug. Any valid slug can be used when composing a post.'
+                            : 'Compose a post with any valid slug to start a community.'}
                     </StateMessage>
+                    <Button to="/create_post" variant="primary" size="sm">
+                        Create post
+                    </Button>
                 </StateBlock>
             </>
         );
@@ -449,26 +442,24 @@ export default function DiscoverView({ state }) {
 
     const renderRow = (t, keyPrefix) => {
         const topicLower = t.topic.toLowerCase();
-        const isFollowing = isSubscribedTopic(t.topic);
+        const isJoined = isSubscribedTopic(t.topic);
         const pending = isTopicPending(topicLower);
         const hovering = hoverTopic === topicLower;
         const tag = t.dominant_tag ? normalizeTag(t.dominant_tag) : null;
+        const meta = formatRowMeta(t);
 
         return (
             <Row key={`${keyPrefix}-${t.topic}`}>
-                <RowIconWrap aria-hidden="true">
-                    <HiHashtag />
-                </RowIconWrap>
                 <RowMain>
                     <TopicLine>
-                        <TopicLink to={`/t/${t.topic}`}>{t.topic}</TopicLink>
+                        <TopicLink to={communityPath(t.topic)}>{communityLabel(t.topic)}</TopicLink>
                         {tag && <ContentTagBadge tag={tag} />}
                     </TopicLine>
-                    <RowMeta>{formatCountMeta(t)}</RowMeta>
+                    {meta ? <RowMeta>{meta}</RowMeta> : null}
                 </RowMain>
                 <RowActions>
                     <Button
-                        variant={isFollowing && hovering ? 'primaryDanger' : isFollowing ? 'subtle' : 'primary'}
+                        variant={isJoined && hovering ? 'primaryDanger' : isJoined ? 'subtle' : 'primary'}
                         size="sm"
                         minWidth="5.5rem"
                         disabled={pending}
@@ -478,7 +469,7 @@ export default function DiscoverView({ state }) {
                         onClick={() => handleSubscribeToggle(t.topic)}
                     >
                         {getToggleLabel({
-                            isFollowing,
+                            isJoined,
                             hovering,
                             pending,
                             status: formatTopicStatus(topicLower),
@@ -496,7 +487,7 @@ export default function DiscoverView({ state }) {
             {filteredTopics.length > 0 && (
                 <>
                     <SectionHeader>
-                        <span>{hasQuery ? 'Matching topics' : 'All topics'}</span>
+                        <span>{hasQuery ? 'Matching communities' : 'All communities'}</span>
                         <CountBadge>{filteredTopics.length}</CountBadge>
                     </SectionHeader>
                     <List>{filteredTopics.map((t) => renderRow(t, 'topic'))}</List>
@@ -506,7 +497,7 @@ export default function DiscoverView({ state }) {
             {searchResults.length > 0 && (
                 <>
                     <SectionHeader>
-                        <span>Topics with fewer than 10 posts</span>
+                        <span>More communities</span>
                         <CountBadge>{searchResults.length}</CountBadge>
                     </SectionHeader>
                     <List>{searchResults.map((t) => renderRow(t, 'search'))}</List>
@@ -519,7 +510,7 @@ export default function DiscoverView({ state }) {
 
             {showSmallHint && (
                 <FootHint>
-                    and {smallTopicsCount} more topic{smallTopicsCount !== 1 ? 's' : ''} with fewer than 10 posts
+                    and {smallTopicsCount} more communit{smallTopicsCount !== 1 ? 'ies' : 'y'} with fewer than 10 posts
                 </FootHint>
             )}
         </>

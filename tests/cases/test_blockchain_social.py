@@ -51,7 +51,7 @@ from tests.blockchain_helpers import (
     _build_msg_block_post, _build_msg_block_user, _build_msg_block_community,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
-    _build_msg_join_community, _build_msg_leave_community, _claim_community,
+    _build_msg_join_community, _build_msg_leave_community,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
     _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
     _build_msg_unblock_post, _build_msg_unblock_user, _build_msg_unblock_topic,
@@ -174,13 +174,7 @@ def test_follow_limits(backend: str) -> None:
     joined_targets: list[str] = []
     for start in range(0, remaining_joined, chunk_size):
         batch_count = min(chunk_size, remaining_joined - start)
-        # Claim every community in the chunk before any envelope is timestamped.
-        # Each claim is a CreateCommunity submitted with wait_deliver, so claiming
-        # inside the build loop spent minutes between the first timestamp and the
-        # submit and aged the whole batch past max_envelope_age.
         topics = [f"ft{_rand_str(4)}{start + i}" for i in range(batch_count)]
-        for topic in topics:
-            _claim_community(backend, topic)
         joined_targets.extend(topics)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
@@ -208,7 +202,6 @@ def test_follow_limits(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_topic = f"ft{_rand_str(4)}over"
-        _claim_community(backend, over_topic)
         nonce = _gen_nonce()
         base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, over_topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
@@ -328,7 +321,6 @@ def test_follow_limits(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
     block_topic = f"mx{_rand_str(4)}"
-    _claim_community(backend, block_topic)
     msg = _build_msg_block_community(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgBlockCommunity")],

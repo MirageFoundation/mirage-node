@@ -206,24 +206,12 @@ func TestListCountReadFailurePropagates(t *testing.T) {
 			_, err := mk.AddFollowedUser(ctx, owner, "target")
 			return err
 		}},
-		"followed_topics": {types.FollowedTopicsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
-			_, err := mk.AddFollowedTopic(ctx, owner, "topic")
-			return err
-		}},
-		"enabled_agents": {types.EnabledAgentsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
-			_, err := mk.AddEnabledAgent(ctx, owner, "agent")
-			return err
-		}},
 		"blocked_users": {types.BlockedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
 			_, err := mk.AddBlockedUserDeque(ctx, owner, "target", 100)
 			return err
 		}},
 		"blocked_posts": {types.BlockedPostsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
 			_, err := mk.AddBlockedPostDeque(ctx, owner, "abcd", 100)
-			return err
-		}},
-		"blocked_topics": {types.BlockedTopicsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
-			_, err := mk.AddBlockedTopicDeque(ctx, owner, "topic", 100)
 			return err
 		}},
 	}
@@ -252,20 +240,12 @@ func TestListSequenceReadFailurePropagates(t *testing.T) {
 		prefix string
 		add    func(mk *mockKeeper, ctx sdk.Context) error
 	}{
-		"enabled_agents": {types.EnabledAgentsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
-			_, err := mk.AddEnabledAgent(ctx, owner, "agent")
-			return err
-		}},
 		"blocked_users": {types.BlockedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
 			_, err := mk.AddBlockedUserDeque(ctx, owner, "target", 100)
 			return err
 		}},
 		"blocked_posts": {types.BlockedPostsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
 			_, err := mk.AddBlockedPostDeque(ctx, owner, "abcd", 100)
-			return err
-		}},
-		"blocked_topics": {types.BlockedTopicsPrefix, func(mk *mockKeeper, ctx sdk.Context) error {
-			_, err := mk.AddBlockedTopicDeque(ctx, owner, "topic", 100)
 			return err
 		}},
 	}
@@ -297,17 +277,17 @@ func TestListMetadataDecodeFailuresPropagate(t *testing.T) {
 
 	t.Run("sequence", func(t *testing.T) {
 		mk := newMockKeeper()
-		mk.storeService.store[listSeqKey(types.EnabledAgentsPrefix, owner)] = []byte{1}
+		mk.storeService.store[listSeqKey(types.BlockedUsersPrefix, owner)] = []byte{1}
 
-		_, err := mk.AddEnabledAgent(newMockContext(), owner, "agent")
+		_, err := mk.AddBlockedUserDeque(newMockContext(), owner, "target", 100)
 		require.ErrorContains(t, err, "sequence decode failed")
 	})
 
 	t.Run("position", func(t *testing.T) {
 		mk := newMockKeeper()
-		mk.storeService.store[types.EnabledAgentsPrefix+owner+"/agent"] = []byte{1}
+		mk.storeService.store[types.BlockedUsersPrefix+owner+"/target"] = []byte{1}
 
-		_, err := mk.ListEnabledAgentsOrdered(newMockContext(), owner)
+		_, err := mk.ListBlockedUsers(newMockContext(), owner)
 		require.ErrorContains(t, err, "position decode failed")
 	})
 }
@@ -327,9 +307,9 @@ func TestListMetadataOverflowPropagates(t *testing.T) {
 		mk := newMockKeeper()
 		bz := make([]byte, 8)
 		binary.BigEndian.PutUint64(bz, math.MaxUint64)
-		mk.storeService.store[listSeqKey(types.EnabledAgentsPrefix, owner)] = bz
+		mk.storeService.store[listSeqKey(types.BlockedUsersPrefix, owner)] = bz
 
-		_, err := mk.AddEnabledAgent(newMockContext(), owner, "agent")
+		_, err := mk.AddBlockedUserDeque(newMockContext(), owner, "target", 100)
 		require.ErrorContains(t, err, "sequence overflow")
 	})
 }
@@ -361,12 +341,9 @@ func TestCountReadFailurePropagatesThroughPublicCounters(t *testing.T) {
 		prefix string
 		count  func(mk *mockKeeper, ctx sdk.Context) (uint32, error)
 	}{
-		"followed_users":  {types.FollowedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountFollowedUsers(ctx, owner) }},
-		"followed_topics": {types.FollowedTopicsPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountFollowedTopics(ctx, owner) }},
-		"enabled_agents":  {types.EnabledAgentsPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountEnabledAgents(ctx, owner) }},
-		"blocked_users":   {types.BlockedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountBlockedUsers(ctx, owner) }},
-		"blocked_posts":   {types.BlockedPostsPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountBlockedPosts(ctx, owner) }},
-		"blocked_topics":  {types.BlockedTopicsPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountBlockedTopics(ctx, owner) }},
+		"followed_users": {types.FollowedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountFollowedUsers(ctx, owner) }},
+		"blocked_users":  {types.BlockedUsersPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountBlockedUsers(ctx, owner) }},
+		"blocked_posts":  {types.BlockedPostsPrefix, func(mk *mockKeeper, ctx sdk.Context) (uint32, error) { return mk.CountBlockedPosts(ctx, owner) }},
 	}
 
 	for name, tc := range counters {

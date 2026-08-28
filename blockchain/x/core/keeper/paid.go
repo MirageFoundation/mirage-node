@@ -42,10 +42,7 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 			if !ok {
 				return fmt.Errorf("CONSENSUS_FATAL:JOIN_PREF_MISSING owner=%s community=%s", owner, slug)
 			}
-			if err := k.addSupportContribution(ctx, slug, pref); err != nil {
-				return err
-			}
-			if err := k.recomputeCrown(ctx, slug); err != nil {
+			if err := k.addSubscriberContribution(ctx, slug, pref); err != nil {
 				return err
 			}
 		}
@@ -76,18 +73,26 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		if !ok {
 			return fmt.Errorf("CONSENSUS_FATAL:JOIN_PREF_MISSING owner=%s community=%s", owner, slug)
 		}
-		if err := k.removeSupportContribution(ctx, slug, pref, true); err != nil {
+		if err := k.removeSubscriberContribution(ctx, slug, pref); err != nil {
 			return err
 		}
-		if err := k.recomputeCrown(ctx, slug); err != nil {
-			return err
-		}
+	}
+	if err := k.ClearPendingInvitationsForTarget(ctx, owner); err != nil {
+		return err
 	}
 	var memberships []struct {
 		slug   string
 		teamID uint64
 	}
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamUserPrefix(owner), 0, func(key, value []byte) error {
+	params := k.GetParams(ctx)
+	tier := params.GetTierConfig(int(core.Level))
+	if tier == nil {
+		return fmt.Errorf("tier config missing for paid-state transition")
+	}
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamUserPrefix(owner), int(tier.MaxCurationMemberships)+1, func(key, value []byte) error {
+		if uint64(len(memberships)) >= tier.MaxCurationMemberships {
+			return fmt.Errorf("curation membership count exceeds tier maximum")
+		}
 		id, err := getU64(value)
 		if err != nil {
 			return err
@@ -142,7 +147,11 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 		order uint64
 	}
 	var members []mem
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), 11, func(_, value []byte) error {
+	maxMembers := k.GetParams(ctx).MaxCuratorsPerTeam
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), int(maxMembers)+1, func(_, value []byte) error {
+		if uint64(len(members)) >= maxMembers {
+			return fmt.Errorf("team member count exceeds configured maximum")
+		}
 		var m types.CurationTeamMember
 		if err := k.cdc.Unmarshal(value, &m); err != nil {
 			return err
@@ -163,9 +172,6 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 			return err
 		}
 		if !found || !core.EffectivePaid {
-			if err := k.RemoveCuratorFromTeam(ctx, slug, teamID, m.addr, "curator_removed"); err != nil {
-				return err
-			}
 			continue
 		}
 		if successor == "" || m.order < bestOrder || (m.order == bestOrder && m.addr < successor) {
@@ -179,29 +185,16 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 	if err := k.RemoveCuratorFromTeam(ctx, slug, teamID, owner, "curator_removed"); err != nil {
 		return err
 	}
-	if err := k.removeSupportIndex(ctx, team); err != nil {
-		return err
-	}
-	if err := k.deleteEligibleIndex(ctx, team); err != nil {
-		return err
-	}
+	oldOwner := team.Owner
 	team.Owner = successor
 	if err := k.SetCurationTeam(ctx, team); err != nil {
-		return err
-	}
-	if err := k.writeEligibleIndex(ctx, team); err != nil {
-		return err
-	}
-	if err := k.writeSupportIndex(ctx, team); err != nil {
-		return err
-	}
-	if err := k.recomputeCrown(ctx, slug); err != nil {
 		return err
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_owner_changed",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
-		sdk.NewAttribute("owner", successor),
+		sdk.NewAttribute("old_owner", oldOwner),
+		sdk.NewAttribute("new_owner", successor),
 	))
 	return nil
 }

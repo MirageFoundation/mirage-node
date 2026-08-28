@@ -426,6 +426,10 @@ class Indexer:
 
                 self._process_governance_events(result_obj, ts, height)
                 self._process_subscription_events(result_obj, ts, height)
+                self.processor.process_curation_events(
+                    result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [],
+                    height,
+                )
                 self._accumulate_node_earnings(result_obj, height, now)
 
                 self.db.upsert_recent_block(height, block_hash, ts)
@@ -570,7 +574,16 @@ class Indexer:
                 continue
             if not any_msg.type_url.startswith("/mirage.core.v1."):
                 continue
-            self.processor.process_core_message(any_msg.type_url, any_msg.value, tx_hash, ts, height)
+            self.processor.process_core_message(
+                any_msg.type_url,
+                any_msg.value,
+                tx_hash,
+                ts,
+                height,
+                events=tx_result.get("events") or [],
+            )
+            self.processor.refresh_message_signer_runtime(any_msg.type_url, any_msg.value)
+        self.processor.process_curation_events(tx_result.get("events") or [], height, tx_hash)
 
     def _process_subscription_events(self, result_obj: dict, ts: int, height: int):
         """Process subscription expiration/renewal events from EndBlock."""
@@ -580,14 +593,21 @@ class Indexer:
 
         for event in events:
             event_type = event.get("type", "")
-            if event_type not in ("subscription_expired", "subscription_renewed"):
+            if event_type not in (
+                "subscription_expired",
+                "subscription_renewed",
+                "subscription_renewal_warning",
+            ):
                 continue
             attrs = {attr_text(a.get("key")): attr_text(a.get("value")) for a in event.get("attributes", [])}
             address = attrs.get("address", "")
             if not address:
                 raise RuntimeError(f"{event_type} event without address at height {height}")
 
-            if event_type == "subscription_expired":
+            if event_type == "subscription_renewal_warning":
+                logger.info("Subscription renewal warning projected for %s", address)
+                self.processor.update_subscription_runtime(address)
+            elif event_type == "subscription_expired":
                 logger.info("Subscription expired for %s (reason: %s)", address, attrs.get("reason", "unknown"))
                 self.processor.update_profile_level(address, 0, ts)
             else:
@@ -638,7 +658,14 @@ class Indexer:
                 if not type_url or not value_b64:
                     raise RuntimeError(f"Proposal {proposal_id} returned a message without type_url/value")
                 value_bytes = base64.b64decode(value_b64)
-                self.processor.process_core_message(type_url, value_bytes, f"proposal-{proposal_id}", ts, height)
+                self.processor.process_core_message(
+                    type_url,
+                    value_bytes,
+                    f"proposal-{proposal_id}",
+                    ts,
+                    height,
+                    events=events,
+                )
                 if type_url == TYPE_URL_UPDATE_PARAMS:
                     params_updated = True
 

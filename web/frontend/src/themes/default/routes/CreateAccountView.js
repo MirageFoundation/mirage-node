@@ -6,7 +6,6 @@ import AuthPageShell, {
   AuthErrorMessage,
   AuthFieldRow,
   AuthHelperText,
-  AuthInput,
   AuthLabel,
   AuthLink,
   AuthLinkRow,
@@ -15,17 +14,12 @@ import AuthPageShell, {
 } from "../components/AuthPageShell.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../utils/chainParams";
-import { formatError } from "../../../utils/errorMessages";
 import { useCreateAccount } from "../../../logic/useCreateAccount";
 
 const StatusLine = styled.div`
   color: ${({ theme }) => theme.colors.text};
   font-size: 0.72rem;
   line-height: 1.5;
-`;
-
-const StatusMuted = styled.span`
-  color: ${({ theme }) => theme.colors.subtleText};
 `;
 
 /* Centered, non-wrapping status line used by the "Signup unavailable"
@@ -113,11 +107,7 @@ function CreateAccountView({ state, setCredentials }) {
   const {
     nodeConfig,
     registrationEnabled,
-    inviteCodeRequired,
     fromRecovery,
-    refFromUrl,
-    inviteCode,
-    setInviteCode,
     usernameInput,
     setUsernameInput,
     submitting,
@@ -125,9 +115,6 @@ function CreateAccountView({ state, setCredentials }) {
     submitError,
     setSubmitError,
     cooldownUntil,
-    referrerStatus,
-    referrerAvailable,
-    referrerError,
     handleContinue,
     usernameFinal,
     configFetchDone,
@@ -141,8 +128,7 @@ function CreateAccountView({ state, setCredentials }) {
   const continueDisabled =
     submitting
     || Date.now() < cooldownUntil
-    || usernameFinal.trim() === ""
-    || referrerStatus === "checking";
+    || usernameFinal.trim() === "";
 
   const footer = (
     <AuthLinkRow>
@@ -184,81 +170,6 @@ function CreateAccountView({ state, setCredentials }) {
     );
   }
 
-  const referralInvalid = referrerStatus === "invalid" && refFromUrl;
-
-  const renderInviteSection = () => {
-    if (!inviteCodeRequired) return null;
-
-    if (referrerStatus === "valid") {
-      return (
-        <AuthSubtlePanel>
-          <StatusLine>
-            Referral from <strong>@{refFromUrl}</strong> applied.
-          </StatusLine>
-          {referrerAvailable > 0 ? (
-            <AuthHelperText>
-              {referrerAvailable} {referrerAvailable === 1 ? "code" : "codes"} remaining.
-            </AuthHelperText>
-          ) : null}
-        </AuthSubtlePanel>
-      );
-    }
-
-    if (referrerStatus === "checking") {
-      return (
-        <AuthSubtlePanel>
-          <StatusLine>
-            <StatusMuted>Validating referral link…</StatusMuted>
-          </StatusLine>
-        </AuthSubtlePanel>
-      );
-    }
-
-    if (referralInvalid) {
-      return (
-        <>
-          <AuthErrorMessage role="alert">
-            {formatError(referrerError)}
-          </AuthErrorMessage>
-          <AuthHelperText>
-            Have an invite code? <AuthLink href="/signup">Enter it manually</AuthLink>.
-          </AuthHelperText>
-        </>
-      );
-    }
-
-    return (
-      <AuthFieldRow>
-        <AuthLabel htmlFor="invite-code-entry">Invite code</AuthLabel>
-        <AuthInput
-          id="invite-code-entry"
-          placeholder="XXXX-XXXX"
-          value={inviteCode}
-          onChange={(event) => {
-            const raw = event.target.value.toUpperCase();
-            const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-            const limited = alphanumOnly.slice(0, 8);
-            const formatted = limited.length > 4
-              ? `${limited.slice(0, 4)}-${limited.slice(4)}`
-              : limited;
-            setInviteCode(formatted);
-            setSubmitError("");
-          }}
-          maxLength={9}
-          name="invite-code-entry"
-          autoComplete="one-time-code"
-          autoCorrect="off"
-          autoCapitalize="characters"
-          spellCheck="false"
-          data-lpignore="true"
-          data-1p-ignore="true"
-          data-bwignore="true"
-          data-form-type="other"
-        />
-      </AuthFieldRow>
-    );
-  };
-
   const buttonLabel = buttonStatus === "preparing"
     ? "Preparing…"
     : buttonStatus === "submitting"
@@ -280,61 +191,55 @@ function CreateAccountView({ state, setCredentials }) {
             footer={footer}
           >
             <AuthStack as="form" onSubmit={handleContinue}>
-              {renderInviteSection()}
+              <AuthFieldRow>
+                <AuthLabel htmlFor="display-name-entry">Username</AuthLabel>
+                <HandleField>
+                  <HandlePrefix aria-hidden="true" $active={usernameInput.length > 0}>Anon-</HandlePrefix>
+                  <HandleInput
+                    id="display-name-entry"
+                    placeholder="name"
+                    value={usernameInput}
+                    onChange={(event) => {
+                      const raw = event.target.value;
+                      const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                      const maxLen = getMaxInputLength(true);
+                      setUsernameInput(cleaned.slice(0, maxLen ?? 100));
+                      setSubmitError("");
+                    }}
+                    onPaste={(event) => event.preventDefault()}
+                    maxLength={getMaxInputLength(true) || 100}
+                    name="display-name-entry"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                  />
+                </HandleField>
+                <AuthHelperText>
+                  Letters, numbers, and hyphens only.
+                </AuthHelperText>
+              </AuthFieldRow>
 
-              {!referralInvalid ? (
-                <>
-                  <AuthFieldRow>
-                    <AuthLabel htmlFor="display-name-entry">Username</AuthLabel>
-                    <HandleField>
-                      <HandlePrefix aria-hidden="true" $active={usernameInput.length > 0}>Anon-</HandlePrefix>
-                      <HandleInput
-                        id="display-name-entry"
-                        placeholder="name"
-                        value={usernameInput}
-                        onChange={(event) => {
-                          const raw = event.target.value;
-                          const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
-                          const maxLen = getMaxInputLength(true);
-                          setUsernameInput(cleaned.slice(0, maxLen ?? 100));
-                          setSubmitError("");
-                        }}
-                        onPaste={(event) => event.preventDefault()}
-                        maxLength={getMaxInputLength(true) || 100}
-                        name="display-name-entry"
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck="false"
-                        data-lpignore="true"
-                        data-1p-ignore="true"
-                        data-bwignore="true"
-                        data-form-type="other"
-                      />
-                    </HandleField>
-                    <AuthHelperText>
-                      Letters, numbers, and hyphens only.
-                    </AuthHelperText>
-                  </AuthFieldRow>
-
-                  {submitError ? (
-                    <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
-                  ) : null}
-
-                  <AuthButtonRow>
-                    <PrimaryButton
-                      type="submit"
-                      disabled={continueDisabled}
-                      fullWidth
-                      mobileFullWidth
-                      size="sm"
-                      loading={submitting}
-                    >
-                      {buttonLabel}
-                    </PrimaryButton>
-                  </AuthButtonRow>
-                </>
+              {submitError ? (
+                <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>
               ) : null}
+
+              <AuthButtonRow>
+                <PrimaryButton
+                  type="submit"
+                  disabled={continueDisabled}
+                  fullWidth
+                  mobileFullWidth
+                  size="sm"
+                  loading={submitting}
+                >
+                  {buttonLabel}
+                </PrimaryButton>
+              </AuthButtonRow>
             </AuthStack>
           </AuthPageShell>
         </ModernPostFeed>

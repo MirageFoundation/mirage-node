@@ -168,7 +168,7 @@ The ante handler detects transaction type and routes accordingly:
 **Path B: Relay Transactions (Core Messages)**
 - Used for: MsgPost, MsgVote, MsgSetUsername, etc.
 - Meta-signature embedded in message fields
-- PoW validation OR reserve-based gas payment
+- PoW validation for free users OR subscriber daily-quota accounting
 - Validator pays outer transaction fees
 
 ---
@@ -188,7 +188,7 @@ Mirage needs:
 - Signature-less outer transactions (validator signs, not user)
 - User identity proven through embedded meta-signatures
 - Proof-of-Work as alternative to gas fees for free users
-- Gas fees deducted from escrowed reserves for paid users
+- Zero-fee subscriber relays with a governance-controlled daily limit
 
 ### Decorator Chain
 
@@ -233,7 +233,7 @@ The `PowDecorator` enforces Proof-of-Work for free-tier users. This is the key i
 
 **Tier-Based PoW Bypass:**
 - Free users (level 0): Must provide valid PoW
-- Paid users (level 1, 10): Skip PoW, pay from escrowed reserve
+- Subscribers (level 1): Skip PoW while below the daily relay limit
 - Admins (level >= 100): Pay from on-chain balance
 
 ### RelaySigDecorator: Meta-Signature Verification
@@ -282,11 +282,17 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 
 **Profile Messages:**
 - `MsgSetUsername`: Claim or change username
-- `MsgEnableAgent`, `MsgDisableAgent`: Manage enabled agents
 - `MsgFollowUser`, `MsgUnfollowUser`: Manage followed users
-- `MsgFollowTopic`, `MsgUnfollowTopic`: Manage followed topics
+- `MsgJoinCommunity`, `MsgLeaveCommunity`: Manage joined communities
 - `MsgBlockUser`, `MsgUnblockUser`: Personal blocking
 - `MsgBlockPost`, `MsgUnblockPost`: Personal post hiding
+- `MsgBlockCommunity`, `MsgUnblockCommunity`: Personal community blocking
+
+**Curation Messages:**
+- `MsgCreateCurationTeam`: Start a subscriber-led curator team
+- `MsgSetCurationPreference`: Select the node default, a team, or raw view
+- Invitation and membership messages: Maintain a consent-based paid curator roster
+- Moderation messages: Hide posts/users, lock threads, and set subscriber-only lenses
 
 **Financial Messages:**
 - `MsgSendTokens`: Transfer MIRAGE tokens
@@ -307,12 +313,12 @@ The module stores state under prefixed keys in the KV store:
 | Prefix | Purpose |
 |--------|---------|
 | `profile/` | Core profile data (JSON serialized) |
-| `plist_agents/` | Enabled agents list |
 | `profile_users/` | Followed users list |
-| `profile_topics/` | Followed topics list |
+| `joined_communities/` | Joined communities and curation preferences |
 | `profile_blocked_users/` | Blocked users list |
 | `profile_blocked_posts/` | Blocked posts list |
-| `profile_blocked_topics/` | Blocked topics list |
+| `blocked_communities/` | Blocked communities list |
+| `curation_teams/` | Curator teams, members, invitations, and moderation state |
 | `username/` | Username → address mapping |
 | `difficulty/` | Current PoW difficulty |
 | `pow_window/` | Per-block message counts |
@@ -327,7 +333,7 @@ Each message handler follows a consistent pattern:
 3. **Validation**: Check field constraints (lengths, formats, ownership)
 4. **Tier Limits**: Apply tier-based restrictions
 5. **State Mutation**: Update KV store
-6. **Gas Fee Deduction**: Deduct from reserve (paid users) or skip (free users)
+6. **Relay Accounting**: Check PoW for free users or subscriber daily quota
 7. **Event Emission**: Emit events for indexer consumption
 
 **Important Design Decision: Minimal On-Chain Validation**
@@ -356,15 +362,14 @@ The tier system serves multiple purposes:
 1. **Sustainable Economics**: Paid users fund validator operations
 2. **Spam Resistance**: Higher tiers = more trust = more features
 3. **Feature Segmentation**: Premium features incentivize subscriptions
-4. **Gas Reserve Model**: Paid users pre-pay for gas, improving UX
+4. **Predictable Relay Access**: Subscribers receive zero-fee relays within a daily cap
 
 ### Tier Definitions
 
 | Level | Name | Monthly Fee | Key Features |
 |-------|------|-------------|--------------|
 | 0 | Free | 0 | PoW required, limited content length, "Anon-" username prefix |
-| 1 | Subscriber | 100K MIRAGE | No PoW, custom username, biography, avatar |
-| 2 | Agent | 200K MIRAGE | Agent eligibility, extended topic blocking, longer content |
+| 1 | Subscriber | Governance parameter | No PoW within daily quota, custom profile, curator-team eligibility |
 | 100+ | Admin | N/A | Governance-assigned, special privileges |
 
 ### Subscription Lifecycle
@@ -379,8 +384,8 @@ User calls MsgSubscribe(level=1)
            ▼
 ┌─────────────────────────────────────────┐
 │  1. Validate user has sufficient balance │
-│  2. Burn non-reserve portion of fee      │
-│  3. Escrow reserve portion to module     │
+│  2. Burn the configured burn share       │
+│  3. Fund the daily creator pool          │
 │  4. Set level, expiry, auto_renew=true   │
 │  5. Index subscription for renewal       │
 └─────────────────────────────────────────┘
@@ -399,23 +404,9 @@ User calls MsgSubscribe(level=1)
 └─────────────────────────────────────────┘
 ```
 
-### Reserve Fund Model
+### Subscriber Relay Quota
 
-**Why Escrow?**
-
-When a user subscribes, a portion of their fee (default 80%) is escrowed to the `core` module account as a "reserve fund". This reserve pays for gas fees on relayed transactions.
-
-Benefits:
-- **Predictable Costs**: Users know their monthly cost upfront
-- **No Per-Transaction Fees**: Users don't see gas deductions
-- **Automatic Downgrade**: When reserve exhausts, user gracefully falls back to free tier
-
-**Gas Fee Calculation:**
-```
-fee = min(gasConsumed * relayMinGasPrice, relayMaxGasFee)
-```
-
-If reserve is insufficient for even one transaction, the user is immediately downgraded to free tier and must provide PoW.
+Subscribers do not escrow a relay reserve. Their signed relay actions use no proof of work and charge no per-message fee while the account remains below `subscriber_daily_relay_limit` for the UTC day. The chain rejects further subscriber relays after the cap and resets the counter at the next UTC day; it does not silently downgrade the transaction to the free-user path.
 
 ---
 
@@ -443,8 +434,8 @@ If reserve is insufficient for even one transaction, the user is immediately dow
 
 **Fee Burning:**
 - All fees collected in `fee_collector` are burned in `BeginBlock`
-- Subscription fees (non-reserve portion) burned immediately
-- Reserve fees burned as consumed or at subscription end
+- The configured share of each subscription payment is burned immediately
+- The remaining configured share funds the daily creator pool
 
 ### Economic Equilibrium
 
@@ -501,7 +492,7 @@ ctx.Logger().Warn("relay insufficient fee", "offered", offered.String(), "requir
 **Subscription Events:**
 ```
 ctx.Logger().Info("processSubscriptions: subscription renewed", "address", sub.Address, "level", core.Level)
-ctx.Logger().Info("deductRelayGasFee: reserve exhausted, downgrading to free", "owner", owner)
+ctx.Logger().Info("subscriber daily relay limit reached", "owner", owner, "used", used, "limit", limit)
 ```
 
 **Difficulty Adjustment:**
@@ -516,6 +507,8 @@ The module emits events that the indexer consumes:
 
 - `subscription_renewed`: Subscription successfully renewed
 - `subscription_expired`: Subscription ended (with reason)
+- `curation_team_subscriber_count_changed`: Final paid explicit subscriber count
+- `curation_team_owner_changed`: Deterministic leadership transfer after expiry
 
 ### Query Endpoints
 

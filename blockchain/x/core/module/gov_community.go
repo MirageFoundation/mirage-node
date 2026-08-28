@@ -18,25 +18,11 @@ func requireGov(authority string) error {
 }
 
 func (am AppModule) GovCreateCommunity(ctx context.Context, req *types.MsgGovCreateCommunity) (*types.MsgGovCreateCommunityResponse, error) {
-	if err := requireGov(req.GetAuthority()); err != nil {
-		return nil, err
-	}
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	if err := am.k.CreateCommunity(sdkCtx, strings.TrimSpace(req.GetFounder()), strings.TrimSpace(req.GetCommunity()), req.GetTitle(), req.GetDescription(), req.GetOriginalTeamName(), req.GetBio(), req.GetPolicy()); err != nil {
-		return nil, err
-	}
-	return &types.MsgGovCreateCommunityResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgGovCreateCommunity is not accepted after v1.39.0")
 }
 
 func (am AppModule) GovSetCommunityFounder(ctx context.Context, req *types.MsgGovSetCommunityFounder) (*types.MsgGovSetCommunityFounderResponse, error) {
-	if err := requireGov(req.GetAuthority()); err != nil {
-		return nil, err
-	}
-	wrapped := &types.MsgTransferCommunity{Authority: req.GetAuthority(), Community: req.GetCommunity(), NewFounder: req.GetNewFounder()}
-	if _, err := am.TransferCommunity(ctx, wrapped); err != nil {
-		return nil, err
-	}
-	return &types.MsgGovSetCommunityFounderResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgGovSetCommunityFounder is not accepted after v1.39.0")
 }
 
 func (am AppModule) GovCreateCurationTeam(ctx context.Context, req *types.MsgGovCreateCurationTeam) (*types.MsgGovCreateCurationTeamResponse, error) {
@@ -44,7 +30,7 @@ func (am AppModule) GovCreateCurationTeam(ctx context.Context, req *types.MsgGov
 		return nil, err
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	if _, err := am.k.CreateAlternativeTeam(sdkCtx, strings.TrimSpace(req.GetOwner()), strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetBio(), req.GetPolicy()); err != nil {
+	if _, err := am.k.CreateCurationTeam(sdkCtx, strings.TrimSpace(req.GetOwner()), strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
 		return nil, err
 	}
 	return &types.MsgGovCreateCurationTeamResponse{}, nil
@@ -55,12 +41,7 @@ func (am AppModule) GovSetCurationTeamOwner(ctx context.Context, req *types.MsgG
 		return nil, err
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	team, ok, err := am.k.GetCurationTeam(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
-	if err != nil || !ok {
-		return nil, fmt.Errorf("team not found")
-	}
-	team.Owner = strings.TrimSpace(req.GetNewOwner())
-	if err := am.k.SetCurationTeam(sdkCtx, team); err != nil {
+	if err := am.k.SetCurationTeamOwner(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.TrimSpace(req.GetNewOwner())); err != nil {
 		return nil, err
 	}
 	return &types.MsgGovSetCurationTeamOwnerResponse{}, nil
@@ -79,7 +60,20 @@ func (am AppModule) GovSetCuratorMembership(ctx context.Context, req *types.MsgG
 		}
 		return &types.MsgGovSetCuratorMembershipResponse{}, nil
 	}
-	return &types.MsgGovSetCuratorMembershipResponse{}, fmt.Errorf("governance membership add must go through invitation+membership helpers")
+	team, ok, err := am.k.GetCurationTeam(sdkCtx, slug, req.GetTeamId())
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("team not found")
+	}
+	if err := am.k.InviteCurator(sdkCtx, team.Owner, slug, req.GetTeamId(), target); err != nil {
+		return nil, err
+	}
+	if err := am.k.AcceptCuratorInvite(sdkCtx, target, slug, req.GetTeamId()); err != nil {
+		return nil, err
+	}
+	return &types.MsgGovSetCuratorMembershipResponse{}, nil
 }
 
 func (am AppModule) GovSetCommunityPreference(ctx context.Context, req *types.MsgGovSetCommunityPreference) (*types.MsgGovSetCommunityPreferenceResponse, error) {
@@ -104,7 +98,10 @@ func (am AppModule) GovSetCommunityPreference(ctx context.Context, req *types.Ms
 	} else if !joined {
 		params := am.k.GetParams(sdkCtx)
 		tier := params.GetTierConfig(int(core.Level))
-		if err := am.k.JoinCommunity(sdkCtx, owner, slug, core.EffectivePaid, uint32(tier.MaxJoinedCommunities), true); err != nil {
+		if tier == nil {
+			return nil, fmt.Errorf("tier config not found")
+		}
+		if err := am.k.JoinCommunity(sdkCtx, owner, slug, uint32(tier.MaxJoinedCommunities)); err != nil {
 			return nil, err
 		}
 	}
@@ -156,9 +153,26 @@ func (am AppModule) GovSetCuratorInvitation(ctx context.Context, req *types.MsgG
 			return nil, err
 		}
 	case types.CuratorInvitationAction_CURATOR_INVITATION_ACTION_REVOKE, types.CuratorInvitationAction_CURATOR_INVITATION_ACTION_DECLINE:
+		inviter, err := am.k.GetRaw(sdkCtx, types.KeyCurationInvite(slug, req.GetTeamId(), invitee))
+		if err != nil {
+			return nil, err
+		}
 		if err := am.k.ClearInvite(sdkCtx, slug, req.GetTeamId(), invitee); err != nil {
 			return nil, err
 		}
+		status := "revoked"
+		eventType := "curator_invitation_revoked"
+		if req.GetAction() == types.CuratorInvitationAction_CURATOR_INVITATION_ACTION_DECLINE {
+			status = "declined"
+			eventType = "curator_invitation_declined"
+		}
+		sdkCtx.EventManager().EmitEvent(sdk.NewEvent(eventType,
+			sdk.NewAttribute("community", slug),
+			sdk.NewAttribute("team_id", fmt.Sprintf("%d", req.GetTeamId())),
+			sdk.NewAttribute("target", invitee),
+			sdk.NewAttribute("inviter", string(inviter)),
+			sdk.NewAttribute("status", status),
+		))
 	default:
 		return nil, fmt.Errorf("unknown invitation action")
 	}
@@ -181,7 +195,9 @@ func (am AppModule) GovSetSubscriptionState(ctx context.Context, req *types.MsgG
 			return nil, fmt.Errorf("subscribed=true requires expiry after block time")
 		}
 		if core.SubscriptionExpiry > 0 {
-			_ = am.k.RemoveSubscription(sdkCtx, owner, core.SubscriptionExpiry)
+			if err := am.k.RemoveSubscription(sdkCtx, owner, core.SubscriptionExpiry); err != nil {
+				return nil, err
+			}
 		}
 		core.SubscriptionExpiry = req.GetNominalExpiry()
 		core.AutoRenew = req.GetAutoRenew()

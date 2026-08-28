@@ -11,21 +11,21 @@ import { formatError } from "../utils/errorMessages";
 export const TIER_NAMES = {
     0: 'Free',
     1: 'Subscriber',
-    10: 'Agent'
 };
 export const TIER_COLORS = {
     0: '#6B7280',
     1: '#F59E0B',
-    10: '#EF4444'
 };
 export const ADMIN_COLOR = '#EF4444';
 export const getTierName = level => {
     if (level >= 100) return 'Admin';
-    return TIER_NAMES[level] || 'Free';
+    if (level >= 1) return 'Subscriber';
+    return 'Free';
 };
 export const getTierColor = level => {
     if (level >= 100) return ADMIN_COLOR;
-    return TIER_COLORS[level] || TIER_COLORS[0];
+    if (level >= 1) return TIER_COLORS[1];
+    return TIER_COLORS[0];
 };
 export const isAdmin = level => level >= 100;
 export const TIERS = [{
@@ -34,17 +34,12 @@ export const TIERS = [{
 }, {
     level: 1,
     name: 'Subscriber'
-}, {
-    level: 10,
-    name: 'Agent'
 }];
 
-// Map user level to tier array index (chain stores 3 tiers at indices 0,1,2)
+// Map user level to the chain `tiers` array index. v1.39 has Free + Subscriber.
 export const levelToTierIndex = level => {
     if (level === 0) return 0;
-    if (level === 1) return 1;
-    if (level === 10) return 2;
-    if (level >= 100) return 2;
+    if (level >= 1) return 1;
     return -1;
 };
 export const buildTierConfig = chainTiers => {
@@ -57,20 +52,30 @@ export const buildTierConfig = chainTiers => {
             return Number.isFinite(v) && v > 0 ? v : 0;
         };
         const maxContent = num('max_content_length');
-        const maxTopics = num('max_followed_topics');
+        const maxCommunities = num('max_joined_communities');
         const maxUsers = num('max_followed_users');
-        const maxAgents = num('max_enabled_agents');
         const voteWeight = num('vote_weight');
         const followParts = [];
-        if (maxTopics > 0) followParts.push(`${maxTopics} topics`);
+        if (maxCommunities > 0) followParts.push(`${maxCommunities} communities`);
         if (maxUsers > 0) followParts.push(`${maxUsers} users`);
         let features;
         if (meta.level === 0) {
-            features = ['PoW for transactions', maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`, followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`, maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents', 'Basic posting'];
-        } else if (meta.level === 1) {
-            features = ['Instant posting', "Remove 'Anon-' prefix", maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`, followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`, maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents', 'Profile biography, avatar & banner', voteWeight > 1 && `${voteWeight}x vote weight`];
+            features = [
+                'PoW for transactions',
+                maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
+                followParts.length > 0 && `Join or follow up to ${followParts.join(' and ')}`,
+                'Basic posting',
+            ];
         } else {
-            features = ['Everything in Subscriber, plus:', 'Listed as a selectable agent on the Agents page', 'Moderate manually or automate with a bot via the API', 'Edit, translate, tag, or hide posts — your followers see your version', voteWeight > 1 && `${voteWeight}x vote weight`];
+            features = [
+                'Instant posting',
+                "Remove 'Anon-' prefix",
+                'Lead curator teams',
+                maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
+                followParts.length > 0 && `Join or follow up to ${followParts.join(' and ')}`,
+                'Profile biography, avatar & banner',
+                voteWeight > 1 && `${voteWeight}x vote weight`,
+            ];
         }
         return {
             level: meta.level,
@@ -397,23 +402,17 @@ export function useSubscription({
             const v = Number(raw[key] ?? 0);
             return Number.isFinite(v) && v > 0 ? v : 0;
         };
-        const maxAgents = num('max_enabled_agents');
-        if (maxAgents) {
-            details.push(`Enable up to ${maxAgents} agents.`);
-        } else {
-            details.push('Cannot enable agents.');
-        }
         const maxUsers = num('max_followed_users');
         if (maxUsers) {
             details.push(`Follow up to ${maxUsers} users.`);
         } else {
             details.push('Cannot follow users.');
         }
-        const maxTopics = num('max_followed_topics');
-        if (maxTopics) {
-            details.push(`Follow up to ${maxTopics} topics.`);
+        const maxCommunities = num('max_joined_communities');
+        if (maxCommunities) {
+            details.push(`Join up to ${maxCommunities} communities.`);
         } else {
-            details.push('Cannot follow topics.');
+            details.push('Cannot join communities.');
         }
         const maxBlockedUsers = num('max_blocked_users');
         if (maxBlockedUsers) {
@@ -427,11 +426,11 @@ export function useSubscription({
         } else {
             details.push('Cannot block posts.');
         }
-        const maxBlockedTopics = num('max_blocked_topics');
-        if (maxBlockedTopics) {
-            details.push(`Block up to ${maxBlockedTopics} topics.`);
+        const maxBlockedCommunities = num('max_blocked_communities');
+        if (maxBlockedCommunities) {
+            details.push(`Block up to ${maxBlockedCommunities} communities.`);
         } else {
-            details.push('Cannot block topics.');
+            details.push('Cannot block communities.');
         }
         const maxTitle = num('max_title_length');
         if (maxTitle) {
@@ -454,10 +453,8 @@ export function useSubscription({
         if (typeof raw.vote_weight === 'number' && raw.vote_weight > 1) {
             details.push(`Vote weight: ${raw.vote_weight.toFixed(2)}x.`);
         }
-        if (raw.can_be_agent) {
-            details.push('Eligible to be agent.');
-        } else {
-            details.push('Ineligible to be agent.');
+        if (tier.level >= 1) {
+            details.push('Can lead curator teams.');
         }
         if (raw.can_remove_anon) {
             details.push('Can remove anonymous prefix.');

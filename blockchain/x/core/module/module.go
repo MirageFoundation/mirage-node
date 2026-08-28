@@ -139,36 +139,6 @@ func validateBlockedTopicPattern(topic string, maxLen, minLen uint64) error {
 	return validateTopic(alpha, maxLen, minLen)
 }
 
-// topicMatchesPattern returns true if topic matches a glob pattern where * matches
-// zero or more characters at any position.
-func topicMatchesPattern(topic string, pattern string) bool {
-	if !strings.Contains(pattern, "*") {
-		return topic == pattern
-	}
-	parts := strings.Split(pattern, "*")
-	// All parts must appear in order within topic
-	pos := 0
-	for i, part := range parts {
-		if part == "" {
-			continue
-		}
-		idx := strings.Index(topic[pos:], part)
-		if idx < 0 {
-			return false
-		}
-		// First part must match at start if pattern doesn't start with *
-		if i == 0 && idx != 0 {
-			return false
-		}
-		pos += idx + len(part)
-	}
-	// Last part must match at end if pattern doesn't end with *
-	if len(parts) > 0 && parts[len(parts)-1] != "" {
-		return strings.HasSuffix(topic, parts[len(parts)-1])
-	}
-	return true
-}
-
 // allowedTags is the whitelist of valid tag values
 var allowedTags = map[string]bool{
 	"":          true,
@@ -460,7 +430,6 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		}
 		if len(ip.JoinedCommunities) > 0 {
 			params := am.k.GetParams(sdkCtx)
-			corePaid := ip.Core != nil && ip.Core.EffectivePaid
 			tier := params.GetTierConfig(0)
 			if ip.Core != nil {
 				tier = params.GetTierConfig(int(ip.Core.Level))
@@ -470,7 +439,7 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 				cap = uint32(tier.MaxJoinedCommunities)
 			}
 			for _, t := range ip.JoinedCommunities {
-				if err := am.k.JoinCommunity(sdkCtx, owner, t, corePaid, cap, false); err != nil {
+				if err := am.k.JoinCommunity(sdkCtx, owner, t, cap); err != nil {
 					panic(fmt.Errorf("InitGenesis: JoinCommunity for %s failed: %w", owner, err))
 				}
 			}
@@ -1268,12 +1237,12 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"max_pending_curator_invites_per_user": func(d *types.Params, s types.Params) {
 		d.MaxPendingCuratorInvitesPerUser = s.MaxPendingCuratorInvitesPerUser
 	},
-	"max_community_title_length": func(d *types.Params, s types.Params) { d.MaxCommunityTitleLength = s.MaxCommunityTitleLength },
-	"max_community_description_length": func(d *types.Params, s types.Params) {
-		d.MaxCommunityDescriptionLength = s.MaxCommunityDescriptionLength
+	"max_curation_team_name_length": func(d *types.Params, s types.Params) {
+		d.MaxCurationTeamNameLength = s.MaxCurationTeamNameLength
 	},
-	"max_curation_team_name_length":   func(d *types.Params, s types.Params) { d.MaxCurationTeamNameLength = s.MaxCurationTeamNameLength },
-	"max_curation_team_bio_length":    func(d *types.Params, s types.Params) { d.MaxCurationTeamBioLength = s.MaxCurationTeamBioLength },
+	"max_curation_team_description_length": func(d *types.Params, s types.Params) {
+		d.MaxCurationTeamDescriptionLength = s.MaxCurationTeamDescriptionLength
+	},
 	"max_curation_team_policy_length": func(d *types.Params, s types.Params) { d.MaxCurationTeamPolicyLength = s.MaxCurationTeamPolicyLength },
 	"subscription_transitions_per_block": func(d *types.Params, s types.Params) {
 		d.SubscriptionTransitionsPerBlock = s.SubscriptionTransitionsPerBlock
@@ -1488,12 +1457,6 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		}
 		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
-		}
-		claimedSlug := strings.ToLower(topic)
-		if _, claimed, err := am.k.GetCommunity(sdkCtx, claimedSlug); err != nil {
-			return nil, err
-		} else if !claimed {
-			return nil, fmt.Errorf("community %s is not claimed", claimedSlug)
 		}
 	}
 
@@ -2225,267 +2188,16 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 	return &types.MsgSetBiographyResponse{}, nil
 }
 
-// EnableAgent adds an agent to the user's enabled agents list (capped deque)
 func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) (*types.MsgEnableAgentResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("EnableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	if _, err := sdk.AccAddressFromBech32(agent); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("EnableAgent: invalid agent address", "address", agent)
-		sdkCtx.Logger().Info(logDelimiter)
-		return nil, fmt.Errorf("invalid agent address: %s", agent)
-	}
-	if agent == owner {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("EnableAgent: self-enable not allowed", "owner", owner)
-		sdkCtx.Logger().Info(logDelimiter)
-		return nil, fmt.Errorf("cannot enable yourself as an agent")
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "EnableAgent")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-	// A nil tier config is a governance fault, not a cue to invent a limit.
-	// Each of these eight sites used to substitute a different hardcoded number,
-	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
-	// same condition (review I-5). Reachable only through a governance
-	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
-	tierConfig := params.GetTierConfig(userLevel)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
-	}
-	maxAgents := int(0 /* agents removed */)
-
-	has, err := am.k.HasEnabledAgent(sdkCtx, owner, agent)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return &types.MsgEnableAgentResponse{}, nil
-	}
-	agentCount, err := am.k.CountEnabledAgents(sdkCtx, owner)
-	if err != nil {
-		return nil, fmt.Errorf("EnableAgent: enabled_agents count for %s: %w", owner, err)
-	}
-	if int(agentCount) >= maxAgents {
-		return nil, fmt.Errorf("enabled agents limit reached (%d); disable an agent first", maxAgents)
-	}
-	if _, err := am.k.AddEnabledAgent(sdkCtx, owner, agent); err != nil {
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("EnableAgent: agent enabled", "owner", owner, "agent", agent)
-	sdkCtx.Logger().Info(logDelimiter)
-
-	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "EnableAgent"); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgEnableAgentResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgEnableAgent is not accepted after v1.39.0")
 }
 
-// DisableAgent removes an agent from the user's enabled agents list
 func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent) (*types.MsgDisableAgentResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("DisableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "DisableAgent")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	if err := am.k.RemoveEnabledAgent(sdkCtx, owner, agent); err != nil {
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("DisableAgent: agent disabled", "owner", owner, "agent", agent)
-	sdkCtx.Logger().Info(logDelimiter)
-
-	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "DisableAgent"); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgDisableAgentResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgDisableAgent is not accepted after v1.39.0")
 }
 
-// SetAgents atomically replaces the user's enabled agents list (ordered).
 func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*types.MsgSetAgentsResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("SetAgents: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "SetAgents")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-	// A nil tier config is a governance fault, not a cue to invent a limit.
-	// Each of these eight sites used to substitute a different hardcoded number,
-	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
-	// same condition (review I-5). Reachable only through a governance
-	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
-	tierConfig := params.GetTierConfig(userLevel)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
-	}
-	maxAgents := int(0 /* agents removed */)
-
-	agents := req.GetAgents()
-	if len(agents) > maxAgents {
-		return nil, fmt.Errorf("too many agents: %d > %d", len(agents), maxAgents)
-	}
-
-	ownerLower := strings.ToLower(owner)
-	seen := make(map[string]struct{}, len(agents))
-	normalized := make([]string, 0, len(agents))
-	for _, a := range agents {
-		a = strings.ToLower(strings.TrimSpace(a))
-		if _, err := sdk.AccAddressFromBech32(a); err != nil {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("SetAgents: invalid agent address", "address", a)
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid agent address: %s", a)
-		}
-		if a == ownerLower {
-			return nil, fmt.Errorf("cannot set yourself as an agent")
-		}
-		if _, dup := seen[a]; dup {
-			return nil, fmt.Errorf("duplicate agent: %s", a)
-		}
-		seen[a] = struct{}{}
-		normalized = append(normalized, a)
-	}
-
-	if err := am.k.ReplaceAllEnabledAgents(sdkCtx, owner, normalized); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("SetAgents: failed to save enabled agents", "owner", owner, "err", err.Error())
-		sdkCtx.Logger().Info(logDelimiter)
-		return nil, err
-	}
-
-	_, hasProfile, err := am.k.GetProfileCore(sdkCtx, owner)
-	if err != nil {
-		return nil, fmt.Errorf("SetAgents: load profile for %s: %w", owner, err)
-	}
-	if !hasProfile {
-		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
-			return nil
-		}); err != nil {
-			return nil, fmt.Errorf("SetAgents: bootstrap profile for %s: %w", owner, err)
-		}
-	}
-
-	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("SetAgents: agents set", "owner", owner, "count", len(normalized))
-	sdkCtx.Logger().Info(logDelimiter)
-
-	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetAgents"); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgSetAgentsResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgSetAgents is not accepted after v1.39.0")
 }
 
 // BlockPost blocks a post txhash (persisted on-chain)
@@ -2710,126 +2422,12 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	return &types.MsgUnblockUserResponse{}, nil
 }
 
-// BlockTopic blocks a topic (persisted on-chain, tier-limited)
 func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-
-	var owner string
-	var userLevel int
-	if authority == govAuthority {
-		owner = authority
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		owner = sdk.AccAddress(pub.Address()).String()
-		core, err := am.requireUsername(sdkCtx, owner, "BlockTopic")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateBlockedTopicPattern(topic, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
-		return nil, fmt.Errorf("invalid topic: %w", err)
-	}
-	if strings.HasSuffix(topic, "*") {
-		sdkCtx.Logger().Debug("BlockTopic wildcard", "owner", owner, "pattern", topic)
-	}
-
-	// Mutual exclusion: blocking a topic pattern removes matching followed topics.
-	followedTopics, err := am.k.ListFollowedTopics(sdkCtx, owner)
-	if err != nil {
-		return nil, err
-	}
-	for _, t := range followedTopics {
-		if topicMatchesPattern(t, topic) {
-			if err := am.k.RemoveFollowedTopic(sdkCtx, owner, t); err != nil {
-				return nil, fmt.Errorf("BlockTopic: unfollow %q for %s: %w", t, owner, err)
-			}
-		}
-	}
-
-	// A nil tier config is a governance fault, not a cue to invent a limit.
-	// Each of these eight sites used to substitute a different hardcoded number,
-	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
-	// same condition (review I-5). Reachable only through a governance
-	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
-	tierConfig := params.GetTierConfig(userLevel)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
-	}
-	maxTopics := tierConfig.MaxBlockedCommunities
-	if maxTopics == 0 {
-		return nil, fmt.Errorf("blocked topic limit is zero for level %d", userLevel)
-	}
-
-	if _, err := am.k.AddBlockedTopicDeque(sdkCtx, owner, topic, uint32(maxTopics)); err != nil {
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info("BlockTopic", "owner", owner, "topic", topic)
-
-	if owner != "" && authority != govAuthority {
-		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockTopic"); err != nil {
-			return nil, err
-		}
-	}
-
-	return &types.MsgBlockTopicResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgBlockTopic is not accepted after v1.39.0")
 }
 
-// UnblockTopic unblocks a topic (persisted on-chain)
 func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-
-	var owner string
-	var userLevel int
-	if authority == govAuthority {
-		owner = authority
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		owner = sdk.AccAddress(pub.Address()).String()
-		core, err := am.requireUsername(sdkCtx, owner, "UnblockTopic")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateBlockedTopicPattern(topic, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
-		return nil, fmt.Errorf("invalid topic: %w", err)
-	}
-
-	if err := am.k.RemoveBlockedTopic(sdkCtx, owner, topic); err != nil {
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info("UnblockTopic", "owner", owner, "topic", topic)
-
-	if owner != "" && authority != govAuthority {
-		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockTopic"); err != nil {
-			return nil, err
-		}
-	}
-
-	return &types.MsgUnblockTopicResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgUnblockTopic is not accepted after v1.39.0")
 }
 
 // FollowUser follows a user (adds to followed users list, capped deque)
@@ -2998,168 +2596,12 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	return &types.MsgUnfollowUserResponse{}, nil
 }
 
-// FollowTopic follows a topic (adds to followed topics list, capped deque)
 func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) (*types.MsgFollowTopicResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "FollowTopic")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
-		return nil, fmt.Errorf("invalid topic: %w", err)
-	}
-
-	// Mutual exclusion: following a topic removes matching blocked topic patterns.
-	// Must iterate blocked topics because of wildcard pattern matching.
-	blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner)
-	if err != nil {
-		return nil, err
-	}
-	for _, t := range blockedTopics {
-		if topicMatchesPattern(topic, t) {
-			if err := am.k.RemoveBlockedTopic(sdkCtx, owner, t); err != nil {
-				return nil, fmt.Errorf("FollowTopic: unblock %q for %s: %w", t, owner, err)
-			}
-		}
-	}
-
-	// A nil tier config is a governance fault, not a cue to invent a limit.
-	// Each of these eight sites used to substitute a different hardcoded number,
-	// none of them matching DefaultTiers, while Edit hard-failed on exactly the
-	// same condition (review I-5). Reachable only through a governance
-	// MsgSetLevel to a level in 2..9, where LevelToTierIndex returns -1.
-	tierConfig := params.GetTierConfig(userLevel)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
-	}
-	maxTopics := tierConfig.MaxJoinedCommunities
-
-	has, err := am.k.HasFollowedTopic(sdkCtx, owner, topic)
-	if err != nil {
-		return nil, err
-	}
-	if has {
-		return &types.MsgFollowTopicResponse{}, nil
-	}
-	topicCount, err := am.k.CountFollowedTopics(sdkCtx, owner)
-	if err != nil {
-		return nil, fmt.Errorf("FollowTopic: followed_topics count for %s: %w", owner, err)
-	}
-	if uint64(topicCount) >= maxTopics {
-		return nil, fmt.Errorf("followed topics limit reached (%d); unfollow a topic first", maxTopics)
-	}
-	if _, err := am.k.AddFollowedTopic(sdkCtx, owner, topic); err != nil {
-		return nil, err
-	}
-
-	_, hasProfile, err := am.k.GetProfileCore(sdkCtx, owner)
-	if err != nil {
-		return nil, fmt.Errorf("FollowTopic: load profile for %s: %w", owner, err)
-	}
-	if !hasProfile {
-		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error { return nil }); err != nil {
-			return nil, fmt.Errorf("FollowTopic: bootstrap profile for %s: %w", owner, err)
-		}
-	}
-
-	sdkCtx.Logger().Info("FollowTopic", "owner", owner, "topic", topic)
-
-	if authority != govAuthority {
-		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "FollowTopic"); err != nil {
-			return nil, err
-		}
-	}
-
-	return &types.MsgFollowTopicResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgFollowTopic is not accepted after v1.39.0")
 }
 
-// UnfollowTopic unfollows a topic (removes from followed topics list)
 func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTopic) (*types.MsgUnfollowTopicResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "UnfollowTopic")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	if err := am.k.RemoveFollowedTopic(sdkCtx, owner, topic); err != nil {
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info("UnfollowTopic", "owner", owner, "topic", topic)
-
-	if authority != govAuthority {
-		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnfollowTopic"); err != nil {
-			return nil, err
-		}
-	}
-
-	return &types.MsgUnfollowTopicResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgUnfollowTopic is not accepted after v1.39.0")
 }
 
 // Delete validates and logs deletion of a post/comment (not persisted on-chain).

@@ -15,9 +15,8 @@ import ShowMoreButton from "../components/ShowMoreButton.js";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../Layout";
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
-import { formatMirage } from "../../../utils/formatters";
+import { formatMirage, formatTimeAgo } from "../../../utils/formatters";
 import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
-import { formatTimeAgo } from "../../../logic/useAgents";
 import InlineMedia from "../components/InlineMedia";
 import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
 

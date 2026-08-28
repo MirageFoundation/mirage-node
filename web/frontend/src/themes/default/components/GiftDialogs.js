@@ -215,9 +215,9 @@ const AwardTile = styled.button`
 
     &:hover:not(:disabled) {
         background: ${({ theme, $selected }) =>
-            $selected ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
+        $selected ? theme.colors.buttonSuccessBg : theme.colors.hoverBg};
         border-color: ${({ theme, $selected }) =>
-            $selected ? theme.colors.buttonSuccessBorder : theme.colors.borderStrong};
+        $selected ? theme.colors.buttonSuccessBorder : theme.colors.borderStrong};
     }
 
     &:active:not(:disabled) { transform: scale(0.98); }
@@ -429,14 +429,9 @@ export function GiftSubscriptionDialog({
     onCancel,
     userBalanceUmirage,
 }) {
-    const isAgent = level === 10;
     const recipient = recipientLabel || 'this user';
-    const title = isAgent
-        ? `Gift agent subscription to ${recipient}`
-        : `Gift subscription to ${recipient}`;
-    const message = isAgent
-        ? "Pays for one agent-tier subscription period on behalf of the recipient."
-        : "Pays for one subscription period on behalf of the recipient.";
+    const title = `Gift subscription to ${recipient}`;
+    const message = "Pays for one subscription period on behalf of the recipient.";
 
     const feeDisplay = feeUmirage != null && isFinite(Number(feeUmirage)) && Number(feeUmirage) > 0
         ? formatMirage(feeUmirage)

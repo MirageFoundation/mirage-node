@@ -777,40 +777,11 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if err != nil {
 				return ctx, err
 			}
-		case *coretypes.MsgCreateCommunity:
-			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCommunity", buildCanonV139("MsgCreateCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.Title)
-				w.writeString(102, m.Description)
-				w.writeString(103, m.OriginalTeamName)
-				w.writeString(104, m.Bio)
-				w.writeString(105, m.Policy)
-			}), verifyPoW)
-			if err != nil {
-				return ctx, err
-			}
-		case *coretypes.MsgSetCommunityMetadata:
-			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCommunityMetadata", buildCanonV139("MsgSetCommunityMetadata", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.Title)
-				w.writeString(102, m.Description)
-			}), verifyPoW)
-			if err != nil {
-				return ctx, err
-			}
-		case *coretypes.MsgTransferCommunity:
-			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgTransferCommunity", buildCanonV139("MsgTransferCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.NewFounder)
-			}), verifyPoW)
-			if err != nil {
-				return ctx, err
-			}
 		case *coretypes.MsgCreateCurationTeam:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgCreateCurationTeam", buildCanonV139("MsgCreateCurationTeam", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
 				w.writeString(100, m.Community)
 				w.writeString(101, m.Name)
-				w.writeString(102, m.Bio)
+				w.writeString(102, m.Description)
 				w.writeString(103, m.Policy)
 			}), verifyPoW)
 			if err != nil {
@@ -821,7 +792,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				w.writeString(100, m.Community)
 				w.writeUvarint(101, m.TeamId)
 				w.writeString(102, m.Name)
-				w.writeString(103, m.Bio)
+				w.writeString(103, m.Description)
 				w.writeString(104, m.Policy)
 			}), verifyPoW)
 			if err != nil {

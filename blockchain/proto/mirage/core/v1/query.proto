@@ -33,20 +33,14 @@ service Query {
     option (google.api.http).get = "/mirage/core/v1/profiles";
   }
 
-  rpc Community(QueryCommunityRequest) returns (QueryCommunityResponse) {
-    option (google.api.http).get = "/mirage/core/v1/community/{slug}";
-  }
-  rpc Communities(QueryCommunitiesRequest) returns (QueryCommunitiesResponse) {
-    option (google.api.http).get = "/mirage/core/v1/communities";
-  }
-  rpc FoundedCommunities(QueryFoundedCommunitiesRequest) returns (QueryFoundedCommunitiesResponse) {
-    option (google.api.http).get = "/mirage/core/v1/founded/{address}";
-  }
   rpc CurationTeam(QueryCurationTeamRequest) returns (QueryCurationTeamResponse) {
     option (google.api.http).get = "/mirage/core/v1/community/{community}/team/{team_id}";
   }
   rpc CurationTeams(QueryCurationTeamsRequest) returns (QueryCurationTeamsResponse) {
     option (google.api.http).get = "/mirage/core/v1/community/{community}/teams";
+  }
+  rpc AllCurationTeams(QueryAllCurationTeamsRequest) returns (QueryAllCurationTeamsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/curation/teams";
   }
   rpc CurationTeamMembers(QueryCurationTeamMembersRequest) returns (QueryCurationTeamMembersResponse) {
     option (google.api.http).get = "/mirage/core/v1/community/{community}/team/{team_id}/members";
@@ -159,29 +153,6 @@ message QueryProfilesResponse {
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
 }
 
-message QueryCommunityRequest { string slug = 1; }
-message QueryCommunityResponse {
-  Community community = 1;
-  uint64 default_count = 2;
-}
-
-message QueryCommunitiesRequest {
-  cosmos.base.query.v1beta1.PageRequest pagination = 1;
-}
-message QueryCommunitiesResponse {
-  repeated Community communities = 1;
-  cosmos.base.query.v1beta1.PageResponse pagination = 2;
-}
-
-message QueryFoundedCommunitiesRequest {
-  string address = 1;
-  cosmos.base.query.v1beta1.PageRequest pagination = 2;
-}
-message QueryFoundedCommunitiesResponse {
-  repeated Community communities = 1;
-  cosmos.base.query.v1beta1.PageResponse pagination = 2;
-}
-
 message QueryCurationTeamRequest {
   string community = 1;
   uint64 team_id = 2;
@@ -194,6 +165,15 @@ message QueryCurationTeamsRequest {
   cosmos.base.query.v1beta1.PageRequest pagination = 3;
 }
 message QueryCurationTeamsResponse {
+  repeated CurationTeam teams = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+message QueryAllCurationTeamsRequest {
+  bool include_deleted = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryAllCurationTeamsResponse {
   repeated CurationTeam teams = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
 }

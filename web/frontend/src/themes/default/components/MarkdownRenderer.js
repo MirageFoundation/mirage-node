@@ -5,6 +5,7 @@ import { markdownUrlTransform } from "../../../utils/markdownUrl";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import InlineMedia from "./InlineMedia";
+import { communityLabel, communityPath } from "../../../utils/community";
 
 const Container = styled.div`
 	font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
@@ -109,7 +110,7 @@ const MentionLink = styled.a`
 	}
 `;
 
-const HashtagLink = styled.a`
+const CommunityLink = styled.a`
 	color: ${({ theme }) => theme.colors.link};
 	font-weight: 600;
 	text-decoration: none;
@@ -220,16 +221,17 @@ function remarkMentions() {
 }
 
 /**
- * Remark plugin: converts #topicname into clickable topic links when the
- * topic exists (validated at render time via the hashtag-tag component).
+ * Remark plugin: converts `[slug]` (and leftover `c/slug`) into a community link.
+ * Does not touch markdown `[text](url)`, `![alt]`, or `[ref]: url`.
+ * Slugs match the chain: lowercase alphanumeric with single internal hyphens.
  */
-function remarkHashtags() {
+function remarkCommunities() {
     return (tree) => {
         visit(tree, 'text', (node, index, parent) => {
             if (!node.value || typeof node.value !== 'string') return;
-            if (!node.value.includes('#')) return;
+            if (!node.value.includes('[') && !node.value.includes('c/')) return;
 
-            const regex = /(?<![#\w])#([a-zA-Z0-9]{3,50})(?![a-zA-Z0-9])/g;
+            const regex = /(?<![!\[])\[([a-z0-9]+(?:-[a-z0-9]+)*)\](?![\(:\]])|(?<![a-zA-Z0-9/])c\/([a-z0-9]+(?:-[a-z0-9]+)*)(?![a-zA-Z0-9-])/g;
             const parts = [];
             let lastIndex = 0;
             let match;
@@ -238,13 +240,14 @@ function remarkHashtags() {
                 if (match.index > lastIndex) {
                     parts.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
                 }
+                const slug = String(match[1] || match[2] || '').toLowerCase();
                 parts.push({
-                    type: 'hashtag',
+                    type: 'community',
                     data: {
-                        hName: 'hashtag-tag',
-                        hProperties: { topic: match[1].toLowerCase() },
+                        hName: 'community-tag',
+                        hProperties: { community: slug },
                     },
-                    children: [{ type: 'text', value: '#' + match[1] }],
+                    children: [{ type: 'text', value: communityLabel(slug) }],
                 });
                 lastIndex = match.index + match[0].length;
             }
@@ -346,7 +349,7 @@ export default function MarkdownRenderer({ text }) {
     return (
         <Container>
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkHashtags, remarkSoftBreaks]}
+                remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkCommunities, remarkSoftBreaks]}
                 urlTransform={markdownUrlTransform}
                 components={{
                     img: ({ src }) => <InlineMedia url={src} />,
@@ -361,10 +364,10 @@ export default function MarkdownRenderer({ text }) {
                             {children}
                         </MentionLink>
                     ),
-                    'hashtag-tag': ({ topic, children }) => (
-                        <HashtagLink href={`/t/${encodeURIComponent(topic)}`}>
+                    'community-tag': ({ community, children }) => (
+                        <CommunityLink href={communityPath(community)}>
                             {children}
-                        </HashtagLink>
+                        </CommunityLink>
                     ),
                 }}
             >

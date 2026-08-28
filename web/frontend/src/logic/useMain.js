@@ -8,14 +8,10 @@ import { fetchFollowedTopics } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
-import { signPlainPayload } from "../utils/signPlain";
 import { onSessionReset } from "../utils/sessionLifecycle";
+import { LENS, lensCacheKey, lensQuery } from "../utils/curation";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
-const MODERATION_REMINDER_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
-// Show the moderation reminder only after the user has been logged in on the
-// home feed for at least this long. Avoids piling onto first-visit onboarding.
-const MODERATION_REMINDER_MIN_AGE_MS = 10 * 60 * 1000;
 
 function bootstrapFeedMatchesTopic(stashed, topic) {
     if (!stashed || stashed.kind !== 'feed') return false;
@@ -216,6 +212,26 @@ export function useMain({
     const isBackNavigation = getIsBackNavigation(navigationType);
     const theme = useTheme();
     const mapHomeSortMode = theme.caps.mapHomeSortMode;
+    const viewerAddress = Storage.load('publicKey', '') || 'guest';
+    const [storedFeedLens, setStoredFeedLens] = useState({
+        community: urlTopic,
+        lens: LENS.EFFECTIVE,
+        teamId: null,
+    });
+    const feedLens = useMemo(() => (
+        storedFeedLens.community === urlTopic
+            ? storedFeedLens
+            : { community: urlTopic, lens: LENS.EFFECTIVE, teamId: null }
+    ), [storedFeedLens, urlTopic]);
+    const setFeedLens = useCallback((next) => {
+        setStoredFeedLens({ community: urlTopic, lens: next.lens, teamId: next.teamId ?? null });
+    }, [urlTopic]);
+    const feedCacheTopic = lensCacheKey({
+        viewer: viewerAddress,
+        community: urlTopic,
+        lens: feedLens.lens,
+        teamId: feedLens.teamId,
+    });
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
     // For browser back button: only restore if we came from a post view that was opened from the feed
@@ -253,12 +269,12 @@ export function useMain({
     const [stableOrder, setStableOrder] = useState(() => {
         if (!shouldRestoreFeedState) return [];
         try {
-            const mem = readMemFeedState(urlTopic);
+            const mem = readMemFeedState(feedCacheTopic);
             const memOrder = mem && Array.isArray(mem.order) ? mem.order : null;
             if (memOrder && memOrder.length > 0) return memOrder;
         } catch (_) { }
         try {
-            const savedOrder = sessionStorage.getItem(getFeedKey(urlTopic, 'order'));
+            const savedOrder = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'order'));
             if (savedOrder) {
                 const parsed = JSON.parse(savedOrder);
                 return Array.isArray(parsed) ? parsed : [];
@@ -271,8 +287,8 @@ export function useMain({
     const [isLoading, setIsLoading] = useState(() => {
         if (!shouldRestoreFeedState) return true;
         try {
-            const memOrder = readMemFeedState(urlTopic)?.order;
-            const order = readSavedOrder(urlTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            const memOrder = readMemFeedState(feedCacheTopic)?.order;
+            const order = readSavedOrder(feedCacheTopic) || (Array.isArray(memOrder) ? memOrder : null);
             if (order && order.length > 0 && state.posts && order.some(id => state.posts[id])) return false;
             if (hasAnyCachedPostsForTopic(urlTopic, state.posts)) return false;
         } catch (_) { }
@@ -283,11 +299,11 @@ export function useMain({
     const [currentPage, setCurrentPage] = useState(() => {
         if (!shouldRestoreFeedState) return 1;
         try {
-            const memPage = Number(readMemFeedState(urlTopic)?.page || 0);
+            const memPage = Number(readMemFeedState(feedCacheTopic)?.page || 0);
             if (Number.isFinite(memPage) && memPage > 0) return Math.floor(memPage);
         } catch (_) { }
         try {
-            const savedPage = sessionStorage.getItem(getFeedKey(urlTopic, 'page'));
+            const savedPage = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'page'));
             if (savedPage) return parseInt(savedPage, 10) || 1;
         } catch (_) { }
         return 1;
@@ -297,11 +313,11 @@ export function useMain({
     const [hasMorePosts, setHasMorePosts] = useState(() => {
         if (!shouldRestoreFeedState) return false;
         try {
-            const memHasMore = readMemFeedState(urlTopic)?.hasMore;
+            const memHasMore = readMemFeedState(feedCacheTopic)?.hasMore;
             if (typeof memHasMore === 'boolean') return memHasMore;
         } catch (_) { }
         try {
-            const savedHasMore = sessionStorage.getItem(getFeedKey(urlTopic, 'hasmore'));
+            const savedHasMore = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'hasmore'));
             if (savedHasMore) return savedHasMore === 'true';
         } catch (_) { }
         return false;
@@ -407,7 +423,6 @@ export function useMain({
         return false;
     }, [blockedTopicsLocal]);
     const location = useLocation(); // Call useLocation at the top level of the component
-    const viewerAddress = Storage.load('publicKey', '') || 'guest';
     useEffect(() => {
         setBlockedTopicsLocal(new Set());
     }, [viewerAddress]);
@@ -422,7 +437,7 @@ export function useMain({
         let cancelled = false;
         const applyBlocked = (data) => {
             if (cancelled) return;
-            const serverTopics = Array.isArray(data?.blocked_topics) ? data.blocked_topics : [];
+            const serverTopics = Array.isArray(data?.blocked_communities) ? data.blocked_communities : [];
             if (serverTopics.length === 0) return;
             setBlockedTopicsLocal(prev => {
                 const next = new Set(prev);
@@ -524,86 +539,6 @@ export function useMain({
 
     // handleNsfwChoice is defined after getPosts (see below)
 
-    const [showModerationReminder, setShowModerationReminder] = useState(false);
-    useEffect(() => {
-        if (!isLoggedIn || urlTopic !== 'home') {
-            setShowModerationReminder(false);
-            return undefined;
-        }
-
-        const suffix = String(viewerAddress).toLowerCase();
-        const dismissedKey = `moderation_reminder_understood_v1_${suffix}`;
-        const snoozedUntilKey = `moderation_reminder_snoozed_until_v1_${suffix}`;
-        const firstSeenKey = `moderation_reminder_first_seen_at_v1_${suffix}`;
-
-        const dismissed = Storage.load(dismissedKey, false) === true;
-        const snoozedUntilRaw = Number(Storage.load(snoozedUntilKey, 0));
-        const now = Date.now();
-        const snoozed = Number.isFinite(snoozedUntilRaw) && snoozedUntilRaw > now;
-
-        let firstSeenAt = Number(Storage.load(firstSeenKey, 0));
-        if (!Number.isFinite(firstSeenAt) || firstSeenAt <= 0 || firstSeenAt > now) {
-            firstSeenAt = now;
-            try {
-                Storage.save(firstSeenKey, firstSeenAt);
-            } catch (_) { }
-        }
-
-        const ageMs = now - firstSeenAt;
-        const eligible = !dismissed && !snoozed;
-        const shouldShow = eligible && ageMs >= MODERATION_REMINDER_MIN_AGE_MS;
-        setShowModerationReminder(shouldShow);
-
-        try {
-            console.debug('[MainView] moderation reminder eligibility', {
-                firstSeenAt,
-                ageMs,
-                dismissed,
-                snoozed,
-                shouldShow
-            });
-        } catch (_) { }
-
-        if (eligible && !shouldShow) {
-            const remainingMs = MODERATION_REMINDER_MIN_AGE_MS - ageMs;
-            const handle = setTimeout(() => {
-                setShowModerationReminder(true);
-                try {
-                    console.debug('[MainView] moderation reminder timer fired', {
-                        firstSeenAt,
-                        remainingMs
-                    });
-                } catch (_) { }
-            }, Math.max(0, remainingMs));
-            return () => clearTimeout(handle);
-        }
-        return undefined;
-    }, [isLoggedIn, urlTopic, viewerAddress]);
-
-    const dismissModerationReminder = useCallback(() => {
-        if (!viewerAddress || viewerAddress === 'guest') return;
-        const suffix = String(viewerAddress).toLowerCase();
-        try {
-            Storage.save(`moderation_reminder_understood_v1_${suffix}`, true);
-            Storage.remove(`moderation_reminder_snoozed_until_v1_${suffix}`);
-            console.debug('[MainView] moderation reminder dismissed');
-        } catch (_) { }
-        setShowModerationReminder(false);
-    }, [viewerAddress]);
-
-    const snoozeModerationReminder = useCallback(() => {
-        if (!viewerAddress || viewerAddress === 'guest') return;
-        const suffix = String(viewerAddress).toLowerCase();
-        const snoozedUntil = Date.now() + MODERATION_REMINDER_SNOOZE_MS;
-        try {
-            Storage.save(`moderation_reminder_snoozed_until_v1_${suffix}`, snoozedUntil);
-            console.debug('[MainView] moderation reminder snoozed', {
-                snoozedUntil
-            });
-        } catch (_) { }
-        setShowModerationReminder(false);
-    }, [viewerAddress]);
-
     const [nodeConfigTick, setNodeConfigTick] = useState(0);
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
@@ -653,7 +588,6 @@ export function useMain({
             });
         } catch (_) { }
     }, [nodeConfig]);
-    const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     // Open browsing: when on, logged-out visitors fetch & read the feed/topics
     // (account prompts only fire on write/social actions). When off, behavior is
     // unchanged: logged-out users get the welcome/invite screen, no content fetch.
@@ -679,11 +613,6 @@ export function useMain({
         });
     }, [androidBannerDismissedAt, iphoneBannerDismissedAt]);
 
-    // Invite code state
-    const [inviteCodes, setInviteCodes] = useState([]);
-    const [inviteModalOpen, setInviteModalOpen] = useState(false);
-    const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
-
     // Welcome stats for logged-out users (user count, posts, 7d active)
     // Initialize from cache for instant display (stale-while-revalidate pattern).
     // Discard caches missing the current shape — schema changed from `active24h`
@@ -700,65 +629,6 @@ export function useMain({
     };
     const [welcomeStats, setWelcomeStats] = useState(_loadValidWelcomeCache);
     const [welcomeStatsStale, setWelcomeStatsStale] = useState(() => _loadValidWelcomeCache() !== null);
-
-    // Collapse state for hero cards (persisted)
-    const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
-        try {
-            return Storage.load('invite_banner_collapsed', true);
-        } catch (_) {
-            return true;
-        }
-    });
-    const toggleInviteBanner = () => {
-        const next = !inviteBannerCollapsed;
-        setInviteBannerCollapsed(next);
-        try {
-            Storage.save('invite_banner_collapsed', next);
-        } catch (_) { }
-    };
-
-    // Fetch invite codes for logged-in users. On cold load the data is usually
-    // already in the bootstrap stash; we consume that first and skip the request.
-    useEffect(() => {
-        if (!isLoggedIn || !inviteCodesEnabled) {
-            setInviteCodes([]);
-            return;
-        }
-        let cancelled = false;
-        const loadInviteCodes = async () => {
-            try {
-                const sig = await signPlainPayload(
-                    (ts, n) => `get_invite_codes:${String(viewerAddress).toLowerCase()}:${ts}:${n}`
-                );
-                const resp = await Api.get('get_invite_codes', {
-                    address: viewerAddress,
-                    ...sig,
-                });
-                if (cancelled) return;
-                if (resp && Array.isArray(resp.codes)) {
-                    setInviteCodes(resp.codes);
-                }
-            } catch (_) { }
-        };
-        (async () => {
-            const stashed = await readBootstrapStashAfterBootstrap('bootstrap_invite_codes', viewerAddress);
-            if (cancelled) return;
-            if (stashed && Array.isArray(stashed.codes)) {
-                setInviteCodes(stashed.codes);
-            } else {
-                loadInviteCodes();
-            }
-        })();
-
-        const handleInviteCodesUpdated = () => {
-            loadInviteCodes();
-        };
-        window.addEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
-        return () => {
-            cancelled = true;
-            window.removeEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
-        };
-    }, [isLoggedIn, viewerAddress, inviteCodesEnabled]);
 
     // Fetch welcome stats for logged-out users (user count, posts in 24h, 7d active)
     // Uses lightweight endpoint that only returns essential counts (fast, cached)
@@ -796,61 +666,6 @@ export function useMain({
         };
     }, [isLoggedIn]);
 
-    // Get next available invite code
-    const nextAvailableCode = inviteCodes.find(c => !c.is_used);
-    const availableCodeCount = inviteCodes.filter(c => !c.is_used).length;
-
-    // Handle opening invite modal
-    const handleOpenInviteModal = () => {
-        setInviteModalOpen(true);
-        setInviteCodeCopied(false);
-    };
-    const handleCopyInviteCode = () => {
-        if (!nextAvailableCode) return;
-        navigator.clipboard.writeText(getShareUrl());
-        setInviteCodeCopied(true);
-        setTimeout(() => setInviteCodeCopied(false), 2000);
-    };
-
-    // Handle native share (mobile)
-    const handleNativeShare = async () => {
-        if (!nextAvailableCode || !navigator.share) return;
-        try {
-            await navigator.share({
-                title: 'Join me on Mirage',
-                text: getShareText(),
-                url: getShareUrl()
-            });
-        } catch (err) {
-            // User cancelled or share failed - ignore
-        }
-    };
-
-    // Check if native share is available (typically mobile)
-    const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
-    const getShareUrl = () => {
-        if (!nextAvailableCode) return '';
-        const viewerName = Storage.load('username', '');
-        const precheckEnabled = Storage.load('referral_precheck_enabled', false) === true;
-        if (inviteCodesEnabled && precheckEnabled && viewerName) {
-            return `${window.location.origin}/signup?ref=${encodeURIComponent(viewerName)}`;
-        }
-        return `${window.location.origin}/signup?invite=${nextAvailableCode.code}`;
-    };
-    const SHARE_TEXTS = [
-        // Tame / Descriptive
-        'Join me on Mirage: a decentralized social network.', 'Join me on Mirage: social media, decentralized.', 'Join me on Mirage: the decentralized social platform.', 'Join me on Mirage: where conversations happen on-chain.', 'Join me on Mirage: social media built on blockchain.', 'Join me on Mirage: a new kind of social network.', 'Join me on Mirage: decentralized and user-controlled.', 'Join me on Mirage: social media you actually own.', 'Join me on Mirage: your posts live on the blockchain.', 'Join me on Mirage: decentralized discourse awaits.', 'Join me on Mirage: where you control your experience.', 'Join me on Mirage: social media with transparency built in.', 'Join me on Mirage: open, decentralized, community-driven.', 'Join me on Mirage: the user-first social network.', 'Join me on Mirage: social media redesigned for users.', 'Join me on Mirage: simple, decentralized, yours.', 'Join me on Mirage: a platform built for real conversations.', 'Join me on Mirage: where your data stays yours.', 'Join me on Mirage: social media without the middleman.', 'Join me on Mirage: decentralized by design.',
-        // User Control Focus
-        'Join me on Mirage: you control your feed, not an algorithm.', 'Join me on Mirage: no black box algorithms here.', 'Join me on Mirage: you own your algorithm.', 'Join me on Mirage: your feed, your rules.', 'Join me on Mirage: take back control of your feed.', 'Join me on Mirage: transparent algorithms, real control.', 'Join me on Mirage: no hidden manipulation, just content you choose.', 'Join me on Mirage: the algorithm works for you, not against you.', 'Join me on Mirage: see what you want, not what they want.', 'Join me on Mirage: your timeline, your choice.', 'Join me on Mirage: no engagement tricks, just real content.', 'Join me on Mirage: social media that respects your attention.', 'Join me on Mirage: finally, a feed you understand.', 'Join me on Mirage: no mystery algorithms deciding what you see.', 'Join me on Mirage: user-centric from day one.', 'Join me on Mirage: built around you, not advertisers.', 'Join me on Mirage: your experience, your control.', 'Join me on Mirage: social media that puts users first.', 'Join me on Mirage: no data harvesting, just discourse.', 'Join me on Mirage: privacy and control by default.',
-        // Anti-Corporate
-        'Join me on Mirage: no corporate overlords.', 'Join me on Mirage: social media without corporate control.', 'Join me on Mirage: free from corporate censorship.', 'Join me on Mirage: no faceless corporations deciding what\'s allowed.', 'Join me on Mirage: discourse without corporate interference.', 'Join me on Mirage: not owned by billionaires.', 'Join me on Mirage: social media that can\'t be bought.', 'Join me on Mirage: no shareholders to please, just users.', 'Join me on Mirage: built for users, not profits.', 'Join me on Mirage: no ads, no corporate agenda.', 'Join me on Mirage: social media without the corporate BS.', 'Join me on Mirage: where corporations don\'t control the conversation.', 'Join me on Mirage: no CEO can change the rules on you.', 'Join me on Mirage: your voice isn\'t a product here.', 'Join me on Mirage: social media that doesn\'t sell you out.', 'Join me on Mirage: no corporate content moderation.', 'Join me on Mirage: escape the corporate walled gardens.', 'Join me on Mirage: owned by everyone, controlled by no one.', 'Join me on Mirage: social media without the suits.', 'Join me on Mirage: decentralized means no corporate master.',
-        // Censorship / Free Speech
-        'Join me on Mirage: censorship-proof by design.', 'Join me on Mirage: where speech is protected, not policed.', 'Join me on Mirage: built to protect speech, not suppress it.', 'Join me on Mirage: your voice can\'t be silenced here.', 'Join me on Mirage: no arbitrary bans, no shadow banning.', 'Join me on Mirage: speak freely, permanently.', 'Join me on Mirage: censorship-resistant social media.', 'Join me on Mirage: your posts can\'t be erased by agents.', 'Join me on Mirage: where deplatforming isn\'t possible.', 'Join me on Mirage: true freedom of expression.', 'Join me on Mirage: your speech doesn\'t need approval.', 'Join me on Mirage: no trust & safety theater here.', 'Join me on Mirage: post without fear of removal.', 'Join me on Mirage: uncensorable discourse.', 'Join me on Mirage: where no one can memory-hole your posts.', 'Join me on Mirage: permanent, immutable, yours.', 'Join me on Mirage: the platform that can\'t censor you.', 'Join me on Mirage: your words, preserved forever on-chain.', 'Join me on Mirage: no one decides what you can say.', 'Join me on Mirage: discourse without gatekeepers.',
-        // Provocative / Bold
-        'Join me on Mirage: the social network they can\'t shut down.', 'Join me on Mirage: unstoppable.', 'Join me on Mirage: decentralized, unstoppable, yours.', 'Join me on Mirage: true discourse, decentralized, unstoppable.', 'Join me on Mirage: what Reddit could have been.', 'Join me on Mirage: what Twitter should have been.', 'Join me on Mirage: what social media was meant to be.', 'Join me on Mirage: social media, unchained.', 'Join me on Mirage: the revolution is decentralized.', 'Join me on Mirage: they can\'t stop the signal.', 'Join me on Mirage: immune to takedowns.', 'Join me on Mirage: no kill switch.', 'Join me on Mirage: built to survive.', 'Join me on Mirage: the platform that fights back.', 'Join me on Mirage: ungovernable social media.', 'Join me on Mirage: where free speech isn\'t negotiable.', 'Join me on Mirage: the network no government can silence.', 'Join me on Mirage: decentralized means unstoppable.', 'Join me on Mirage: burn the algorithm, own your feed.', 'Join me on Mirage: social media with teeth.'];
-    const getShareText = () => {
-        return SHARE_TEXTS[Math.floor(Math.random() * SHARE_TEXTS.length)];
-    };
     useEffect(() => {
         let cancelled = false;
         const loadFollowData = async () => {
@@ -1143,29 +958,33 @@ export function useMain({
 
         // Determine sort mode
         const mode = overrideChrono !== null ? overrideChrono ? 'newest' : 'magic' : homeSortMode;
+        const params = {
+            limit: 15,
+            page: page,
+            address: viewerAddress,
+            by: mode,
+            allowed_tags: getAllowedTagsParam(),
+        };
         if (isHomeFeed || isFollowingFeed) {
-            const params = {
-                feed: topic,
-                limit: 15,
-                page: page,
-                address: viewerAddress
-            };
-            params.by = mode;
-            params.allowed_tags = getAllowedTagsParam();
-            Api.get('get_posts', params).then(handleResponse).catch(onError);
-        } else {
-            const params = {
-                topic,
-                limit: 15,
-                page: page,
-                address: viewerAddress
-            };
-            params.by = mode;
-            params.allowed_tags = getAllowedTagsParam();
-            Api.get('get_posts', params).then(handleResponse).catch(onError);
+            params.feed = topic;
+        } else if (topic && topic !== 'all') {
+            // Guest home/following remaps to the unscoped catalog (`all`); that
+            // query takes no community filter. A real slug is `community`.
+            // `topic` is retired — the backend 400s it.
+            params.community = topic;
+            Object.assign(params, lensQuery(feedLens.lens, feedLens.teamId, 'current'));
         }
+        console.debug('[Feed] get_posts', {
+            feed: params.feed,
+            community: params.community,
+            lens: params.lens,
+            teamId: params.team_id,
+            page,
+            guest: isGuest,
+        });
+        Api.get('get_posts', params).then(handleResponse).catch(onError);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback(allowNsfw => {
@@ -1321,7 +1140,19 @@ export function useMain({
         setStableOrder([]); // Clear stale order to prevent flash of old content
         setIsLoading(true); // Show loading immediately when navigating
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts]);
+    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts, feedLens]);
+
+    useEffect(() => {
+        const onLensChanged = (event) => {
+            const detail = event?.detail || {};
+            if (String(detail.community || '').toLowerCase() !== String(urlTopic || '').toLowerCase()) return;
+            const next = { lens: detail.lens, teamId: detail.teamId ?? null };
+            setFeedLens(next);
+            console.debug('[Feed] lens changed', { community: urlTopic, ...next });
+        };
+        window.addEventListener('lensChanged', onLensChanged);
+        return () => window.removeEventListener('lensChanged', onLensChanged);
+    }, [setFeedLens, urlTopic]);
 
     // Infinite scroll: observe a sentinel near the bottom (also clickable fallback)
     const bottomSentinelRef = useRef(null);
@@ -1450,26 +1281,25 @@ export function useMain({
         if (shouldFetch && !topicsLoadedRef.current) {
             topicsLoadedRef.current = true;
             let cancelled = false;
-            Api.get('get_topics', {
+            Api.get('communities', {
                 limit: 50,
-                min_posts: 1,
-                address: viewerAddress
             }).then(data => {
                 if (cancelled || !isMountedRef.current) return;
-                if (data && Array.isArray(data.topics)) {
-                    const topicsWithCounts = data.topics.filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '').map(t => ({
-                        topic: t.topic,
-                        count: t.post_count || t.count || 0
+                const items = Array.isArray(data?.items) ? data.items : [];
+                const topicsWithCounts = items
+                    .filter(t => t && t.community && typeof t.community === 'string' && t.community.trim() !== '')
+                    .map(t => ({
+                        topic: t.community,
+                        count: 0
                     }));
-                    const topicNames = topicsWithCounts.map(t => t.topic);
-                    const topicsWithAll = ['all', ...topicNames];
-                    Storage.save("topics", {
-                        topics: topicsWithAll,
-                        topicsWithCounts: topicsWithCounts,
-                        lastFetched: new Date().toISOString()
-                    });
-                    setTopics(topicsWithAll);
-                }
+                const topicNames = topicsWithCounts.map(t => t.topic);
+                const topicsWithAll = ['all', ...topicNames];
+                Storage.save("topics", {
+                    topics: topicsWithAll,
+                    topicsWithCounts: topicsWithCounts,
+                    lastFetched: new Date().toISOString()
+                });
+                setTopics(topicsWithAll);
             }).catch(error => {
                 if (cancelled || !isMountedRef.current) return;
                 topicsLoadedRef.current = false;
@@ -1488,8 +1318,8 @@ export function useMain({
 
         // On back navigation (POP), restore from cache if available
         if (shouldRestoreFeedState) {
-            const memOrder = readMemFeedState(urlTopic)?.order;
-            const order = readSavedOrder(urlTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            const memOrder = readMemFeedState(feedCacheTopic)?.order;
+            const order = readSavedOrder(feedCacheTopic) || (Array.isArray(memOrder) ? memOrder : null);
             const hasPostsForOrder = !!(order && order.length > 0 && state.posts && order.some(id => state.posts[id]));
             const hasPostsForTopic = hasAnyCachedPostsForTopic(urlTopic, state.posts);
             if (hasPostsForOrder || hasPostsForTopic) {
@@ -1584,7 +1414,7 @@ export function useMain({
             if (timeoutId) clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, location.pathname, openBrowsingEnabled, nodeConfigLoaded]);
+    }, [urlTopic, location.pathname, openBrowsingEnabled, nodeConfigLoaded, feedLens]);
 
     // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
@@ -1668,28 +1498,28 @@ export function useMain({
     // Each topic gets its own cache keys so we can restore any feed independently
     useEffect(() => {
         try {
-            const orderKey = getFeedKey(urlTopic, 'order');
+            const orderKey = getFeedKey(feedCacheTopic, 'order');
             if (stableOrder.length > 0) sessionStorage.setItem(orderKey, JSON.stringify(stableOrder)); else sessionStorage.removeItem(orderKey);
-            sessionStorage.setItem(getFeedKey(urlTopic, 'page'), String(currentPage));
-            sessionStorage.setItem(getFeedKey(urlTopic, 'hasmore'), String(hasMorePosts));
+            sessionStorage.setItem(getFeedKey(feedCacheTopic, 'page'), String(currentPage));
+            sessionStorage.setItem(getFeedKey(feedCacheTopic, 'hasmore'), String(hasMorePosts));
         } catch (_) { }
         try {
-            writeMemFeedState(urlTopic, {
+            writeMemFeedState(feedCacheTopic, {
                 order: stableOrder,
                 page: currentPage,
                 hasMore: hasMorePosts
             });
         } catch (_) { }
-    }, [urlTopic, stableOrder, currentPage, hasMorePosts]);
+    }, [feedCacheTopic, stableOrder, currentPage, hasMorePosts]);
 
     // Save scroll position before navigating away (keyed by current topic)
     useEffect(() => {
         const saveScrollPosition = () => {
             try {
-                sessionStorage.setItem(getFeedKey(urlTopic, 'scroll'), String(window.scrollY || 0));
+                sessionStorage.setItem(getFeedKey(feedCacheTopic, 'scroll'), String(window.scrollY || 0));
             } catch (_) { }
             try {
-                writeMemFeedState(urlTopic, {
+                writeMemFeedState(feedCacheTopic, {
                     scroll: Number(window.scrollY || 0)
                 });
             } catch (_) { }
@@ -1728,7 +1558,7 @@ export function useMain({
             window.removeEventListener('click', handleClick, true);
             window.removeEventListener('beforeunload', saveScrollPosition);
         };
-    }, [urlTopic]);
+    }, [feedCacheTopic, urlTopic]);
 
     // Track if scroll has been restored to prevent multiple restorations
     const scrollRestoredRef = useRef(false);
@@ -1745,9 +1575,9 @@ export function useMain({
         // Wait for posts to be loaded
         if (stableOrder.length === 0) return;
         try {
-            const savedScrollRaw = sessionStorage.getItem(getFeedKey(urlTopic, 'scroll'));
+            const savedScrollRaw = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'scroll'));
             const fromSession = savedScrollRaw ? parseInt(savedScrollRaw, 10) : 0;
-            const fromMem = Number(readMemFeedState(urlTopic)?.scroll || 0);
+            const fromMem = Number(readMemFeedState(feedCacheTopic)?.scroll || 0);
             const scrollY = Number.isFinite(fromSession) && fromSession > 0 ? fromSession : Number.isFinite(fromMem) && fromMem > 0 ? fromMem : 0;
             if (scrollY > 0) {
                 scrollRestoredRef.current = true;
@@ -1762,7 +1592,7 @@ export function useMain({
                 });
             }
         } catch (_) { }
-    }, [urlTopic, stableOrder.length]);
+    }, [feedCacheTopic, stableOrder.length]);
 
     // Listen for global hard refresh requests (from header)
     useEffect(() => {
@@ -1851,32 +1681,17 @@ export function useMain({
         dismissAndroidBanner,
         dismissIPhoneBanner,
         showNsfwHero,
-        showModerationReminder,
-        dismissModerationReminder,
-        snoozeModerationReminder,
         isLoggedIn,
-        inviteCodesEnabled,
         openBrowsingEnabled,
         nodeConfigLoaded,
         showAndroidBanner,
         showIPhoneBanner,
-        inviteModalOpen,
-        setInviteModalOpen,
-        inviteCodeCopied,
         welcomeStats,
         welcomeStatsStale,
-        inviteBannerCollapsed,
-        toggleInviteBanner,
-        nextAvailableCode,
-        availableCodeCount,
-        handleOpenInviteModal,
-        handleCopyInviteCode,
-        handleNativeShare,
-        canNativeShare,
-        getShareUrl,
-        getShareText,
         handleNsfwChoice,
         bottomSentinelRef,
-        loadMore
+        loadMore,
+        feedLens,
+        setFeedLens
     };
 }

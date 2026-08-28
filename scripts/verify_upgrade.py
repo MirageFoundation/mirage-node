@@ -127,6 +127,12 @@ def check_params() -> None:
         ok("two subscription tiers")
     else:
         fail(f"tier count={len(tiers)}")
+    retired = {"max_community_title_length", "max_community_description_length"}
+    present = sorted(retired.intersection(params))
+    if present:
+        fail(f"retired community metadata params remain: {present}")
+    else:
+        ok("community title and description params retired")
 
 
 def check_params_reach_backend() -> None:
@@ -154,12 +160,49 @@ def check_params_reach_backend() -> None:
 
 
 def check_gone_routes() -> None:
-    for path in ("/api/get_topics", "/api/core/follow_topic"):
+    for path in (
+        "/api/get_topics",
+        "/api/core/follow_topic",
+        "/api/core/unfollow_topic",
+        "/api/core/block_topic",
+        "/api/core/unblock_topic",
+        "/api/core/enable_agent",
+        "/api/core/disable_agent",
+        "/api/core/set_agents",
+        "/api/core/create_community",
+        "/api/core/set_community_metadata",
+        "/api/core/transfer_community",
+    ):
         status = http_status(f"{BACKEND}{path}")
         if status == 410:
             ok(f"{path} -> 410")
         else:
             fail(f"{path} status={status}, expected 410")
+
+
+def check_open_community_contract() -> None:
+    slug = "v139-open-community-verification"
+    community = http_json(f"{BACKEND}/api/communities/{slug}")
+    if community.get("community") == slug:
+        ok("valid unregistered community slug resolves")
+    else:
+        fail(f"community detail returned unexpected payload: {community}")
+    retired = {
+        "claimed",
+        "title",
+        "description",
+        "founder",
+        "original_founder",
+        "current_founder",
+        "original_team_id",
+        "current_default_team_id",
+        "default_count",
+    }
+    present = sorted(retired.intersection(community))
+    if present:
+        fail(f"retired community ownership fields remain: {present}")
+    else:
+        ok("community detail has no ownership or metadata fields")
 
 
 def comet_height() -> int:
@@ -207,6 +250,7 @@ def main() -> int:
         check_params,
         check_params_reach_backend,
         check_gone_routes,
+        check_open_community_contract,
         check_progress,
     )
     for check in checks:

@@ -21,7 +21,7 @@ import (
 func TestRelayMessageRegistryParity(t *testing.T) {
 	prototypes := relayMessagePrototypes()
 	require.NotEmpty(t, prototypes)
-	require.Equal(t, 40, len(prototypes), "update this count when adding/removing relay message types")
+	require.Equal(t, 37, len(prototypes), "update this count when adding/removing relay message types")
 
 	seen := make(map[string]struct{}, len(prototypes))
 	for _, m := range prototypes {
@@ -115,7 +115,7 @@ func switchedCoreMessages(t *testing.T, file, receiverType, method string) map[s
 // verification, which is an authorization hole.
 func TestRelayDecoratorSwitchParity(t *testing.T) {
 	registry := relayMessageNames(t)
-	require.Len(t, registry, 40, "update this count when adding/removing relay message types")
+	require.Len(t, registry, 37, "update this count when adding/removing relay message types")
 
 	powCases := switchedCoreMessages(t, "ante_pow.go", "PowDecorator", "AnteHandle")
 	sigCases := switchedCoreMessages(t, "ante_metasig.go", "RelaySigDecorator", "AnteHandle")
@@ -141,14 +141,17 @@ var governanceOnlyEnvelopeMessages = map[string]struct{}{
 }
 
 var retiredEnvelopeMessages = map[string]struct{}{
-	"MsgEnableAgent":   {},
-	"MsgDisableAgent":  {},
-	"MsgSetAgents":     {},
-	"MsgFollowTopic":   {},
-	"MsgUnfollowTopic": {},
-	"MsgBlockTopic":    {},
-	"MsgUnblockTopic":  {},
-	"MsgAnnotate":      {},
+	"MsgEnableAgent":          {},
+	"MsgDisableAgent":         {},
+	"MsgSetAgents":            {},
+	"MsgFollowTopic":          {},
+	"MsgUnfollowTopic":        {},
+	"MsgBlockTopic":           {},
+	"MsgUnblockTopic":         {},
+	"MsgAnnotate":             {},
+	"MsgCreateCommunity":      {},
+	"MsgSetCommunityMetadata": {},
+	"MsgTransferCommunity":    {},
 }
 
 // TestEveryEnvelopeMessageIsRoutedOrGovernanceOnly pins the other half of L-5:

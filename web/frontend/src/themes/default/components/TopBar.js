@@ -3,8 +3,6 @@ import styled from 'styled-components';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
-import { THEME_MANIFESTS } from '../../manifests';
-import { normalizeThemeId } from '../../../registry/theme';
 import SearchDropdown from './SearchDropdown.js';
 import { useSearchDropdown } from '../../../logic/useSearchDropdown';
 import { dicebearAvatarUrl } from '../../../utils/avatar';
@@ -653,52 +651,6 @@ const MenuSectionLabel = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 
-const ThemeRowButton = styled.button`
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    width: 100%;
-    padding: 0.4rem 0.9rem;
-    border: none;
-    background: ${({ theme, $active }) =>
-        $active ? theme.colors.hoverBg : 'transparent'};
-    color: ${({ theme }) => theme.colors.text};
-    font-family: inherit;
-    font-size: 0.76rem;
-    font-weight: 500;
-    text-align: left;
-    cursor: pointer;
-
-    &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
-    }
-`;
-
-const ThemeSwatchDot = styled.span`
-    width: 0.85rem;
-    height: 0.85rem;
-    border-radius: 999px;
-    flex-shrink: 0;
-    background: ${({ $bg }) => $bg || '#667eea'};
-    border: 1px solid rgba(0, 0, 0, 0.12);
-`;
-
-const ThemeNameText = styled.span`
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-`;
-
-const ActiveDot = styled.span`
-    width: 0.32rem;
-    height: 0.32rem;
-    border-radius: 999px;
-    background: ${({ theme }) => theme.colors.link};
-    flex-shrink: 0;
-`;
-
 const ModeTrack = styled.div`
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -735,30 +687,15 @@ const ModeIconButton = styled.button`
     }
 `;
 
-// Swatch colors per theme id used by the guest dropdown theme list.
-const THEME_SWATCHES = {
-    default: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    bluemoon: 'linear-gradient(135deg, #4f7fff 0%, #1b3bbf 100%)',
-    onyx: 'linear-gradient(135deg, #2a2a2a 0%, #000000 100%)',
-    oldreddit: 'linear-gradient(135deg, #ff6a33 0%, #cc3700 100%)',
-};
-
 /**
  * 3-dots menu shown on the right side of the TopBar for logged-out users.
- * Contains: Login, Signup, and a Theme picker with light/dark/auto mode toggle.
+ * Contains: Login, Signup, and light/dark/auto mode.
  */
 function GuestMenu() {
     const [open, setOpen] = useState(false);
     const wrapRef = useRef(null);
     const location = useLocation();
 
-    const [activeThemeId, setActiveThemeId] = useState(() => {
-        try {
-            return normalizeThemeId(Storage.load('theme_id', 'default'));
-        } catch (_) {
-            return 'default';
-        }
-    });
     const [themeMode, setThemeMode] = useState(() => {
         try {
             const v = Storage.load('theme_mode', 'system');
@@ -779,31 +716,15 @@ function GuestMenu() {
     useEffect(() => { setOpen(false); }, [location.pathname]);
 
     useEffect(() => {
-        const onThemeIdChanged = (e) => {
-            const next = e?.detail?.themeId;
-            if (next) setActiveThemeId(next);
-        };
         const onThemeModeChanged = (e) => {
             const next = e?.detail?.mode;
             if (next) setThemeMode(next);
         };
-        window.addEventListener('themeIdChanged', onThemeIdChanged);
         window.addEventListener('themeModeChanged', onThemeModeChanged);
         return () => {
-            window.removeEventListener('themeIdChanged', onThemeIdChanged);
             window.removeEventListener('themeModeChanged', onThemeModeChanged);
         };
     }, []);
-
-    const handleThemePick = (id) => {
-        const normalized = normalizeThemeId(id);
-        if (normalized === activeThemeId) return;
-        setActiveThemeId(normalized);
-        Storage.save('theme_id', normalized);
-        try {
-            window.dispatchEvent(new CustomEvent('themeIdChanged', { detail: { themeId: normalized } }));
-        } catch (_) { }
-    };
 
     const handleModePick = (mode) => {
         if (mode === themeMode) return;
@@ -836,24 +757,7 @@ function GuestMenu() {
                     <MenuItem to="/signup" onClick={() => setOpen(false)}>Sign up</MenuItem>
                     <MenuItem to="/login" onClick={() => setOpen(false)}>Log in</MenuItem>
                     <MenuDivider />
-                    <MenuSectionLabel>Theme</MenuSectionLabel>
-                    {THEME_MANIFESTS.map((m) => {
-                        const active = m.id === activeThemeId;
-                        return (
-                            <ThemeRowButton
-                                key={m.id}
-                                type="button"
-                                $active={active}
-                                onClick={() => handleThemePick(m.id)}
-                                aria-pressed={active}
-                                title={m.label || m.id}
-                            >
-                                <ThemeSwatchDot $bg={THEME_SWATCHES[m.id]} />
-                                <ThemeNameText>{m.label || m.id}</ThemeNameText>
-                                {active && <ActiveDot aria-hidden="true" />}
-                            </ThemeRowButton>
-                        );
-                    })}
+                    <MenuSectionLabel>Mode</MenuSectionLabel>
                     <ModeTrack role="group" aria-label="Theme mode">
                         <ModeIconButton
                             type="button"
@@ -951,7 +855,6 @@ export function ProfileMenuContent({ displayName, onItemClick, onSignOut }) {
             <MenuItem to="/settings" onClick={() => handleItemClick('/settings')}>Settings</MenuItem>
             <MenuItem to="/follows" onClick={() => handleItemClick('/follows')}>Follows</MenuItem>
             <MenuItem to="/blocks" onClick={() => handleItemClick('/blocks')}>Blocks</MenuItem>
-            <MenuItem to="/agents" onClick={() => handleItemClick('/agents')}>Agents</MenuItem>
             <MenuItem to="/faq" onClick={() => handleItemClick('/faq')}>FAQ</MenuItem>
             <MenuItem to="/network" onClick={() => handleItemClick('/network')}>Network</MenuItem>
             {isAdmin && (

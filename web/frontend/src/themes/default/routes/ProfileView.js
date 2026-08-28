@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import styled, { useTheme } from "styled-components";
@@ -24,6 +25,7 @@ import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import Api from "../../../utils/api";
 import Tooltip from "../components/Tooltip.js";
 import { AWARD_TYPES } from "../../../logic/usePostGifts";
+import CreatorEarningsPanel from "../components/CreatorEarningsPanel";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1432,8 +1434,8 @@ function ProfileCommentRow({ post }) {
                         </>
                     ) : hasRealTopic && (
                         <>
-                            <CommentTopicLink to={`/t/${encodeURIComponent(displayTopic)}`} onClick={e => e.stopPropagation()}>
-                                #{displayTopic}
+                            <CommentTopicLink to={communityPath(displayTopic)} onClick={e => e.stopPropagation()}>
+                                {communityLabel(displayTopic)}
                             </CommentTopicLink>
                             <CommentDot>·</CommentDot>
                         </>
@@ -1615,9 +1617,7 @@ function ProfileViewAuthenticated({
         subFeePending,
         subFeeStatus,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
         handleGiftSub,
         confirmGiftSubAction,
         cancelGiftSub,
@@ -1635,10 +1635,8 @@ function ProfileViewAuthenticated({
         handleRecentPostClick,
         usernameDisplay,
         balance,
-        reserveFunds,
         profileRegisteredAt,
         balanceDisplay,
-        reserveDisplay,
         registeredDisplay,
         canEditProfile,
         donatePending,
@@ -1947,14 +1945,6 @@ function ProfileViewAuthenticated({
                                             </ProfileFieldValuePlain>
                                         </ProfileFieldRow>}
                                         <ProfileFieldRow>
-                                            <HoverableLabel tabIndex={0} data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
-                                                Reserve:
-                                            </HoverableLabel>
-                                            <ProfileFieldValuePlain>
-                                                <Mono title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</Mono>
-                                            </ProfileFieldValuePlain>
-                                        </ProfileFieldRow>
-                                        <ProfileFieldRow>
                                             <Label>Registered:</Label>
                                             <ProfileFieldValuePlain>
                                                 <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
@@ -2089,6 +2079,10 @@ function ProfileViewAuthenticated({
                                         }} />
                                     </>}
 
+                                    {activeTab === 'earnings' && isOwnProfile && profileAddress && (
+                                        <CreatorEarningsPanel creator={profileAddress} />
+                                    )}
+
                                     {isPostsTab && !profileUsesListFeed && <>
                                         {!profileHideFilterSelect && profileAddress && <ProfilePostsTabGutter><FilterSelect value={recentPostsFilter} onChange={e => setRecentPostsFilter(e.target.value)}>
                                             <option value="all">All</option>
@@ -2123,8 +2117,8 @@ function ProfileViewAuthenticated({
                                         <AlgoSection>
                                             <AlgoSectionHead>
                                                 <AlgoSectionHeadText>
-                                                    <AlgoSectionTitle>Topic preferences</AlgoSectionTitle>
-                                                    <AlgoSectionSubtitle>Topics this account engages with the most</AlgoSectionSubtitle>
+                                                    <AlgoSectionTitle>Community preferences</AlgoSectionTitle>
+                                                    <AlgoSectionSubtitle>Communities this account engages with the most</AlgoSectionSubtitle>
                                                 </AlgoSectionHeadText>
                                                 {!prefsLoading && !prefsError && prefsTopics.length > 0 && (
                                                     <AlgoSectionCount>{prefsTopics.length}</AlgoSectionCount>
@@ -2133,7 +2127,7 @@ function ProfileViewAuthenticated({
                                             <AlgoList>
                                                 {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={false} />}
                                                 {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                                {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No topic preference data yet.</AlgoEmpty>}
+                                                {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No community preference data yet.</AlgoEmpty>}
                                                 {!prefsError && prefsTopics.length > 0 && (() => {
                                                     const CAP = 5;
                                                     const needsCollapse = prefsTopics.length > CAP * 2;
@@ -2145,15 +2139,15 @@ function ProfileViewAuthenticated({
                                                                 return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
                                                             }
                                                             const tone = t.weight > 0 ? 'up' : t.weight < 0 ? 'down' : 'neutral';
-                                                            return <AlgoRow key={t.topic} href={`/t/${encodeURIComponent(t.topic)}`} onClick={e => {
+                                                            return <AlgoRow key={t.topic} href={communityPath(t.topic)} onClick={e => {
                                                                 if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
                                                                     e.preventDefault();
-                                                                    navigate(`/t/${encodeURIComponent(t.topic)}`);
+                                                                    navigate(communityPath(t.topic));
                                                                 }
                                                             }}>
                                                                 <AlgoTopicChip aria-hidden="true"><HiHashtag /></AlgoTopicChip>
                                                                 <AlgoIdentity>
-                                                                    <AlgoIdentityTitle>{t.topic}</AlgoIdentityTitle>
+                                                                    <AlgoIdentityTitle>{communityLabel(t.topic)}</AlgoIdentityTitle>
                                                                 </AlgoIdentity>
                                                                 <AlgoWeightPill $tone={tone}>{formatPrefWeight(t.weight)}</AlgoWeightPill>
                                                             </AlgoRow>;
@@ -2342,10 +2336,6 @@ function ProfileViewAuthenticated({
                                                 <AsideStatLabel>Joined</AsideStatLabel>
                                             </AsideStat>
                                             <AsideStat>
-                                                <AsideStatValue title={reserveDisplay}>{compactMirageLabel(reserveFunds)}</AsideStatValue>
-                                                <AsideStatLabel>Reserve</AsideStatLabel>
-                                            </AsideStat>
-                                            <AsideStat>
                                                 <AsideStatValue>{followingCount == null ? '—' : followingCount}</AsideStatValue>
                                                 <AsideStatLabel>Following</AsideStatLabel>
                                             </AsideStat>
@@ -2412,8 +2402,8 @@ function ProfileViewAuthenticated({
                 ? `@${profileUsername}`
                 : (profileAddress ? `@${String(profileAddress).slice(0, 10)}…` : '@this user')}
             level={confirmGiftSub?.level}
-            feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
-            feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+            feeLabel={subFeeLabel}
+            feeUmirage={subFeeUmirage}
             loading={!!confirmGiftSub?.loading}
             expiryLabel={confirmGiftSub?.expiryLabel}
             error={confirmGiftSub?.error}

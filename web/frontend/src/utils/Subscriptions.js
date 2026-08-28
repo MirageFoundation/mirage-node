@@ -10,9 +10,9 @@ export async function fetchFollowedTopics(viewerAddress) {
     try {
         // Always go through ProfileCache so no-cache window / TTL logic applies.
         const profile = await fetchProfile(addr);
-        if (profile && Array.isArray(profile.followed_topics)) {
+        if (profile && Array.isArray(profile.joined_communities)) {
             // Normalize the list the same way as getTopicsFromCache()
-            return profile.followed_topics
+            return profile.joined_communities
                 .map(t => String(t || '').trim())
                 .filter(t => {
                     const v = t.toLowerCase();

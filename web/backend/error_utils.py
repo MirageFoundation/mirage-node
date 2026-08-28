@@ -31,18 +31,11 @@ class IndexerUnavailable(RuntimeError):
 ERRORS = {
     # Registration / signup
     "registration_disabled": "registration is disabled on this node",
-    "attribution_signature_invalid": "invite code and referrer must be signed",
     # Username
     "username_required": "username required",
     "username_too_short": "username too short",
     "username_too_long": "username too long",
     "username_invalid_format": "invalid username format",
-    # Referrer attribution recorded at signup
-    "referrer_not_found": "referrer not found",
-    "referrer_username_too_long": "referrer username too long",
-    "referrer_username_invalid_format": "invalid referrer username format",
-    "referrer_check_failed": "failed to validate referrer",
-    "self_referral": "self-referral is not allowed",
     # Auth / envelope
     "missing_fields": "missing required fields",
     "invalid_pubkey": "invalid pubkey",
@@ -74,6 +67,10 @@ ERRORS = {
     "backend_not_initialized": "backend not initialized",
     "upgrade_required": "client upgrade required",
     "gone": "this API has been removed",
+    "community_invalid": "invalid community slug",
+    "invalid_curated": "curated must be true or false",
+    "curation_team_not_found": "curator team not found",
+    "missing_viewer": "viewer is required",
     "internal_error": "internal server error",
     "indexer_unavailable": "indexer DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",

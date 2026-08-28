@@ -11,6 +11,7 @@ import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPage
 import { tooltipStyles } from "../components/Tooltip.js";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
+import AccountStatusNotices from "../components/AccountStatusNotices";
 
 /**
  * SubscriptionView — `default` Plan 06 sub-plan 05.
@@ -463,12 +464,8 @@ const AdminBalanceValue = styled.div`
 
 const BalanceRow = styled.div`
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 0.6rem;
-
-    @media (max-width: 420px) {
-        grid-template-columns: 1fr;
-    }
 `;
 
 const BalanceTile = styled.div`
@@ -778,7 +775,6 @@ export default function SubscriptionView({ state }) {
         subscriptionExpiry,
         autoRenew,
         balance,
-        reserveFunds,
         isLoading,
         isUpgrading,
         error,
@@ -1019,13 +1015,6 @@ export default function SubscriptionView({ state }) {
                                         {formatMirageCompact(balance)}
                                         <span>MIRAGE</span>
                                     </AdminBalanceValue>
-                                    <AdminBalanceLabel data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
-                                        Reserve
-                                    </AdminBalanceLabel>
-                                    <AdminBalanceValue>
-                                        {formatMirageCompact(reserveFunds)}
-                                        <span>MIRAGE</span>
-                                    </AdminBalanceValue>
                                 </AdminPlanRight>
                             </AdminPlanGrid>
                         </ActivePlanCard>
@@ -1044,6 +1033,7 @@ export default function SubscriptionView({ state }) {
     return (
         <SubscriptionPageShell>
             {error && <ErrorMessage>{error}</ErrorMessage>}
+            <AccountStatusNotices />
 
             <Section>
                 <SectionHeader>Active plan</SectionHeader>
@@ -1100,15 +1090,6 @@ export default function SubscriptionView({ state }) {
                                 </BalanceLabel>
                                 <BalanceValue>
                                     {formatMirageCompact(balance)}
-                                    <span>MIRAGE</span>
-                                </BalanceValue>
-                            </BalanceTile>
-                            <BalanceTile>
-                                <BalanceLabel data-tooltip={`Escrowed reserve in MIRAGE used for relayed gas and subscriptions.\n\nHeld internally by the blockchain and used to process all transactions while subscribed.\n\nNot directly spendable and will get burned if not used.`}>
-                                    Reserve
-                                </BalanceLabel>
-                                <BalanceValue $muted>
-                                    {formatMirageCompact(reserveFunds)}
                                     <span>MIRAGE</span>
                                 </BalanceValue>
                             </BalanceTile>

@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../utils/community';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled, { css, keyframes, useTheme } from "styled-components";
@@ -18,7 +19,6 @@ import { buildPhotonUrl, isLikelyImageUrl, isLikelyVideoUrl, getVideoThumbnailUr
 import Storage from "../../utils/Storage";
 import { formatTimeStamp } from "../../logic/useViewPost";
 import { AWARD_TYPES } from "../../logic/usePostGifts";
-import { useShowOriginal } from "../../logic/useShowOriginal";
 
 /**
  * ListFeedView (default) — mobile-app inspired feed list.
@@ -1112,15 +1112,7 @@ function CompactRow({ post, state, updatePost }) {
         } catch (_) { /* noop */ }
     }, [postId]);
 
-    const showingOriginal = useShowOriginal(post && post.post_id);
-    const displayPost = useMemo(() => {
-        if (!post) return post;
-        if (!showingOriginal) return post;
-        const next = { ...post };
-        if (post.original_title != null) next.title = post.original_title;
-        if (post.original_content != null) next.content = post.original_content;
-        return next;
-    }, [post, showingOriginal]);
+    const displayPost = post;
 
     const { mediaUrl, body } = useMemo(() => resolveCompactContent(displayPost || {}), [displayPost]);
     const thumbUrl = useMemo(() => getCompactThumb(post || {}), [post]);
@@ -1173,8 +1165,8 @@ function CompactRow({ post, state, updatePost }) {
 
             <CompactTopRow>
                 <CompactHeader>
-                    <CompactTopicLink to={`/t/${encodeURIComponent(topic)}`} onClick={stop}>
-                        #{topic}
+                    <CompactTopicLink to={communityPath(topic)} onClick={stop}>
+                        {communityLabel(topic)}
                     </CompactTopicLink>
                     <CompactHeaderDot>·</CompactHeaderDot>
                     <CompactUserLink
@@ -1316,12 +1308,6 @@ function CompactRow({ post, state, updatePost }) {
                                 </CompactFeedDebugTooltip>,
                                 document.body
                             )}
-                        </>
-                    )}
-                    {post.agent_edited && (
-                        <>
-                            <CompactHeaderDot>·</CompactHeaderDot>
-                            <span style={{ fontStyle: 'italic' }}>agent modified</span>
                         </>
                     )}
                     {hasTag && (

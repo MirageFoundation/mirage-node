@@ -261,6 +261,276 @@ class ChainClient:
         )
         return profile
 
+    def query_curation_team(self, community: str, team_id: int, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Read one committed curator team. Missing or malformed state is fatal."""
+        from shared.datatypes import QueryCurationTeamRequest, QueryCurationTeamResponse
+
+        slug = str(community).strip().lower()
+        if not slug or int(team_id) <= 0:
+            raise RuntimeError("query_curation_team requires community and positive team_id")
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CurationTeam",
+                request_serializer=QueryCurationTeamRequest.SerializeToString,
+                response_deserializer=QueryCurationTeamResponse.FromString,
+            )
+            try:
+                resp = method(QueryCurationTeamRequest(community=slug, team_id=int(team_id)), timeout=timeout)
+            except grpc.RpcError as e:
+                raise RuntimeError(f"CurationTeam gRPC failed for {slug}/{team_id}: {e}") from e
+        team = resp.team
+        if str(team.community).strip().lower() != slug or int(team.team_id) != int(team_id):
+            raise RuntimeError(f"CurationTeam returned the wrong team for {slug}/{team_id}")
+        result = {
+            "community": slug,
+            "team_id": int(team.team_id),
+            "owner": str(team.owner).strip().lower(),
+            "name": str(team.name),
+            "description": str(team.description),
+            "policy": str(team.policy),
+            "subscriber_only": bool(team.subscriber_only),
+            "subscriber_count": int(team.subscriber_count),
+            "created_height": int(team.created_height),
+            "created_order": int(team.created_order),
+            "deleted_height": int(team.deleted_height),
+        }
+        if not result["owner"] or not result["name"] or result["created_order"] <= 0:
+            raise RuntimeError(f"CurationTeam returned incomplete state for {slug}/{team_id}")
+        logger.debug(
+            "[curation] team grpc community=%s team_id=%s deleted_height=%s subscribers=%s",
+            slug,
+            team_id,
+            result["deleted_height"],
+            result["subscriber_count"],
+        )
+        return result
+
+    def query_curation_team_members(
+        self, community: str, team_id: int, timeout: int = GRPC_TIMEOUT
+    ) -> list[dict]:
+        """Read the complete accepted roster for a team."""
+        from shared.datatypes import QueryCurationTeamMembersRequest, QueryCurationTeamMembersResponse
+
+        slug = str(community).strip().lower()
+        next_key = b""
+        members: list[dict] = []
+        seen: set[str] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CurationTeamMembers",
+                request_serializer=QueryCurationTeamMembersRequest.SerializeToString,
+                response_deserializer=QueryCurationTeamMembersResponse.FromString,
+            )
+            for page in range(100):
+                req = QueryCurationTeamMembersRequest(community=slug, team_id=int(team_id))
+                req.pagination.key = next_key
+                req.pagination.limit = 100
+                try:
+                    resp = method(req, timeout=timeout)
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"CurationTeamMembers gRPC failed for {slug}/{team_id}: {e}") from e
+                for member in resp.members:
+                    address = str(member.address).strip().lower()
+                    order = int(member.accepted_order)
+                    if not address or order <= 0:
+                        raise RuntimeError(f"CurationTeamMembers returned malformed member for {slug}/{team_id}")
+                    if address in seen:
+                        raise RuntimeError(f"CurationTeamMembers returned duplicate {address} for {slug}/{team_id}")
+                    seen.add(address)
+                    members.append({"address": address, "accepted_order": order})
+                next_key = bytes(resp.pagination.next_key)
+                if not next_key:
+                    break
+            else:
+                raise RuntimeError(f"CurationTeamMembers exceeded 100 pages for {slug}/{team_id}")
+        logger.debug("[curation] members grpc community=%s team_id=%s count=%s", slug, team_id, len(members))
+        return members
+
+    def list_all_curation_teams(
+        self, *, include_deleted: bool = True, timeout: int = PROFILES_PAGE_TIMEOUT
+    ) -> list[dict]:
+        """Read every team for indexer startup/backfill."""
+        from shared.datatypes import QueryAllCurationTeamsRequest, QueryAllCurationTeamsResponse
+
+        next_key = b""
+        teams: list[dict] = []
+        seen: set[tuple[str, int]] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/AllCurationTeams",
+                request_serializer=QueryAllCurationTeamsRequest.SerializeToString,
+                response_deserializer=QueryAllCurationTeamsResponse.FromString,
+            )
+            for page in range(10000):
+                req = QueryAllCurationTeamsRequest(include_deleted=bool(include_deleted))
+                req.pagination.key = next_key
+                req.pagination.limit = 100
+                try:
+                    resp = method(req, timeout=timeout)
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"AllCurationTeams gRPC failed on page {page + 1}: {e}") from e
+                for team in resp.teams:
+                    community = str(team.community).strip().lower()
+                    team_id = int(team.team_id)
+                    key = (community, team_id)
+                    if not community or team_id <= 0 or key in seen:
+                        raise RuntimeError(f"AllCurationTeams returned malformed/duplicate team {key}")
+                    seen.add(key)
+                    teams.append(
+                        {
+                            "community": community,
+                            "team_id": team_id,
+                            "owner": str(team.owner).strip().lower(),
+                            "name": str(team.name),
+                            "description": str(team.description),
+                            "policy": str(team.policy),
+                            "subscriber_only": bool(team.subscriber_only),
+                            "subscriber_count": int(team.subscriber_count),
+                            "created_height": int(team.created_height),
+                            "created_order": int(team.created_order),
+                            "deleted_height": int(team.deleted_height),
+                        }
+                    )
+                next_key = bytes(resp.pagination.next_key)
+                if not next_key:
+                    break
+            else:
+                raise RuntimeError("AllCurationTeams exceeded 10000 pages")
+        logger.info("[curation] fetched %d teams via AllCurationTeams", len(teams))
+        return teams
+
+    def query_community_preference(
+        self, owner: str, community: str, timeout: int = GRPC_TIMEOUT
+    ) -> dict:
+        """Read stored and effective preference state from the committed chain."""
+        from shared.datatypes import QueryCommunityPreferenceRequest, QueryCommunityPreferenceResponse
+
+        address = str(owner).strip().lower()
+        slug = str(community).strip().lower()
+        if not address or not slug:
+            raise RuntimeError("query_community_preference requires owner and community")
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CommunityPreference",
+                request_serializer=QueryCommunityPreferenceRequest.SerializeToString,
+                response_deserializer=QueryCommunityPreferenceResponse.FromString,
+            )
+            try:
+                resp = method(QueryCommunityPreferenceRequest(owner=address, community=slug), timeout=timeout)
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return {"joined": False}
+                raise RuntimeError(f"CommunityPreference gRPC failed for {address}/{slug}: {e}") from e
+        mode = int(resp.stored.mode)
+        pinned_team_id = int(resp.stored.pinned_team_id)
+        if mode not in (0, 1, 2) or (mode == 1) != (pinned_team_id > 0):
+            raise RuntimeError(f"CommunityPreference returned malformed state for {address}/{slug}")
+        return {
+            "joined": True,
+            "mode": mode,
+            "pinned_team_id": pinned_team_id if mode == 1 else None,
+            "effective_mode": int(resp.effective_mode),
+            "effective_team_id": int(resp.effective_team_id),
+        }
+
+    def query_post_metadata(self, txhash: str, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Read required protocol-1 post metadata."""
+        from shared.datatypes import QueryPostMetadataRequest, QueryPostMetadataResponse
+
+        target = str(txhash).strip().lower()
+        if len(target) != 64:
+            raise RuntimeError("query_post_metadata requires a 64-character tx hash")
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/PostMetadata",
+                request_serializer=QueryPostMetadataRequest.SerializeToString,
+                response_deserializer=QueryPostMetadataResponse.FromString,
+            )
+            try:
+                resp = method(QueryPostMetadataRequest(txhash=target), timeout=timeout)
+            except grpc.RpcError as e:
+                raise RuntimeError(f"PostMetadata gRPC failed for {target}: {e}") from e
+        metadata = resp.metadata
+        result = {
+            "author": str(metadata.author).strip().lower(),
+            "parent_hash": str(metadata.parent_hash).strip().lower(),
+            "root_hash": str(metadata.root_hash).strip().lower(),
+            "community": str(metadata.community).strip().lower(),
+            "global_sequence": int(metadata.global_sequence),
+            "created_height": int(metadata.created_height),
+            "created_epoch": int(metadata.created_epoch),
+            "author_was_paid_at_creation": bool(metadata.author_was_paid_at_creation),
+            "deleted_height": int(metadata.deleted_height),
+            "deleted_epoch": int(metadata.deleted_epoch),
+        }
+        if (
+            not result["author"]
+            or len(result["root_hash"]) != 64
+            or not result["community"]
+            or result["global_sequence"] <= 0
+            or result["created_height"] <= 0
+        ):
+            raise RuntimeError(f"PostMetadata returned incomplete state for {target}")
+        logger.debug(
+            "[curation] post metadata grpc tx=%s sequence=%s community=%s",
+            target[:12],
+            result["global_sequence"],
+            result["community"],
+        )
+        return result
+
+    def query_subscription_runtime(self, address: str, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Read quota and renewal-warning state required by bootstrap."""
+        from shared.datatypes import (
+            QuerySubscriberQuotaRequest,
+            QuerySubscriberQuotaResponse,
+            QuerySubscriptionRenewalRequest,
+            QuerySubscriptionRenewalResponse,
+        )
+
+        owner = str(address).strip().lower()
+        if not owner:
+            raise RuntimeError("query_subscription_runtime requires address")
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            quota_method = channel.unary_unary(
+                "/mirage.core.v1.Query/SubscriberQuota",
+                request_serializer=QuerySubscriberQuotaRequest.SerializeToString,
+                response_deserializer=QuerySubscriberQuotaResponse.FromString,
+            )
+            renewal_method = channel.unary_unary(
+                "/mirage.core.v1.Query/SubscriptionRenewal",
+                request_serializer=QuerySubscriptionRenewalRequest.SerializeToString,
+                response_deserializer=QuerySubscriptionRenewalResponse.FromString,
+            )
+            try:
+                quota = quota_method(QuerySubscriberQuotaRequest(address=owner), timeout=timeout)
+                renewal = renewal_method(QuerySubscriptionRenewalRequest(address=owner), timeout=timeout)
+            except grpc.RpcError as e:
+                raise RuntimeError(f"subscription runtime gRPC failed for {owner}: {e}") from e
+        result = {
+            "quota_epoch": int(quota.epoch),
+            "quota_limit": int(quota.limit),
+            "quota_used": int(quota.used),
+            "quota_remaining": int(quota.remaining),
+            "quota_reset_at": int(quota.reset_at),
+            "renewal_expiry": int(renewal.state.expiry),
+            "renewal_next_attempt": int(renewal.state.next_attempt_unix),
+            "renewal_last_attempt_epoch": int(renewal.state.last_attempt_epoch),
+            "renewal_warning_sent": bool(renewal.state.warning_sent),
+        }
+        if result["quota_limit"] < result["quota_used"] or result["quota_remaining"] != (
+            result["quota_limit"] - result["quota_used"]
+        ):
+            raise RuntimeError(f"SubscriberQuota returned inconsistent values for {owner}")
+        logger.debug(
+            "[quota] grpc address=%s used=%s limit=%s renewal_expiry=%s",
+            owner,
+            result["quota_used"],
+            result["quota_limit"],
+            result["renewal_expiry"],
+        )
+        return result
+
     @staticmethod
     def _profile_to_dict(resp) -> dict:
         """Convert a mirage.core.v1.QueryProfileResponse message to a plain dict."""

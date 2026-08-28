@@ -66,7 +66,6 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_root_post_id": PUBLIC,
     "/api/get_similar_users": PUBLIC,
     "/api/get_supply_history": PUBLIC,
-    "/api/get_topics": PUBLIC,
     "/api/get_total_supply": PUBLIC,
     "/api/get_tx_status": PUBLIC,
     "/api/get_user_followed": PUBLIC,
@@ -76,7 +75,6 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_users": PUBLIC,
     "/api/get_welcome_stats": PUBLIC,
     "/api/search": PUBLIC,
-    "/api/search_topics": PUBLIC,
     "/api/search_username": PUBLIC,
     "/api/stats/visitor_attribution": PUBLIC,
     "/api/stream_proxy/<video_uid>": PUBLIC,
@@ -105,43 +103,39 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/core/annotate": ENVELOPE,
     "/api/core/award": ENVELOPE,
     "/api/core/block_post": ENVELOPE,
-    "/api/core/block_topic": ENVELOPE,
     "/api/core/block_user": ENVELOPE,
     "/api/core/delete_post": ENVELOPE,
     "/api/core/delete_user": ENVELOPE,
-    "/api/core/disable_agent": ENVELOPE,
     "/api/core/edit": ENVELOPE,
-    "/api/core/enable_agent": ENVELOPE,
-    "/api/core/follow_topic": ENVELOPE,
     "/api/core/follow_user": ENVELOPE,
     "/api/core/join_community": ENVELOPE,
     "/api/core/leave_community": ENVELOPE,
     "/api/core/block_community": ENVELOPE,
     "/api/core/unblock_community": ENVELOPE,
-    "/api/core/create_community": ENVELOPE,
-    "/api/core/set_community_metadata": ENVELOPE,
-    "/api/core/transfer_community": ENVELOPE,
     "/api/core/create_curation_team": ENVELOPE,
     "/api/core/set_curation_preference": ENVELOPE,
     "/api/core/claim_creator_rewards": ENVELOPE,
     "/api/communities": PUBLIC,
     "/api/communities/<slug>": PUBLIC,
     "/api/communities/<slug>/teams": PUBLIC,
+    # Team rosters and pending curator invitations are chain state: anyone can
+    # read the same rows off a public node with Query/CurationTeamMembers and
+    # Query/PendingCuratorInvitations, so gating the convenience route is theater.
+    "/api/communities/<slug>/teams/<int:team_id>": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/invitations": PUBLIC,
     "/api/creator/earnings": PUBLIC,
     "/api/core/post": ENVELOPE,
     "/api/core/report": ENVELOPE,
     "/api/core/send_tokens": ENVELOPE,
-    "/api/core/set_agents": ENVELOPE,
     "/api/core/set_auto_renewal": ENVELOPE,
     "/api/core/set_biography": ENVELOPE,
     "/api/core/set_username": ENVELOPE,
     "/api/core/subscribe": ENVELOPE,
     "/api/core/unblock_post": ENVELOPE,
-    "/api/core/unblock_topic": ENVELOPE,
     "/api/core/unblock_user": ENVELOPE,
-    "/api/core/unfollow_topic": ENVELOPE,
     "/api/core/unfollow_user": ENVELOPE,
     "/api/core/vote": ENVELOPE,
+    # --- Retired in v1.39.0: 410 on every method ----------------------------
 }
 
 # Markers the static scan looks for, mapped to the capability they prove.
@@ -172,7 +166,7 @@ _REQUIRED: Dict[str, Set[str]] = {
     SIGNED_ADMIN: {"sig", "level"},
 }
 
-_ROUTE_FILES = ("public.py", "core.py", "quests.py", "communities.py")
+_ROUTE_FILES = ("public.py", "core.py", "communities.py")
 
 
 def _markers_of(fn: ast.FunctionDef) -> Set[str]:

@@ -8,7 +8,7 @@ import * as tx from "../utils/tx";
 import Api from "../utils/api";
 import { getMaxUsernameSize, getMinUsernameSize } from "../utils/chainParams";
 import { formatError } from "../utils/errorMessages";
-import { clearReferralAttribution, getReferralAttribution } from "../utils/visitorId";
+import { clearReferralAttribution } from "../utils/visitorId";
 import { peekHandoff, createHandoff, clearHandoff } from "../utils/onboardingSession";
 export function useCreateAccount({
     state,
@@ -27,14 +27,14 @@ export function useCreateAccount({
     }, []);
 
     // Read node config from localStorage (set by get_node_config API)
-    // Both fields must be explicitly present (boolean) — no silent defaults.
+    // The field must be explicitly present (boolean) — no silent defaults.
     const nodeConfig = React.useMemo(() => {
         void configUpdateTrigger;
         try {
             const raw = localStorage.getItem('nodeConfig');
             if (raw) {
                 const parsed = JSON.parse(raw);
-                if (typeof parsed.registration_enabled === 'boolean' && typeof parsed.registration_invite_code_required === 'boolean') {
+                if (typeof parsed.registration_enabled === 'boolean') {
                     return parsed;
                 }
             }
@@ -42,7 +42,6 @@ export function useCreateAccount({
         return null; // null = config not loaded
     }, [configUpdateTrigger]);
     const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
-    const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
     // App.js fetches get_node_config on mount when stale and fires nodeConfigUpdated.
     // If config is missing (cleared or never cached), fetch here once to avoid
@@ -88,17 +87,6 @@ export function useCreateAccount({
         return entry?.seed || null;
     }, [handoffId]);
 
-    // Get invite code and referrer from URL parameters
-    const urlParams = new URLSearchParams(location.search);
-    const inviteFromUrl = urlParams.get('invite') || '';
-    const inviteChars = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-    const formattedInviteFromUrl = inviteChars.length > 4
-        ? `${inviteChars.slice(0, 4)}-${inviteChars.slice(4)}`
-        : inviteChars;
-    const hasValidInviteFromUrl = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(formattedInviteFromUrl);
-    const explicitReferrer = urlParams.get('ref') || '';
-    const refFromUrl = hasValidInviteFromUrl ? '' : explicitReferrer || getReferralAttribution();
-
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
         if (state.publicKey) {
@@ -111,7 +99,6 @@ export function useCreateAccount({
     // Set up state for seed_phrase and publicKey (privateKey derived from seed)
     const [seedPhrase, setSeedPhrase] = useState("");
     const [publicKey, setPublicKey] = useState("");
-    const [inviteCode, setInviteCode] = useState(formattedInviteFromUrl);
     const [usernameInput, setUsernameInput] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
@@ -119,49 +106,6 @@ export function useCreateAccount({
     const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
-
-    // Referral attribution survives navigation in a short-lived first-party cookie.
-    const [referrerUsername, setReferrerUsername] = useState(refFromUrl);
-    const [referrerStatus, setReferrerStatus] = useState(refFromUrl ? "checking" : "none");
-    const [referrerAvailable, setReferrerAvailable] = useState(0);
-    const [referrerError, setReferrerError] = useState("");
-
-    // Invite-gated nodes pre-check whether the referrer can supply the invite.
-    // Open-registration nodes still submit the referrer for attribution.
-    React.useEffect(() => {
-        if (!refFromUrl) return;
-        setReferrerUsername(refFromUrl);
-        if (!inviteCodeRequired) {
-            setReferrerStatus("valid");
-            return;
-        }
-        if (hasValidInviteFromUrl) {
-            setReferrerStatus("none");
-            return;
-        }
-        let cancelled = false;
-        setReferrerStatus("checking");
-        Api.get('referrals/precheck', {
-            username: refFromUrl
-        }).then(data => {
-            if (cancelled) return;
-            if (data && data.valid) {
-                setReferrerUsername(refFromUrl);
-                setReferrerStatus("valid");
-                if (typeof data.available === 'number') setReferrerAvailable(data.available);
-            } else {
-                setReferrerStatus("none");
-                setReferrerError(data || "referrer_check_failed");
-            }
-        }).catch(() => {
-            if (cancelled) return;
-            setReferrerStatus("none");
-            setReferrerError("referrer_check_failed");
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, [hasValidInviteFromUrl, inviteCodeRequired, refFromUrl]);
 
     // While submitting/confirming, block all clicks and key navigation globally
     React.useEffect(() => {
@@ -224,30 +168,6 @@ export function useCreateAccount({
         }
     };
 
-    // Validate invite code via backend
-    const validateInviteCode = async code => {
-        try {
-            const resp = await Api.post('validate_invite_code', {
-                code
-            });
-            if (resp && resp.valid) {
-                return {
-                    valid: true,
-                };
-            }
-            return resp || {
-                valid: false,
-                error_code: "invite_code_invalid",
-                error: "invalid invite code"
-            };
-        } catch (e) {
-            return {
-                valid: false,
-                error_code: "invite_code_check_failed",
-                error: "failed to validate invite code"
-            };
-        }
-    };
     const initializeAccount = (existingSeed = null) => {
         // Do NOT clear Storage / vault here — only stage a new identity in component state.
         // Active vault stays intact until create_user confirms on-chain.
@@ -324,50 +244,6 @@ export function useCreateAccount({
             return;
         }
 
-        // Validate invite code or referrer
-        let codeClean = hasValidInviteFromUrl ? formattedInviteFromUrl : "";
-        const usingReferrer = inviteCodeRequired && referrerStatus === "valid" && referrerUsername;
-        if (inviteCodeRequired && !usingReferrer) {
-            codeClean = (inviteCode || "").trim().toUpperCase();
-            if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
-                setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
-                const until = Date.now() + 1000;
-                setCooldownUntil(until);
-                setTimeout(() => setCooldownUntil(0), 1000);
-                return;
-            }
-            setSubmitError("");
-            const inviteRes = await validateInviteCode(codeClean);
-            if (!inviteRes || !inviteRes.valid) {
-                setSubmitError(formatError(inviteRes));
-                const until = Date.now() + 1000;
-                setCooldownUntil(until);
-                setTimeout(() => setCooldownUntil(0), 1000);
-                return;
-            }
-        } else if (inviteCodeRequired && usingReferrer) {
-            // Re-check referrer availability before submit
-            try {
-                const precheck = await Api.get('referrals/precheck', {
-                    username: referrerUsername
-                });
-                if (!precheck || !precheck.valid) {
-                    setReferrerError(precheck || "referrer_check_failed");
-                    setReferrerStatus("invalid");
-                    const until = Date.now() + 1000;
-                    setCooldownUntil(until);
-                    setTimeout(() => setCooldownUntil(0), 1000);
-                    return;
-                }
-            } catch (_) {
-                setReferrerError("referrer_check_failed");
-                const until = Date.now() + 1000;
-                setCooldownUntil(until);
-                setTimeout(() => setCooldownUntil(0), 1000);
-                return;
-            }
-        }
-
         // Preflight: ensure username is still available
         const availRes = await checkUsernameAvailable(usernameFinal);
         if (!availRes || availRes.error) {
@@ -412,8 +288,7 @@ export function useCreateAccount({
             } catch (_) { /* noop */ }
             // Persist seed into vault only after success (plaintext default).
             // Defer to tx facade for PoW + relay
-            const submittedReferrer = codeClean ? "" : referrerUsername;
-            const result = await tx.createUser(usernameFinal, codeClean, submittedReferrer);
+            const result = await tx.createUser(usernameFinal);
             if (!result || !result.success) {
                 clearHandoff(signingHandoffId);
                 signingHandoffId = null;
@@ -505,11 +380,7 @@ export function useCreateAccount({
         location,
         nodeConfig,
         registrationEnabled,
-        inviteCodeRequired,
         fromRecovery,
-        refFromUrl,
-        inviteCode,
-        setInviteCode,
         usernameInput,
         setUsernameInput,
         submitting,
@@ -517,9 +388,6 @@ export function useCreateAccount({
         submitError,
         setSubmitError,
         cooldownUntil,
-        referrerStatus,
-        referrerAvailable,
-        referrerError,
         handleContinue,
         usernameFinal,
         configFetchDone

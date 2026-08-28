@@ -12,8 +12,6 @@ import {
     HiOutlinePlusCircle,
     HiMagnifyingGlass,
     HiOutlineMagnifyingGlass,
-    HiUserGroup,
-    HiOutlineUserGroup,
     HiQuestionMarkCircle,
     HiOutlineQuestionMarkCircle,
     HiChevronDown,
@@ -22,6 +20,7 @@ import Storage from '../../../utils/Storage';
 import { fetchFollowedTopics, loadSubscriptions } from '../../../utils/Subscriptions';
 import { fetchFollowedUsers, loadFollowedAuthors } from '../../../utils/FollowUsers';
 import { resolveUsernames } from '../../../utils/UsernameCache';
+import { communityLabel, communityPath } from '../../../utils/community';
 
 /**
  * Desktop sidebar rail for the default theme.
@@ -243,12 +242,11 @@ const icons = {
     topics: { outline: HiOutlineHashtag, filled: HiHashtag },
     create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
     search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
-    agents: { outline: HiOutlineUserGroup, filled: HiUserGroup },
     faq: { outline: HiOutlineQuestionMarkCircle, filled: HiQuestionMarkCircle },
 };
 
 function isActivePath(pathname, target) {
-    if (target === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/t/');
+    if (target === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/c/') || pathname.startsWith('/t/');
     if (target === '/profile') return pathname === '/profile' || pathname.startsWith('/u/');
     return pathname === target;
 }
@@ -406,8 +404,7 @@ function Sidebar({ state }) {
             <Section>
                 <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} onClick={handleHomeClick} />
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
-                <SidebarItem to="/topics" icon={icons.topics} label="Topics" pathname={pathname} />
-                <SidebarItem to="/agents" icon={icons.agents} label="Agents" pathname={pathname} />
+                <SidebarItem to="/communities" icon={icons.topics} label="Communities" pathname={pathname} />
                 <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
@@ -422,7 +419,7 @@ function Sidebar({ state }) {
                             onClick={() => setTopicsOpen(v => !v)}
                             aria-expanded={topicsOpen}
                         >
-                            <span>Topics</span>
+                            <span>Communities</span>
                             <ChevronIcon expanded={topicsOpen} />
                         </SectionHeader>
                         {topicsOpen && (
@@ -431,8 +428,8 @@ function Sidebar({ state }) {
                                     <EmptyRow>None followed</EmptyRow>
                                 ) : (
                                     topicsToShow.map((topic) => (
-                                        <TopicLink key={topic} to={`/t/${topic}`}>
-                                            #{topic}
+                                        <TopicLink key={topic} to={communityPath(topic)}>
+                                            {communityLabel(topic)}
                                         </TopicLink>
                                     ))
                                 )}

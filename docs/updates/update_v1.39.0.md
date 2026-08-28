@@ -2,11 +2,11 @@
 
 ### Communities, not topics
 
-The places you post are communities now. Open one at `/c/` plus its name, browse the directory at `/communities`, and join the ones you actually want in your home feed. Old `/t/` links still work; they take you to the new address. A community has to be claimed before anyone can start a new thread there, so the page you remember from before this upgrade stays readable as an archive until someone with a subscription claims the name and opens it again.
+The places you post are communities now. Open one at `/c/` plus its name, browse the directory at `/communities`, and join the ones you actually want in your home feed. Old `/t/` links still work; they take you to the new address. Every valid community name is open for conversation immediately—there is no registration, founder, owner, or claim.
 
 ### Curation you choose
 
-Each claimed community can have competing curation teams. Join and you follow the community default; pin a team if you trust that lens, or read raw if you want everything. Curators can hide a post or a user in their own lens, lock a thread, or switch that lens to subscribers only. They cannot rewrite anyone else's words. What they hide is a filter, not a deletion, and you can always open the raw view or a direct link.
+Paid subscribers can start competing curator teams for any community they have joined. Teams publish their own description and policy, invite other paid subscribers who must accept, and earn the default position by attracting the most paid users who explicitly select them. A community with no team remains uncurated and is shown raw. Curators can hide a post or user in their own lens, lock a thread, or limit that lens to subscriber posts, but they never own the community or rewrite anyone else's words. Raw view remains available wherever node policy permits it.
 
 ### A creator pool instead of quests
 

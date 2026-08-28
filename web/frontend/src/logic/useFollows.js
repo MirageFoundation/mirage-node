@@ -41,7 +41,7 @@ export function useFollows({
         });
         if (cancelled) return;
         setFollowedUsers(data?.followed_users || []);
-        setFollowedTopics(data?.followed_topics || []);
+        setFollowedTopics(data?.joined_communities || []);
       } catch (err) {
         if (!cancelled) {
           setListsError(err?.message || 'Failed to load follows');
@@ -103,10 +103,10 @@ export function useFollows({
           removed: topicTrimmed
         });
       } else {
-        alert(`Failed to unfollow topic: ${result?.error || 'Unknown error'}`);
+        alert(`Failed to unfollow community: ${result?.error || 'Unknown error'}`);
       }
     } catch (error) {
-      alert(`Error unfollowing topic: ${error?.message || error}`);
+      alert(`Error unfollowing community: ${error?.message || error}`);
     }
   };
   const handleUnfollowUser = async (e, userAddr) => {

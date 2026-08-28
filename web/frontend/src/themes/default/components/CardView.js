@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled, { useTheme, css } from "styled-components";
@@ -16,7 +17,6 @@ import {
     HiOutlineFlag,
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
-    HiOutlineDocumentText,
     HiOutlineArrowDownTray,
     HiOutlineShieldExclamation,
 } from "react-icons/hi2";
@@ -37,7 +37,6 @@ import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import ContentTagBadge from "./ContentTagBadge";
 import usePostGifts from "../../../logic/usePostGifts";
-import { useShowOriginal, toggleShowOriginal } from "../../../logic/useShowOriginal";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
 
@@ -727,14 +726,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     })();
     const followingTopic = topicFollowOverride !== null ? topicFollowOverride : computedFollowingTopic;
 
-    const showingOriginal = useShowOriginal(postId);
-    const hasAgentOriginal = !!(safePost.original_title || safePost.original_content);
-    const displayTitle = (showingOriginal && safePost.original_title != null)
-        ? safePost.original_title
-        : safePost.title;
-    const displayRawContent = (showingOriginal && safePost.original_content != null)
-        ? safePost.original_content
-        : safePost.content;
+    const displayTitle = safePost.title;
+    const displayRawContent = safePost.content;
 
     const { mediaUrl, mediaList, body } = useMemo(
         () => resolveDisplayContent({ ...safePost, content: displayRawContent }),
@@ -877,8 +870,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleCopyText = useCallback(() => {
         closeAllMenus();
         const parts = [];
-        const titleStr = (showingOriginal && post && typeof post.original_title === 'string') ? post.original_title : (post && post.title);
-        const contentStr = (showingOriginal && post && typeof post.original_content === 'string') ? post.original_content : (post && post.content);
+        const titleStr = post && post.title;
+        const contentStr = post && post.content;
         if (typeof titleStr === 'string' && titleStr.trim()) parts.push(titleStr.trim());
         if (typeof contentStr === 'string' && contentStr.trim()) parts.push(contentStr.trim());
         const text = parts.join('\n\n');
@@ -890,12 +883,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 setTimeout(() => setTextCopied(false), 2500);
             }
         } catch (_) { /* noop */ }
-    }, [closeAllMenus, post, showingOriginal]);
-
-    const handleToggleOriginal = useCallback(() => {
-        closeAllMenus();
-        toggleShowOriginal(postId);
-    }, [closeAllMenus, postId]);
+    }, [closeAllMenus, post]);
 
     const handleFollowUser = useCallback(async () => {
         closeAllMenus();
@@ -914,7 +902,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleFollowTopic = useCallback(async () => {
         closeAllMenus();
         if (!topic) return;
-        if (!requireAccount('follow topics')) return;
+        if (!requireAccount('follow communities')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {
@@ -1041,9 +1029,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         AWARD_TYPES: awardTypes,
         getAwardCost,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
     } = gifts;
 
     const handleGiveAward = useCallback(() => {
@@ -1100,8 +1086,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         >
             <HeaderRow>
                 <HeaderMeta>
-                    <TopicLink to={`/t/${encodeURIComponent(topic)}`} onClick={stop}>
-                        #{topic}
+                    <TopicLink to={communityPath(topic)} onClick={stop}>
+                        {communityLabel(topic)}
                     </TopicLink>
                     <HeaderDot>·</HeaderDot>
                     <UserLink
@@ -1246,12 +1232,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </>
                     )}
-                    {post.agent_edited && (
-                        <>
-                            <HeaderDot>·</HeaderDot>
-                            <span style={{ fontStyle: 'italic' }}>agent modified</span>
-                        </>
-                    )}
                     {hasTag && (
                         <>
                             <HeaderDot>·</HeaderDot>
@@ -1299,7 +1279,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onClick={handleFollowTopic}
                                     >
                                         <HiOutlineHashtag />
-                                        <span>{followingTopic ? `Unfollow #${topic}` : `Follow #${topic}`}</span>
+                                        <span>{followingTopic ? `Unfollow ${communityLabel(topic)}` : `Follow ${communityLabel(topic)}`}</span>
                                     </MenuItemBtn>
                                     <MenuItemBtn
                                         type="button"
@@ -1349,12 +1329,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         <span>{mediaDownloadLabel(d.kind, i, mediaDownloads.length, d.format)}</span>
                                     </MenuItemBtn>
                                 ))}
-                                {hasAgentOriginal && (
-                                    <MenuItemBtn type="button" onClick={handleToggleOriginal}>
-                                        <HiOutlineDocumentText />
-                                        <span>{showingOriginal ? 'Show modified' : 'Show original'}</span>
-                                    </MenuItemBtn>
-                                )}
                                 {isOwnPost && (
                                     <>
                                         <MenuItemBtn type="button" onClick={handleEdit}>
@@ -1375,7 +1349,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleFollowTopic}>
                                             <HiOutlineHashtag />
-                                            <span>{followingTopic ? 'Unfollow topic' : 'Follow topic'}</span>
+                                            <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleGiveAward}>
                                             <HiOutlineSparkles />
@@ -1462,7 +1436,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" $danger onClick={handleBlockTopic}>
                                     <HiOutlineNoSymbol />
-                                    <span>Block topic</span>
+                                    <span>Block community</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" $danger onClick={handleReport}>
                                     <HiOutlineFlag />
@@ -1523,9 +1497,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             />
             <ConfirmDialog
                 open={activeDialog === 'block_topic'}
-                title={`Block #${topic || 'topic'}?`}
-                message="Posts tagged with this topic will stop appearing in your Home and discovery feeds."
-                confirmLabel="Block topic"
+                title={`Block ${communityLabel(topic || 'community')}?`}
+                message="Posts in this community will stop appearing in your Home and discovery feeds."
+                confirmLabel="Block community"
                 confirmVariant="danger"
                 pending={dialogPending}
                 onConfirm={confirmBlockTopic}
@@ -1534,7 +1508,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             <ConfirmDialog
                 open={activeDialog === 'report'}
                 title="🚨 Report illegal content only"
-                message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about wrong topic, untagged adult content, low quality, or anything you just don't like will be dismissed. To filter those out of your feed, follow a moderation agent. Agents are how content moderation works on Mirage for everyone."
+                message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about the wrong community, untagged adult content, low quality, or anything you just don't like will be dismissed. Hide those from your feed with blocks and community filters."
                 confirmLabel="Report"
                 confirmVariant="warning"
                 pending={dialogPending}
@@ -1580,8 +1554,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 open={!!confirmGiftSub}
                 recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : `@${authorDisplay}`}
                 level={confirmGiftSub?.level}
-                feeLabel={confirmGiftSub?.level === 10 ? agentFeeLabel : subFeeLabel}
-                feeUmirage={confirmGiftSub?.level === 10 ? agentFeeUmirage : subFeeUmirage}
+                feeLabel={subFeeLabel}
+                feeUmirage={subFeeUmirage}
                 loading={!!confirmGiftSub?.loading}
                 expiryLabel={confirmGiftSub?.expiryLabel}
                 error={confirmGiftSub?.error}

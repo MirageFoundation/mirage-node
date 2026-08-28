@@ -35,7 +35,7 @@ The backend serves as the "relay" layer in Mirage's meta-transaction architectur
 5. Broadcasts transactions to the blockchain
 6. Queries the indexer database for read operations
 
-**Key Design Principle:** The backend enables a gas-free user experience. Users never need to hold tokens for gas fees - validators relay their transactions and charge fees from subscription reserves (paid users) or accept PoW spam protection (free users).
+**Key Design Principle:** The backend enables a gas-free user experience. Users never need to hold tokens for gas fees: validators relay transactions, while subscribers use a daily zero-fee allowance and free users provide PoW spam protection.
 
 ---
 
@@ -84,7 +84,7 @@ class Runtime:
 
 The validator's account pays all gas fees. This is recouped through:
 - **Free users:** Accept PoW as spam protection (gas is validator's operating cost)
-- **Paid users:** Chain deducts from user's escrowed reserve during AnteHandler
+- **Subscribers:** Chain enforces a governance-controlled daily relay limit
 
 ---
 
@@ -197,7 +197,7 @@ This allows the backend to identify the sender without requiring them to explici
 │       "timestamp": 1700000000,    // Unix seconds                             │
 │       "pow_difficulty": 3,        // Difficulty steps (free users)            │
 │       "pow": 98765,               // Nonce that produces valid hash           │
-│       "topic": "technology",                                                  │
+│       "community": "technology",                                              │
 │       "title": "Hello World",                                                 │
 │       "content": "..."                                                        │
 │     }                                                                         │
@@ -311,7 +311,7 @@ def canon_base_post(
     difficulty: int,
     timestamp: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     tag: str = "",
@@ -321,7 +321,7 @@ def canon_base_post(
         hex_to_bytes(last_block_hash),
         difficulty,
         timestamp,
-        target, topic, title, content, tag
+        target, community, title, content, tag
     )
 ```
 
@@ -337,7 +337,7 @@ Canonical Format:
 │    Tag 4: envelope_difficulty (varint)                                   │
 │    Tag 5: envelope_timestamp (varint)                                    │
 │    Tag 100: target (length-prefixed string)                              │
-│    Tag 101: topic (length-prefixed string)                               │
+│    Tag 101: community (length-prefixed string)                           │
 │    Tag 102: title (length-prefixed string)                               │
 │    Tag 103: content (length-prefixed string)                             │
 │    Tag 104: tag (length-prefixed string)                                 │
@@ -512,7 +512,9 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/get_node_config` | Per-node static settings (validator info, flags) |
 | `GET /api/get_user_status` | User status (level, balance, subscription) |
 | `GET /api/get_tx_status` | Transaction status with enrichment |
-| `GET /api/get_topics` | Most active topics |
+| `GET /api/communities` | Derived community directory and curation summaries |
+| `GET /api/communities/:slug` | Community, lens, and default-team state |
+| `GET /api/communities/:slug/teams` | Live curator teams and subscriber counts |
 | `GET /api/get_posts` | Recent posts with aggregates |
 | `GET /api/get_user_posts` | Posts by specific user |
 | `GET /api/get_comments` | Comment tree for a post |
@@ -534,10 +536,12 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/set_username` | MsgSetUsername |
 | `POST /api/core/follow_user` | MsgFollowUser |
 | `POST /api/core/unfollow_user` | MsgUnfollowUser |
-| `POST /api/core/follow_topic` | MsgFollowTopic |
-| `POST /api/core/unfollow_topic` | MsgUnfollowTopic |
-| `POST /api/core/enable_agent` | MsgEnableAgent |
-| `POST /api/core/disable_agent` | MsgDisableAgent |
+| `POST /api/core/join_community` | MsgJoinCommunity |
+| `POST /api/core/leave_community` | MsgLeaveCommunity |
+| `POST /api/core/create_curation_team` | MsgCreateCurationTeam |
+| `POST /api/core/set_curation_preference` | MsgSetCurationPreference |
+| `POST /api/core/invite_curator` | MsgInviteCurator |
+| `POST /api/core/accept_curator_invite` | MsgAcceptCuratorInvite |
 | `POST /api/core/block_post` | MsgBlockPost |
 | `POST /api/core/block_user` | MsgBlockUser |
 | `POST /api/core/delete` | MsgDelete |
@@ -698,7 +702,7 @@ All write endpoints validate:
 2. **Required Fields:** All mandatory fields present
 3. **Field Formats:** Length limits, address formats
 4. **Pubkey/Signature:** Valid lengths and formats
-5. **Content Limits:** Title, content, topic within chain params
+5. **Content Limits:** Title, content, and community slug within chain params
 6. **Subscription/PoW:** Appropriate authorization model
 
 ### PoW vs Subscription
@@ -715,7 +719,7 @@ if not user_is_sub:
     if not is_valid_recent_block_hash(last_block_hash):
         return error("invalid last_block_hash")
 else:
-    pass  # Subscriber: PoW fields ignored; chain handles via reserve
+    pass  # Subscriber: PoW fields ignored; chain enforces daily quota
 ```
 
 ### Error Response Format
@@ -758,7 +762,7 @@ def core_post():
     
     log_event(rid, "post.parsed", 
               pubkey_len=len(pub_b64),
-              topic=topic,
+              community=community,
               content_len=len(content))
     
     # ... validation ...
@@ -773,7 +777,7 @@ Request IDs allow correlating log entries:
 
 ```
 [2024-01-15 12:34:56] req-12345 post.begin
-[2024-01-15 12:34:56] req-12345 post.parsed pubkey_len=44 topic=technology content_len=256
+[2024-01-15 12:34:56] req-12345 post.parsed pubkey_len=44 community=technology content_len=256
 [2024-01-15 12:34:57] req-12345 post.success tx_hash=abc123...
 ```
 

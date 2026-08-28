@@ -115,7 +115,9 @@ export function useCreatePost({
                 const viewerAddress = Storage.load('publicKey', '');
                 const data = await Api.get('get_comments', {
                     post_id: overrideId,
-                    address: viewerAddress
+                    address: viewerAddress,
+                    lens: 'effective',
+                    scope: 'current',
                 });
                 if (data && data.root) {
                     setTopicValue(data.root.topic || '');
@@ -199,24 +201,10 @@ export function useCreatePost({
         let cancelled = false;
         (async () => {
             try {
-                const data = await Api.get('search_topics', {
-                    q: topicValue,
-                    limit: 5,
-                    allowed_tags: 'sensitive,adult,violence,gore,death'
-                });
-                if (cancelled) return;
-                const target = String(topicValue).toLowerCase();
-                const match = (data?.topics || []).find(
-                    t => String(t.topic || '').toLowerCase() === target
-                );
-                const dominantTag = String(match?.dominant_tag || '').toLowerCase();
-                if (!dominantTag) return;
-                setTagManuallySet(prev => {
-                    if (prev) return prev;
-                    setTagEnabled(true);
-                    setTagValue(dominantTag);
-                    return false;
-                });
+                // Dominant-tag auto-apply used retired search_topics. Communities
+                // list has no tag stats, so leave the tag unset unless the user
+                // (or TopicSelector) sets it explicitly.
+                void topicValue;
             } catch (_) { /* noop */ }
         })();
         return () => { cancelled = true; };
@@ -273,10 +261,9 @@ export function useCreatePost({
             const chain = JSON.parse(chainRaw || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : userLevel === 10 || userLevel >= 100 ? 2 : 0;
-            // Admins (>=100) map to the agent tier on-chain (see LevelToTierIndex
-            // in params.go); they are NOT uncapped — the chain enforces the agent
-            // tier's max_content_length / max_title_length. Show that real cap.
+            // v1.39: Free (0) + Subscriber (1). Admins and leftover level-10
+            // accounts use the Subscriber tier limits.
+            const tierIndex = userLevel === 0 ? 0 : 1;
             const isAdmin = userLevel >= 100;
             let tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxTitle = parseInt(tier.max_title_length) || 0;
@@ -521,15 +508,15 @@ export function useCreatePost({
             return;
         }
         if (!topic || topic === '' || topic === '(select a topic)') {
-            setSubmitError(`Please select or enter a topic`);
+            setSubmitError(`Please select or enter a community`);
             return;
         }
         if (topic.length < limits.minTopic) {
-            setSubmitError(`Topic too short (min ${limits.minTopic} characters)`);
+            setSubmitError(`Community name too short (min ${limits.minTopic} characters)`);
             return;
         }
         if (topic.length > limits.maxTopic) {
-            setSubmitError(`Topic too long (max ${limits.maxTopic} characters)`);
+            setSubmitError(`Community name too long (max ${limits.maxTopic} characters)`);
             return;
         }
         if (content.length > limits.maxContent) {
@@ -676,7 +663,9 @@ export function useCreatePost({
                             const viewerAddress = Storage.load('publicKey', '');
                             const data = await Api.get('get_comments', {
                                 post_id: txHash,
-                                address: viewerAddress
+                                address: viewerAddress,
+                                lens: 'effective',
+                                scope: 'current',
                             });
                             if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                 Storage.removeOptimisticPost(txHash);

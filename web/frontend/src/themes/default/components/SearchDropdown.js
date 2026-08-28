@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import React, { useMemo } from "react";
 import styled from "styled-components";
 import { Link } from "react-router-dom";
@@ -403,22 +404,22 @@ export default function SearchDropdown({
                 )}
 
                 <SectionLabelRow>
-                    <SectionLabel>Trending topics</SectionLabel>
+                    <SectionLabel>Trending communities</SectionLabel>
                 </SectionLabelRow>
 
                 {isLoadingTrending && (
-                    <EmptyBlock>Loading trending topics…</EmptyBlock>
+                    <EmptyBlock>Loading trending communities…</EmptyBlock>
                 )}
 
                 {!isLoadingTrending && trendingTopics.length === 0 && (
-                    <EmptyBlock>No trending topics available</EmptyBlock>
+                    <EmptyBlock>No trending communities available</EmptyBlock>
                 )}
 
                 {!isLoadingTrending &&
                     trendingTopics.map((topic) => (
                         <RowLink
                             key={`trending-${topic.topic}`}
-                            to={`/t/${encodeURIComponent(topic.topic)}`}
+                            to={communityPath(topic.topic)}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => onResultNavigate && onResultNavigate()}
                         >
@@ -426,7 +427,7 @@ export default function SearchDropdown({
                                 <HiOutlineFire />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{topic.topic}</RowPrimary>
+                                <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
                                 <RowSecondary>
                                     {formatPostCount(topic.post_count || topic.count)}
                                 </RowSecondary>
@@ -472,12 +473,12 @@ export default function SearchDropdown({
                 {topics.length > 0 && (
                     <>
                         <SectionLabelRow>
-                            <SectionLabel>Topics</SectionLabel>
+                            <SectionLabel>Communities</SectionLabel>
                         </SectionLabelRow>
                         {topics.map((topic) => (
                             <RowLink
                                 key={`live-topic-${topic.topic}`}
-                                to={`/t/${encodeURIComponent(topic.topic)}`}
+                                to={communityPath(topic.topic)}
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => onResultNavigate && onResultNavigate()}
                             >
@@ -485,7 +486,7 @@ export default function SearchDropdown({
                                     <HiOutlineHashtag />
                                 </RowIcon>
                                 <RowMain>
-                                    <RowPrimary>{topic.topic}</RowPrimary>
+                                    <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
                                     {(topic.post_count || topic.count) && (
                                         <RowSecondary>
                                             {formatPostCount(topic.post_count || topic.count)}
@@ -584,7 +585,7 @@ export default function SearchDropdown({
                                             <TierUsername $tierColor={tierColor}>
                                                 @{post.username || "anonymous"}
                                             </TierUsername>
-                                            {post.topic && ` · #${post.topic}`}
+                                            {post.topic && ` · ${communityLabel(post.topic)}`}
                                         </RowSecondary>
                                     </RowMain>
                                 </RowLink>

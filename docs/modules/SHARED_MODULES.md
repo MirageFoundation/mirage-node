@@ -114,7 +114,7 @@ def _build_pool():
     add_f(msg, "envelope_timestamp", 6, TYPE_UINT64)
     add_f(msg, "envelope_signature", 10, TYPE_BYTES)
     add_f(msg, "target", 100, TYPE_STRING)
-    add_f(msg, "topic", 101, TYPE_STRING)
+    add_f(msg, "community", 101, TYPE_STRING)
     add_f(msg, "title", 102, TYPE_STRING)
     add_f(msg, "content", 103, TYPE_STRING)
     add_f(msg, "tag", 104, TYPE_STRING)
@@ -145,10 +145,12 @@ The module exports all message types needed by Python services:
 MsgPost, MsgEdit, MsgVote, MsgDelete
 MsgSetUsername, MsgSendTokens
 MsgFollowUser, MsgUnfollowUser
-MsgFollowTopic, MsgUnfollowTopic
-MsgEnableAgent, MsgDisableAgent
+MsgJoinCommunity, MsgLeaveCommunity
+MsgCreateCurationTeam, MsgSetCurationPreference
+MsgInviteCurator, MsgAcceptCuratorInvite
 MsgBlockPost, MsgUnblockPost
 MsgBlockUser, MsgUnblockUser
+MsgBlockCommunity, MsgUnblockCommunity
 
 # Subscription messages
 MsgSubscribe, MsgSetAutoRenewal, MsgSetLevel

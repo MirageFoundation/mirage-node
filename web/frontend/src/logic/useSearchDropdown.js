@@ -144,6 +144,8 @@ export function useSearchDropdown(options = {}) {
         const params = {
             q: debouncedQuery,
             limit: LIVE_LIMIT,
+            lens: 'effective',
+            scope: 'current',
         };
         if (viewerAddress) params.address = viewerAddress;
         params.allowed_tags = getAllowedTagsParam();
@@ -185,25 +187,22 @@ export function useSearchDropdown(options = {}) {
         trendingFetchedRef.current = true;
         setIsLoadingTrending(true);
         Api.get(
-            "get_topics",
+            "communities",
             {
                 limit: 40,
-                min_posts: 10,
-                address: viewerKey,
-                allowed_tags: getAllowedTagsParam(),
             },
             { timeoutMs: 10000 }
         )
             .then((data) => {
                 if (!mountedRef.current) return;
-                const list = Array.isArray(data?.topics) ? data.topics : [];
+                const list = Array.isArray(data?.items) ? data.items : [];
                 const sorted = [...list]
-                    .filter((t) => t && t.topic)
-                    .sort(
-                        (a, b) =>
-                            (b.post_count || b.count || 0) -
-                            (a.post_count || a.count || 0)
-                    )
+                    .filter((t) => t && t.community)
+                    .map((t) => ({
+                        topic: t.community,
+                        post_count: 0,
+                        count: 0,
+                    }))
                     .slice(0, TRENDING_LIMIT);
                 setTrendingTopics(sorted);
                 setIsLoadingTrending(false);

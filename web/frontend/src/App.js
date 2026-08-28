@@ -79,6 +79,8 @@ const CreatePostView = lazyWithRetry(() => import('./views/CreatePostView'));
 const CreateAccountView = lazyWithRetry(() => import('./views/CreateAccountView'));
 const LoginView = lazyWithRetry(() => import('./views/LoginView'));
 const ChangeUsernameView = lazyWithRetry(() => import('./views/ChangeUsernameView'));
+const CurationTeamsView = lazyWithRetry(() => import('./themes/default/routes/CurationTeamsView'));
+const CurationTeamView = lazyWithRetry(() => import('./themes/default/routes/CurationTeamView'));
 const SignOutView = lazyWithRetry(() => import('./views/SignOutView'));
 const ViewPostView = lazyWithRetry(() => import('./views/ViewPostView'));
 const ProfileView = lazyWithRetry(() => import('./views/ProfileView'));
@@ -104,7 +106,8 @@ const excludedRoutes = [
     '/welcome',
     '/sign_out',
     '/p/',
-    '/create_post'
+    '/create_post',
+    '/communities/new',
 ];
 
 // Routes that are safe to restore on startup (avoid restoring transient/deprecated routes)
@@ -499,7 +502,7 @@ class App extends Component {
 
         // Single combined bootstrap fetch: replaces the cold-load fan-out of
         // get_node_config + get_chain_config + get_user_status + get_user_followed +
-        // get_user_blocked + get_invite_codes + /rewards/summary + the initial
+        // get_user_blocked + /rewards/summary + the initial
         // screen payload (feed/thread/inbox). Per-section nulls fall through
         // to the existing per-endpoint fetches; chain_config falls back to
         // _bootstrapChainConfig when missing from the response.
@@ -755,7 +758,16 @@ class App extends Component {
 
                     if (pk) {
                         if (resp.user_status) {
-                            try { tx.cacheUserStatus(resp.user_status); } catch (_) { }
+                            if (!Object.prototype.hasOwnProperty.call(resp, 'daily_quota') || !Object.prototype.hasOwnProperty.call(resp, 'renewal_warning')) {
+                                throw new Error('bootstrap missing quota or renewal status');
+                            }
+                            try {
+                                tx.cacheUserStatus({
+                                    ...resp.user_status,
+                                    daily_quota: resp.daily_quota,
+                                    renewal_warning: resp.renewal_warning,
+                                });
+                            } catch (_) { }
                             // Surface backend-resolved username if missing from local state.
                             try {
                                 const u = resp.user_status.username;
@@ -790,9 +802,6 @@ class App extends Component {
                         }
                         if (resp.user_blocked) {
                             try { Storage.save('bootstrap_user_blocked', { data: resp.user_blocked, at: stashAt, pk }); } catch (_) { }
-                        }
-                        if (resp.invite_codes) {
-                            try { Storage.save('bootstrap_invite_codes', { data: resp.invite_codes, at: stashAt, pk }); } catch (_) { }
                         }
                         if (resp.rewards_summary) {
                             try { Storage.save('bootstrap_rewards_summary', { data: resp.rewards_summary, at: stashAt, pk }); } catch (_) { }
@@ -879,7 +888,6 @@ class App extends Component {
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
         Storage.remove('bootstrap_user_blocked');
-        Storage.remove('bootstrap_invite_codes');
         Storage.remove('bootstrap_rewards_summary');
         Storage.remove('bootstrap_view');
 
@@ -1127,6 +1135,14 @@ class App extends Component {
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="following" />}
                                             />
                                             <Route
+                                                path="/c/:topic/teams/:teamId"
+                                                element={<CurationTeamView />}
+                                            />
+                                            <Route
+                                                path="/c/:topic/teams"
+                                                element={<CurationTeamsView />}
+                                            />
+                                            <Route
                                                 path="/c/:topic"
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} />}
                                             />
@@ -1152,6 +1168,7 @@ class App extends Component {
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
+                                            <Route path="/curator-teams/new" element={<CurationTeamsView createOnly />} />
                                             <Route path="/communities" element={<DiscoverView state={this.state} />} />
                                             <Route path="/topics" element={<Navigate to="/communities" replace />} />
                                             <Route path="/stats" element={<StatsView />} />

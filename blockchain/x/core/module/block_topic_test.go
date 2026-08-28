@@ -124,257 +124,77 @@ func TestValidateBlockedTopicPattern(t *testing.T) {
 	}
 }
 
-func TestBlockTopicNormalizesAndDedups(t *testing.T) {
+func TestBlockCommunityNormalizesAndDedups(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
 	am := newTestModule(mk)
 
-	params := mk.GetParams(ctx)
-	params.Tiers[0].MaxBlockedCommunities = 10
-	require.NoError(t, mk.SetParams(ctx, params))
-
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 
-	req := &types.MsgBlockTopic{
-		Authority:      "not-gov",
+	_, err := am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Topic:          "  ToPic1 ",
-	}
-	_, err := am.BlockTopic(ctx, req)
-	require.NoError(t, err)
-
-	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Topic:          "topic1",
+		Community:      "  topic1 ",
 	})
 	require.NoError(t, err)
 
-	topics, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	t.Logf("[debug] blocked topics=%v", topics)
-	require.Equal(t, []string{"topic1"}, topics)
-}
-
-func TestBlockTopicCapsToTierLimit(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	params := mk.GetParams(ctx)
-	params.Tiers[0].MaxBlockedCommunities = 3
-	require.NoError(t, mk.SetParams(ctx, params))
-
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	for _, topic := range []string{"Alpha", "Beta", "Gamma", "Delta"} {
-		_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
-			Authority:      "not-gov",
-			EnvelopePubkey: pub,
-			Topic:          topic,
-		})
-		require.NoError(t, err)
-	}
-
-	topics, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	t.Logf("[debug] capped blocked topics=%v", topics)
-	require.Equal(t, []string{"beta", "gamma", "delta"}, topics)
-
-	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority:      "not-gov",
+	_, err = am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Topic:          "Gamma",
+		Community:      "topic1",
 	})
 	require.NoError(t, err)
-	topics, err = mk.ListBlockedTopics(ctx, owner)
+
+	blocked, err := mk.ListBlockedCommunities(ctx, owner)
 	require.NoError(t, err)
-	require.Equal(t, []string{"beta", "gamma", "delta"}, topics)
+	t.Logf("[debug] blocked communities=%v", blocked)
+	require.Equal(t, []string{"topic1"}, blocked)
 }
 
-func TestBlockTopicInvalidTopic(t *testing.T) {
+func TestBlockCommunityInvalidSlug(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority:      "not-gov",
+	_, err := am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Topic:          "bad_topic",
+		Community:      "bad_topic",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "invalid topic")
+	require.Contains(t, err.Error(), "lowercase alphanumeric")
 }
 
-func TestUnblockTopicRemovesEntry(t *testing.T) {
+func TestUnblockCommunityRemovesEntry(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
-	setProfileLevel(t, mk, ctx, owner, 0)
-	for _, t2 := range []string{"alpha", "beta", "gamma"} {
-		_, _ = mk.AddBlockedTopicDeque(ctx, owner, t2, 0)
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
+	for _, slug := range []string{"alpha", "beta", "gamma"} {
+		require.NoError(t, mk.AddBlockedCommunity(ctx, owner, slug, 0))
 	}
 
-	_, err := am.UnblockTopic(ctx, &types.MsgUnblockTopic{
-		Authority:      "not-gov",
+	_, err := am.UnblockCommunity(ctx, &types.MsgUnblockCommunity{
 		EnvelopePubkey: pub,
-		Topic:          " BeTa ",
+		Community:      " beta ",
 	})
 	require.NoError(t, err)
 
-	topics, err := mk.ListBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedCommunities(ctx, owner)
 	require.NoError(t, err)
-	t.Logf("[debug] unblocked topics=%v", topics)
-	require.Equal(t, []string{"alpha", "gamma"}, topics)
+	t.Logf("[debug] unblocked communities=%v", blocked)
+	require.Equal(t, []string{"alpha", "gamma"}, blocked)
 
-	_, err = am.UnblockTopic(ctx, &types.MsgUnblockTopic{
-		Authority:      "not-gov",
+	_, err = am.UnblockCommunity(ctx, &types.MsgUnblockCommunity{
 		EnvelopePubkey: pub,
-		Topic:          "delta",
+		Community:      "delta",
 	})
 	require.NoError(t, err)
-	topics, err = mk.ListBlockedTopics(ctx, owner)
+	blocked, err = mk.ListBlockedCommunities(ctx, owner)
 	require.NoError(t, err)
-	require.Equal(t, []string{"alpha", "gamma"}, topics)
-}
-
-func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "alpha")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "beta")
-
-	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Topic:          " Alpha ",
-	})
-	require.NoError(t, err)
-
-	followed, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"beta"}, followed)
-
-	blocked, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"alpha"}, blocked)
-}
-
-func TestTopicMatchesPattern(t *testing.T) {
-	tests := []struct {
-		topic   string
-		pattern string
-		want    bool
-	}{
-		{"beer", "beer", true},
-		{"beer", "wine", false},
-		{"beer123", "beer*", true},
-		{"beer", "beer*", true},
-		{"wine", "beer*", false},
-		{"mybeer", "*beer", true},
-		{"mybeer123", "*beer*", true},
-		{"gaming", "gam*g", true},
-		{"gambling", "gam*g", true},
-		{"game", "gam*g", false},
-		{"beer", "*beer*", true},
-		{"test", "*", true},
-	}
-	for _, tt := range tests {
-		got := topicMatchesPattern(tt.topic, tt.pattern)
-		if got != tt.want {
-			t.Errorf("topicMatchesPattern(%q, %q) = %v, want %v", tt.topic, tt.pattern, got, tt.want)
-		}
-	}
-}
-
-func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "beer")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "beerman123")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "wine")
-
-	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Topic:          "beer*",
-	})
-	require.NoError(t, err)
-
-	followed, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"wine"}, followed)
-
-	blocked, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"beer*"}, blocked)
-}
-
-func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "alpha", 0)
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "beta", 0)
-
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Topic:          " Alpha ",
-	})
-	require.NoError(t, err)
-
-	blocked, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"beta"}, blocked)
-
-	followed, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"alpha"}, followed)
-}
-
-func TestFollowTopicRemovesBlockedWildcard(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
-
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "beer*", 0)
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "wine", 0)
-
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Topic:          "beerman123",
-	})
-	require.NoError(t, err)
-
-	blocked, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"wine"}, blocked)
-
-	followed, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"beerman123"}, followed)
+	require.Equal(t, []string{"alpha", "gamma"}, blocked)
 }
 
 func TestBlockUserRemovesFollowedUser(t *testing.T) {
@@ -457,29 +277,31 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	require.Equal(t, []string{target}, blocked)
 }
 
-func TestFollowTopicAlreadyFollowedStillRemovesBlock(t *testing.T) {
-	mk := newMockKeeper()
-	ctx := newMockContext()
-	am := newTestModule(mk)
+// TestRetiredTopicAndAgentHandlersReject pins the v1.39.0 retirement at the
+// msg-server level. The ante decorator already rejects these type URLs, but a
+// handler that still wrote to the drained legacy stores would silently produce
+// state nothing reads if that decorator were ever removed.
+func TestRetiredTopicAndAgentHandlersReject(t *testing.T) {
+	_, ctx, am := setupModule(t)
 
-	pub, owner := testPubkeyOwner()
-	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "alpha")
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "alpha", 0)
+	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{})
+	require.ErrorContains(t, err, "retired message MsgFollowTopic")
 
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Topic:          "Alpha",
-	})
-	require.NoError(t, err)
+	_, err = am.UnfollowTopic(ctx, &types.MsgUnfollowTopic{})
+	require.ErrorContains(t, err, "retired message MsgUnfollowTopic")
 
-	blocked, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Empty(t, blocked)
+	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{})
+	require.ErrorContains(t, err, "retired message MsgBlockTopic")
 
-	followed, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Equal(t, []string{"alpha"}, followed)
+	_, err = am.UnblockTopic(ctx, &types.MsgUnblockTopic{})
+	require.ErrorContains(t, err, "retired message MsgUnblockTopic")
+
+	_, err = am.EnableAgent(ctx, &types.MsgEnableAgent{})
+	require.ErrorContains(t, err, "retired message MsgEnableAgent")
+
+	_, err = am.DisableAgent(ctx, &types.MsgDisableAgent{})
+	require.ErrorContains(t, err, "retired message MsgDisableAgent")
+
+	_, err = am.SetAgents(ctx, &types.MsgSetAgents{})
+	require.ErrorContains(t, err, "retired message MsgSetAgents")
 }

@@ -12,7 +12,6 @@ import { generateMnemonic } from 'bip39';
 import seedVault from '../../src/utils/SeedVault.js';
 import Storage from '../../src/utils/Storage.js';
 import { markdownUrlTransform } from '../../src/utils/markdownUrl.js';
-import { canonicalAttribution } from '../../src/utils/canonicalEncoding.js';
 import { getSessionGeneration, onSessionReset, resetClientSession } from '../../src/utils/sessionLifecycle.js';
 
 const PASSWORD = 'correct-horse-battery-staple';
@@ -206,40 +205,6 @@ describe('L-1: cross-tab sign-out drains the sibling tab', () => {
         expect(seedVault.getSeed()).toBe(null);
         // Re-broadcasting would bounce the signal back to the originating tab.
         expect(localStorage.getItem('mirage_session_reset_signal')).toBe(null);
-    });
-});
-
-describe('L-2: attribution fields are covered by a signature', () => {
-    const hex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-
-    // Golden vectors verified byte-for-byte against canon_attribution in
-    // web/backend/pow.py. If either side changes, these stop matching and the
-    // backend starts rejecting every invited signup, which is the loud failure.
-    it('matches the backend encoding', () => {
-        expect(hex(canonicalAttribution({
-            action: 'set_username', target: 'MIRAGE1abc', invite_code: 'ABCD-1234',
-            referrer_username: '', nonce: 1786816859440123,
-        }))).toBe('6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653161626300414243442d31323334000031373836383136383539343430313233');
-
-        expect(hex(canonicalAttribution({
-            action: 'set_username', target: 'mirage1xyz', invite_code: '',
-            referrer_username: 'bob-1', nonce: 9007199254740991,
-        }))).toBe('6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653178797a0000626f622d310039303037313939323534373430393931');
-    });
-
-    it('binds the nonce, so a signature cannot be lifted onto another request', () => {
-        const base = { action: 'set_username', target: 'mirage1abc', invite_code: 'ABCD-1234', referrer_username: '' };
-        expect(hex(canonicalAttribution({ ...base, nonce: 1 })))
-            .not.toBe(hex(canonicalAttribution({ ...base, nonce: 2 })));
-    });
-
-    it('changes when the invite code or referrer changes', () => {
-        const base = { action: 'set_username', target: 'mirage1abc', nonce: 7 };
-        const withCode = hex(canonicalAttribution({ ...base, invite_code: 'AAAA-1111', referrer_username: '' }));
-        const tampered = hex(canonicalAttribution({ ...base, invite_code: 'BBBB-2222', referrer_username: '' }));
-        const withReferrer = hex(canonicalAttribution({ ...base, invite_code: '', referrer_username: 'bob' }));
-        expect(withCode).not.toBe(tampered);
-        expect(withCode).not.toBe(withReferrer);
     });
 });
 

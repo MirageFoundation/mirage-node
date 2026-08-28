@@ -75,7 +75,6 @@ from tests.common import (
     _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_create_community,
     _do_post,
     _do_post_with_nonce,
     _do_post_with_media,
@@ -93,8 +92,6 @@ from tests.backend_helpers import (
     _do_set_username_raw,
     _do_set_biography,
     _do_report,
-    _do_enable_agent,
-    _do_set_agents,
     _do_set_auto_renewal,
     _do_send_tokens,
     _do_award,
@@ -999,10 +996,9 @@ def test_tx_status_matrix(backend: str):
     if unfollow_txh:
         _check("unfollow_user", unfollow_txh, "unfollow_user")
 
-    # 4. join_community (sub1 — higher limits). Claim it as sub2 first: creating a
-    # community makes the creator its original curator, and the chain refuses to
-    # let a curator leave, which would strand step 5.
-    _do_create_community(backend, sub2, follow_topic)
+    # 4. join_community (sub1 — higher limits). Every valid slug is joinable as
+    # of v1.39.0: communities are not registered or claimed, so nothing has to
+    # exist before the join.
     ftopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=True, skip_pow=True)
     ftopic_txh = _extract_tx_hash("join_community", ftopic_resp)
     if ftopic_txh:

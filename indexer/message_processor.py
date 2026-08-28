@@ -37,6 +37,21 @@ from shared.datatypes import (
     MsgJoinCommunity,
     MsgLeaveCommunity,
     MsgCreateCommunity,
+    MsgCreateCurationTeam,
+    MsgSetCurationTeamProfile,
+    MsgInviteCurator,
+    MsgRevokeCuratorInvite,
+    MsgAcceptCuratorInvite,
+    MsgDeclineCuratorInvite,
+    MsgLeaveCurationTeam,
+    MsgRemoveCurator,
+    MsgTransferCurationTeam,
+    MsgDeleteCurationTeam,
+    MsgSetCurationPreference,
+    MsgSetCurationPostHidden,
+    MsgSetCurationUserHidden,
+    MsgSetCurationThreadLocked,
+    MsgSetCurationSubscriberOnly,
     MsgClaimCreatorRewards,
     MsgBlockCommunity,
     MsgUnblockCommunity,
@@ -165,6 +180,23 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgJoinCommunity": MsgJoinCommunity,
     "/mirage.core.v1.MsgLeaveCommunity": MsgLeaveCommunity,
     "/mirage.core.v1.MsgCreateCommunity": MsgCreateCommunity,
+    "/mirage.core.v1.MsgBlockCommunity": MsgBlockCommunity,
+    "/mirage.core.v1.MsgUnblockCommunity": MsgUnblockCommunity,
+    "/mirage.core.v1.MsgCreateCurationTeam": MsgCreateCurationTeam,
+    "/mirage.core.v1.MsgSetCurationTeamProfile": MsgSetCurationTeamProfile,
+    "/mirage.core.v1.MsgInviteCurator": MsgInviteCurator,
+    "/mirage.core.v1.MsgRevokeCuratorInvite": MsgRevokeCuratorInvite,
+    "/mirage.core.v1.MsgAcceptCuratorInvite": MsgAcceptCuratorInvite,
+    "/mirage.core.v1.MsgDeclineCuratorInvite": MsgDeclineCuratorInvite,
+    "/mirage.core.v1.MsgLeaveCurationTeam": MsgLeaveCurationTeam,
+    "/mirage.core.v1.MsgRemoveCurator": MsgRemoveCurator,
+    "/mirage.core.v1.MsgTransferCurationTeam": MsgTransferCurationTeam,
+    "/mirage.core.v1.MsgDeleteCurationTeam": MsgDeleteCurationTeam,
+    "/mirage.core.v1.MsgSetCurationPreference": MsgSetCurationPreference,
+    "/mirage.core.v1.MsgSetCurationPostHidden": MsgSetCurationPostHidden,
+    "/mirage.core.v1.MsgSetCurationUserHidden": MsgSetCurationUserHidden,
+    "/mirage.core.v1.MsgSetCurationThreadLocked": MsgSetCurationThreadLocked,
+    "/mirage.core.v1.MsgSetCurationSubscriberOnly": MsgSetCurationSubscriberOnly,
     "/mirage.core.v1.MsgClaimCreatorRewards": MsgClaimCreatorRewards,
 }
 
@@ -235,7 +267,15 @@ class MessageProcessor:
         self.log_yaml = log_yaml_fn
         self.iso_timestamp = iso_timestamp_fn
 
-    def process_core_message(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
+    def process_core_message(
+        self,
+        type_url: str,
+        value: bytes,
+        tx_hash: str,
+        ts: int,
+        height: int,
+        events: list | None = None,
+    ):
         """Process a core message."""
         if type_url == "/mirage.core.v1.MsgPost":
             self._handle_post(type_url, value, tx_hash, ts, height)
@@ -276,7 +316,7 @@ class MessageProcessor:
         elif type_url == "/mirage.core.v1.MsgUnblockTopic":
             self._handle_unblock_topic(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgDelete":
-            self._handle_delete(type_url, value, ts)
+            self._handle_delete(type_url, value, ts, height)
         elif type_url == "/mirage.core.v1.MsgDeleteUser":
             self._handle_delete_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetLevel":
@@ -302,8 +342,6 @@ class MessageProcessor:
         elif type_url == "/mirage.core.v1.MsgClaimCreatorRewards":
             self._handle_claim_creator_rewards(type_url, value, tx_hash, ts, height)
         elif type_url in (
-            "/mirage.core.v1.MsgSetCommunityMetadata",
-            "/mirage.core.v1.MsgTransferCommunity",
             "/mirage.core.v1.MsgCreateCurationTeam",
             "/mirage.core.v1.MsgSetCurationTeamProfile",
             "/mirage.core.v1.MsgInviteCurator",
@@ -320,7 +358,17 @@ class MessageProcessor:
             "/mirage.core.v1.MsgSetCurationThreadLocked",
             "/mirage.core.v1.MsgSetCurationSubscriberOnly",
         ):
-            logger.info("indexed_community_msg type_url=%s height=%s tx=%s", type_url, height, tx_hash)
+            # Curation state is projected from the block's events in
+            # process_curation_events(), which carries the committed final state
+            # and also covers the expiry/governance transitions that never arrive
+            # as a user message. Projecting the payload here as well would be a
+            # second, divergent implementation of the same rules.
+            logger.debug("[curation] message decoded type_url=%s height=%s tx=%s", type_url, height, tx_hash)
+        elif type_url in (
+            "/mirage.core.v1.MsgSetCommunityMetadata",
+            "/mirage.core.v1.MsgTransferCommunity",
+        ):
+            logger.info("[community] historical retired message decoded type_url=%s height=%s tx=%s", type_url, height, tx_hash)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
         elif type_url == "/mirage.core.v1.MsgBridgeBurn":
@@ -347,6 +395,36 @@ class MessageProcessor:
                 height,
                 tx_hash,
             )
+
+    def refresh_message_signer_runtime(self, type_url: str, value: bytes) -> None:
+        """Refresh quota state after a successful user message may consume it."""
+        proto_cls = TYPE_URL_TO_PROTO.get(type_url)
+        if proto_cls is None:
+            raise RuntimeError(f"missing protobuf mapping for runtime refresh: {type_url}")
+        parsed = proto_cls()
+        parsed.ParseFromString(value)
+        owner = derive_owner_from_msg(MessageToDict(parsed, preserving_proto_field_name=True))
+        if not owner:
+            return
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT effective_paid FROM profiles WHERE LOWER(owner)=LOWER(%s)", (owner,))
+                row = cur.fetchone()
+        if not row or not bool(row[0]):
+            return
+        self.update_subscription_runtime(owner)
+
+    def update_subscription_runtime(self, owner: str) -> None:
+        """Project absolute quota and renewal state for an existing profile."""
+        runtime = self.chain.query_subscription_runtime(owner)
+        self.db.update_subscription_runtime(owner, runtime)
+        logger.debug(
+            "[quota] refreshed signer=%s used=%s epoch=%s renewal_warning=%s",
+            owner,
+            runtime["quota_used"],
+            runtime["quota_epoch"],
+            runtime["renewal_warning_sent"],
+        )
 
     def _handle_post(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgPost (with tag support)."""
@@ -409,6 +487,13 @@ class MessageProcessor:
             media=media,
             protocol_version=protocol_version,
         )
+        if protocol_version == 1:
+            metadata = self.chain.query_post_metadata(txhash)
+            if metadata["author"] != owner:
+                raise RuntimeError(
+                    f"PostMetadata author mismatch for {txhash}: message={owner} metadata={metadata['author']}"
+                )
+            self.db.update_post_protocol_metadata(txhash, metadata)
 
         # Update user topic stats for new posts (not edits). Required projection: any
         # failure must abort the block rather than leave post_count silently short.
@@ -1515,7 +1600,7 @@ class MessageProcessor:
 
             raise
 
-    def _handle_delete(self, type_url: str, value: bytes, ts: int):
+    def _handle_delete(self, type_url: str, value: bytes, ts: int, height: int):
         """Handle MsgDelete.
 
         Security model (enforced HERE, not on-chain):
@@ -1596,6 +1681,16 @@ class MessageProcessor:
                     )
                 else:
                     logger.warning("Delete rejected: target %s not found or not owned by %s", target, owner)
+            if rows_affected > 0:
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT protocol_version FROM posts WHERE LOWER(txhash)=LOWER(%s)", (target,))
+                        row = cur.fetchone()
+                if row and int(row[0]) == 1:
+                    metadata = self.chain.query_post_metadata(target)
+                    if int(metadata["deleted_height"]) <= 0:
+                        raise RuntimeError(f"PostMetadata did not report deletion for {target} at height {height}")
+                    self.db.update_post_protocol_metadata(target, metadata)
         except Exception as e:
             logger.error("Error handling MsgDelete: %s", e, exc_info=True)
 
@@ -1725,6 +1820,7 @@ class MessageProcessor:
                 reserve_funds=reserve_funds,
                 effective_paid=effective_paid,
             )
+            self.db.update_subscription_runtime(owner, self.chain.query_subscription_runtime(owner))
             self.log_yaml(
                 "User subscribed",
                 {
@@ -1786,6 +1882,7 @@ class MessageProcessor:
                 reserve_funds=reserve_funds,
                 effective_paid=effective_paid,
             )
+            self.db.update_subscription_runtime(owner, self.chain.query_subscription_runtime(owner))
             self.log_yaml(
                 "User set auto_renewal",
                 {
@@ -1819,14 +1916,44 @@ class MessageProcessor:
 
             raise
 
+    def _refresh_subscription_projection(self, addr: str, ts: int) -> dict:
+        profile = self._load_chain_profile(addr)
+        if profile is None:
+            raise RuntimeError(f"subscription event references missing profile {addr}")
+        self.db.upsert_profile_full(
+            profile["owner"],
+            profile["username"],
+            profile["level"],
+            profile["created_at"],
+            profile["subscription_expiry"],
+            profile["auto_renew"],
+            profile["biography"],
+            profile["avatar"],
+            profile["banner"],
+            profile["flair"],
+            ts,
+            reserve_funds=profile["reserve_funds"],
+            effective_paid=profile["effective_paid"],
+        )
+        runtime = self.chain.query_subscription_runtime(addr)
+        self.db.update_subscription_runtime(addr, runtime)
+        logger.info(
+            "[quota] projected address=%s paid=%s used=%s renewal_warning=%s",
+            addr,
+            profile["effective_paid"],
+            runtime["quota_used"],
+            runtime["renewal_warning_sent"],
+        )
+        return profile
+
     def update_profile_level(self, addr: str, level: int, ts: int):
         """Update profile level from subscription events (EndBlock)."""
         try:
-            updated = self.db.update_profile_level(addr, level, ts)
-            if updated:
-                logger.info("Updated profile level for %s to %d", addr, level)
-            else:
-                logger.warning("No profile found to update level for %s", addr)
+            profile = self._refresh_subscription_projection(addr, ts)
+            if int(profile["level"]) != int(level):
+                raise RuntimeError(
+                    f"subscription expiry level mismatch for {addr}: event={level} chain={profile['level']}"
+                )
         except Exception as e:
             logger.error("Error updating profile level for %s: %s", addr, e, exc_info=True)
             raise
@@ -1834,17 +1961,13 @@ class MessageProcessor:
     def update_profile_subscription(self, addr: str, level: int, subscription_expiry: int, ts: int):
         """Update profile level and subscription_expiry from renewal events (EndBlock)."""
         try:
-            # Pass None for auto_renew to preserve the existing setting
-            updated = self.db.update_profile_subscription(addr, level, subscription_expiry, None, ts)
-            if updated:
-                logger.info(
-                    "Updated profile subscription for %s: level=%d, expiry=%d",
-                    addr,
-                    level,
-                    subscription_expiry,
+            profile = self._refresh_subscription_projection(addr, ts)
+            if int(profile["level"]) != int(level) or int(profile["subscription_expiry"]) != int(subscription_expiry):
+                raise RuntimeError(
+                    f"subscription renewal mismatch for {addr}: "
+                    f"event=({level},{subscription_expiry}) "
+                    f"chain=({profile['level']},{profile['subscription_expiry']})"
                 )
-            else:
-                logger.warning("No profile found to update subscription for %s", addr)
         except Exception as e:
             logger.error("Error updating profile subscription for %s: %s", addr, e, exc_info=True)
             raise
@@ -2053,37 +2176,298 @@ class MessageProcessor:
                 )
         logger.info("leave_community owner=%s community=%s height=%s", owner, slug, height)
 
+    def _sync_curation_team(self, community: str, team_id: int, height: int) -> None:
+        team = self.chain.query_curation_team(community, team_id)
+        members = self.chain.query_curation_team_members(community, team_id)
+        member_addresses = {member["address"] for member in members}
+        if team["deleted_height"] == 0 and team["owner"] not in member_addresses:
+            raise RuntimeError(f"live team owner is absent from roster: {community}/{team_id}")
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO curation_teams(
+                        community, team_id, owner, name, normalized_name, description, policy,
+                        subscriber_only, subscriber_count, created_height, created_order, deleted_height
+                    ) VALUES(%s,%s,%s,%s,LOWER(TRIM(%s)),%s,%s,%s,%s,%s,%s,NULLIF(%s,0))
+                    ON CONFLICT (community, team_id) DO UPDATE SET
+                        owner=EXCLUDED.owner,
+                        name=EXCLUDED.name,
+                        normalized_name=EXCLUDED.normalized_name,
+                        description=EXCLUDED.description,
+                        policy=EXCLUDED.policy,
+                        subscriber_only=EXCLUDED.subscriber_only,
+                        subscriber_count=EXCLUDED.subscriber_count,
+                        created_height=EXCLUDED.created_height,
+                        created_order=EXCLUDED.created_order,
+                        deleted_height=EXCLUDED.deleted_height
+                    """,
+                    (
+                        team["community"],
+                        team["team_id"],
+                        team["owner"],
+                        team["name"],
+                        team["name"],
+                        team["description"],
+                        team["policy"],
+                        team["subscriber_only"],
+                        team["subscriber_count"],
+                        team["created_height"],
+                        team["created_order"],
+                        team["deleted_height"],
+                    ),
+                )
+                if members:
+                    cur.executemany(
+                        """
+                        INSERT INTO curation_team_curators(
+                            community, team_id, curator, accepted_order, joined_height
+                        ) VALUES(%s,%s,%s,%s,%s)
+                        ON CONFLICT(community, team_id, curator) DO UPDATE SET
+                            accepted_order=EXCLUDED.accepted_order
+                        """,
+                        [
+                            (community, int(team_id), member["address"], member["accepted_order"], int(height))
+                            for member in members
+                        ],
+                    )
+                    cur.execute(
+                        """
+                        DELETE FROM curation_team_curators
+                        WHERE community=%s AND team_id=%s AND NOT (curator=ANY(%s))
+                        """,
+                        (community, int(team_id), [member["address"] for member in members]),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM curation_team_curators WHERE community=%s AND team_id=%s",
+                        (community, int(team_id)),
+                    )
+                if team["deleted_height"]:
+                    cur.execute(
+                        """
+                        UPDATE curation_team_invitations
+                        SET status=2, resolved_height=%s
+                        WHERE community=%s AND team_id=%s AND status=0
+                        """,
+                        (int(height), community, int(team_id)),
+                    )
+        logger.info(
+            "[curation] projected team community=%s team_id=%s members=%s subscribers=%s deleted=%s",
+            community,
+            team_id,
+            len(members),
+            team["subscriber_count"],
+            bool(team["deleted_height"]),
+        )
+
+    def process_curation_events(self, events: list, height: int, tx_hash: str = "") -> None:
+        """Refresh absolute team state changed by tx or block-level events."""
+        team_events = {
+            "curation_team_created",
+            "curation_team_profile_updated",
+            "curation_team_subscriber_count_changed",
+            "curation_team_owner_changed",
+            "curation_team_deleted",
+            "curator_joined",
+            "curator_left",
+            "curator_removed",
+            "curation_subscriber_only_changed",
+        }
+        touched: set[tuple[str, int]] = set()
+        for event_type, attrs in self.decode_events(events):
+            community = str(attrs.get("community", "")).strip().lower()
+            raw_team_id = attrs.get("team_id")
+            if event_type in team_events:
+                if not community or raw_team_id is None:
+                    raise RuntimeError(f"{event_type} event missing community/team_id at height {height}")
+                try:
+                    team_id = int(raw_team_id)
+                except (TypeError, ValueError) as e:
+                    raise RuntimeError(f"{event_type} event has invalid team_id {raw_team_id!r}") from e
+                if team_id <= 0:
+                    raise RuntimeError(f"{event_type} event has non-positive team_id {team_id}")
+                touched.add((community, team_id))
+                continue
+
+            invitation_statuses = {
+                "curator_invited": 0,
+                "curator_invitation_revoked": 2,
+                "curator_invitation_accepted": 1,
+                "curator_invitation_declined": 3,
+            }
+            if event_type in invitation_statuses:
+                if not community or raw_team_id is None:
+                    raise RuntimeError(f"{event_type} event missing community/team_id")
+                team_id = int(raw_team_id)
+                invitee = str(attrs.get("target", "")).strip().lower()
+                inviter = str(attrs.get("inviter", "")).strip().lower()
+                if not invitee:
+                    raise RuntimeError(f"{event_type} event missing target")
+                status = invitation_statuses[event_type]
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        if status == 0:
+                            if not inviter:
+                                raise RuntimeError(f"{event_type} event missing inviter")
+                            cur.execute(
+                                """
+                                INSERT INTO curation_team_invitations(
+                                    community, team_id, invitee, inviter, status,
+                                    created_height, resolved_height
+                                ) VALUES(%s,%s,%s,%s,0,%s,NULL)
+                                ON CONFLICT(community, team_id, invitee) DO UPDATE SET
+                                    inviter=EXCLUDED.inviter,
+                                    status=0,
+                                    created_height=EXCLUDED.created_height,
+                                    resolved_height=NULL
+                                """,
+                                (community, team_id, invitee, inviter, int(height)),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                UPDATE curation_team_invitations
+                                SET status=%s, resolved_height=%s
+                                WHERE community=%s AND team_id=%s AND invitee=%s AND status=0
+                                """,
+                                (status, int(height), community, team_id, invitee),
+                            )
+                            if cur.rowcount != 1:
+                                cur.execute(
+                                    """
+                                    SELECT status FROM curation_team_invitations
+                                    WHERE community=%s AND team_id=%s AND invitee=%s
+                                    """,
+                                    (community, team_id, invitee),
+                                )
+                                existing = cur.fetchone()
+                                if not existing or int(existing[0]) != status:
+                                    raise RuntimeError(f"{event_type} has no pending invitation row")
+                continue
+
+            if event_type == "community_preference_changed":
+                owner = str(attrs.get("owner", "")).strip().lower()
+                if not owner or not community or "new_mode" not in attrs or "new_team_id" not in attrs:
+                    raise RuntimeError(f"{event_type} event missing final state")
+                mode = int(attrs["new_mode"])
+                team_id = int(attrs["new_team_id"])
+                if mode not in (0, 1, 2) or (mode == 1) != (team_id > 0):
+                    raise RuntimeError("community_preference_changed event has malformed mode/team")
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO community_curation_preferences(
+                                owner, community, mode, pinned_team_id, updated_height
+                            ) VALUES(%s,%s,%s,NULLIF(%s,0),%s)
+                            ON CONFLICT(owner, community) DO UPDATE SET
+                                mode=EXCLUDED.mode,
+                                pinned_team_id=EXCLUDED.pinned_team_id,
+                                updated_height=EXCLUDED.updated_height
+                            """,
+                            (owner, community, mode, team_id, int(height)),
+                        )
+                continue
+
+            moderation_events = {
+                "curation_post_hidden": ("curation_hidden_posts", "target_txhash", "hidden"),
+                "curation_user_hidden": ("curation_hidden_users", "target_user", "hidden"),
+            }
+            if event_type in moderation_events:
+                if not community or raw_team_id is None or "target" not in attrs:
+                    raise RuntimeError(f"{event_type} event missing final state")
+                table, column, active_key = moderation_events[event_type]
+                team_id = int(raw_team_id)
+                target = str(attrs["target"]).strip().lower()
+                active = str(attrs.get(active_key, "")).lower() == "true"
+                actor = str(attrs.get("actor", "")).strip().lower()
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        if active:
+                            if not actor:
+                                raise RuntimeError(f"{event_type} event missing actor")
+                            cur.execute(
+                                f"""
+                                INSERT INTO {table}(community, team_id, {column}, actor, updated_height)
+                                VALUES(%s,%s,%s,%s,%s)
+                                ON CONFLICT(community, team_id, {column}) DO UPDATE SET
+                                    actor=EXCLUDED.actor, updated_height=EXCLUDED.updated_height
+                                """,
+                                (community, team_id, target, actor, int(height)),
+                            )
+                        else:
+                            cur.execute(
+                                f"DELETE FROM {table} WHERE community=%s AND team_id=%s AND {column}=%s",
+                                (community, team_id, target),
+                            )
+                continue
+
+            if event_type == "curation_thread_locked":
+                if (
+                    not community
+                    or raw_team_id is None
+                    or "target" not in attrs
+                    or "locked" not in attrs
+                ):
+                    raise RuntimeError("curation_thread_locked event missing final state")
+                team_id = int(raw_team_id)
+                target = str(attrs["target"]).strip().lower()
+                locked = str(attrs["locked"]).lower() == "true"
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        if locked:
+                            if not attrs.get("lock_sequence") or not attrs.get("actor"):
+                                raise RuntimeError(
+                                    "curation_thread_locked event missing lock_sequence/actor"
+                                )
+                            cur.execute(
+                                """
+                                INSERT INTO curation_locks(
+                                    community, team_id, root_txhash, lock_sequence, actor, updated_height
+                                ) VALUES(%s,%s,%s,%s,%s,%s)
+                                ON CONFLICT(community, team_id, root_txhash) DO UPDATE SET
+                                    lock_sequence=EXCLUDED.lock_sequence,
+                                    actor=EXCLUDED.actor,
+                                    updated_height=EXCLUDED.updated_height
+                                """,
+                                (
+                                    community,
+                                    team_id,
+                                    target,
+                                    int(attrs["lock_sequence"]),
+                                    attrs["actor"],
+                                    int(height),
+                                ),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                DELETE FROM curation_locks
+                                WHERE community=%s AND team_id=%s AND root_txhash=%s
+                                """,
+                                (community, team_id, target),
+                            )
+        for community, team_id in sorted(touched):
+            self._sync_curation_team(community, team_id, height)
+        if touched:
+            logger.debug(
+                "[curation] projected event teams height=%s tx=%s count=%s",
+                height,
+                tx_hash,
+                len(touched),
+            )
+
     def _handle_create_community(self, type_url: str, value: bytes, ts: int, height: int):
         parsed = MsgCreateCommunity()
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
         slug = str(msg_dict.get("community", "")).strip().lower()
-        title = str(msg_dict.get("title", "") or "")
-        description = str(msg_dict.get("description", "") or "")
         if not owner or not slug:
-            return
-        with self.db._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO communities(
-                        community, original_founder, current_founder, title, description,
-                        original_team_id, current_default_team_id, default_count, created_height, created_order
-                    ) VALUES(%s, %s, %s, %s, %s, 1, 1, 0, %s, %s)
-                    ON CONFLICT (community) DO NOTHING
-                    """,
-                    (slug, owner, owner, title, description, int(height), int(height)),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
-                    VALUES(%s, %s, 0, NULL, %s)
-                    ON CONFLICT (owner, community) DO NOTHING
-                    """,
-                    (owner, slug, int(height)),
-                )
-        logger.info("create_community owner=%s community=%s height=%s", owner, slug, height)
+            raise RuntimeError("historical MsgCreateCommunity is missing signer/community")
+        self._sync_curation_team(slug, 1, height)
+        logger.info("[community] historical create projected as ordinary team owner=%s community=%s", owner, slug)
 
     def _handle_claim_creator_rewards(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         parsed = MsgClaimCreatorRewards()

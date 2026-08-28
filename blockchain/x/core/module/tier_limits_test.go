@@ -38,79 +38,7 @@ func setupModule(t *testing.T) (*mockKeeper, sdk.Context, AppModule) {
 
 func seedClaimedCommunity(t *testing.T, mk *mockKeeper, ctx sdk.Context, slug string) sdk.Context {
 	t.Helper()
-	founder := genAddr(99)
-	ensureUsername(t, mk, ctx, founder, "Anon-founder")
-	bz, found, err := mk.GetProfileCore(ctx, founder)
-	require.NoError(t, err)
-	require.True(t, found)
-	var core types.ProfileCore
-	require.NoError(t, json.Unmarshal(bz, &core))
-	core.EffectivePaid = true
-	core.Level = types.LevelSubscriber
-	out, err := json.Marshal(&core)
-	require.NoError(t, err)
-	require.NoError(t, mk.SetProfileCore(ctx, founder, out))
-	require.NoError(t, mk.CreateCommunity(ctx, founder, slug, "Title", "desc", "origteam", "bio", "policy"))
 	return ctx.WithTxBytes([]byte("test-post-tx"))
-}
-
-// =========================================================================
-// EnableAgent: retired — the live limit is zero
-// =========================================================================
-
-func TestEnableAgentRejected(t *testing.T) {
-	_, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
-
-	_, err := am.EnableAgent(ctx, &types.MsgEnableAgent{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Agent:          genAddr(0xFF),
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "limit reached")
-}
-
-func TestSetAgentsRejected(t *testing.T) {
-	_, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
-
-	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
-		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
-		Agents: []string{genAddr(1)},
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "too many agents")
-}
-
-func TestSetAgentsEmptyClears(t *testing.T) {
-	mk, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
-
-	require.NoError(t, mk.ReplaceAllEnabledAgents(ctx, owner, []string{genAddr(1), genAddr(2)}))
-
-	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
-		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
-		Agents: []string{},
-	})
-	require.NoError(t, err)
-
-	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
-	require.Len(t, got, 0)
-}
-
-func TestSetAgentsRejectsDuplicates(t *testing.T) {
-	_, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
-
-	a1 := genAddr(1)
-	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
-		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
-		Agents: []string{a1, a1},
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "too many agents")
 }
 
 // =========================================================================
@@ -194,33 +122,29 @@ func TestFollowUserIdempotent(t *testing.T) {
 }
 
 // =========================================================================
-// FollowTopic: hard cap (reject at limit, must unfollow first)
+// JoinCommunity: hard cap (reject at limit, must leave first)
 // =========================================================================
 
-func TestFollowTopicHardCapFreeTier(t *testing.T) {
+func TestJoinCommunityHardCapFreeTier(t *testing.T) {
 	mk, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
+	pub, _ := testPubkeyOwner()
 
 	params := mk.GetParams(ctx)
 	params.Tiers[0].MaxJoinedCommunities = 3
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	for _, topic := range []string{"alpha", "beta", "gamma"} {
-		_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
-			Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: topic,
-		})
+	for _, slug := range []string{"alpha", "beta", "gamma"} {
+		_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: slug})
 		require.NoError(t, err)
 	}
 
 	// 4th should be rejected
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
-		Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "delta",
-	})
+	_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "delta"})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "limit reached")
+	require.Contains(t, err.Error(), "cap reached")
 }
 
-func TestFollowTopicSucceedsAfterUnfollow(t *testing.T) {
+func TestJoinCommunitySucceedsAfterLeave(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 
@@ -228,25 +152,26 @@ func TestFollowTopicSucceedsAfterUnfollow(t *testing.T) {
 	params.Tiers[0].MaxJoinedCommunities = 2
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
+	_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "alpha"})
 	require.NoError(t, err)
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "beta"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "beta"})
 	require.NoError(t, err)
 
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "gamma"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "gamma"})
 	require.Error(t, err)
 
-	_, err = am.UnfollowTopic(ctx, &types.MsgUnfollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
+	_, err = am.LeaveCommunity(ctx, &types.MsgLeaveCommunity{EnvelopePubkey: pub, Community: "alpha"})
 	require.NoError(t, err)
 
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "gamma"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "gamma"})
 	require.NoError(t, err)
 
-	got, _ := mk.ListFollowedTopics(ctx, owner)
+	got, err := mk.ListJoinedCommunities(ctx, owner)
+	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"beta", "gamma"}, got)
 }
 
-func TestFollowTopicIdempotent(t *testing.T) {
+func TestJoinCommunityIdempotent(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 
@@ -254,13 +179,14 @@ func TestFollowTopicIdempotent(t *testing.T) {
 	params.Tiers[0].MaxJoinedCommunities = 1
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
+	_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "alpha"})
 	require.NoError(t, err)
 
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "alpha"})
 	require.NoError(t, err)
 
-	got, _ := mk.ListFollowedTopics(ctx, owner)
+	got, err := mk.ListJoinedCommunities(ctx, owner)
+	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, got)
 }
 
@@ -333,10 +259,10 @@ func TestBlockUserDequeEviction(t *testing.T) {
 }
 
 // =========================================================================
-// BlockTopic: deque behavior (evict oldest, NOT reject)
+// BlockCommunity: deque behavior (evict oldest, NOT reject)
 // =========================================================================
 
-func TestBlockTopicDequeEviction(t *testing.T) {
+func TestBlockCommunityDequeEviction(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 
@@ -344,14 +270,15 @@ func TestBlockTopicDequeEviction(t *testing.T) {
 	params.Tiers[0].MaxBlockedCommunities = 2
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	for _, topic := range []string{"alpha", "beta", "gamma"} {
-		_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
-			Authority: "not-gov", EnvelopePubkey: pub, Topic: topic,
+	for _, slug := range []string{"alpha", "beta", "gamma"} {
+		_, err := am.BlockCommunity(ctx, &types.MsgBlockCommunity{
+			EnvelopePubkey: pub, Community: slug,
 		})
 		require.NoError(t, err, "blocking should always succeed (deque)")
 	}
 
-	got, _ := mk.ListBlockedTopics(ctx, owner)
+	got, err := mk.ListBlockedCommunities(ctx, owner)
+	require.NoError(t, err)
 	require.Equal(t, []string{"beta", "gamma"}, got, "oldest should be evicted")
 }
 
@@ -389,7 +316,7 @@ func TestTierLimitsFollowUserFreeLowerThanSubscriber(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestTierLimitsFollowTopicFreeLowerThanSubscriber(t *testing.T) {
+func TestTierLimitsJoinCommunityFreeLowerThanSubscriber(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 
@@ -397,17 +324,17 @@ func TestTierLimitsFollowTopicFreeLowerThanSubscriber(t *testing.T) {
 	params.Tiers[0].MaxJoinedCommunities = 2
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
+	_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "alpha"})
 	require.NoError(t, err)
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "beta"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "beta"})
 	require.NoError(t, err)
 
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "gamma"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "gamma"})
 	require.Error(t, err)
 
 	setProfileLevel(t, mk, ctx, owner, int32(types.LevelSubscriber))
 
-	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "gamma"})
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "gamma"})
 	require.NoError(t, err)
 }
 
@@ -729,10 +656,13 @@ func TestBlockedListZeroLimitRejectsAdds(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "blocked post limit is zero")
 
-	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{
-		Authority: "not-gov", EnvelopePubkey: pub, Topic: "topic",
+	// The keeper's deque helper reads a zero cap as "never evict", so this
+	// must be refused at the handler like the two lists above rather than
+	// growing without bound.
+	_, err = am.BlockCommunity(ctx, &types.MsgBlockCommunity{
+		Authority: "not-gov", EnvelopePubkey: pub, Community: "technology",
 	})
-	require.ErrorContains(t, err, "blocked topic limit is zero")
+	require.ErrorContains(t, err, "blocked community limit is zero")
 }
 
 // =========================================================================

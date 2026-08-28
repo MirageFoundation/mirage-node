@@ -86,8 +86,6 @@ from tests.backend_helpers import (
     _do_set_username_raw,
     _do_set_biography,
     _do_report,
-    _do_enable_agent,
-    _do_set_agents,
     _do_set_auto_renewal,
     _do_send_tokens,
     _do_award,
@@ -221,115 +219,14 @@ def test_account(backend: str):
     else:
         _fail("account.get_user_followed returns 200", f"code={code}")
 
-    # 2.9 Profile-share attribution works with open registration and rewards off.
-    invite_required = bool((_ncfg or {}).get("registration_invite_code_required", False))
-    if invite_required:
-        _skip("account.profile_referral open-registration coverage", "invite codes required on this node")
-        return
-
-    referrer_wallet = _generate_wallet()
-    referrer_addr = str(referrer_wallet.address()).lower()
-    referrer_resp = _do_set_username_raw(backend, referrer_wallet, f"ref-{_rand_str(6)}")
-    if not referrer_resp.get("tx_hash"):
-        _fail("account.profile_referral creates referrer", f"resp={referrer_resp}")
-        return
-    referrer_name = _wait_username(backend, referrer_addr)
-    if not referrer_name:
-        _fail("account.profile_referral indexes referrer", f"address={referrer_addr}")
-        return
-
-    unknown_wallet = _generate_wallet()
-    unknown_resp = _do_set_username_raw(
-        backend,
-        unknown_wallet,
-        f"referred-{_rand_str(6)}",
-        referrer_username=f"missing-{_rand_str(8)}",
-    )
-    if unknown_resp.get("tx_hash"):
-        _pass("account.profile_referral ignores unknown referrer")
-    else:
-        _fail("account.profile_referral ignores unknown referrer", f"resp={unknown_resp}")
-
-    malformed_wallet = _generate_wallet()
-    malformed_resp = _do_set_username_raw(
-        backend,
-        malformed_wallet,
-        f"referred-{_rand_str(6)}",
-        referrer_username="invalid referrer!",
-    )
-    if malformed_resp.get("tx_hash"):
-        _pass("account.profile_referral ignores malformed referrer")
-    else:
-        _fail("account.profile_referral ignores malformed referrer", f"resp={malformed_resp}")
-
-    referred_wallet = _generate_wallet()
-    referred_resp = _do_set_username_raw(
-        backend,
-        referred_wallet,
-        f"referred-{_rand_str(6)}",
-        referrer_username=referrer_name,
-    )
-    if not referred_resp.get("tx_hash"):
-        _fail("account.profile_referral registration succeeds", f"resp={referred_resp}")
-        return
-    _pass("account.profile_referral registration succeeds", referrer=referrer_name)
-
-    # v1.39 pays nothing for a referral and dropped the tables behind the stats,
-    # so the whole /api/referrals surface is retired. A node that still answers
-    # it is serving an endpoint whose storage no longer exists.
-    summary_code, _ = _get(f"{backend}/api/referrals/summary", {"address": referrer_addr})
+    # 2.9 The referral surface must stay retired. v1.39 dropped referral_links,
+    # referral_user_settings and invite_codes, so a node that answers here is
+    # serving an endpoint whose storage no longer exists.
+    summary_code, _ = _get(f"{backend}/api/referrals/summary", {"address": addr})
     if summary_code == 410:
-        _pass("account.profile_referral referral stats retired")
+        _pass("account.referrals_retired")
     else:
-        _fail("account.profile_referral referral stats retired", f"code={summary_code}")
-
-    # Attribution fields ride outside the chain envelope, so they carry their own
-    # signature. A network position that can rewrite the body must not be able to
-    # redirect attribution, nor strip the signature to dodge the check.
-    unsigned_wallet = _generate_wallet()
-    unsigned_resp = _do_set_username_raw(
-        backend,
-        unsigned_wallet,
-        f"unsigned-{_rand_str(6)}",
-        referrer_username=referrer_name,
-        omit_attribution_signature=True,
-    )
-    if unsigned_resp.get("tx_hash"):
-        _fail("account.profile_referral rejects unsigned attribution", f"resp={unsigned_resp}")
-    elif unsigned_resp.get("error_code") == "attribution_signature_invalid":
-        _pass("account.profile_referral rejects unsigned attribution")
-    else:
-        _fail("account.profile_referral rejects unsigned attribution", f"resp={unsigned_resp}")
-
-    tampered_wallet = _generate_wallet()
-    tampered_resp = _do_set_username_raw(
-        backend,
-        tampered_wallet,
-        f"tampered-{_rand_str(6)}",
-        referrer_username=referrer_name,
-        tamper_referrer_after_signing=f"attacker-{_rand_str(6)}",
-    )
-    if tampered_resp.get("tx_hash"):
-        _fail("account.profile_referral rejects swapped referrer", f"resp={tampered_resp}")
-    elif tampered_resp.get("error_code") == "attribution_signature_invalid":
-        _pass("account.profile_referral rejects swapped referrer")
-    else:
-        _fail("account.profile_referral rejects swapped referrer", f"resp={tampered_resp}")
-
-    # A second signup naming the same referrer must still register: with no
-    # reward attached there is nothing to ration, so the old per-client gate is
-    # gone and repeat attribution is not an error.
-    duplicate_wallet = _generate_wallet()
-    duplicate_resp = _do_set_username_raw(
-        backend,
-        duplicate_wallet,
-        f"duplicate-{_rand_str(6)}",
-        referrer_username=referrer_name,
-    )
-    if duplicate_resp.get("tx_hash"):
-        _pass("account.profile_referral repeat referrer allowed")
-    else:
-        _fail("account.profile_referral repeat referrer allowed", f"resp={duplicate_resp}")
+        _fail("account.referrals_retired", f"code={summary_code}")
 
 
 # =========================================================================

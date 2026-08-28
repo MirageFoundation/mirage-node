@@ -1,14 +1,10 @@
 # `src/themes` — full UI families (not skins)
 
-> **As of 2026-04-25:** every user is locked to the **`default`** theme.
-> `registry/theme.js` exports `DEFAULT_THEME_ID = 'default'` and
-> `normalizeThemeId` force-overrides any persisted `theme_id` to that value
-> regardless of input. The Theme picker has been removed from
-> `default/SettingsView`. The other manifests (`bluemoon`, `onyx`,
-> `oldreddit`) are kept registered only so legacy storage values don't blow
-> up `getThemeFamily`; they are not reachable as a runtime visual. To restore
-> per-user theming, undo the override in `registry/theme.js` (see git history
-> for the 2026-04-24 version) and re-add the picker UI.
+> **As of 2026-08-27:** only the **`default`** theme is registered.
+> `normalizeThemeId` always returns `default`. The other families stay on
+> disk under `themes/` but are not imported, so they are not in the bundle
+> and do not need to stay in sync. To restore theming, add the manifests
+> back to `themes/manifests.js` and re-add the picker UI.
 >
 > Until then: product UI feedback targets **`default`** only.
 
@@ -105,7 +101,7 @@ Each file under **`src/views/`** is a facade named **`X.js`** that calls **`useT
 
 As of this writing, manifests include at least:
 
-`AgentsView`, `BlocksView`, `ChangeUsernameView`, `CreateAccountView`, `CreatePostView`, `DiscoverView`, `FollowsView`, `InboxView`, `LoginView`, `MainView`, `NetworkView`, `NotFoundView`, `ProfileView`, `ReportsView`, `SearchResultsView`, `SettingsView`, `SignOutView`, `StatsView`, `SubscriptionView`, `ViewPostView`, `WelcomeView`.
+`BlocksView`, `ChangeUsernameView`, `CreateAccountView`, `CreatePostView`, `DiscoverView`, `FollowsView`, `InboxView`, `LoginView`, `MainView`, `NetworkView`, `NotFoundView`, `ProfileView`, `ReportsView`, `SearchResultsView`, `SettingsView`, `SignOutView`, `StatsView`, `SubscriptionView`, `ViewPostView`, `WelcomeView`.
 
 Adding a **new** top-level URL requires **`App.js`** `<Route>`, a **`src/views/NewThing.js`** facade, and **`routes.NewThing`** on **every** theme manifest.
 

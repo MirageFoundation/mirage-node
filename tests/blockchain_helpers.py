@@ -8,7 +8,6 @@ import json
 import math
 import os
 import random
-import re
 import time
 import tomllib
 from typing import Optional
@@ -60,7 +59,6 @@ from shared.canon import (
     canon_base_leave_community as _canon_base_leave_community_raw,
     canon_base_block_community as _canon_base_block_community_raw,
     canon_base_unblock_community as _canon_base_unblock_community_raw,
-    canon_base_create_community as _canon_base_create_community_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
@@ -104,7 +102,6 @@ from shared.datatypes import (
     MsgLeaveCommunity,
     MsgBlockCommunity,
     MsgUnblockCommunity,
-    MsgCreateCommunity,
 )
 
 from tests.common import (
@@ -830,10 +827,6 @@ def _build_msg_post(
     lb_override: Optional[str] = None,
     diff_override: Optional[int] = None,
 ) -> MsgPost:
-    if not target:
-        slug = str(topic or "").strip().lower()
-        if slug:
-            _claim_community("", slug)
     pub = wallet.public_key().public_key_bytes
     d = diff if diff_override is None else diff_override
     lb_hex = lb_override or lb
@@ -1422,112 +1415,14 @@ def _build_msg_unblock_community(
     return msg
 
 
-def _build_msg_create_community(
-    wallet: LocalWallet,
-    lb: str,
-    diff: int,
-    ts: int,
-    community: str,
-    pow_val: int = 0,
-    nonce: int = 0,
-    title: str = "",
-    description: str = "test community",
-    original_team_name: str = "orig",
-    bio: str = "bio",
-    policy: str = "policy",
-) -> MsgCreateCommunity:
-    pub = wallet.public_key().public_key_bytes
-    lb_bytes = _lb_bytes(lb)
-    slug = str(community or "").strip().lower()
-    title = title or slug
-    base = _canon_base_create_community_raw(
-        pub, lb_bytes, diff, ts, slug, title, description, original_team_name, bio, policy, nonce=nonce
-    )
-    sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgCreateCommunity()
-    msg.authority = _VALIDATOR_ADDR or ""
-    msg.envelope_pubkey = pub
-    msg.envelope_block_hash = lb_bytes
-    msg.envelope_difficulty = int(diff)
-    msg.envelope_pow = int(pow_val)
-    msg.envelope_timestamp = int(ts)
-    msg.envelope_nonce = int(nonce)
-    msg.envelope_signature = sig
-    msg.community = slug
-    msg.title = title
-    msg.description = description
-    msg.original_team_name = original_team_name
-    msg.bio = bio
-    msg.policy = policy
-    return msg
-
-
-_CLAIMED_ON_CHAIN: set[str] = set()
 _SHARED_COMMUNITY: str = ""
 
-# Mirrors ValidateCommunitySlug on the chain.
-_COMMUNITY_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
-
-
-def _is_valid_community_slug(slug: str) -> bool:
-    return 2 <= len(slug) <= 35 and bool(_COMMUNITY_SLUG_RE.fullmatch(slug)) and "--" not in slug
-
-
 def _shared_community() -> str:
-    """One claimed community, reused by tests that don't assert on the slug.
-
-    Root posts now require a claimed community, so a test that mints a fresh
-    random slug pays for a CreateCommunity tx and its block wait before its own
-    submission. Tests checking signatures, nonces, memos or field formats do not
-    care where the post lands, and paying that cost per post pushed their
-    envelope timestamps past the chain's 60s window.
-    """
+    """One valid slug reused by tests that do not assert on the community."""
     global _SHARED_COMMUNITY
     if not _SHARED_COMMUNITY:
-        slug = f"shared{_rand_str(6)}"
-        _claim_community("", slug)
-        _SHARED_COMMUNITY = slug
+        _SHARED_COMMUNITY = f"shared{_rand_str(6)}"
     return _SHARED_COMMUNITY
-
-
-def _claim_community(backend: str, slug: str) -> None:
-    """CreateCommunity from sub1 so JoinCommunity(requireClaimed) can succeed."""
-    import tests.common as _common
-    from tests.common import WALLETS
-
-    community = str(slug or "").strip().lower()
-    if not community or community in _CLAIMED_ON_CHAIN:
-        return
-    if not _is_valid_community_slug(community):
-        # The malicious-input and msg-format cases pass slugs the chain must refuse
-        # (NUL bytes, spaces, over-length). Those cannot be pre-claimed by
-        # definition, and the assertion under test is the chain's rejection of the
-        # message that follows, so leave the claim to fail there instead of here.
-        return
-    claimer = WALLETS.get("sub1")
-    if claimer is None:
-        raise RuntimeError("sub1 wallet required to claim a community")
-    addr = str(claimer.address())
-    pub = claimer.public_key().public_key_bytes
-    lb, _, _, _ = _get_pow_params(backend or _common.SUITE_BACKEND, addr)
-    ts = _now_ms()
-    nonce = _gen_nonce()
-    msg = _build_msg_create_community(claimer, lb, 0, ts, community, pow_val=0, nonce=nonce)
-    _, ccode, clog, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgCreateCommunity")],
-        DEFAULT_GAS_LIMIT,
-        _VALIDATOR_ADDR or "",
-        pub,
-        wait_deliver=True,
-    )
-    combined = f"{clog or ''} {dlog or ''}".lower()
-    if ccode == 0 and dcode == 0:
-        _CLAIMED_ON_CHAIN.add(community)
-        return
-    if "already" in combined:
-        _CLAIMED_ON_CHAIN.add(community)
-        return
-    raise RuntimeError(f"claim community {community} failed check={ccode} deliver={dcode} log={combined[:200]}")
 
 
 def _build_msg_follow_topic(

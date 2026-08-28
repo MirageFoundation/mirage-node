@@ -38,6 +38,7 @@ from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
 from user_last_seen import update_user_last_seen
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
+from curation import filter_posts as _filter_posts_for_lens, resolve_lens as _resolve_curation_lens
 from settings import (
     IGNORE_DELETIONS,
     REGISTRATION_ENABLED,
@@ -109,6 +110,37 @@ def _escape_like(value: str) -> str:
     escape sequence and raises, which is an unauthenticated 500 from any search box.
     """
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _lens_request_args(
+    community: str | None = None, *, allow_team_without_community: bool = False
+) -> tuple[str, int | None, str]:
+    scope = (request.args.get("scope") or "current").strip().lower()
+    if scope not in ("current", "legacy"):
+        raise ValueError("invalid scope")
+    default_lens = "raw" if scope == "legacy" else "effective"
+    lens = (request.args.get("lens") or default_lens).strip().lower()
+    if lens not in ("effective", "default", "team", "raw"):
+        raise ValueError("invalid lens")
+    raw_team_id = request.args.get("team_id")
+    team_id = None
+    if raw_team_id is not None:
+        try:
+            team_id = int(raw_team_id)
+        except (TypeError, ValueError) as e:
+            raise ValueError("invalid team_id") from e
+        if team_id <= 0:
+            raise ValueError("invalid team_id")
+    if lens == "team" and (
+        team_id is None
+        or ((not community or community == "all") and not allow_team_without_community)
+    ):
+        raise ValueError("team lens requires team_id and community")
+    if lens != "team" and team_id is not None:
+        raise ValueError("team_id is only valid with team lens")
+    if scope == "legacy" and (lens != "raw" or team_id is not None):
+        raise ValueError("legacy scope requires raw lens")
+    return lens, team_id, scope
 
 
 def _get_balance(address) -> int:
@@ -3206,11 +3238,13 @@ def _build_user_followed(addr: str) -> dict:
     standalone route's responsibility. Used by /api/get_user_followed and
     /api/bootstrap.
     """
-    followed_users: list = []
-    joined_communities: list = []
-
+    # No try/except: an indexer failure must not be reported as "you follow
+    # nobody and joined nothing". Empty lists would make the client offer to
+    # re-join communities the user is already in. Both callers already turn the
+    # exception into a hard error (/api/bootstrap → 503 indexer_unavailable,
+    # /api/get_user_followed → safe_error).
+    conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
     try:
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
@@ -3222,9 +3256,8 @@ def _build_user_followed(addr: str) -> dict:
             (addr,),
         )
         joined_communities = [row[0] for row in cur.fetchall()]
+    finally:
         conn.close()
-    except Exception:
-        pass
 
     return {
         "followed_users": followed_users,
@@ -3234,7 +3267,7 @@ def _build_user_followed(addr: str) -> dict:
 
 @public_bp.route("/api/get_user_followed")
 def get_user_followed():
-    """Get user's follow lists (agents, topics, users)."""
+    """Get user's follow lists (users, joined communities)."""
     rid = next_request_id()
     addr = request.args.get("address", default=None, type=str)
     log_event(rid, "get_user_followed.begin", address=addr)
@@ -3660,10 +3693,25 @@ _guest_feed_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
 _guest_feed_cache_lock = threading.Lock()
 
 
-def _guest_feed_cache_key(feed: str, sort_mode: str, page: int, limit: int, allowed_tags: set[str]) -> str:
+def _guest_feed_cache_key(
+    feed: str,
+    sort_mode: str,
+    page: int,
+    limit: int,
+    allowed_tags: set[str],
+    *,
+    viewer: str,
+    community: str,
+    scope: str,
+    lens: str,
+    team_id: int | None,
+) -> str:
     # allowed_tags is clamped to empty for guests today, but it stays in the key
     # so a future policy change cannot serve one tag policy's posts under another.
-    return f"{feed}|{sort_mode}|{page}|{limit}|{','.join(sorted(allowed_tags))}"
+    return (
+        f"{viewer}|{feed}|{community}|{scope}|{lens}|{team_id or 0}|"
+        f"{sort_mode}|{page}|{limit}|{','.join(sorted(allowed_tags))}"
+    )
 
 
 def _guest_feed_cache_get(key: str) -> Optional[Dict[str, Any]]:
@@ -3977,6 +4025,10 @@ def _build_bootstrap_view(
     addr = (address or "").strip()
     sort_mode = sort_mode if sort_mode in ("magic", "newest") else "magic"
     limit = min(max(1, int(limit or 15)), 100)
+    community_hint = view[len("topic:") :].strip() if view.startswith("topic:") else None
+    lens, team_id, scope = _lens_request_args(
+        community_hint, allow_team_without_community=view.startswith("thread:")
+    )
 
     # ── thread:<post_id> ──────────────────────────────────────────────
     if view.startswith("thread:"):
@@ -3999,6 +4051,9 @@ def _build_bootstrap_view(
                 blocked_topics_exact,
                 blocked_topic_prefixes,
                 rid,
+                lens=lens,
+                team_id=team_id,
+                scope=scope,
             )
             if not thread:
                 return {"kind": "thread", "found": False}
@@ -4023,11 +4078,14 @@ def _build_bootstrap_view(
         with current_app.test_request_context(
             "/api/get_posts",
             query_string={
-                "topic": topic_name,
+                "community": topic_name,
                 "limit": str(limit),
                 "page": "1",
                 "by": sort_mode,
                 "allowed_tags": ",".join(sorted(allowed_tags)),
+                "lens": lens,
+                "scope": scope,
+                **({"team_id": str(team_id)} if team_id is not None else {}),
                 **({"address": addr} if addr else {}),
             },
         ):
@@ -4078,7 +4136,22 @@ def _build_bootstrap_view(
     if feed_name not in ("home", "following"):
         return None
 
-    guest_key = _guest_feed_cache_key(feed_name, sort_mode, 1, limit, allowed_tags) if _is_guest(addr) else None
+    guest_key = (
+        _guest_feed_cache_key(
+            feed_name,
+            sort_mode,
+            1,
+            limit,
+            allowed_tags,
+            viewer="guest",
+            community="",
+            scope=scope,
+            lens=lens,
+            team_id=team_id,
+        )
+        if _is_guest(addr) and (scope == "legacy" or lens == "raw")
+        else None
+    )
     if guest_key is not None:
         cached = _guest_feed_cache_get(guest_key)
         if cached is not None:
@@ -4139,6 +4212,14 @@ def _build_bootstrap_view(
                 context=f"bootstrap.view.feed.{feed_name}",
                 viewer=addr,
             )
+            resp["posts"], _ = _filter_posts_for_lens(
+                cur,
+                resp["posts"],
+                viewer=addr,
+                requested_lens=lens,
+                requested_team_id=team_id,
+                scope=scope,
+            )
             _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
         resp.pop("_timings", None)
         if guest_key is not None:
@@ -4149,6 +4230,90 @@ def _build_bootstrap_view(
             conn.close()
         except Exception:
             pass
+
+
+def _build_community_bootstrap(address: str) -> dict:
+    """Build required lens, quota, and renewal contracts from indexer state."""
+    params = expect_params()
+    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT community, mode, pinned_team_id
+            FROM community_curation_preferences
+            WHERE LOWER(owner)=LOWER(%s)
+            ORDER BY community
+            """,
+            (address,),
+        )
+        preferences: dict[str, dict] = {}
+        for community, mode, pinned_team_id in cur.fetchall():
+            resolved = _resolve_curation_lens(cur, viewer=address, community=community)
+            preferences[community] = {
+                "stored_mode": int(mode),
+                "stored_team_id": str(pinned_team_id) if pinned_team_id is not None else None,
+                "effective_mode": int(resolved["effective_mode"]),
+                "effective_team_id": (
+                    str(resolved["effective_team_id"]) if resolved["effective_team_id"] is not None else None
+                ),
+            }
+        cur.execute(
+            """
+            SELECT effective_paid, subscriber_quota_epoch, subscriber_quota_used,
+                   renewal_next_attempt, renewal_last_attempt_epoch,
+                   renewal_warning_expiry, renewal_warning_sent
+            FROM profiles
+            WHERE LOWER(owner)=LOWER(%s)
+            """,
+            (address,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return {
+            "community_preferences": preferences,
+            "daily_quota": None,
+            "renewal_warning": None,
+        }
+    effective_paid = bool(row[0])
+    quota_epoch = row[1]
+    quota_used = row[2]
+    if effective_paid and (quota_epoch is None or quota_used is None):
+        raise RuntimeError("paid profile is missing subscriber quota projection")
+    daily_quota = None
+    if effective_paid:
+        limit = int(params["subscriber_daily_relay_limit"])
+        used = int(quota_used)
+        if used > limit:
+            raise RuntimeError("subscriber quota projection exceeds chain limit")
+        daily_quota = {
+            "epoch": int(quota_epoch),
+            "used": used,
+            "limit": limit,
+            "remaining": limit - used,
+            "reset_at": (int(quota_epoch) + 1) * 86400,
+        }
+    renewal_values = row[3:7]
+    if effective_paid and any(value is None for value in renewal_values):
+        raise RuntimeError("paid profile is missing renewal projection")
+    renewal_warning = None
+    if all(value is not None for value in renewal_values):
+        renewal_warning = {
+            "expiry": int(row[5]),
+            "next_attempt": int(row[3]),
+            "last_attempt_epoch": int(row[4]),
+            "warning_sent": bool(row[6]),
+        }
+    logger.debug(
+        "[renewal] bootstrap address=%s paid=%s warning_sent=%s",
+        address[:12],
+        effective_paid,
+        renewal_warning["warning_sent"] if renewal_warning is not None else None,
+    )
+    return {
+        "community_preferences": preferences,
+        "daily_quota": daily_quota,
+        "renewal_warning": renewal_warning,
+    }
 
 
 @public_bp.route("/api/bootstrap")
@@ -4172,33 +4337,29 @@ def bootstrap():
     if _is_catching_up() and (address or _NODE_CONFIG_CACHE is None or _CHAIN_CONFIG_CACHE is None):
         return api_error_code("node_catching_up", 503)
 
-    def _safe(name: str, builder):
-        try:
-            return builder()
-        except Exception as e:
-            log_event(rid, f"bootstrap.{name}.err", error=str(e))
-            return None
-
-    allowed_tags = _viewer_allowed_tags(address)
-
-    resp: Dict[str, Any] = {
-        "node_config": _safe("node_config", _build_node_config),
-        "chain_config": _safe("chain_config", _build_chain_config),
-        "user_status": None,
-        "user_followed": None,
-        "user_blocked": None,
-        "rewards_summary": None,
-        "view": None,
-    }
-    if address:
-        resp["user_status"] = _safe("user_status", lambda: _build_user_status(address))
-        resp["user_followed"] = _safe("user_followed", lambda: _build_user_followed(address))
-        resp["user_blocked"] = _safe("user_blocked", lambda: _build_user_blocked(address))
-
-    resp["view"] = _safe(
-        "view",
-        lambda: _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid),
-    )
+    try:
+        allowed_tags = _viewer_allowed_tags(address)
+        resp: Dict[str, Any] = {
+            "node_config": _build_node_config(),
+            "chain_config": _build_chain_config(),
+            "user_status": None,
+            "user_followed": None,
+            "user_blocked": None,
+            "rewards_summary": None,
+            "community_preferences": {},
+            "daily_quota": None,
+            "renewal_warning": None,
+            "view": _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid),
+        }
+        if address:
+            resp["user_status"] = _build_user_status(address)
+            resp["user_followed"] = _build_user_followed(address)
+            resp["user_blocked"] = _build_user_blocked(address)
+            community_bootstrap = _build_community_bootstrap(address)
+            resp.update(community_bootstrap)
+    except Exception as e:
+        log_event(rid, "bootstrap.required.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
 
     log_event(
         rid,
@@ -4532,247 +4693,6 @@ def get_users():
         return safe_error(e)
 
 
-@public_bp.route("/api/get_topics")
-def get_topics():
-    """Get list of most active topics, excluding deleted messages."""
-    limit = request.args.get("limit", 50, type=int)
-    limit = min(max(1, limit), 200)
-    min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
-
-    # Cache the anonymous case only. The response is filtered by the viewer's
-    # blocked topics further down, so a key that ignored the viewer would serve one
-    # user's filtered view to another. Anonymous is the unrestricted path anyway.
-    viewer_addr = request.args.get("address", default="", type=str)
-    allowed_tags = _viewer_allowed_tags(viewer_addr)
-    cache_key = f"topics:{limit}:{min_posts}:{','.join(sorted(allowed_tags))}"
-    if not viewer_addr:
-        cached = _agg_cache_get(cache_key)
-        if cached is not None:
-            return jsonify(cached)
-
-    try:
-        # Get min/max topic size from chain params
-        p = expect_params()
-        min_topic = p.get("min_topic_size", 3)
-        max_topic = p.get("max_topic_size", 50)
-
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        cur = conn.cursor()
-
-        deleted_clause = _deleted_filter()
-
-        # Get topics with at least min_posts
-        cur.execute(
-            f"""
-            SELECT p.community, COUNT(1) as post_count
-            FROM posts p
-            WHERE COALESCE(p.target, '') = ''
-              AND LENGTH(COALESCE(p.title, '')) > 0
-              AND p.community IS NOT NULL
-              AND LENGTH(TRIM(p.community)) >= %s
-              AND LENGTH(TRIM(p.community)) <= %s
-              {deleted_clause}
-            GROUP BY p.community
-            HAVING COUNT(1) >= %s
-            ORDER BY post_count DESC, p.community ASC
-            LIMIT %s
-            """,
-            (min_topic, max_topic, min_posts, limit),
-        )
-        rows = cur.fetchall()
-
-        # Count topics with fewer posts (for "and X more" display)
-        small_topics_count = 0
-        if min_posts > 1:
-            cur.execute(
-                f"""
-                SELECT COUNT(*) FROM (
-                    SELECT p.community
-                    FROM posts p
-                    WHERE COALESCE(p.target, '') = ''
-                      AND LENGTH(COALESCE(p.title, '')) > 0
-                      AND p.community IS NOT NULL
-                      AND LENGTH(TRIM(p.community)) >= %s
-                      AND LENGTH(TRIM(p.community)) <= %s
-                      {deleted_clause}
-                    GROUP BY p.community
-                    HAVING COUNT(1) > 0 AND COUNT(1) < %s
-                ) small_topics
-                """,
-                (min_topic, max_topic, min_posts),
-            )
-            small_topics_count = cur.fetchone()[0] or 0
-
-        # Avoid hinting at hidden topics when content filters are active
-        if not set(_TOPIC_TAGS).issubset(allowed_tags):
-            small_topics_count = 0
-
-        # Filter out blocked topics for the viewer
-        viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
-        blocked_exact, blocked_prefixes = _split_blocked_topics(viewer_blocked_topics)
-
-        topics_dict = {}
-        for row in rows:
-            if row[0] and row[1] and row[1] > 0:
-                if _topic_is_blocked((row[0] or "").strip().lower(), blocked_exact, blocked_prefixes):
-                    continue
-                topics_dict[row[0]] = {"topic": row[0], "post_count": row[1], "count": row[1], "comment_count": 0}
-
-        if topics_dict:
-            cur.execute(
-                f"""
-                SELECT p.root_community, COUNT(1) as comment_count
-                FROM posts p
-                WHERE COALESCE(p.target, '') != ''
-                  AND p.root_community IS NOT NULL
-                  AND LENGTH(TRIM(p.root_community)) > 0
-                  {deleted_clause}
-                GROUP BY p.root_community
-                """
-            )
-            # root_topic is stored lowercase; build a lookup from the original-case topic keys
-            lower_to_topic = {k.lower(): k for k in topics_dict}
-            for row in cur.fetchall():
-                root_topic, count = row[0], row[1]
-                key = lower_to_topic.get((root_topic or "").lower())
-                if key:
-                    topics_dict[key]["comment_count"] = count or 0
-
-        if topics_dict:
-            lower_to_key = {k.lower(): k for k in topics_dict.keys()}
-            stats = _compute_dominant_flags(cur, list(lower_to_key.keys()))
-            remove_keys = []
-            for t_lower, info in stats.items():
-                key = lower_to_key.get(t_lower)
-                if not key or key not in topics_dict:
-                    continue
-                dominant_tag = _normalize_api_tag((info.get("dominant_tag") or "") if info else "")
-                dominant_ratio = float(info.get("dominant_ratio") or 0)
-                if dominant_tag and dominant_tag not in allowed_tags:
-                    remove_keys.append(key)
-                    continue
-                flags = {tag: dominant_tag == tag for tag in _TOPIC_TAGS}
-                topics_dict[key]["flags"] = flags
-                topics_dict[key]["dominant_tag"] = dominant_tag or None
-                topics_dict[key]["dominant_ratio"] = dominant_ratio
-            for k in remove_keys:
-                topics_dict.pop(k, None)
-
-        topics = list(topics_dict.values())
-        conn.close()
-
-        payload = {"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts}
-        if not viewer_addr:
-            _agg_cache_put(cache_key, payload)
-        return jsonify(payload)
-    except Exception as e:
-        return safe_error(e)
-
-
-@public_bp.route("/api/search_topics")
-def search_topics():
-    """Search topics by substring with relevance sorting.
-
-    Sorts results by: exact match > prefix match > contains match, then by post count.
-    """
-    limit = request.args.get("limit", 20, type=int)
-    offset = request.args.get("offset", 0, type=int)
-    limit = min(max(1, limit), 50)
-    offset = max(0, offset)
-    allowed_tags_raw = request.args.get("allowed_tags", default="sensitive", type=str)
-    allowed_tags = _parse_allowed_tags(allowed_tags_raw)
-
-    q_raw = request.args.get("q", default="", type=str)
-    q = re.sub(r"[^a-zA-Z0-9]", "", str(q_raw or "")).lower()
-    if len(q) < 2:
-        return jsonify({"topics": []})
-
-    try:
-        p = expect_params()
-        min_topic = p.get("min_topic_size", 3)
-        max_topic = p.get("max_topic_size", 50)
-
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
-        cur = conn.cursor()
-        deleted_clause = _deleted_filter()
-
-        # Search with substring match, sorted by relevance:
-        # 0 = exact match, 1 = prefix match, 2 = contains match
-        cur.execute(
-            f"""
-            WITH topic_base AS (
-                SELECT LOWER(TRIM(p.community)) AS community,
-                       COUNT(1) AS post_count
-                FROM posts p
-                WHERE COALESCE(p.target, '') = ''
-                  AND p.community IS NOT NULL
-                  AND LENGTH(TRIM(p.community)) >= %s
-                  AND LENGTH(TRIM(p.community)) <= %s
-                  AND LOWER(p.community) LIKE %s
-                  {deleted_clause}
-                GROUP BY LOWER(TRIM(p.community))
-            )
-            SELECT
-                tb.community,
-                tb.post_count,
-                COALESCE(tcs.dominant_tag, '') AS dominant_tag,
-                COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio,
-                CASE
-                    WHEN tb.community = %s THEN 0
-                    WHEN tb.community LIKE %s THEN 1
-                    ELSE 2
-                END AS relevance
-            FROM topic_base tb
-            LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
-            ORDER BY relevance ASC, post_count DESC, community ASC
-            LIMIT %s
-            OFFSET %s
-            """,
-            (min_topic, max_topic, f"%{q}%", q, f"{q}%", limit, offset),
-        )
-
-        rows = cur.fetchall()
-
-        # Filter out blocked topics for the viewer
-        viewer_addr = request.args.get("address", default="", type=str)
-        viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
-        blocked_exact, blocked_prefixes = _split_blocked_topics(viewer_blocked_topics)
-
-        topics = []
-        topic_list = [
-            row[0] for row in rows if not _topic_is_blocked((row[0] or "").lower(), blocked_exact, blocked_prefixes)
-        ]
-
-        # Compute live dominant flags from posts to avoid stale stats
-        stats = _compute_dominant_flags(cur, topic_list)
-
-        for row in rows:
-            topic = row[0]
-            if _topic_is_blocked((topic or "").lower(), blocked_exact, blocked_prefixes):
-                continue
-            post_count = int(row[1] or 0)
-            stat = stats.get(topic, {}) if stats else {}
-            dominant_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
-            dominant_ratio = float(stat.get("dominant_ratio") or 0)
-            if dominant_tag and dominant_tag not in allowed_tags:
-                continue
-            flags = {tag: dominant_tag == tag for tag in _TOPIC_TAGS}
-            topics.append(
-                {
-                    "topic": topic,
-                    "post_count": post_count,
-                    "count": post_count,
-                    "flags": flags,
-                    "dominant_tag": dominant_tag or None,
-                    "dominant_ratio": dominant_ratio,
-                }
-            )
-        conn.close()
-        return jsonify({"topics": topics})
-    except Exception as e:
-        return safe_error(e)
-
-
 @public_bp.route("/api/search")
 def search():
     """
@@ -4798,6 +4718,10 @@ def search():
     offset = request.args.get("offset", 0, type=int)
     offset = max(0, offset)
     viewer = request.args.get("address", default="", type=str).strip()
+    try:
+        lens, team_id, scope = _lens_request_args()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     allowed_tags = _viewer_allowed_tags(viewer)
 
@@ -5142,6 +5066,15 @@ def search():
                 result["posts"] = posts
                 result["has_more_posts"] = has_more_posts
 
+        if result["posts"]:
+            result["posts"], _ = _filter_posts_for_lens(
+                cur,
+                result["posts"],
+                viewer=viewer,
+                requested_lens=lens,
+                requested_team_id=team_id,
+                scope=scope,
+            )
         conn.close()
         return jsonify(result)
     except Exception as e:
@@ -5356,9 +5289,14 @@ def get_posts():
     offset = (page - 1) * limit
     community = request.args.get("community", default=None, type=str)
     if request.args.get("topic") is not None:
-        return jsonify({"error": "topic is retired; use community"}), 400
+        log_event(rid, "get_posts.topic_retired", topic=request.args.get("topic"), page=page)
+        return api_error_code("topic_retired")
     topic = community
     address = request.args.get("address", default="", type=str)
+    try:
+        lens, team_id, scope = _lens_request_args(topic)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Parse allowed_tags: comma-separated list of tags the user wants to see.
     # Signed in, only 'sensitive' is allowed by default (adult, violence, gore,
@@ -5376,8 +5314,21 @@ def get_posts():
     sort_mode = sort_mode or "magic"
 
     guest_key = (
-        _guest_feed_cache_key(feed, sort_mode, page, limit, allowed_tags)
-        if feed in ("home", "following") and _is_guest(address)
+        _guest_feed_cache_key(
+            feed,
+            sort_mode,
+            page,
+            limit,
+            allowed_tags,
+            viewer="guest",
+            community=(topic or "").strip().lower(),
+            scope=scope,
+            lens=lens,
+            team_id=team_id,
+        )
+        if feed in ("home", "following")
+        and _is_guest(address)
+        and (scope == "legacy" or lens == "raw")
         else None
     )
     if guest_key is not None:
@@ -5471,6 +5422,14 @@ def get_posts():
                     rid=rid,
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
+                )
+                resp["posts"], _ = _filter_posts_for_lens(
+                    cur,
+                    resp["posts"],
+                    viewer=address,
+                    requested_lens=lens,
+                    requested_team_id=team_id,
+                    scope=scope,
                 )
                 filter_ms = round((time.monotonic() - _t) * 1000, 2)
                 _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
@@ -5813,6 +5772,14 @@ def get_posts():
                 context=f"get_posts.topic.{topic or 'all'}",
                 viewer=address,
             )
+            result, _ = _filter_posts_for_lens(
+                cur,
+                result,
+                viewer=address,
+                requested_lens=lens,
+                requested_team_id=team_id,
+                scope=scope,
+            )
             _track_image_impressions(result, rid, context=f"get_posts.topic.{topic or 'all'}")
 
         has_more = len(result) >= limit and (page * limit) < total
@@ -5844,6 +5811,10 @@ def get_user_posts():
     rid = next_request_id()
     owner = request.args.get("owner", type=str)
     viewer = request.args.get("address", default="", type=str)
+    try:
+        lens, team_id, scope = _lens_request_args()
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     limit = request.args.get("limit", 10, type=int)
     page = request.args.get("page", 1, type=int)
     post_type = request.args.get("type", default="", type=str)
@@ -6195,6 +6166,14 @@ def get_user_posts():
                 viewer=viewer,
             )
             _track_image_impressions(result, rid, context=f"get_user_posts.{post_type or 'all'}")
+            result, _ = _filter_posts_for_lens(
+                cur,
+                result,
+                viewer=viewer,
+                requested_lens=lens,
+                requested_team_id=team_id,
+                scope=scope,
+            )
         conn.close()
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
@@ -7005,6 +6984,9 @@ def _build_thread(
     blocked_topics_exact: set[str],
     blocked_topic_prefixes: tuple[str, ...],
     rid: str,
+    lens: str = "effective",
+    team_id: int | None = None,
+    scope: str = "current",
 ) -> dict | None:
     """Build the get_comments payload for `post_id`. Returns None if not found/blocked."""
     root, children = _fetch_comment_tree_batch(
@@ -7100,6 +7082,34 @@ def _build_thread(
     _collect_posts(children, thread_posts)
     overlay_posts = thread_posts + ancestors
     _enrich_media_meta(cur, overlay_posts)
+    visible_posts, tombstones = _filter_posts_for_lens(
+        cur,
+        overlay_posts,
+        viewer=address,
+        requested_lens=lens,
+        requested_team_id=team_id,
+        scope=scope,
+        direct=True,
+    )
+    visible_ids = {post["post_id"] for post in visible_posts}
+    if root["post_id"] not in visible_ids:
+        tombstone = next((item for item in tombstones if item["post_id"] == root["post_id"]), None)
+        if tombstone is None:
+            return None
+        return {"root": tombstone, "children": [], "ancestors": [], "ancestors_omitted": 0}
+
+    def retain_visible(nodes):
+        kept = []
+        for node in nodes:
+            if node["post_id"] not in visible_ids:
+                continue
+            if node.get("children"):
+                node["children"] = retain_visible(node["children"])
+            kept.append(node)
+        return kept
+
+    children = retain_visible(children)
+    ancestors = [ancestor for ancestor in ancestors if ancestor["post_id"] in visible_ids]
     _track_image_impressions(thread_posts, rid, context="get_comments")
 
     return {
@@ -7117,6 +7127,10 @@ def get_comments():
 
     post_id = request.args.get("post_id", type=str)
     address = request.args.get("address", default="", type=str)
+    try:
+        lens, team_id, scope = _lens_request_args(allow_team_without_community=True)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     if not post_id:
         return jsonify({"error": "post_id is required"}), 400
     try:
@@ -7140,6 +7154,9 @@ def get_comments():
             blocked_topics_exact,
             blocked_topic_prefixes,
             rid,
+            lens=lens,
+            team_id=team_id,
+            scope=scope,
         )
         t_tree_ms = (time.time() - t_tree) * 1000
 
@@ -7228,6 +7245,10 @@ def get_comment_context():
     rid = next_request_id()
     comment_id = request.args.get("comment_id", type=str)
     address = request.args.get("address", default="", type=str)
+    try:
+        lens, team_id, scope = _lens_request_args(allow_team_without_community=True)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     max_depth_raw = request.args.get("max_depth", default=None, type=str)
 
     # Parse and validate max_depth strictly (1-5, hard error on invalid)
@@ -7267,6 +7288,14 @@ def get_comment_context():
             hard_cap=max_depth,
         )
         chain = list(reversed(ancestors))
+        chain, _ = _filter_posts_for_lens(
+            cur,
+            chain,
+            viewer=address,
+            requested_lens=lens,
+            requested_team_id=team_id,
+            scope=scope,
+        )
         conn.close()
         resp = {"context": chain, "comment_id": comment_id}
         return jsonify(_inject_balance(resp, address))

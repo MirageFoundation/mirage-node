@@ -183,19 +183,24 @@ separate, explicit per-task approval.
 
 **Profile Structure**:
 - `ProfileCore` (proto-generated): scalar fields stored at `profiles/{owner}` KV prefix
-- List fields stored separately at their own prefixes:
-  - `plist_agents/{owner}` - enabled agents
-  - `followed_users/{owner}` - followed users
-  - `followed_topics/{owner}` - followed topics
-  - `blocked_users/{owner}` - blocked users
-  - `blocked_posts/{owner}` - blocked posts
-  - `blocked_topics/{owner}` - blocked topics
+- List fields stored separately under their own prefixes. Never hand-build these
+  keys — use the typed helpers in `blockchain/x/core/types/keys.go` (`fu/`, `bu/`,
+  `bp/`) and `kv.go` (`jc|`, `bc|`), which are the source of truth:
+  - followed users (`FollowedUsersPrefix`)
+  - joined communities (`KeyJoin`, plus its reverse index and count)
+  - blocked users (`BlockedUsersPrefix`)
+  - blocked posts (`BlockedPostsPrefix`)
+  - blocked communities (`KeyBlockCommunity`, plus index/count/next)
+- Agents and topics are gone as of v1.39.0. Their prefixes (`ft/`, `ea/`, `bt/`,
+  `plist_*`) survive **only** so the v1.39 migration and historical decode paths
+  can drain them. Do not write to them.
 
 **Chain list limits — hard cap vs deque**:
-- `enabled_agents`, `followed_users`, `followed_topics`: **hard cap** — the chain rejects the transaction when the tier limit is reached. The user must disable/unfollow first.
-- `blocked_users`, `blocked_posts`, `blocked_topics`: **deque** — the chain silently evicts the oldest entry when the limit is exceeded. The indexer stores the full history (up to 100k per user per list) so feed filtering still sees old blocks.
+- followed users, joined communities: **hard cap** — the chain rejects the transaction when the tier limit is reached. The user must unfollow/leave first.
+- blocked users, blocked posts, blocked communities: **deque** — the chain evicts the oldest entry when the limit is exceeded. The indexer stores the full history (up to 100k per user per list) so feed filtering still sees old blocks.
+- A tier limit of `0` means the list is **disabled** and the handler rejects the write. It does NOT mean unlimited — the keeper's deque helper reads a zero cap as "never evict", so every deque handler must check for zero itself (see `BlockUser`, `BlockPost`, `BlockCommunity`).
 - `get_profile` endpoint: ALL fields (scalar + lists) from indexer DB. No chain queries.
-- Feed filtering (`_get_blocked_posts`, `_get_blocked_users`, `_get_blocked_topics`) reads from indexer DB.
+- Feed filtering reads from the indexer DB, never the chain.
 
 **Genesis Export/Import**:
 - `ExportGenesis` exports ALL KV pairs to `raw_state` (complete state)
@@ -203,8 +208,10 @@ separate, explicit per-task approval.
 - `InitialProfile` wraps `ProfileCore` + all list fields for backfill scenarios
 
 **Indexer DB tables**:
-- `profiles`, `enabled_agents`, `followed_users`, `followed_topics`, `blocked_users`, `blocked_posts`, `blocked_topics`
-- All list tables have a `position` column for ordering and deque eviction (cap: `INDEXER_LIST_CAP` = 100k in `indexer/database.py`)
+- `profiles`, `followed_users`, `blocked_users`, `blocked_posts`, `blocked_communities`, `community_curation_preferences`
+- There is **no** `joined_communities` table. A user's joined communities are derived from the rows they have in `community_curation_preferences` — joining a community *is* having a preference row for it. See `_build_user_followed` in `web/backend/routes/public.py`.
+- List tables have a `position` column for ordering and deque eviction (cap: `INDEXER_LIST_CAP` = 100k in `indexer/database.py`)
+- `topic_content_stats` and `user_topic_stats` keep their `topic` naming on purpose: renaming a table whose data is already on disk is never worth it.
 
 ### Docker Container Paths
 

@@ -43,7 +43,7 @@ export function useBlocks({
         if (cancelled) return;
         setBlockedUsers(data?.blocked_users || []);
         setBlockedPosts(data?.blocked_posts || []);
-        setBlockedTopics(data?.blocked_topics || []);
+        setBlockedTopics(data?.blocked_communities || []);
       } catch (err) {
         if (!cancelled) {
           setListsError(err?.message || 'Failed to load blocked items');
@@ -102,10 +102,10 @@ export function useBlocks({
       if (result && result.success) {
         setBlockedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
       } else {
-        alert(`Failed to unblock topic: ${result?.error || 'Unknown error'}`);
+        alert(`Failed to unblock community: ${result?.error || 'Unknown error'}`);
       }
     } catch (error) {
-      alert(`Error unblocking topic: ${error?.message || error}`);
+      alert(`Error unblocking community: ${error?.message || error}`);
     }
   };
   const handleUnblockUser = async (e, userAddr) => {

@@ -1,11 +1,35 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Storage from "../utils/Storage";
-import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
 import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { useLocation } from "react-router-dom";
 import { requireAccount } from "../utils/openBrowsing";
+import { stripCommunityPrefix } from "../utils/community";
+
+function mapCommunity(item) {
+    if (!item || typeof item.community !== 'string' || typeof item.curated !== 'boolean') {
+        throw new Error('Invalid community directory item');
+    }
+    if (!Number.isInteger(item.live_team_count) || !Number.isInteger(item.post_count)) {
+        throw new Error('Community directory counts are required');
+    }
+    if (item.curated && (
+        !item.default_team
+        || typeof item.default_team.team_id !== 'string'
+        || typeof item.default_team.name !== 'string'
+        || typeof item.default_team.subscriber_count !== 'string'
+    )) {
+        throw new Error('Curated community is missing its default team');
+    }
+    return {
+        topic: item.community,
+        curated: item.curated,
+        live_team_count: item.live_team_count,
+        post_count: item.post_count,
+        default_team: item.default_team,
+    };
+}
 export const tagColors = {
     adult: {
         bg: 'rgba(236, 72, 153, 0.18)',
@@ -49,6 +73,7 @@ export function useDiscover({
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [hoverTopic, setHoverTopic] = useState(null);
     const {
@@ -66,23 +91,17 @@ export function useDiscover({
     useEffect(() => {
         let alive = true;
         setLoading(true);
-        Api.get('get_topics', {
-            limit: 200,
-            min_posts: 10,
-            address: viewerAddress,
-            allowed_tags: getAllowedTagsParam()
+        setError('');
+        Api.get('communities', {
+            limit: 100,
         }).then(data => {
             if (!alive || !mountedRef.current) return;
-            if (data && Array.isArray(data.topics)) {
-                const topicsList = data.topics.filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '').map(t => ({
-                    topic: t.topic,
-                    post_count: t.post_count || t.count || 0,
-                    comment_count: t.comment_count || 0,
-                    dominant_tag: t.dominant_tag || null
-                }));
+            if (data && Array.isArray(data.items)) {
+                const topicsList = data.items.map(mapCommunity);
                 setTopics(topicsList);
                 setFilteredTopics(topicsList);
-                setSmallTopicsCount(data.small_topics_count || 0);
+                setSmallTopicsCount(0);
+                console.debug('[DiscoverView] loaded communities', { count: topicsList.length });
             } else {
                 setTopics([]);
                 setFilteredTopics([]);
@@ -91,9 +110,8 @@ export function useDiscover({
             setLoading(false);
         }).catch(error => {
             if (!alive || !mountedRef.current) return;
-            console.error('[DiscoverView] Failed to load topics:', error);
-            setTopics([]);
-            setFilteredTopics([]);
+            console.error('[DiscoverView] Failed to load communities:', error);
+            setError(String(error?.message || error));
             setLoading(false);
         });
         return () => {
@@ -103,7 +121,7 @@ export function useDiscover({
 
     // Filter local topics and search API for more results
     useEffect(() => {
-        const term = searchTerm.toLowerCase().trim().replace(/^#+/, '');
+        const term = stripCommunityPrefix(searchTerm).toLowerCase();
         if (!term) {
             setFilteredTopics(topics);
             setSearchResults([]);
@@ -129,24 +147,18 @@ export function useDiscover({
         setIsSearching(true);
         const handle = setTimeout(async () => {
             try {
-                const data = await Api.get('search_topics', {
-                    q: term,
+                const data = await Api.get('communities', {
+                    query: term,
                     limit: 50,
-                    allowed_tags: getAllowedTagsParam()
                 }, {
                     timeoutMs: 8000
                 });
                 if (searchRequestId.current !== requestId || !mountedRef.current) return;
-                const results = Array.isArray(data?.topics) ? data.topics : [];
-                // Filter out topics already in the main list
+                const results = Array.isArray(data?.items) ? data.items : [];
                 const existingLower = new Set(topics.map(t => t.topic.toLowerCase()));
-                const newTopics = results.filter(t => t && t.topic && !existingLower.has(t.topic.toLowerCase())).map(t => ({
-                    topic: t.topic,
-                    post_count: t.post_count || t.count || 0,
-                    comment_count: t.comment_count || 0,
-                    dominant_tag: t.dominant_tag || null,
-                    fromSearch: true
-                }));
+                const newTopics = results
+                    .filter(t => t && t.community && !existingLower.has(String(t.community).toLowerCase()))
+                    .map(mapCommunity);
                 setSearchResults(newTopics);
             } catch (_) {
                 if (searchRequestId.current === requestId) setSearchResults([]);
@@ -181,7 +193,7 @@ export function useDiscover({
     const handleSubscribeToggle = useCallback(async topic => {
         const t = String(topic || '').toLowerCase();
         if (!t || isTopicPending(t)) return;
-        if (!requireAccount('follow topics')) return;
+        if (!requireAccount('join a community')) return;
         const wasSubscribed = isSubscribedTopic(topic);
         try {
             if (wasSubscribed) {
@@ -211,6 +223,7 @@ export function useDiscover({
         searchResults,
         isSearching,
         loading,
+        error,
         hoverTopic,
         setHoverTopic,
         isTopicPending,

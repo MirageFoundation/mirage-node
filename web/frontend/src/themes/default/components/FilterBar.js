@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
+import { communityLabel } from '../../../utils/community';
 
 const FilterBarWrapper = styled.div`
     position: relative;
@@ -165,7 +166,7 @@ function FilterBar({
     onRightAction = null
 }) {
     const topicOptions = {
-        'all': 'all topics',
+        'all': 'all communities',
         'home': 'home feed',
         'following': 'following feed',
         // 'popular': 'popular topics', // disabled for now
@@ -193,7 +194,7 @@ function FilterBar({
             const allowed = ['all', 'home', 'following', ...(hasSubs ? ['manage'] : [])];
             return allowed.includes(selectedTopic) ? selectedTopic : 'all';
         })());
-    const topicDisplayText = customTopicName ? `#${customTopicName}` : (topicOptions[selectedValue] || 'all topics');
+    const topicDisplayText = customTopicName ? communityLabel(customTopicName) : (topicOptions[selectedValue] || 'all communities');
     const sortDisplayText = sortOptions[sortBy] || 'sorted by newest';
 
     useEffect(() => {
@@ -262,7 +263,7 @@ function FilterBar({
                         <StyledSelect $textStyle={textStyle} value={selectedValue} onChange={handleTopicChange} width={topicWidth}>
                             {customTopicName ? (
                                 <>
-                                    <option value={customTopicName}>#{customTopicName}</option>
+                                    <option value={customTopicName}>{communityLabel(customTopicName)}</option>
                                     <option disabled value="divider-custom">────</option>
                                 </>
                             ) : null}
@@ -272,7 +273,7 @@ function FilterBar({
                                     <option disabled value="divider">────</option>
                                 </>
                             ) : null}
-                            <option value="all">all topics</option>
+                            <option value="all">all communities</option>
                             <option value="home">home feed</option>
                             <option value="following">following feed</option>
                             {/* <option value="popular">popular topics</option> */}
@@ -280,7 +281,7 @@ function FilterBar({
                                 <>
                                     <option disabled value="divider-2">────</option>
                                     {subscribedTopics.map((t) => (
-                                        <option key={`sub-${t}`} value={t}>#{t}</option>
+                                        <option key={`sub-${t}`} value={t}>{communityLabel(t)}</option>
                                     ))}
                                 </>
                             ) : null}

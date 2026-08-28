@@ -24,6 +24,7 @@ from tests.common import (
     _skip,
     _debug,
     _check_local_docker,
+    _post,
     docker_python,
     docker_import_probe,
 )
@@ -87,57 +88,89 @@ def _test_topic_matcher() -> None:
         _fail("backend_hardening.wildcard_counter", f"cap={MAX_TOPIC_WILDCARDS}")
 
 
-def _test_attribution_canon() -> None:
-    """L-2 (frontend review): the attribution encoding is pinned across languages.
+def _test_curation_visibility() -> None:
+    backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    from curation import MODE_LIVE_DEFAULT, MODE_PINNED, MODE_RAW, resolve_visibility
 
-    invite_code and referrer_username drive the referral reward ledger and used to
-    be appended to the POST body after the signature was computed. They now carry
-    their own signature, which only works if both sides build the same bytes — so
-    these vectors are duplicated verbatim in the frontend's
-    tests/unit/frontendHardening.test.js. A change on one side alone turns every
-    invited signup into a rejection, which is the loud failure this pins.
-    """
-    root = Path(__file__).resolve().parents[2]
-    for extra in (root, root / "web" / "backend"):
-        if str(extra) not in sys.path:
-            sys.path.insert(0, str(extra))
-    from pow import canon_attribution
-
-    vectors = [
-        (
-            ("set_username", "MIRAGE1abc", "ABCD-1234", "", 1786816859440123),
-            "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653161626300414243442d31323334000031373836383136383539343430313233",
-        ),
-        (
-            ("set_username", "mirage1xyz", "", "bob-1", 9007199254740991),
-            "6d69726167652e6174747269627574696f6e2e7631007365745f757365726e616d65006d69726167653178797a0000626f622d310039303037313939323534373430393931",
-        ),
-    ]
-    for args, expected in vectors:
-        got = canon_attribution(*args).hex()
-        if got != expected:
-            _fail("backend_hardening.attribution_canon", f"args={args} got={got}")
-            return
-
-    # The nonce binding is what stops a captured signature being replayed onto a
-    # different request carrying a different invite code.
-    a = canon_attribution("set_username", "mirage1abc", "ABCD-1234", "", 1)
-    b = canon_attribution("set_username", "mirage1abc", "ABCD-1234", "", 2)
-    if a == b:
-        _fail("backend_hardening.attribution_canon", "nonce not bound into the payload")
-        return
-    _pass("backend_hardening.attribution_canon")
+    base = {
+        "viewer": "mirage1viewer",
+        "community": "test",
+        "author": "mirage1author",
+        "txhash": "a" * 64,
+        "root_txhash": "b" * 64,
+        "post_sequence": 12,
+        "author_was_paid_at_creation": True,
+        "deleted": False,
+        "viewer_blocks_author": False,
+        "viewer_blocks_post": False,
+        "viewer_blocks_community": False,
+        "viewer_follows_author": False,
+        "stored_mode": MODE_LIVE_DEFAULT,
+        "stored_team_id": None,
+        "default_team_id": 7,
+        "team_hidden_post": False,
+        "team_hidden_author": False,
+        "team_subscriber_only": False,
+        "lock_sequence": None,
+        "temporary_raw": False,
+        "node_blocked": False,
+    }
+    default = resolve_visibility(**base)
+    raw = resolve_visibility(**{**base, "stored_mode": MODE_RAW, "team_hidden_post": True})
+    stale = resolve_visibility(**{**base, "stored_mode": MODE_PINNED, "stored_team_id": None})
+    lock = resolve_visibility(**{**base, "lock_sequence": 11})
+    paid = resolve_visibility(
+        **{**base, "team_subscriber_only": True, "author_was_paid_at_creation": False}
+    )
+    if (
+        default["visible"]
+        and default["effective_team_id"] == 7
+        and raw["visible"]
+        and raw["effective_team_id"] is None
+        and stale["effective_team_id"] == 7
+        and lock["reason"] == "thread_locked"
+        and paid["reason"] == "subscriber_only"
+    ):
+        _pass("backend_hardening.curation_visibility")
+    else:
+        _fail(
+            "backend_hardening.curation_visibility",
+            f"default={default} raw={raw} stale={stale} lock={lock} paid={paid}",
+        )
 
 
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
     _test_topic_matcher()
-    _test_attribution_canon()
+    _test_curation_visibility()
 
     if not _check_local_docker():
         _skip("backend_hardening.container_probes", "requires local docker")
         return
+
+    # Community ownership, topics and agents all went away in v1.39.0, and the
+    # chain rejects their messages outright, so the backend must refuse before
+    # it ever builds a transaction.
+    for route in (
+        "create_community",
+        "set_community_metadata",
+        "transfer_community",
+        "follow_topic",
+        "unfollow_topic",
+        "block_topic",
+        "unblock_topic",
+        "enable_agent",
+        "disable_agent",
+        "set_agents",
+    ):
+        code, body = _post(f"{backend}/api/core/{route}", {"community": "test"})
+        if code == 410 and body.get("error_code") == "gone" and body.get("retired") == route:
+            _pass(f"backend_hardening.{route}_retired")
+        else:
+            _fail(f"backend_hardening.{route}_retired", f"code={code} body={body}")
 
     # ── C-1: the deployed matcher is exact and linear ────────────────────
     _probe(
@@ -363,45 +396,6 @@ def test_backend_hardening(backend: str):
         "empty = ids([{'media': []}, {}])\n"
         "ok = len(one) == 1 and repeated == one and len(two) == 2 and not empty\n"
         "print('OK' if ok else ('BAD', len(one), len(repeated), len(two), len(empty)))\n",
-    )
-
-    # ── 2026-08-14 frontend review ───────────────────────────────────────
-    # L-2: a real sign/verify roundtrip over the attribution payload, and proof
-    # that swapping the invite code afterwards fails verification.
-    _probe(
-        "backend_hardening.attribution_signature_roundtrip",
-        "import hashlib\n"
-        "from cryptography.hazmat.primitives.asymmetric import ec\n"
-        "from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, Prehashed\n"
-        "from cryptography.hazmat.primitives import hashes, serialization\n"
-        "from pow import canon_attribution\n"
-        "from routes.core import _verify_signature\n"
-        "priv = ec.derive_private_key(0x4d69726167655465737441747472696273, ec.SECP256K1())\n"
-        "pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.CompressedPoint)\n"
-        "signed = canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', '', 42)\n"
-        "der = priv.sign(hashlib.sha256(signed).digest(), ec.ECDSA(Prehashed(hashes.SHA256())))\n"
-        "r, s = decode_dss_signature(der)\n"
-        "sig = r.to_bytes(32, 'big') + s.to_bytes(32, 'big')\n"
-        "good = _verify_signature(pub, sig, signed)\n"
-        "swapped_code = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'BBBB-2222', '', 42))\n"
-        "swapped_ref = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', 'mallory', 42))\n"
-        "replayed = _verify_signature(pub, sig, canon_attribution('set_username', 'mirage1abc', 'AAAA-1111', '', 43))\n"
-        "ok = good and not swapped_code and not swapped_ref and not replayed\n"
-        "print('OK' if ok else ('BAD', good, swapped_code, swapped_ref, replayed))\n",
-    )
-    # The handler blanks referrer_username when a direct invite code is present.
-    # Verification has to run against the value the client actually signed, so it
-    # must read received_referrer and not the post-blanking raw_referrer -- an
-    # ordering slip there would reject every code+referrer signup.
-    _probe(
-        "backend_hardening.attribution_verifies_received_value",
-        "import inspect, re\n"
-        "from routes import core\n"
-        "src = inspect.getsource(core.core_set_username)\n"
-        "call = re.search(r'canon_attribution[(](.*?)[)]', src, re.S)\n"
-        "args = call.group(1) if call else ''\n"
-        "ok = bool(call) and 'received_referrer' in args and 'raw_referrer' not in args\n"
-        "print('OK' if ok else ('BAD', args[:200]))\n",
     )
 
     # Push enabled with an empty Expo token must be reported loudly. It is not

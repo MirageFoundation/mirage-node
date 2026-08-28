@@ -362,12 +362,9 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	_ = mk.ClaimUsername(ctx, "listuser", owner)
 
 	// Populate all profile list KV entries using per-entry methods
-	_ = mk.ReplaceAllEnabledAgents(ctx, owner, []string{"agent1", "agent2"})
 	_, _ = mk.AddFollowedUser(ctx, owner, "user1")
-	_, _ = mk.AddFollowedTopic(ctx, owner, "topic1")
 	_, _ = mk.AddBlockedUserDeque(ctx, owner, "blocked1", 0)
 	_, _ = mk.AddBlockedPostDeque(ctx, owner, "txhash1", 0)
-	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "btopic1", 0)
 
 	req := &types.MsgDeleteUser{
 		Authority:      testAccAddressString(),
@@ -379,17 +376,9 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	require.NoError(t, err)
 
 	// All lists should be cleaned up
-	agents, err := mk.ListEnabledAgentsOrdered(ctx, owner)
-	require.NoError(t, err)
-	require.Empty(t, agents, "enabled agents should be empty")
-
 	users, err := mk.ListFollowedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, users, "followed users should be empty")
-
-	topics, err := mk.ListFollowedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Empty(t, topics, "followed topics should be empty")
 
 	blockedUsers, err := mk.ListBlockedUsers(ctx, owner)
 	require.NoError(t, err)
@@ -398,10 +387,6 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	blockedPosts, err := mk.ListBlockedPosts(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, blockedPosts, "blocked posts should be empty")
-
-	blockedTopics, err := mk.ListBlockedTopics(ctx, owner)
-	require.NoError(t, err)
-	require.Empty(t, blockedTopics, "blocked topics should be empty")
 }
 
 func TestDeleteUserDoubleDeleteRejects(t *testing.T) {

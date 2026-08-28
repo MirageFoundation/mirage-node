@@ -523,10 +523,8 @@ def _build_pool():
     add_f(msg4, "max_curators_per_team", 57, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_pending_curator_invites_per_team", 58, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_pending_curator_invites_per_user", 59, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "max_community_title_length", 60, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "max_community_description_length", 61, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_curation_team_name_length", 62, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "max_curation_team_bio_length", 63, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_curation_team_description_length", 63, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_curation_team_policy_length", 64, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "subscription_transitions_per_block", 65, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "curation_prune_keys_per_block", 66, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -674,14 +672,14 @@ def _build_pool():
     add_msg_fields("MsgCreateCurationTeam", [
         ("community", 100, STRING, False),
         ("name", 101, STRING, False),
-        ("bio", 102, STRING, False),
+        ("description", 102, STRING, False),
         ("policy", 103, STRING, False),
     ])
     add_msg_fields("MsgSetCurationTeamProfile", [
         ("community", 100, STRING, False),
         ("team_id", 101, UINT64, False),
         ("name", 102, STRING, False),
-        ("bio", 103, STRING, False),
+        ("description", 103, STRING, False),
         ("policy", 104, STRING, False),
     ])
     add_msg_fields("MsgInviteCurator", [
@@ -777,6 +775,184 @@ def _build_pool():
 
     pool.Add(page_file)
     file_proto.dependency.append(page_file.name)
+
+    curation_team = file_proto.message_type.add()
+    curation_team.name = "CurationTeam"
+    add_f(curation_team, "community", 1, STRING)
+    add_f(curation_team, "team_id", 2, UINT64)
+    add_f(curation_team, "owner", 3, STRING)
+    add_f(curation_team, "name", 4, STRING)
+    add_f(curation_team, "description", 5, STRING)
+    add_f(curation_team, "policy", 6, STRING)
+    add_f(curation_team, "subscriber_only", 8, BOOL)
+    add_f(curation_team, "subscriber_count", 9, UINT64)
+    add_f(curation_team, "created_height", 10, INT64)
+    add_f(curation_team, "created_order", 11, UINT64)
+    add_f(curation_team, "next_member_order", 12, UINT64)
+    add_f(curation_team, "deleted_height", 13, INT64)
+
+    curation_member = file_proto.message_type.add()
+    curation_member.name = "CurationTeamMember"
+    add_f(curation_member, "address", 1, STRING)
+    add_f(curation_member, "accepted_order", 2, UINT64)
+
+    community_preference = file_proto.message_type.add()
+    community_preference.name = "CommunityPreference"
+    add_f(community_preference, "mode", 1, UINT32)
+    add_f(community_preference, "pinned_team_id", 2, UINT64)
+
+    def add_message_field(message, name, number, type_name, *, repeated=False):
+        field = message.field.add()
+        field.name = name
+        field.number = number
+        field.label = (
+            descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+            if repeated
+            else descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        )
+        field.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+        field.type_name = type_name
+
+    query_team_req = file_proto.message_type.add()
+    query_team_req.name = "QueryCurationTeamRequest"
+    add_f(query_team_req, "community", 1, STRING)
+    add_f(query_team_req, "team_id", 2, UINT64)
+    query_team_resp = file_proto.message_type.add()
+    query_team_resp.name = "QueryCurationTeamResponse"
+    add_message_field(query_team_resp, "team", 1, ".mirage.core.v1.CurationTeam")
+
+    query_teams_req = file_proto.message_type.add()
+    query_teams_req.name = "QueryCurationTeamsRequest"
+    add_f(query_teams_req, "community", 1, STRING)
+    add_f(query_teams_req, "include_deleted", 2, BOOL)
+    add_message_field(query_teams_req, "pagination", 3, ".cosmos.base.query.v1beta1.PageRequest")
+    query_teams_resp = file_proto.message_type.add()
+    query_teams_resp.name = "QueryCurationTeamsResponse"
+    add_message_field(query_teams_resp, "teams", 1, ".mirage.core.v1.CurationTeam", repeated=True)
+    add_message_field(query_teams_resp, "pagination", 2, ".cosmos.base.query.v1beta1.PageResponse")
+
+    query_all_teams_req = file_proto.message_type.add()
+    query_all_teams_req.name = "QueryAllCurationTeamsRequest"
+    add_f(query_all_teams_req, "include_deleted", 1, BOOL)
+    add_message_field(query_all_teams_req, "pagination", 2, ".cosmos.base.query.v1beta1.PageRequest")
+    query_all_teams_resp = file_proto.message_type.add()
+    query_all_teams_resp.name = "QueryAllCurationTeamsResponse"
+    add_message_field(query_all_teams_resp, "teams", 1, ".mirage.core.v1.CurationTeam", repeated=True)
+    add_message_field(query_all_teams_resp, "pagination", 2, ".cosmos.base.query.v1beta1.PageResponse")
+
+    query_members_req = file_proto.message_type.add()
+    query_members_req.name = "QueryCurationTeamMembersRequest"
+    add_f(query_members_req, "community", 1, STRING)
+    add_f(query_members_req, "team_id", 2, UINT64)
+    add_message_field(query_members_req, "pagination", 3, ".cosmos.base.query.v1beta1.PageRequest")
+    query_members_resp = file_proto.message_type.add()
+    query_members_resp.name = "QueryCurationTeamMembersResponse"
+    add_message_field(
+        query_members_resp, "members", 1, ".mirage.core.v1.CurationTeamMember", repeated=True
+    )
+    add_message_field(query_members_resp, "pagination", 2, ".cosmos.base.query.v1beta1.PageResponse")
+
+    pending_invitation = file_proto.message_type.add()
+    pending_invitation.name = "PendingCuratorInvitation"
+    add_f(pending_invitation, "community", 1, STRING)
+    add_f(pending_invitation, "team_id", 2, UINT64)
+    add_f(pending_invitation, "invitee", 3, STRING)
+    add_f(pending_invitation, "inviter", 4, STRING)
+
+    query_invitations_req = file_proto.message_type.add()
+    query_invitations_req.name = "QueryPendingCuratorInvitationsRequest"
+    add_f(query_invitations_req, "address", 1, STRING)
+    add_message_field(query_invitations_req, "pagination", 2, ".cosmos.base.query.v1beta1.PageRequest")
+    query_invitations_resp = file_proto.message_type.add()
+    query_invitations_resp.name = "QueryPendingCuratorInvitationsResponse"
+    add_message_field(
+        query_invitations_resp,
+        "invitations",
+        1,
+        ".mirage.core.v1.PendingCuratorInvitation",
+        repeated=True,
+    )
+    add_message_field(query_invitations_resp, "pagination", 2, ".cosmos.base.query.v1beta1.PageResponse")
+
+    curation_membership = file_proto.message_type.add()
+    curation_membership.name = "CurationMembership"
+    add_f(curation_membership, "community", 1, STRING)
+    add_f(curation_membership, "team_id", 2, UINT64)
+
+    query_memberships_req = file_proto.message_type.add()
+    query_memberships_req.name = "QueryCurationMembershipsRequest"
+    add_f(query_memberships_req, "address", 1, STRING)
+    add_message_field(query_memberships_req, "pagination", 2, ".cosmos.base.query.v1beta1.PageRequest")
+    query_memberships_resp = file_proto.message_type.add()
+    query_memberships_resp.name = "QueryCurationMembershipsResponse"
+    add_message_field(
+        query_memberships_resp,
+        "memberships",
+        1,
+        ".mirage.core.v1.CurationMembership",
+        repeated=True,
+    )
+    add_message_field(query_memberships_resp, "pagination", 2, ".cosmos.base.query.v1beta1.PageResponse")
+
+    query_pref_req = file_proto.message_type.add()
+    query_pref_req.name = "QueryCommunityPreferenceRequest"
+    add_f(query_pref_req, "owner", 1, STRING)
+    add_f(query_pref_req, "community", 2, STRING)
+    query_pref_resp = file_proto.message_type.add()
+    query_pref_resp.name = "QueryCommunityPreferenceResponse"
+    add_message_field(query_pref_resp, "stored", 1, ".mirage.core.v1.CommunityPreference")
+    # CurationPreferenceMode is a proto3 enum, so the mirror reads it as the
+    # varint it is on the wire.
+    add_f(query_pref_resp, "effective_mode", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(query_pref_resp, "effective_team_id", 3, UINT64)
+
+    post_metadata = file_proto.message_type.add()
+    post_metadata.name = "PostMetadata"
+    add_f(post_metadata, "author", 1, STRING)
+    add_f(post_metadata, "parent_hash", 2, STRING)
+    add_f(post_metadata, "root_hash", 3, STRING)
+    add_f(post_metadata, "community", 4, STRING)
+    add_f(post_metadata, "global_sequence", 5, UINT64)
+    add_f(post_metadata, "created_height", 6, INT64)
+    add_f(post_metadata, "created_epoch", 7, INT64)
+    add_f(post_metadata, "author_was_paid_at_creation", 8, BOOL)
+    add_f(post_metadata, "deleted_height", 9, INT64)
+    add_f(post_metadata, "deleted_epoch", 10, INT64)
+    add_f(post_metadata, "deletion_actor", 11, STRING)
+
+    query_post_meta_req = file_proto.message_type.add()
+    query_post_meta_req.name = "QueryPostMetadataRequest"
+    add_f(query_post_meta_req, "txhash", 1, STRING)
+    query_post_meta_resp = file_proto.message_type.add()
+    query_post_meta_resp.name = "QueryPostMetadataResponse"
+    add_message_field(query_post_meta_resp, "metadata", 1, ".mirage.core.v1.PostMetadata")
+
+    renewal_state = file_proto.message_type.add()
+    renewal_state.name = "SubscriptionRenewalState"
+    add_f(renewal_state, "expiry", 1, INT64)
+    add_f(renewal_state, "next_attempt_unix", 2, INT64)
+    add_f(renewal_state, "last_attempt_epoch", 3, INT64)
+    add_f(renewal_state, "warning_sent", 4, BOOL)
+    add_f(renewal_state, "generation", 5, UINT64)
+
+    query_renewal_req = file_proto.message_type.add()
+    query_renewal_req.name = "QuerySubscriptionRenewalRequest"
+    add_f(query_renewal_req, "address", 1, STRING)
+    query_renewal_resp = file_proto.message_type.add()
+    query_renewal_resp.name = "QuerySubscriptionRenewalResponse"
+    add_message_field(query_renewal_resp, "state", 1, ".mirage.core.v1.SubscriptionRenewalState")
+    add_f(query_renewal_resp, "curation_membership_count", 2, UINT32)
+
+    query_quota_req = file_proto.message_type.add()
+    query_quota_req.name = "QuerySubscriberQuotaRequest"
+    add_f(query_quota_req, "address", 1, STRING)
+    query_quota_resp = file_proto.message_type.add()
+    query_quota_resp.name = "QuerySubscriberQuotaResponse"
+    add_f(query_quota_resp, "epoch", 1, INT64)
+    add_f(query_quota_resp, "limit", 2, UINT64)
+    add_f(query_quota_resp, "used", 3, UINT64)
+    add_f(query_quota_resp, "remaining", 4, UINT64)
+    add_f(query_quota_resp, "reset_at", 5, INT64)
 
     # QueryProfilesRequest
     msg_profiles_req = file_proto.message_type.add()
@@ -892,3 +1068,34 @@ MsgSetCurationUserHidden = _get_message_class("mirage.core.v1.MsgSetCurationUser
 MsgSetCurationThreadLocked = _get_message_class("mirage.core.v1.MsgSetCurationThreadLocked")
 MsgSetCurationSubscriberOnly = _get_message_class("mirage.core.v1.MsgSetCurationSubscriberOnly")
 MsgClaimCreatorRewards = _get_message_class("mirage.core.v1.MsgClaimCreatorRewards")
+CurationTeam = _get_message_class("mirage.core.v1.CurationTeam")
+CurationTeamMember = _get_message_class("mirage.core.v1.CurationTeamMember")
+CommunityPreference = _get_message_class("mirage.core.v1.CommunityPreference")
+QueryCurationTeamRequest = _get_message_class("mirage.core.v1.QueryCurationTeamRequest")
+QueryCurationTeamResponse = _get_message_class("mirage.core.v1.QueryCurationTeamResponse")
+QueryCurationTeamsRequest = _get_message_class("mirage.core.v1.QueryCurationTeamsRequest")
+QueryCurationTeamsResponse = _get_message_class("mirage.core.v1.QueryCurationTeamsResponse")
+QueryAllCurationTeamsRequest = _get_message_class("mirage.core.v1.QueryAllCurationTeamsRequest")
+QueryAllCurationTeamsResponse = _get_message_class("mirage.core.v1.QueryAllCurationTeamsResponse")
+QueryCurationTeamMembersRequest = _get_message_class("mirage.core.v1.QueryCurationTeamMembersRequest")
+QueryCurationTeamMembersResponse = _get_message_class("mirage.core.v1.QueryCurationTeamMembersResponse")
+PendingCuratorInvitation = _get_message_class("mirage.core.v1.PendingCuratorInvitation")
+QueryPendingCuratorInvitationsRequest = _get_message_class(
+    "mirage.core.v1.QueryPendingCuratorInvitationsRequest"
+)
+QueryPendingCuratorInvitationsResponse = _get_message_class(
+    "mirage.core.v1.QueryPendingCuratorInvitationsResponse"
+)
+CurationMembership = _get_message_class("mirage.core.v1.CurationMembership")
+QueryCurationMembershipsRequest = _get_message_class("mirage.core.v1.QueryCurationMembershipsRequest")
+QueryCurationMembershipsResponse = _get_message_class("mirage.core.v1.QueryCurationMembershipsResponse")
+QueryCommunityPreferenceRequest = _get_message_class("mirage.core.v1.QueryCommunityPreferenceRequest")
+QueryCommunityPreferenceResponse = _get_message_class("mirage.core.v1.QueryCommunityPreferenceResponse")
+PostMetadata = _get_message_class("mirage.core.v1.PostMetadata")
+QueryPostMetadataRequest = _get_message_class("mirage.core.v1.QueryPostMetadataRequest")
+QueryPostMetadataResponse = _get_message_class("mirage.core.v1.QueryPostMetadataResponse")
+SubscriptionRenewalState = _get_message_class("mirage.core.v1.SubscriptionRenewalState")
+QuerySubscriptionRenewalRequest = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalRequest")
+QuerySubscriptionRenewalResponse = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalResponse")
+QuerySubscriberQuotaRequest = _get_message_class("mirage.core.v1.QuerySubscriberQuotaRequest")
+QuerySubscriberQuotaResponse = _get_message_class("mirage.core.v1.QuerySubscriberQuotaResponse")

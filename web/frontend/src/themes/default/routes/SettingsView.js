@@ -4,7 +4,6 @@ import styled, { keyframes } from "styled-components";
 import { Navigate } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
-import { THEMES } from "../../../registry/theme";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { useSettings, RadioInput } from "../../../logic/useSettings";
 
@@ -718,7 +717,6 @@ export default function SettingsView({ state }) {
     const [openModal, setOpenModal] = useState(null);
 
     const {
-        themeId,
         themeMode,
         collapseThreshold,
         sidebarTopicsLimit,
@@ -739,11 +737,6 @@ export default function SettingsView({ state }) {
         setShowTagGore,
         showTagDeath,
         setShowTagDeath,
-        referralPrecheckEnabled,
-        referralPrecheckBusy,
-        referralPrecheckError,
-        referralPrecheckSuccess,
-        inviteCodesRequired,
         seedMode,
         prfSupported,
         secPassword,
@@ -779,9 +772,7 @@ export default function SettingsView({ state }) {
         setVaultAutoLockMinutes,
         commitModeSwitch,
         handleModeSelect,
-        handleThemeIdChange,
         handleThemeModeChange,
-        handleReferralPrecheckToggle,
         handleCollapseThresholdChange,
         handleSidebarTopicsLimitChange,
         handleSidebarPeopleLimitChange,
@@ -795,7 +786,6 @@ export default function SettingsView({ state }) {
         return <Navigate to="/login" replace />;
     }
 
-    const themeOptions = Object.values(THEMES).map(t => ({ value: t.id, label: t.label, sub: t.description }));
     const modeOptions = [
         { value: 'time', label: 'Time-based', sub: getThemeExplanation('time') },
         { value: 'dark', label: 'Dark' },
@@ -812,7 +802,6 @@ export default function SettingsView({ state }) {
     ];
     const limitOptions = ['5', '10', '15', '20', '50', '100'].map(v => ({ value: v, label: v }));
 
-    const currentThemeLabel = themeOptions.find(o => o.value === themeId)?.label || themeId;
     const currentModeLabel = modeOptions.find(o => o.value === themeMode)?.label || themeMode;
     const currentCollapseLabel = collapseOptions.find(o => o.value === (Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'))?.label || '-5';
 
@@ -846,14 +835,6 @@ export default function SettingsView({ state }) {
                             <SectionDivider />
 
                             <SectionHeader>Appearance</SectionHeader>
-
-                            <ClickableSettingRow type="button" onClick={() => setOpenModal('theme')}>
-                                <ClickableRowLabel>Theme</ClickableRowLabel>
-                                <ClickableRowRight>
-                                    <ClickableRowValue>{currentThemeLabel}</ClickableRowValue>
-                                    <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
-                                </ClickableRowRight>
-                            </ClickableSettingRow>
 
                             <ClickableSettingRow type="button" onClick={() => setOpenModal('mode')}>
                                 <ClickableRowLabel>Mode</ClickableRowLabel>
@@ -943,7 +924,7 @@ export default function SettingsView({ state }) {
                             <SectionHeader>Sidebar</SectionHeader>
 
                             <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarTopics')}>
-                                <ClickableRowLabel>Topics shown</ClickableRowLabel>
+                                <ClickableRowLabel>Communities shown</ClickableRowLabel>
                                 <ClickableRowRight>
                                     <ClickableRowValue>{String(sidebarTopicsLimit)}</ClickableRowValue>
                                     <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
@@ -957,24 +938,6 @@ export default function SettingsView({ state }) {
                                     <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
                                 </ClickableRowRight>
                             </ClickableSettingRow>
-
-                            {inviteCodesRequired && <>
-                                <SectionHeader>Referrals</SectionHeader>
-
-                                <SettingRow>
-                                    <SettingControl>
-                                        <ToggleRow as="div">
-                                            <div>
-                                                <ToggleLabel>Enable referral links</ToggleLabel>
-                                                <ToggleDesc>Lets users sign up via your personal link instead of sharing invite codes directly.</ToggleDesc>
-                                            </div>
-                                            <Toggle checked={referralPrecheckEnabled} disabled={referralPrecheckBusy} onChange={e => handleReferralPrecheckToggle(!!e.target.checked)} />
-                                        </ToggleRow>
-                                        {referralPrecheckError && <SecurityError>{referralPrecheckError}</SecurityError>}
-                                        {referralPrecheckSuccess && <SecuritySuccess><span>✓</span>{referralPrecheckSuccess}</SecuritySuccess>}
-                                    </SettingControl>
-                                </SettingRow>
-                            </>}
 
                             <SectionHeader>Security</SectionHeader>
 
@@ -1177,14 +1140,6 @@ export default function SettingsView({ state }) {
             </CappedPageColumn>
         </ModernPostFeed>
 
-        {openModal === 'theme' && <OptionModal
-            title="Choose Theme"
-            options={themeOptions}
-            value={themeId}
-            onChange={v => handleThemeIdChange({ target: { value: v } })}
-            onClose={closeModal}
-        />}
-
         {openModal === 'mode' && <OptionModal
             title="Theme Mode"
             options={modeOptions}
@@ -1202,7 +1157,7 @@ export default function SettingsView({ state }) {
         />}
 
         {openModal === 'sidebarTopics' && <OptionModal
-            title="Sidebar Topics Limit"
+            title="Sidebar communities"
             options={limitOptions}
             value={String(sidebarTopicsLimit)}
             onChange={v => handleSidebarTopicsLimitChange({ target: { value: v } })}

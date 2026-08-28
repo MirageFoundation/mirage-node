@@ -1,3 +1,4 @@
+import { communityLabel, communityPath } from '../../../utils/community';
 import { useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { Navigate, useLocation } from "react-router-dom";
@@ -306,7 +307,7 @@ const StateMessage = styled.div`
 `;
 
 const TABS = [
-    { id: 'topics', label: 'Topics' },
+    { id: 'topics', label: 'Communities' },
     { id: 'users', label: 'Users' },
 ];
 
@@ -449,9 +450,9 @@ export default function FollowsView({ state }) {
                     <StateIcon>
                         <HiHashtag />
                     </StateIcon>
-                    <StateTitle>Not following any topics</StateTitle>
+                    <StateTitle>Not following any communities</StateTitle>
                     <StateMessage>
-                        Topics you follow will appear here. Pin topics you want to see more of in your feed.
+                        Communities you follow will appear here. Pin communities you want to see more of in your feed.
                     </StateMessage>
                 </StateBlock>
             )}
@@ -461,7 +462,7 @@ export default function FollowsView({ state }) {
                     {visibleTopics.map(topic => {
                         const isPending = isFollowTopicPending(topic);
                         const status = formatFollowTopicStatus(topic);
-                        const topicUrl = `/t/${encodeURIComponent(topic)}`;
+                        const topicUrl = communityPath(topic);
                         return (
                             <Row
                                 key={topic}
@@ -476,7 +477,7 @@ export default function FollowsView({ state }) {
                                     <HiHashtag />
                                 </TopicIcon>
                                 <Identity>
-                                    <IdentityTitle>{topic}</IdentityTitle>
+                                    <IdentityTitle>{communityLabel(topic)}</IdentityTitle>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
                                     <FollowingButton

@@ -1,6 +1,6 @@
 {
     "title": "Release v1.39.0 (communities, creator pool, no Agent)",
-    "summary": "THIS UPGRADE HALTS THE CHAIN. Every validator must be running v1.39.0 when the plan height is reached. Topics become claimed communities with competing curation teams. The Agent tier is removed and those accounts become ordinary subscribers. Subscriptions no longer keep a relay reserve: half of each new payment is burned and half funds a daily creator pool. Paid users get zero-fee relays up to 250 messages per UTC day. This is a consensus change: a node still on v1.38.x computes different state from the same block, so mixed binaries would fork. Jailed and unbonded validators remain excluded.",
+    "summary": "THIS UPGRADE HALTS THE CHAIN. Every validator must be running v1.39.0 when the plan height is reached. Topics become open communities: every valid name can receive posts, while paid subscriber-led curator teams provide optional competing lenses without owning or claiming the name. The Agent tier is removed and those accounts become ordinary subscribers. Subscriptions no longer keep a relay reserve: half of each new payment is burned and half funds a daily creator pool. Paid users get zero-fee relays up to 250 messages per UTC day. This is a consensus change: a node still on v1.38.x computes different state from the same block, so mixed binaries would fork. Jailed and unbonded validators remain excluded.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",

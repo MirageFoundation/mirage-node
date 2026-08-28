@@ -40,6 +40,9 @@ _GONE_PATHS = {
     "/api/get_topics",
     "/api/search_topics",
     "/api/get_agents",
+    "/api/core/create_community",
+    "/api/core/set_community_metadata",
+    "/api/core/transfer_community",
     "/api/core/follow_topic",
     "/api/core/unfollow_topic",
     "/api/core/block_topic",
@@ -81,11 +84,18 @@ def create_app(init_runtime: bool = True) -> Flask:
     app.register_blueprint(core_bp)
     app.register_blueprint(communities_bp)
 
+    # Single chokepoint for every route v1.39.0 retired. This runs before URL
+    # matching raises, so a retired path answers 410 whether or not a handler is
+    # still registered for it — which is why no retired stub handlers exist in
+    # routes/. Adding one would be unreachable code shadowed by this gate.
     @app.before_request
     def _reject_retired_v139_routes():
         path = request.path.rstrip("/") or "/"
         if path in _GONE_PATHS or path.startswith("/api/quests") or path.startswith("/api/referrals") or path.startswith("/api/rewards") or path.startswith("/api/admin/rewards"):
             from error_utils import api_error_code
+            from logging_utils import log_event, next_request_id
+
+            log_event(next_request_id(), "[retired] v139 route", path=path, method=request.method)
             return api_error_code("gone", 410)
 
     # Global safety net: catch any unhandled exception and return a generic error

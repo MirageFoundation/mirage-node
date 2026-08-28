@@ -136,7 +136,7 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	for _, p := range profiles {
 		paidOwners[p.owner] = p.core.EffectivePaid
 	}
-	if err := k.migrateFollowedTopics(ctx, paidOwners); err != nil {
+	if err := k.migrateFollowedTopics(ctx); err != nil {
 		return err
 	}
 	if err := k.migrateBlockedTopics(ctx); err != nil {
@@ -152,6 +152,9 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 		return err
 	}
 	if err := k.deletePrefix(ctx, []byte(types.ProfileBlockedTopicsPrefix)); err != nil {
+		return err
+	}
+	if err := k.migrateCuratorDefinedCommunities(ctx, paidOwners); err != nil {
 		return err
 	}
 
@@ -209,7 +212,7 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	return nil
 }
 
-func (k Keeper) migrateFollowedTopics(ctx sdk.Context, paid map[string]bool) error {
+func (k Keeper) migrateFollowedTopics(ctx sdk.Context) error {
 	type join struct {
 		owner, slug string
 		key         []byte
@@ -244,11 +247,6 @@ func (k Keeper) migrateFollowedTopics(ctx sdk.Context, paid map[string]bool) err
 			return err
 		}
 		counts[j.owner]++
-		if paid[j.owner] {
-			if _, err := k.addCheckedU64(ctx, types.KeyCommunitySupport(j.slug), 1); err != nil {
-				return err
-			}
-		}
 		if err := k.storeDelete(ctx, j.key); err != nil {
 			return err
 		}
@@ -322,6 +320,112 @@ func (k Keeper) migrateBlockedTopics(ctx sdk.Context) error {
 		}
 	}
 	return k.deletePrefix(ctx, []byte(types.BlockedTopicsPrefix))
+}
+
+func (k Keeper) migrateCuratorDefinedCommunities(ctx sdk.Context, paid map[string]bool) error {
+	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCommunity), 0, func(_, value []byte) error {
+		var legacy types.Community
+		if err := k.cdc.Unmarshal(value, &legacy); err != nil {
+			return fmt.Errorf("v1.39.0: decode legacy community: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	type teamKey struct {
+		slug string
+		id   uint64
+	}
+	teams := map[teamKey]*types.CurationTeam{}
+	var teamOrder []teamKey
+	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCurationTeam), 0, func(_, value []byte) error {
+		var team types.CurationTeam
+		if err := k.cdc.Unmarshal(value, &team); err != nil {
+			return fmt.Errorf("v1.39.0: decode curation team: %w", err)
+		}
+		if team.Community == "" || team.TeamId == 0 {
+			return fmt.Errorf("v1.39.0: curation team has empty identity")
+		}
+		if team.CreatedOrder == 0 {
+			team.CreatedOrder = team.TeamId
+		}
+		team.SubscriberCount = 0
+		copyTeam := team
+		key := teamKey{slug: team.Community, id: team.TeamId}
+		if teams[key] != nil {
+			return fmt.Errorf("v1.39.0: duplicate curation team identity %s/%d", key.slug, key.id)
+		}
+		teams[key] = &copyTeam
+		teamOrder = append(teamOrder, key)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	joinPrefix := []byte(types.PfxJoin)
+	if err := k.iterPrefixKeys(ctx, joinPrefix, 0, func(key, value []byte) error {
+		rest := key[len(joinPrefix):]
+		if len(rest) < 22 {
+			return fmt.Errorf("v1.39.0: malformed joined-community key")
+		}
+		owner := sdk.AccAddress(rest[:20]).String()
+		slugPart := rest[20:]
+		n := int(binary.BigEndian.Uint16(slugPart[:2]))
+		if len(slugPart) != 2+n {
+			return fmt.Errorf("v1.39.0: malformed joined-community slug")
+		}
+		if !paid[owner] || len(value) == 0 {
+			return nil
+		}
+		var pref types.CommunityPreference
+		if err := k.cdc.Unmarshal(value, &pref); err != nil {
+			return fmt.Errorf("v1.39.0: decode preference for %s: %w", owner, err)
+		}
+		if pref.Mode != types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED {
+			return nil
+		}
+		tk := teamKey{slug: string(slugPart[2:]), id: pref.PinnedTeamId}
+		team := teams[tk]
+		if team == nil || team.DeletedHeight != 0 {
+			return nil
+		}
+		next, err := types.CheckedAddUint64(team.SubscriberCount, 1)
+		if err != nil {
+			return fmt.Errorf("v1.39.0: subscriber recount %s/%d: %w", tk.slug, tk.id, err)
+		}
+		team.SubscriberCount = next
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, key := range teamOrder {
+		team := teams[key]
+		if err := k.SetCurationTeam(ctx, team); err != nil {
+			return fmt.Errorf("v1.39.0: save curation team %s/%d: %w", team.Community, team.TeamId, err)
+		}
+	}
+
+	retiredPrefixes := []string{
+		types.PfxCommunity,
+		types.PfxCommunitySupport,
+		types.PfxCommunityFounder,
+		types.PfxCommunityHistory,
+		types.PfxCommunityHistNext,
+		types.PfxCurationEligible,
+		types.PfxCurationSupportOrd,
+		types.PfxCurationCreated,
+	}
+	for _, prefix := range retiredPrefixes {
+		if err := k.deletePrefix(ctx, []byte(prefix)); err != nil {
+			return fmt.Errorf("v1.39.0: delete retired prefix %q: %w", prefix, err)
+		}
+	}
+	if err := k.storeDelete(ctx, []byte(types.PfxCommunitySeq)); err != nil {
+		return fmt.Errorf("v1.39.0: delete retired community sequence: %w", err)
+	}
+	return nil
 }
 
 func (k Keeper) deletePrefix(ctx sdk.Context, prefix []byte) error {

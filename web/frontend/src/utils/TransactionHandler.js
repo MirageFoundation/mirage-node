@@ -7,10 +7,30 @@ import { getSessionGeneration } from './sessionLifecycle';
 import { peekHandoffByPurpose } from './onboardingSession';
 import Api from './api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
-import { generateEnvelopeNonce, canonicalAttribution } from './canonicalEncoding';
+import { generateEnvelopeNonce, buildCanonical, encStr, uvarint64 } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
+import { curationPendingKey, invalidateCurationReads, requireCommunitySlug, requireTeamId } from './curation';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
+
+const CURATION_TX_SPECS = Object.freeze({
+    create_curation_team: ['MsgCreateCurationTeam', 'core/create_curation_team', [['community', 100, 'string'], ['name', 101, 'string'], ['description', 102, 'string'], ['policy', 103, 'string']]],
+    set_curation_team_profile: ['MsgSetCurationTeamProfile', 'core/set_curation_team_profile', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['name', 102, 'string'], ['description', 103, 'string'], ['policy', 104, 'string']]],
+    invite_curator: ['MsgInviteCurator', 'core/invite_curator', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string']]],
+    revoke_curator_invite: ['MsgRevokeCuratorInvite', 'core/revoke_curator_invite', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string']]],
+    accept_curator_invite: ['MsgAcceptCuratorInvite', 'core/accept_curator_invite', [['community', 100, 'string'], ['team_id', 101, 'uint']]],
+    decline_curator_invite: ['MsgDeclineCuratorInvite', 'core/decline_curator_invite', [['community', 100, 'string'], ['team_id', 101, 'uint']]],
+    leave_curation_team: ['MsgLeaveCurationTeam', 'core/leave_curation_team', [['community', 100, 'string'], ['team_id', 101, 'uint']]],
+    remove_curator: ['MsgRemoveCurator', 'core/remove_curator', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string']]],
+    transfer_curation_team: ['MsgTransferCurationTeam', 'core/transfer_curation_team', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['new_owner', 102, 'string']]],
+    delete_curation_team: ['MsgDeleteCurationTeam', 'core/delete_curation_team', [['community', 100, 'string'], ['team_id', 101, 'uint']]],
+    set_curation_preference: ['MsgSetCurationPreference', 'core/set_curation_preference', [['community', 100, 'string'], ['mode', 101, 'uint'], ['pinned_team_id', 102, 'uint']]],
+    set_curation_post_hidden: ['MsgSetCurationPostHidden', 'core/set_curation_post_hidden', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string'], ['hidden', 103, 'bool']]],
+    set_curation_user_hidden: ['MsgSetCurationUserHidden', 'core/set_curation_user_hidden', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string'], ['hidden', 103, 'bool']]],
+    set_curation_thread_locked: ['MsgSetCurationThreadLocked', 'core/set_curation_thread_locked', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['root_hash', 102, 'string'], ['locked', 103, 'bool']]],
+    set_curation_subscriber_only: ['MsgSetCurationSubscriberOnly', 'core/set_curation_subscriber_only', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['enabled', 102, 'bool']]],
+    claim_creator_rewards: ['MsgClaimCreatorRewards', 'core/claim_creator_rewards', [['epoch_ids', 100, 'repeated_uint']]],
+});
 
 // /pow/ is not fingerprinted the way /static/ is, so a bare worker URL is served
 // from a browser's own cache for as long as the response allowed -- v1.38.1
@@ -40,10 +60,6 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "unfollow user already in progress": "unfollow_user_in_progress",
     "follow topic already in progress": "follow_topic_in_progress",
     "unfollow topic already in progress": "unfollow_topic_in_progress",
-    "empty agent address": "agent_address_required",
-    "enable agent already in progress": "enable_agent_in_progress",
-    "disable agent already in progress": "disable_agent_in_progress",
-    "agents must be an array": "agents_must_be_array",
     "empty target": "target_required",
     "empty reason": "reason_required",
     "Invalid recipient or amount": "invalid_recipient_or_amount",
@@ -198,11 +214,6 @@ class TransactionHandler {
             this.pendingDeletes = new Map();
             this._deleteListeners = new Set();
 
-            // Track in-flight enable/disable agent operations
-            // Map<agentAddress, { action: 'enable'|'disable', target: string, queuePosition: number }>
-            this.pendingAgents = new Map();
-            this._agentListeners = new Set();
-
             // Track in-flight votes by post ID: Map<postId, { direction: number, queuePosition: number }>
             this.pendingVotes = new Map();
             this._voteListeners = new Set();
@@ -216,6 +227,10 @@ class TransactionHandler {
             // Map<key, { target: string, action: 'subscribe'|'gift', queuePosition: number }>
             this.pendingSubscribes = new Map();
             this._subscribeListeners = new Set();
+
+            // Curator actions stay visible across route changes until their queued tx resolves.
+            this.pendingCuration = new Map();
+            this._curationListeners = new Set();
 
             // Vote detail polling can overlap when users vote quickly.
             // Track the latest vote tx per target and cancel/ignore stale poll loops.
@@ -368,14 +383,14 @@ class TransactionHandler {
         this.pendingSends.clear();
         this.pendingSubscribes.clear();
         this.pendingDeletes.clear();
-        this.pendingAgents.clear();
+        this.pendingCuration.clear();
         this._notifyVoteListeners();
         this._notifyFollowListeners();
         this._notifyBlockListeners();
         this._notifySendListeners();
         this._notifySubscribeListeners();
         this._notifyDeleteListeners();
-        this._notifyAgentListeners();
+        this._notifyCurationListeners();
     }
 
     _drainQueue(reason) {
@@ -488,8 +503,7 @@ class TransactionHandler {
             try {
                 this._pushStampedTransaction(entry);
             } catch (err) {
-                this._releaseEntryReservation(entry);
-                resolve(this._failFromException(err));
+                entry._resolve(this._failFromException(err));
             }
         });
     }
@@ -767,37 +781,49 @@ class TransactionHandler {
         return this.pendingDeletes.get(key) || null;
     }
 
-    // Agent tracking methods
-    addAgentListener(callback) {
-        if (typeof callback === 'function') {
-            this._agentListeners.add(callback);
+    addCurationListener(callback) {
+        if (typeof callback === 'function') this._curationListeners.add(callback);
+        return () => this._curationListeners.delete(callback);
+    }
+
+    _notifyCurationListeners() {
+        const pending = this.getPendingCuration();
+        this._curationListeners.forEach((callback) => {
+            try { callback(pending); } catch (_) { /* noop */ }
+        });
+    }
+
+    getPendingCuration() {
+        return Object.fromEntries(this.pendingCuration);
+    }
+
+    _enqueueCuration(action, payload, community = '', teamId = 0, target = '') {
+        const key = curationPendingKey(action, community, teamId, target);
+        if (this.pendingCuration.has(key)) {
+            return Promise.resolve({
+                success: false,
+                error_code: 'curation_action_pending',
+                error: 'This curator action is already pending.',
+            });
         }
-        return () => this._agentListeners.delete(callback);
-    }
-
-    _notifyAgentListeners() {
-        const pending = this.getPendingAgents();
-        this._agentListeners.forEach(cb => {
-            try { cb(pending); } catch (_) { }
-        });
-    }
-
-    getPendingAgents() {
-        const result = {};
-        this.pendingAgents.forEach((value, key) => {
-            result[key] = value;
-        });
-        return result;
-    }
-
-    isPendingAgent(agentAddress) {
-        const key = String(agentAddress || '').toLowerCase();
-        return this.pendingAgents.has(key);
-    }
-
-    getPendingAgentInfo(agentAddress) {
-        const key = String(agentAddress || '').toLowerCase();
-        return this.pendingAgents.get(key) || null;
+        const queuePosition = this.totalTransactions + 1;
+        console.debug('[curation] enqueue', { action, community, teamId, target, queuePosition });
+        return this._enqueueBoundTransaction(
+            { action, ...payload },
+            {
+                beforeEnqueue: () => {
+                    this.pendingCuration.set(key, { action, community, teamId, target, queuePosition });
+                    this._notifyCurationListeners();
+                    return null;
+                },
+                onResolve: (result) => {
+                    this.pendingCuration.delete(key);
+                    this._notifyCurationListeners();
+                    if (result?.success) invalidateCurationReads(community);
+                    console.debug('[curation] resolved', { action, community, teamId, target, success: !!result?.success });
+                },
+            },
+        );
     }
 
     addStatusListener(callback) {
@@ -970,11 +996,9 @@ class TransactionHandler {
 
     /**
      * @param {string} usernameRaw
-     * @param {string} [inviteCode] - Optional invite code used for account creation
-     * @param {string} [referrerUsername] - Optional referrer username (from /signup?ref=)
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
-    async createUser(usernameRaw, inviteCode = "", referrerUsername = "") {
+    async createUser(usernameRaw) {
         try {
             const username = String(usernameRaw || "").trim();
             if (!username) return this._fail("empty username");
@@ -989,8 +1013,6 @@ class TransactionHandler {
             return this._enqueueBoundTransaction({
                 action: 'set_username',
                 username,
-                invite_code: inviteCode || "",
-                referrer_username: referrerUsername || "",
                 _signerSource: 'handoff',
                 _handoffPurpose: 'create-user-signing',
             });
@@ -1023,6 +1045,183 @@ class TransactionHandler {
         } catch (e) {
             return this._failFromException(e);
         }
+    }
+
+    async createCuratorTeam(community, name, description = '', policy = '') {
+        try {
+            const slug = requireCommunitySlug(community);
+            const teamName = String(name || '').trim();
+            if (!teamName) throw new Error('team name is required');
+            return this._enqueueCuration('create_curation_team', {
+                community: slug,
+                name: teamName,
+                description: String(description),
+                policy: String(policy),
+            }, slug);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async updateCurationTeam(community, teamId, name, description = '', policy = '') {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const teamName = String(name || '').trim();
+            if (!teamName) throw new Error('team name is required');
+            return this._enqueueCuration('set_curation_team_profile', {
+                community: slug, team_id: id, name: teamName,
+                description: String(description), policy: String(policy),
+            }, slug, id);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async inviteCurationTeamMember(community, teamId, invitee) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(invitee || '').trim().toLowerCase();
+            if (!target) throw new Error('invitee is required');
+            return this._enqueueCuration('invite_curator', {
+                community: slug, team_id: id, target,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async revokeCurationTeamInvitation(community, teamId, invitee) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(invitee || '').trim().toLowerCase();
+            if (!target) throw new Error('invitee is required');
+            return this._enqueueCuration('revoke_curator_invite', {
+                community: slug, team_id: id, target,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async respondCurationTeamInvitation(community, teamId, accept) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(Storage.load('publicKey', '') || '').toLowerCase();
+            const action = accept ? 'accept_curator_invite' : 'decline_curator_invite';
+            return this._enqueueCuration(action, {
+                community: slug, team_id: id,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async removeCurationTeamMember(community, teamId, member) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(member || '').trim().toLowerCase();
+            if (!target) throw new Error('member is required');
+            return this._enqueueCuration('remove_curator', {
+                community: slug, team_id: id, target,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async leaveCurationTeam(community, teamId) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(Storage.load('publicKey', '') || '').toLowerCase();
+            return this._enqueueCuration('leave_curation_team', {
+                community: slug, team_id: id,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async transferCurationTeamLeadership(community, teamId, newLeader) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(newLeader || '').trim().toLowerCase();
+            if (!target) throw new Error('new leader is required');
+            return this._enqueueCuration('transfer_curation_team', {
+                community: slug, team_id: id, new_owner: target,
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async deleteCurationTeam(community, teamId) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            return this._enqueueCuration('delete_curation_team', {
+                community: slug, team_id: id,
+            }, slug, id);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async moderateCurationPost(community, teamId, postId, hidden) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(postId || '').trim().toLowerCase();
+            if (!target) throw new Error('post id is required');
+            return this._enqueueCuration('set_curation_post_hidden', {
+                community: slug, team_id: id, target, hidden: Boolean(hidden),
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async moderateCurationUser(community, teamId, user, hidden) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(user || '').trim().toLowerCase();
+            if (!target) throw new Error('user is required');
+            return this._enqueueCuration('set_curation_user_hidden', {
+                community: slug, team_id: id, target, hidden: Boolean(hidden),
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async setCurationThreadLocked(community, teamId, rootHash, locked) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(rootHash || '').trim().toLowerCase();
+            if (!target) throw new Error('root hash is required');
+            return this._enqueueCuration('set_curation_thread_locked', {
+                community: slug, team_id: id, root_hash: target, locked: Boolean(locked),
+            }, slug, id, target);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async setCurationSubscriberOnly(community, teamId, enabled) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            return this._enqueueCuration('set_curation_subscriber_only', {
+                community: slug, team_id: id, enabled: Boolean(enabled),
+            }, slug, id);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async setCurationPreference(community, mode, pinnedTeamId = 0) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const selectedMode = Number(mode);
+            if (![0, 1, 2].includes(selectedMode)) throw new Error('invalid curation mode');
+            const teamId = selectedMode === 1 ? requireTeamId(pinnedTeamId) : 0;
+            return this._enqueueCuration('set_curation_preference', {
+                community: slug, mode: selectedMode, pinned_team_id: teamId,
+            }, slug);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async claimCreatorRewards(epochIds) {
+        try {
+            const ids = [...new Set((epochIds || []).map(Number))].sort((a, b) => a - b);
+            if (!ids.length || ids.length > 30 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+                throw new Error('invalid epoch ids');
+            }
+            const owner = String(Storage.load('publicKey', '') || '').toLowerCase();
+            return this._enqueueCuration('claim_creator_rewards', { epoch_ids: ids }, '', 0, owner);
+        } catch (e) { return this._failFromException(e); }
     }
 
     /**
@@ -1192,49 +1391,51 @@ class TransactionHandler {
     async blockTopic(topic) {
         try {
             const publicKey = Storage.load("publicKey", "");
-            const topicTrimmed = String(topic || "").trim().toLowerCase();
-            if (!topicTrimmed) return this._fail("empty topic");
+            const community = String(topic || "").trim().toLowerCase();
+            if (!community) return this._fail("empty community");
+            if (!publicKey) return this._fail("Not logged in");
 
-            // Check if topic is already blocked
+            // Check if community is already blocked
             try {
                 const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
-                const blockedTopics = (blocked?.blocked_topics || []).map(t => String(t).toLowerCase());
-                if (blockedTopics.includes(topicTrimmed)) {
-                    return this._fail("topic is already blocked");
+                const blockedCommunities = (blocked?.blocked_communities || []).map(t => String(t).toLowerCase());
+                if (blockedCommunities.includes(community)) {
+                    return this._fail("community is already blocked");
                 }
             } catch (_) { }
 
-            const key = `topic:${topicTrimmed}`;
+            const key = `topic:${community}`;
             if (this.pendingBlocks.has(key)) {
                 return this._fail("block topic already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
-            this.pendingBlocks.set(key, { action: 'block', type: 'topic', target: topicTrimmed, queuePosition });
+            this.pendingBlocks.set(key, { action: 'block', type: 'topic', target: community, queuePosition });
             this._notifyBlockListeners();
-            console.debug("[blocks] enqueue block_topic", { target: topicTrimmed, queuePosition });
+            console.debug("[blocks] enqueue block_community", { community, target: publicKey, queuePosition });
 
             const baseTx = {
-                action: 'block_topic',
-                topic: topicTrimmed,
-                target: "",
+                action: 'block_community',
+                community,
+                topic: community,
+                target: publicKey,
             };
 
             return new Promise((resolve) => {
                 const wrappedResolve = (result) => {
                     this.pendingBlocks.delete(key);
                     this._notifyBlockListeners();
-                    // Mutual exclusion: blocking a topic unfollows it on-chain.
-                    // Update sidebar immediately so the blocked topic disappears.
+                    // Mutual exclusion: blocking a community leaves it on-chain.
+                    // Update sidebar immediately so the blocked community disappears.
                     if (result?.success) {
                         // Delay all feed/sidebar updates so the caller can show success UI first
                         setTimeout(() => {
-                            notifyTopicsUpdated({ removed: topicTrimmed });
+                            notifyTopicsUpdated({ removed: community });
                             invalidateSubCache();
-                            window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: topicTrimmed } }));
+                            window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: community } }));
                         }, 3200);
                     }
-                    console.debug("[blocks] resolved block_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
+                    console.debug("[blocks] resolved block_community", { community, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
@@ -1247,22 +1448,25 @@ class TransactionHandler {
 
     async unblockTopic(topic) {
         try {
-            const topicTrimmed = String(topic || "").trim().toLowerCase();
-            if (!topicTrimmed) return this._fail("empty topic");
-            const key = `topic:${topicTrimmed}`;
+            const publicKey = Storage.load("publicKey", "");
+            const community = String(topic || "").trim().toLowerCase();
+            if (!community) return this._fail("empty community");
+            if (!publicKey) return this._fail("Not logged in");
+            const key = `topic:${community}`;
             if (this.pendingBlocks.has(key)) {
                 return this._fail("unblock topic already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
-            this.pendingBlocks.set(key, { action: 'unblock', type: 'topic', target: topicTrimmed, queuePosition });
+            this.pendingBlocks.set(key, { action: 'unblock', type: 'topic', target: community, queuePosition });
             this._notifyBlockListeners();
-            console.debug("[blocks] enqueue unblock_topic", { target: topicTrimmed, queuePosition });
+            console.debug("[blocks] enqueue unblock_community", { community, target: publicKey, queuePosition });
 
             const baseTx = {
-                action: 'unblock_topic',
-                topic: topicTrimmed,
-                target: "",
+                action: 'unblock_community',
+                community,
+                topic: community,
+                target: publicKey,
             };
 
             return new Promise((resolve) => {
@@ -1270,9 +1474,9 @@ class TransactionHandler {
                     this.pendingBlocks.delete(key);
                     this._notifyBlockListeners();
                     if (result?.success) {
-                        window.dispatchEvent(new CustomEvent('topicUnblocked', { detail: { topic: topicTrimmed } }));
+                        window.dispatchEvent(new CustomEvent('topicUnblocked', { detail: { topic: community } }));
                     }
-                    console.debug("[blocks] resolved unblock_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
+                    console.debug("[blocks] resolved unblock_community", { community, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
@@ -1441,130 +1645,6 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
-            this._pushStampedTransaction(transaction);
-        });
-    }
-
-    enableAgent(agentAddress) {
-        const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = seedVault.getSeed() || "";
-        if (!publicKey || !seedPhrase) {
-            updateNotification("Not logged in");
-            return Promise.resolve(this._fail("Not logged in"));
-        }
-
-        const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
-        if (!agentTrimmed) {
-            return Promise.resolve(this._fail("empty agent address"));
-        }
-
-        if (this.pendingAgents.has(agentTrimmed)) {
-            return Promise.resolve(this._fail("enable agent already in progress"));
-        }
-
-        const queuePosition = this.totalTransactions + 1;
-        this.pendingAgents.set(agentTrimmed, { action: 'enable', target: agentTrimmed, queuePosition });
-        this._notifyAgentListeners();
-        console.debug("[agents] enqueue enable_agent", { target: agentTrimmed, queuePosition });
-
-        const baseTx = {
-            action: 'enable_agent',
-            agent: agentTrimmed,
-        };
-
-        return new Promise((resolve) => {
-            const wrappedResolve = (result) => {
-                this.pendingAgents.delete(agentTrimmed);
-                this._notifyAgentListeners();
-                console.debug("[agents] resolved enable_agent", { target: agentTrimmed, success: !!result?.success, error: result?.error });
-                resolve(result);
-            };
-            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
-            this._pushStampedTransaction(transaction);
-        });
-    }
-
-    disableAgent(agentAddress) {
-        const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = seedVault.getSeed() || "";
-        if (!publicKey || !seedPhrase) {
-            updateNotification("Not logged in");
-            return Promise.resolve(this._fail("Not logged in"));
-        }
-
-        const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
-        if (!agentTrimmed) {
-            return Promise.resolve(this._fail("empty agent address"));
-        }
-
-        if (this.pendingAgents.has(agentTrimmed)) {
-            return Promise.resolve(this._fail("disable agent already in progress"));
-        }
-
-        const queuePosition = this.totalTransactions + 1;
-        this.pendingAgents.set(agentTrimmed, { action: 'disable', target: agentTrimmed, queuePosition });
-        this._notifyAgentListeners();
-        console.debug("[agents] enqueue disable_agent", { target: agentTrimmed, queuePosition });
-
-        const baseTx = {
-            action: 'disable_agent',
-            agent: agentTrimmed,
-        };
-
-        return new Promise((resolve) => {
-            const wrappedResolve = (result) => {
-                this.pendingAgents.delete(agentTrimmed);
-                this._notifyAgentListeners();
-                console.debug("[agents] resolved disable_agent", { target: agentTrimmed, success: !!result?.success, error: result?.error });
-                resolve(result);
-            };
-            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
-            this._pushStampedTransaction(transaction);
-        });
-    }
-
-    setAgents(agents, { triggerAgent } = {}) {
-        const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = seedVault.getSeed() || "";
-        if (!publicKey || !seedPhrase) {
-            updateNotification("Not logged in");
-            return Promise.resolve(this._fail("Not logged in"));
-        }
-
-        if (!Array.isArray(agents)) {
-            return Promise.resolve(this._fail("agents must be an array"));
-        }
-
-        const normalized = agents.map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
-        const triggerKey = triggerAgent ? String(triggerAgent).toLowerCase() : null;
-
-        const queuePosition = this.totalTransactions + 1;
-        if (triggerKey) {
-            this.pendingAgents.set(triggerKey, { action: 'set_agents', agents: normalized, queuePosition });
-        } else {
-            this.pendingAgents.set('__set_agents__', { action: 'set_agents', agents: normalized, queuePosition });
-        }
-        this._notifyAgentListeners();
-        console.debug("[agents] enqueue set_agents", { count: normalized.length, triggerAgent: triggerKey, queuePosition });
-
-        const baseTx = {
-            action: 'set_agents',
-            agents: normalized,
-        };
-
-        return new Promise((resolve) => {
-            const wrappedResolve = (result) => {
-                if (triggerKey) {
-                    this.pendingAgents.delete(triggerKey);
-                } else {
-                    this.pendingAgents.delete('__set_agents__');
-                }
-                this._notifyAgentListeners();
-                console.debug("[agents] resolved set_agents", { success: !!result?.success, error: result?.error });
-                resolve(result);
-            };
-            const pendingKey = triggerKey || '__set_agents__';
-            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: pendingKey };
             this._pushStampedTransaction(transaction);
         });
     }
@@ -1846,37 +1926,6 @@ class TransactionHandler {
     }
 
 
-    /**
-     * Agent-only: annotate (overlay edit) an existing post
-     * @param {string} overrideId - txhash of the post being annotated
-     * @param {{topic?: string, title?: string, content?: string, tag?: string, media?: string[], appendix?: string}} fields
-     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
-     */
-    async annotatePost(overrideId, fields) {
-        try {
-            const overrideLower = String(overrideId || "").trim().toLowerCase();
-            if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
-            const topic = String(fields?.topic ?? ".").trim();
-            const title = String(fields?.title ?? ".").trim();
-            const content = String(fields?.content ?? ".").trim();
-            const tag = String(fields?.tag ?? ".").trim();
-            const appendix = String(fields?.appendix ?? ".").trim();
-            const media = Array.isArray(fields?.media) ? fields.media : ["."];
-
-            return this._enqueueBoundTransaction({
-                action: 'annotate_post',
-                override: overrideLower,
-                topic,
-                title,
-                content,
-                tag,
-                media,
-                appendix,
-            });
-        } catch (e) {
-            return this._failFromException(e);
-        }
-    }
 
     setWarnOnLeaveCallback(setWarnOnLeave) {
         this.setWarnOnLeave = setWarnOnLeave;
@@ -1960,17 +2009,18 @@ class TransactionHandler {
         if (data.username !== undefined) Storage.save('username', data.username);
         if (data.user_level !== undefined && data.user_level !== null) Storage.save('user_level', String(data.user_level));
         if (data.server_balance !== undefined) Storage.save('server_balance', String(data.server_balance));
-        if (data.referral_precheck_enabled !== undefined) {
-            Storage.save('referral_precheck_enabled', data.referral_precheck_enabled === true);
-        }
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {
             this._persistUserBalance(balanceVal);
         }
+        if (Object.prototype.hasOwnProperty.call(data, 'daily_quota')) Storage.save('daily_quota', data.daily_quota);
+        if (Object.prototype.hasOwnProperty.call(data, 'renewal_warning')) Storage.save('renewal_warning', data.renewal_warning);
         console.debug('[TransactionHandler] cacheUserStatus', {
             hasUsername: data.username !== undefined,
             userLevel: data.user_level ?? null,
             hasBalance: balanceVal !== undefined,
+            hasDailyQuota: Object.prototype.hasOwnProperty.call(data, 'daily_quota') && data.daily_quota !== null,
+            hasRenewalWarning: Object.prototype.hasOwnProperty.call(data, 'renewal_warning') && data.renewal_warning !== null,
         });
         window.dispatchEvent(new Event('userStatusUpdated'));
     }
@@ -2159,7 +2209,6 @@ class TransactionHandler {
                 _followKey: _ignored2,
                 _blockKey: _ignored3,
                 _deleteKey: _ignored4,
-                _agentKey: _ignored5,
                 _voteKey: _ignored6,
                 _sendKey: _ignored7,
                 _forcePow: _ignored8,
@@ -2191,7 +2240,7 @@ class TransactionHandler {
             let pow_base_bits_relay = 0;
             let pow_factor_relay = 0;
             const userLevelNow = Number(Storage.load('user_level', '0')) || 0;
-            const NO_POW_QUEUE_ACTIONS = new Set(['subscribe', 'set_auto_renewal', 'award', 'annotate_post']);
+            const NO_POW_QUEUE_ACTIONS = new Set(['subscribe', 'set_auto_renewal', 'award']);
             if (userLevelNow === 0 && !NO_POW_QUEUE_ACTIONS.has(transaction.action)) {
                 try {
                     const addrNow = queued.owner || Storage.load('publicKey', '');
@@ -2251,8 +2300,6 @@ class TransactionHandler {
                     pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
-                if (transaction.invite_code) final_transaction.invite_code = transaction.invite_code;
-                if (transaction.referrer_username) final_transaction.referrer_username = transaction.referrer_username;
             }
             else if (transaction.action === "create_vote") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
@@ -2334,6 +2381,21 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
+            else if (CURATION_TX_SPECS[transaction.action]) {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                const spec = CURATION_TX_SPECS[transaction.action];
+                final_transaction = {
+                    action: transaction.action,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+                for (const [fieldName] of spec[2]) {
+                    final_transaction[fieldName] = transaction[fieldName];
+                }
+            }
             else if (transaction.action === "unfollow_topic" || transaction.action === "leave_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
@@ -2370,36 +2432,15 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
-            else if (transaction.action === "block_topic" || transaction.action === "unblock_topic") {
+            else if (transaction.action === "block_topic" || transaction.action === "unblock_topic"
+                || transaction.action === "block_community" || transaction.action === "unblock_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                const community = (transaction.community || transaction.topic || "").toLowerCase();
                 final_transaction = {
                     action: transaction.action,
                     target: transaction.target || "",
-                    topic: transaction.topic || "",
-                    last_block_hash,
-                    pow_difficulty: Number(pow_difficulty),
-                    pow_base_bits: pow_base_bits_relay,
-                    pow_factor: pow_factor_relay,
-                    timestamp: txTimestamp,
-                };
-            }
-            else if (transaction.action === "enable_agent" || transaction.action === "disable_agent") {
-                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-                final_transaction = {
-                    action: transaction.action,
-                    agent: (transaction.agent || "").toLowerCase(),
-                    last_block_hash,
-                    pow_difficulty: Number(pow_difficulty),
-                    pow_base_bits: pow_base_bits_relay,
-                    pow_factor: pow_factor_relay,
-                    timestamp: txTimestamp,
-                };
-            }
-            else if (transaction.action === "set_agents") {
-                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-                final_transaction = {
-                    action: transaction.action,
-                    agents: (transaction.agents || []).map(a => String(a).toLowerCase()),
+                    community,
+                    topic: community,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2525,27 +2566,6 @@ class TransactionHandler {
                     pow_factor: 0,
                     timestamp: txTimestamp,
                 };
-            }
-            else if (transaction.action === "annotate_post") {
-                challenge = `${derivedAddress}::0`;
-                final_transaction = {
-                    action: transaction.action,
-                    override: transaction.override,
-                    topic: transaction.topic || ".",
-                    title: transaction.title || ".",
-                    content: transaction.content || ".",
-                    tag: transaction.tag || ".",
-                    media: Array.isArray(transaction.media) ? transaction.media : ["."],
-                    appendix: transaction.appendix || ".",
-                    last_block_hash: "",
-                    pow_difficulty: 0,
-                    pow_base_bits: 0,
-                    pow_factor: 0,
-                    timestamp: txTimestamp,
-                };
-            } else {
-                failAndDrain(this._fail("transaction failed", { details: `Unknown action: ${transaction.action}` }));
-                break;
             }
 
             if (final_transaction) {
@@ -2849,75 +2869,6 @@ class TransactionHandler {
         );
     }
 
-    canonicalAnnotate({ pub_bytes, last_block_hash, difficulty, proof, timestamp, topic, title, content, tag, override, media, appendix, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgAnnotate\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);
-        const tag6 = Uint8Array.from([6]);
-        const tag101 = Uint8Array.from([101]);
-        const tag102 = Uint8Array.from([102]);
-        const tag103 = Uint8Array.from([103]);
-        const tag104 = Uint8Array.from([104]);
-        const tag105 = Uint8Array.from([105]);
-        const tag106 = Uint8Array.from([106]);
-        const tag107 = Uint8Array.from([107]);
-        const mediaParts = [];
-        for (const m of (media || [])) {
-            mediaParts.push(tag106);
-            mediaParts.push(encStr(m));
-        }
-
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag101, encStr(topic || ""),
-            tag102, encStr(title || ""),
-            tag103, encStr(content || ""),
-            tag104, encStr(tag || ""),
-            tag105, encStr(override || ""),
-            ...mediaParts,
-            tag107, encStr(appendix || ""),
-        );
-    }
 
     // Build canonical bytes for MsgSetUsername (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
@@ -3026,175 +2977,6 @@ class TransactionHandler {
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(biography ?? ""),
-        );
-    }
-
-    // Build canonical bytes for MsgEnableAgent
-    canonicalEnableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgEnableAgent\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);    // envelope_pow
-        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
-        const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]);
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag100, encStr(target || ""),
-            tag101, encStr(agent || ""),
-        );
-    }
-
-    // Build canonical bytes for MsgDisableAgent
-    canonicalDisableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgDisableAgent\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);    // envelope_pow
-        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
-        const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]);
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag100, encStr(target || ""),
-            tag101, encStr(agent || ""),
-        );
-    }
-
-    // Build canonical bytes for MsgSetAgents
-    canonicalSetAgents({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agents, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetAgents\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);
-        const tag6 = Uint8Array.from([6]);
-        const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]);
-        const agentParts = [];
-        for (const a of (agents || [])) {
-            agentParts.push(tag101, encStr(a));
-        }
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag100, encStr(target || ""),
-            ...agentParts,
         );
     }
 
@@ -3359,6 +3141,36 @@ class TransactionHandler {
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(community || ""),
         );
+    }
+
+    canonicalCuration(action, values) {
+        const spec = CURATION_TX_SPECS[action];
+        if (!spec) throw new Error(`Unknown curator action: ${action}`);
+        const fields = [];
+        for (const [fieldName, tag, type] of spec[2]) {
+            const value = values[fieldName];
+            if (type === 'repeated_uint') {
+                for (const item of value || []) fields.push([tag, uvarint64(item)]);
+            } else if (type === 'string') {
+                fields.push([tag, encStr(value || '')]);
+            } else if (type === 'uint') {
+                fields.push([tag, uvarint64(value || 0)]);
+            } else if (type === 'bool') {
+                fields.push([tag, Uint8Array.from([value ? 1 : 0])]);
+            } else {
+                throw new Error(`Unknown canonical field type: ${type}`);
+            }
+        }
+        return buildCanonical({
+            msgType: spec[0],
+            pub_bytes: values.pub_bytes,
+            last_block_hash: values.last_block_hash,
+            difficulty: values.difficulty,
+            proof: values.proof,
+            timestamp: values.timestamp,
+            nonce: values.nonce,
+            fields,
+        });
     }
 
     canonicalLeaveCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, community, nonce }) {
@@ -3769,14 +3581,14 @@ class TransactionHandler {
             let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
             return out;
         };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockCommunity\x00");
         const tag2 = Uint8Array.from([2]);
         const tag3 = Uint8Array.from([3]);
         const tag4 = Uint8Array.from([4]);
         const tag5 = Uint8Array.from([5]);
         const tag6 = Uint8Array.from([6]);    // envelope_timestamp
         const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]); // topic
+        const tag101 = Uint8Array.from([101]); // community
         return concat(
             prefix,
             tag2, encBytes(pub_bytes || new Uint8Array()),
@@ -3790,7 +3602,7 @@ class TransactionHandler {
         );
     }
 
-    // Build canonical bytes for MsgUnblockTopic
+    // Build canonical bytes for MsgUnblockCommunity (legacy helper name)
     canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
             const out = [];
@@ -3824,14 +3636,14 @@ class TransactionHandler {
             let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
             return out;
         };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockCommunity\x00");
         const tag2 = Uint8Array.from([2]);
         const tag3 = Uint8Array.from([3]);
         const tag4 = Uint8Array.from([4]);
         const tag5 = Uint8Array.from([5]);
         const tag6 = Uint8Array.from([6]);    // envelope_timestamp
         const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]); // topic
+        const tag101 = Uint8Array.from([101]); // community
         return concat(
             prefix,
             tag2, encBytes(pub_bytes || new Uint8Array()),
@@ -4043,11 +3855,9 @@ class TransactionHandler {
             // Compute canonical bytes per Tx type and sign
             const action = transaction.action;
             let msgName = '';
-            if (action === 'create_vote') msgName = 'MsgVote';
+            if (CURATION_TX_SPECS[action]) msgName = CURATION_TX_SPECS[action][0];
+            else if (action === 'create_vote') msgName = 'MsgVote';
             else if (action === 'create_post' || action === 'create_comment') msgName = 'MsgPost';
-            else if (action === 'enable_agent') msgName = 'MsgEnableAgent';
-            else if (action === 'disable_agent') msgName = 'MsgDisableAgent';
-            else if (action === 'set_agents') msgName = 'MsgSetAgents';
             else if (action === 'follow_user') msgName = 'MsgFollowUser';
             else if (action === 'unfollow_user') msgName = 'MsgUnfollowUser';
             else if (action === 'follow_topic' || action === 'join_community') msgName = 'MsgJoinCommunity';
@@ -4056,8 +3866,8 @@ class TransactionHandler {
             else if (action === 'unblock_post') msgName = 'MsgUnblockPost';
             else if (action === 'block_user') msgName = 'MsgBlockUser';
             else if (action === 'unblock_user') msgName = 'MsgUnblockUser';
-            else if (action === 'block_topic') msgName = 'MsgBlockTopic';
-            else if (action === 'unblock_topic') msgName = 'MsgUnblockTopic';
+            else if (action === 'block_topic' || action === 'block_community') msgName = 'MsgBlockCommunity';
+            else if (action === 'unblock_topic' || action === 'unblock_community') msgName = 'MsgUnblockCommunity';
             else if (action === 'delete_post') msgName = 'MsgDelete';
             else if (action === 'delete_user') msgName = 'MsgDeleteUser';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
@@ -4065,14 +3875,37 @@ class TransactionHandler {
             else if (action === 'set_biography') msgName = 'MsgSetBiography';
             else if (action === 'report') msgName = 'MsgReport';
             else if (action === 'edit_post') msgName = 'MsgEdit';
-            else if (action === 'annotate_post') msgName = 'MsgAnnotate';
             else if (action === 'subscribe') msgName = 'MsgSubscribe';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
             else if (action === 'award') msgName = 'MsgAward';
             else throw new Error(`CRITICAL: Missing or invalid transaction.action: "${action}". Transaction must have explicit action field.`);
 
             let endpoint = '';
-            if (msgName === 'MsgSetUsername') {
+            if (CURATION_TX_SPECS[action]) {
+                const difficulty = resolveTxDifficulty(transaction);
+                const spec = CURATION_TX_SPECS[action];
+                const canon = this.canonicalCuration(action, {
+                    ...transaction,
+                    pub_bytes: pubBytes,
+                    difficulty,
+                    proof: Number(proof),
+                    nonce: envelopeNonce,
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigB64 = btoa(Array.from(sigCompact.toFixedLength()).map((b) => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                    envelope_nonce: envelopeNonce,
+                };
+                for (const [fieldName] of spec[2]) toRelay[fieldName] = transaction[fieldName];
+                endpoint = spec[1];
+            } else if (msgName === 'MsgSetUsername') {
                 // Sign relay for set username (must match chain ante)
                 const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalSetUsername({
@@ -4100,25 +3933,6 @@ class TransactionHandler {
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                if (transaction.invite_code || transaction.referrer_username) {
-                    // Sign exactly what is sent, already normalised the way the backend
-                    // normalises it, so the two canonical strings cannot drift.
-                    const inviteCode = String(transaction.invite_code || "").trim().toUpperCase();
-                    const referrerUsername = String(transaction.referrer_username || "").trim();
-                    if (inviteCode) toRelay.invite_code = inviteCode;
-                    if (referrerUsername) toRelay.referrer_username = referrerUsername;
-                    const attrCanon = canonicalAttribution({
-                        action: 'set_username',
-                        target: signerAddress,
-                        invite_code: inviteCode,
-                        referrer_username: referrerUsername,
-                        nonce: envelopeNonce,
-                    });
-                    const attrSig = await __CosmSecp256k1.createSignature(__CosmSha256(attrCanon), privBytes);
-                    toRelay.attribution_signature = btoa(
-                        Array.from(attrSig.toFixedLength()).map(b => String.fromCharCode(b)).join('')
-                    );
-                }
                 endpoint = 'core/set_username';
             } else if (msgName === 'MsgSetBiography') {
                 const difficulty = resolveTxDifficulty(transaction);
@@ -4147,93 +3961,6 @@ class TransactionHandler {
                     envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/set_biography';
-            } else if (msgName === 'MsgEnableAgent') {
-                const difficulty = resolveTxDifficulty(transaction);
-                const targetLower = signerAddress.toLowerCase();
-                const agentLower = (transaction.agent || "").toLowerCase();
-                const canon = this.canonicalEnableAgent({
-                    pub_bytes: pubBytes,
-                    last_block_hash: transaction.last_block_hash,
-                    difficulty: difficulty,
-                    proof: Number(proof),
-                    timestamp: transaction.timestamp,
-                    target: targetLower,
-                    agent: agentLower,
-                    nonce: envelopeNonce,
-                });
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp,
-                    agent: agentLower,
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                    envelope_nonce: envelopeNonce,
-                };
-                endpoint = 'core/enable_agent';
-            } else if (msgName === 'MsgDisableAgent') {
-                const difficulty = resolveTxDifficulty(transaction);
-                const targetLower = signerAddress.toLowerCase();
-                const agentLower = (transaction.agent || "").toLowerCase();
-                const canon = this.canonicalDisableAgent({
-                    pub_bytes: pubBytes,
-                    last_block_hash: transaction.last_block_hash,
-                    difficulty: difficulty,
-                    proof: Number(proof),
-                    timestamp: transaction.timestamp,
-                    target: targetLower,
-                    agent: agentLower,
-                    nonce: envelopeNonce,
-                });
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp,
-                    agent: agentLower,
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                    envelope_nonce: envelopeNonce,
-                };
-                endpoint = 'core/disable_agent';
-            } else if (msgName === 'MsgSetAgents') {
-                const difficulty = resolveTxDifficulty(transaction);
-                const targetLower = signerAddress.toLowerCase();
-                const agentsLower = (transaction.agents || []).map(a => String(a).toLowerCase());
-                const canon = this.canonicalSetAgents({
-                    pub_bytes: pubBytes,
-                    last_block_hash: transaction.last_block_hash,
-                    difficulty: difficulty,
-                    proof: Number(proof),
-                    timestamp: transaction.timestamp,
-                    target: targetLower,
-                    agents: agentsLower,
-                    nonce: envelopeNonce,
-                });
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp,
-                    agents: agentsLower,
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                    envelope_nonce: envelopeNonce,
-                };
-                endpoint = 'core/set_agents';
             } else if (msgName === 'MsgFollowUser') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
@@ -4452,16 +4179,18 @@ class TransactionHandler {
                     envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unblock_user';
-            } else if (msgName === 'MsgBlockTopic') {
+            } else if (msgName === 'MsgBlockCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
+                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const targetAddr = (transaction.target || "").toLowerCase();
                 const canon = this.canonicalBlockTopic({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
-                    target: transaction.target || "",
-                    topic: transaction.topic || "",
+                    target: targetAddr,
+                    topic: community,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -4472,23 +4201,26 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    topic: transaction.topic || "",
+                    target: targetAddr,
+                    community,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                endpoint = 'core/block_topic';
-            } else if (msgName === 'MsgUnblockTopic') {
+                endpoint = 'core/block_community';
+            } else if (msgName === 'MsgUnblockCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
+                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const targetAddr = (transaction.target || "").toLowerCase();
                 const canon = this.canonicalUnblockTopic({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
-                    target: transaction.target || "",
-                    topic: transaction.topic || "",
+                    target: targetAddr,
+                    topic: community,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -4499,13 +4231,14 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    topic: transaction.topic || "",
+                    target: targetAddr,
+                    community,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                     envelope_nonce: envelopeNonce,
                 };
-                endpoint = 'core/unblock_topic';
+                endpoint = 'core/unblock_community';
             } else if (msgName === 'MsgDelete') {
                 // Sign relay for delete post (must match chain ante)
                 const difficulty = resolveTxDifficulty(transaction);
@@ -4729,37 +4462,6 @@ class TransactionHandler {
                     media: mediaArr,
                 };
                 endpoint = 'core/edit';
-            } else if (msgName === 'MsgAnnotate') {
-                const topic = transaction.topic || "";
-                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
-                const canon = this.canonicalAnnotate({
-                    pub_bytes: pubBytes,
-                    last_block_hash: transaction.last_block_hash,
-                    difficulty: 0,
-                    proof: 0,
-                    timestamp: transaction.timestamp,
-                    topic: topic,
-                    title: transaction.title || "",
-                    content: transaction.content || "",
-                    tag: transaction.tag || "",
-                    override: String(transaction.override || '').toLowerCase(),
-                    media: mediaArr,
-                    appendix: transaction.appendix || "",
-                    nonce: envelopeNonce,
-                });
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    ...toRelay,
-                    signature: sigB64,
-                    topic: topic,
-                    tag: transaction.tag || "",
-                    media: mediaArr,
-                    appendix: transaction.appendix || "",
-                };
-                endpoint = 'core/annotate';
             } else if (msgName === 'MsgVote') {
                 // Sign relay for vote (must match chain ante_metasig)
                 const uvarint = (n) => {
@@ -5383,7 +5085,30 @@ class TransactionHandler {
             };
             const tag6 = Uint8Array.from([6]);   // envelope_timestamp
 
-            if (action === 'create_vote') {
+            if (CURATION_TX_SPECS[action]) {
+                const spec = CURATION_TX_SPECS[action];
+                const parts = [
+                    new TextEncoder().encode(`mirage.core.v1:${spec[0]}\x00`),
+                    Uint8Array.from([2]), encBytes(pubBytes),
+                    Uint8Array.from([3]), encBytes(hexToBytes(transaction.last_block_hash)),
+                    Uint8Array.from([4]), uvarint64(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
+                ];
+                for (const [fieldName, tag, type] of spec[2]) {
+                    const value = transaction[fieldName];
+                    if (type === 'repeated_uint') {
+                        for (const item of value || []) parts.push(Uint8Array.from([tag]), uvarint64(item));
+                    } else if (type === 'string') {
+                        parts.push(Uint8Array.from([tag]), encStr(value || ''));
+                    } else if (type === 'uint') {
+                        parts.push(Uint8Array.from([tag]), uvarint64(value || 0));
+                    } else if (type === 'bool') {
+                        parts.push(Uint8Array.from([tag]), Uint8Array.from([value ? 1 : 0]));
+                    }
+                }
+                baseBytes = concat(...parts);
+            } else if (action === 'create_vote') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgVote\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
@@ -5443,48 +5168,6 @@ class TransactionHandler {
                     tag104, encStr(transaction.tag || ""),
                     ...mediaParts,
                     Uint8Array.from([106]), uvarint(1),
-                );
-            } else if (action === 'enable_agent' || action === 'disable_agent') {
-                const prefix = new TextEncoder().encode(
-                    action === 'enable_agent'
-                        ? "mirage.core.v1:MsgEnableAgent\x00"
-                        : "mirage.core.v1:MsgDisableAgent\x00"
-                );
-                const tag2 = Uint8Array.from([2]);
-                const tag3 = Uint8Array.from([3]);
-                const tag4 = Uint8Array.from([4]);
-                const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
-                baseBytes = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr(signerAddress.toLowerCase()),
-                    tag101, encStr((transaction.agent || "").toLowerCase()),
-                );
-            } else if (action === 'set_agents') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetAgents\x00");
-                const tag2 = Uint8Array.from([2]);
-                const tag3 = Uint8Array.from([3]);
-                const tag4 = Uint8Array.from([4]);
-                const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
-                const agentParts = [];
-                for (const a of (transaction.agents || [])) {
-                    agentParts.push(tag101, encStr(String(a).toLowerCase()));
-                }
-                baseBytes = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr(signerAddress.toLowerCase()),
-                    ...agentParts,
                 );
             } else if (action === 'set_username') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetUsername\x00");
@@ -5627,13 +5310,14 @@ class TransactionHandler {
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
-            } else if (action === 'block_topic') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+            } else if (action === 'block_topic' || action === 'block_community') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
                 const tag101 = Uint8Array.from([101]);
+                const community = (transaction.community || transaction.topic || "").toLowerCase();
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -5642,15 +5326,16 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
-                    tag101, encStr(transaction.topic || ""),
+                    tag101, encStr(community),
                 );
-            } else if (action === 'unblock_topic') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+            } else if (action === 'unblock_topic' || action === 'unblock_community') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
                 const tag101 = Uint8Array.from([101]);
+                const community = (transaction.community || transaction.topic || "").toLowerCase();
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -5659,7 +5344,7 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
-                    tag101, encStr(transaction.topic || ""),
+                    tag101, encStr(community),
                 );
             } else if (action === 'delete_post') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgDelete\x00");
@@ -5763,41 +5448,6 @@ class TransactionHandler {
                     tag105, encStr(String(transaction.override || "").toLowerCase()),
                     ...mediaParts,
                 );
-            } else if (action === 'annotate_post') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgAnnotate\x00");
-                const tag2 = Uint8Array.from([2]);
-                const tag3 = Uint8Array.from([3]);
-                const tag4 = Uint8Array.from([4]);
-                const tag5 = Uint8Array.from([5]);
-                const tag6 = Uint8Array.from([6]);
-                const tag101 = Uint8Array.from([101]);
-                const tag102 = Uint8Array.from([102]);
-                const tag103 = Uint8Array.from([103]);
-                const tag104 = Uint8Array.from([104]);
-                const tag105 = Uint8Array.from([105]);
-                const tag106 = Uint8Array.from([106]);
-                const tag107 = Uint8Array.from([107]);
-                const mediaParts = [];
-                for (const m of (transaction.media || [])) {
-                    mediaParts.push(tag106);
-                    mediaParts.push(encStr(m));
-                }
-                baseBytes = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag5, uvarint(0),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag101, encStr(transaction.topic || ""),
-                    tag102, encStr(transaction.title || ""),
-                    tag103, encStr(transaction.content || ""),
-                    tag104, encStr(transaction.tag || ""),
-                    tag105, encStr(String(transaction.override || "").toLowerCase()),
-                    ...mediaParts,
-                    tag107, encStr(transaction.appendix || ""),
-                );
             } else if (action === 'subscribe') {
                 // subscribe should NEVER use PoW - it must be paid with tokens
                 // This branch should not be reached, but handle gracefully
@@ -5823,7 +5473,7 @@ class TransactionHandler {
                 }
                 baseBytes = concat(...parts);
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, join_community, leave_community, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, subscribe, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}"`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

@@ -113,7 +113,7 @@ export async function fetchProfile(viewerAddress, force = false) {
 export function getFollowedTopics() {
     const cached = loadFromStorage();
     if (!cached || !cached.profile) return [];
-    const topics = cached.profile.followed_topics || [];
+    const topics = cached.profile.joined_communities || [];
     return topics.map(t => String(t || '').trim()).filter(t => {
         const v = t.toLowerCase();
         return v !== 'all' && v !== 'home' && v !== '';
@@ -154,10 +154,10 @@ export function updateCacheTopics(topics, address = null) {
         cached = {
             address: addr.toLowerCase(),
             timestamp: Date.now(),
-            profile: { followed_topics: [], followed_users: [], enabled_agents: [] }
+            profile: { joined_communities: [], followed_users: [] }
         };
     }
-    cached.profile.followed_topics = topics;
+    cached.profile.joined_communities = topics;
     cached.timestamp = Date.now();
     try {
         localStorage.setItem(CACHE_KEY, JSON.stringify(cached));
@@ -176,7 +176,7 @@ export function updateCacheUsers(users, address = null) {
         cached = {
             address: addr.toLowerCase(),
             timestamp: Date.now(),
-            profile: { followed_topics: [], followed_users: [], enabled_agents: [] }
+            profile: { joined_communities: [], followed_users: [] }
         };
     }
     cached.profile.followed_users = users;
@@ -192,9 +192,9 @@ export function scheduleRefresh(address) {
 }
 
 // Seed the profile_followed_cache from the /api/bootstrap response so the
-// sidebar's followed topics/users/enabled agents render instantly on cold load
+// sidebar's joined communities / followed users render instantly on cold load
 // without firing a separate /api/get_user_followed request. Honors the
-// no-cache window — if the user just performed a follow/unfollow we keep the
+// no-cache window — if the user just performed a join/leave we keep the
 // stale-bypass active and do nothing.
 export function seedFromBootstrap(address, data) {
     if (!address || !data || typeof data !== 'object') return;
@@ -202,8 +202,7 @@ export function seedFromBootstrap(address, data) {
     const addr = String(address).trim().toLowerCase();
     if (!addr || addr === 'guest') return;
     saveToStorage(addr, {
-        followed_topics: Array.isArray(data.followed_topics) ? data.followed_topics : [],
+        joined_communities: Array.isArray(data.joined_communities) ? data.joined_communities : [],
         followed_users: Array.isArray(data.followed_users) ? data.followed_users : [],
-        enabled_agents: Array.isArray(data.enabled_agents) ? data.enabled_agents : [],
     });
 }

@@ -540,7 +540,7 @@ export default function FAQView() {
                                     <HeaderRow>
                                         <HeaderTitle>Frequently Asked Questions</HeaderTitle>
                                         <HeaderDescription>
-                                            Straight answers about Mirage, moderation, safety, agents, nodes, tokens, and how the network works.
+                                            Straight answers about Mirage, moderation, safety, nodes, tokens, and how the network works.
                                         </HeaderDescription>
                                         <SearchWrap>
                                             <SearchLabel>Search FAQ</SearchLabel>
@@ -548,7 +548,7 @@ export default function FAQView() {
                                                 type="search"
                                                 value={query}
                                                 onChange={event => setQuery(event.target.value)}
-                                                placeholder="Try agents, subscriptions, nodes, privacy..."
+                                                placeholder="Try subscriptions, nodes, privacy..."
                                             />
                                             <SearchHint>
                                                 {hasQuery

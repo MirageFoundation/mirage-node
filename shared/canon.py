@@ -662,37 +662,11 @@ def canon_base_unblock_community(pubkey, last_block_hash, difficulty, timestamp,
     return bytes(out)
 
 
-def canon_base_create_community(pubkey, last_block_hash, difficulty, timestamp, community, title, description, original_team_name, bio, policy, nonce=0):
-    out = _canon_envelope("MsgCreateCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
-    out += _enc_str(100, community)
-    out += _enc_str(101, title)
-    out += _enc_str(102, description)
-    out += _enc_str(103, original_team_name)
-    out += _enc_str(104, bio)
-    out += _enc_str(105, policy)
-    return bytes(out)
-
-
-def canon_base_set_community_metadata(pubkey, last_block_hash, difficulty, timestamp, community, title, description, nonce=0):
-    out = _canon_envelope("MsgSetCommunityMetadata", pubkey, last_block_hash, difficulty, timestamp, nonce)
-    out += _enc_str(100, community)
-    out += _enc_str(101, title)
-    out += _enc_str(102, description)
-    return bytes(out)
-
-
-def canon_base_transfer_community(pubkey, last_block_hash, difficulty, timestamp, community, new_founder, nonce=0):
-    out = _canon_envelope("MsgTransferCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
-    out += _enc_str(100, community)
-    out += _enc_str(101, new_founder)
-    return bytes(out)
-
-
-def canon_base_create_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, name, bio, policy, nonce=0):
+def canon_base_create_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, name, description, policy, nonce=0):
     out = _canon_envelope("MsgCreateCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
     out += _enc_str(101, name)
-    out += _enc_str(102, bio)
+    out += _enc_str(102, description)
     out += _enc_str(103, policy)
     return bytes(out)
 
@@ -705,12 +679,12 @@ def canon_base_set_curation_preference(pubkey, last_block_hash, difficulty, time
     return bytes(out)
 
 
-def canon_base_set_curation_team_profile(pubkey, last_block_hash, difficulty, timestamp, community, team_id, name, bio, policy, nonce=0):
+def canon_base_set_curation_team_profile(pubkey, last_block_hash, difficulty, timestamp, community, team_id, name, description, policy, nonce=0):
     out = _canon_envelope("MsgSetCurationTeamProfile", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
     out += _enc_str(102, name)
-    out += _enc_str(103, bio)
+    out += _enc_str(103, description)
     out += _enc_str(104, policy)
     return bytes(out)
 
@@ -780,8 +754,7 @@ def canon_base_set_curation_post_hidden(pubkey, last_block_hash, difficulty, tim
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
     out += _enc_str(102, target)
-    if hidden:
-        out += _enc_u64(103, 1)
+    out += _enc_u64(103, 1 if hidden else 0)
     return bytes(out)
 
 
@@ -790,8 +763,7 @@ def canon_base_set_curation_user_hidden(pubkey, last_block_hash, difficulty, tim
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
     out += _enc_str(102, target)
-    if hidden:
-        out += _enc_u64(103, 1)
+    out += _enc_u64(103, 1 if hidden else 0)
     return bytes(out)
 
 
@@ -800,8 +772,7 @@ def canon_base_set_curation_thread_locked(pubkey, last_block_hash, difficulty, t
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
     out += _enc_str(102, root_hash)
-    if locked:
-        out += _enc_u64(103, 1)
+    out += _enc_u64(103, 1 if locked else 0)
     return bytes(out)
 
 
@@ -809,8 +780,7 @@ def canon_base_set_curation_subscriber_only(pubkey, last_block_hash, difficulty,
     out = _canon_envelope("MsgSetCurationSubscriberOnly", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
-    if enabled:
-        out += _enc_u64(102, 1)
+    out += _enc_u64(102, 1 if enabled else 0)
     return bytes(out)
 
 
@@ -819,33 +789,6 @@ def canon_base_claim_creator_rewards(pubkey, last_block_hash, difficulty, timest
     for eid in epoch_ids:
         out += _enc_u64(100, int(eid))
     return bytes(out)
-
-
-def canon_attribution(
-    action: str,
-    target: str,
-    invite_code: str,
-    referrer_username: str,
-    nonce: int,
-) -> bytes:
-    """Canonical bytes for backend-only fields that ride along with a relayed message.
-
-    The chain envelope has a fixed shape, so attribution fields (invite_code,
-    referrer_username) cannot go into it and were previously appended to the POST
-    body after signing. They now carry their own signature over these bytes, bound
-    to the envelope nonce so a captured signature cannot be lifted onto another
-    request. Must match canonicalAttribution() in
-    web/frontend/src/utils/canonicalEncoding.js byte for byte.
-    """
-    parts = [
-        "mirage.attribution.v1",
-        str(action or ""),
-        str(target or "").lower(),
-        str(invite_code or ""),
-        str(referrer_username or ""),
-        str(int(nonce or 0)),
-    ]
-    return "\x00".join(parts).encode("utf-8")
 
 
 def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:

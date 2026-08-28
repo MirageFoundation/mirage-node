@@ -1,0 +1,172 @@
+syntax = "proto3";
+package mirage.core.v1;
+
+option go_package = "mirage/x/core/types";
+
+enum CurationPreferenceMode {
+  CURATION_PREFERENCE_MODE_LIVE_DEFAULT = 0;
+  CURATION_PREFERENCE_MODE_PINNED = 1;
+  CURATION_PREFERENCE_MODE_RAW = 2;
+}
+
+enum CreatorEpochStatus {
+  CREATOR_EPOCH_STATUS_OPEN = 0;
+  CREATOR_EPOCH_STATUS_COUNTING = 1;
+  CREATOR_EPOCH_STATUS_ALLOCATING = 2;
+  CREATOR_EPOCH_STATUS_CLAIMABLE = 3;
+  CREATOR_EPOCH_STATUS_EXPIRED = 4;
+}
+
+enum CreatorSettlementPhase {
+  CREATOR_SETTLEMENT_PHASE_COUNT = 0;
+  CREATOR_SETTLEMENT_PHASE_ALLOCATE = 1;
+}
+
+enum SubscriptionTrancheSource {
+  SUBSCRIPTION_TRANCHE_SOURCE_SELF_PURCHASE = 0;
+  SUBSCRIPTION_TRANCHE_SOURCE_GIFT = 1;
+  SUBSCRIPTION_TRANCHE_SOURCE_AUTO_RENEWAL = 2;
+  SUBSCRIPTION_TRANCHE_SOURCE_GOVERNANCE = 3;
+}
+
+enum CuratorInvitationAction {
+  CURATOR_INVITATION_ACTION_CREATE = 0;
+  CURATOR_INVITATION_ACTION_REVOKE = 1;
+  CURATOR_INVITATION_ACTION_DECLINE = 2;
+}
+
+// Community is retained only to decode pre-v1.39 state during migration.
+message Community {
+  string slug = 1;
+  string original_founder = 2;
+  string current_founder = 3;
+  string title = 4;
+  string description = 5;
+  uint64 original_team_id = 6;
+  uint64 current_default_team_id = 7;
+  int64 created_height = 8;
+  uint64 created_order = 9;
+}
+
+message CurationTeam {
+  string community = 1;
+  uint64 team_id = 2;
+  string owner = 3;
+  string name = 4;
+  string description = 5;
+  string policy = 6;
+  reserved 7; // was is_original
+  bool subscriber_only = 8;
+  uint64 subscriber_count = 9;
+  int64 created_height = 10;
+  uint64 created_order = 11;
+  uint64 next_member_order = 12;
+  int64 deleted_height = 13;
+}
+
+message CurationTeamMember {
+  string address = 1;
+  uint64 accepted_order = 2;
+}
+
+message CommunityPreference {
+  CurationPreferenceMode mode = 1;
+  uint64 pinned_team_id = 2;
+}
+
+message PostMetadata {
+  string author = 1;
+  string parent_hash = 2;
+  string root_hash = 3;
+  string community = 4;
+  uint64 global_sequence = 5;
+  int64 created_height = 6;
+  int64 created_epoch = 7;
+  bool author_was_paid_at_creation = 8;
+  int64 deleted_height = 9;
+  int64 deleted_epoch = 10;
+  string deletion_actor = 11;
+}
+
+message CreatorEpoch {
+  int64 epoch_id = 1;
+  string pool = 2;
+  CreatorEpochStatus status = 3;
+  CreatorSettlementPhase phase = 4;
+  uint64 gross_records = 5;
+  uint64 active_engagers = 6;
+  string engager_slice = 7;
+  string allocated_total = 8;
+  string claimed_total = 9;
+  int64 finalized_epoch = 10;
+  int64 claim_window_days = 11;
+  int64 claim_deadline_epoch = 12;
+  bytes settlement_cursor = 13;
+  string partial_actor = 14;
+  uint64 partial_count = 15;
+  bool prune_pending = 16;
+  bool prune_complete = 17;
+}
+
+message CreatorAccrual {
+  int64 epoch = 1;
+  string creator = 2;
+  string amount = 3;
+  string claimed_amount = 4;
+  bool claimed = 5;
+  int64 claimed_height = 6;
+  string claimed_txhash = 7;
+}
+
+message SubscriptionTranche {
+  uint64 id = 1;
+  string payer = 2;
+  string recipient = 3;
+  SubscriptionTrancheSource source = 4;
+  int64 start_time = 5;
+  int64 end_time = 6;
+  uint32 period_count = 7;
+  string total_fee = 8;
+  string burn_amount = 9;
+  string creator_amount = 10;
+  uint64 creator_bps = 11;
+  uint64 period = 12;
+  int64 created_height = 13;
+  string txhash = 14;
+}
+
+message SubscriberQuota {
+  int64 utc_epoch = 1;
+  uint64 count = 2;
+}
+
+message SubscriptionRenewalState {
+  int64 expiry = 1;
+  int64 next_attempt_unix = 2;
+  int64 last_attempt_epoch = 3;
+  bool warning_sent = 4;
+  uint64 generation = 5;
+}
+
+message CommunityFounderHistory {
+  string community = 1;
+  uint64 sequence = 2;
+  int64 height = 3;
+  string txhash = 4;
+  string old_founder = 5;
+  string new_founder = 6;
+  string authority = 7;
+}
+
+message CurationTeamHistory {
+  string community = 1;
+  uint64 team_id = 2;
+  uint64 sequence = 3;
+  int64 height = 4;
+  string txhash = 5;
+  string event_type = 6;
+  string actor = 7;
+  string target = 8;
+  uint64 accepted_order = 9;
+  string authority = 10;
+}

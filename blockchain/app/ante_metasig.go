@@ -699,37 +699,11 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			}); err != nil {
 				return ctx, err
 			}
-		case *coretypes.MsgCreateCommunity:
-			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgCreateCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.Title)
-				w.writeString(102, m.Description)
-				w.writeString(103, m.OriginalTeamName)
-				w.writeString(104, m.Bio)
-				w.writeString(105, m.Policy)
-			}); err != nil {
-				return ctx, err
-			}
-		case *coretypes.MsgSetCommunityMetadata:
-			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCommunityMetadata", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.Title)
-				w.writeString(102, m.Description)
-			}); err != nil {
-				return ctx, err
-			}
-		case *coretypes.MsgTransferCommunity:
-			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgTransferCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
-				w.writeString(100, m.Community)
-				w.writeString(101, m.NewFounder)
-			}); err != nil {
-				return ctx, err
-			}
 		case *coretypes.MsgCreateCurationTeam:
 			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgCreateCurationTeam", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeString(100, m.Community)
 				w.writeString(101, m.Name)
-				w.writeString(102, m.Bio)
+				w.writeString(102, m.Description)
 				w.writeString(103, m.Policy)
 			}); err != nil {
 				return ctx, err
@@ -739,7 +713,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeString(100, m.Community)
 				w.writeUvarint(101, m.TeamId)
 				w.writeString(102, m.Name)
-				w.writeString(103, m.Bio)
+				w.writeString(103, m.Description)
 				w.writeString(104, m.Policy)
 			}); err != nil {
 				return ctx, err
