@@ -55,6 +55,7 @@ from shared.datatypes import (
     MsgClaimCreatorRewards,
     MsgBlockCommunity,
     MsgUnblockCommunity,
+    MsgSendTokens,
 )
 from indexer.address_utils import addr_from_pubkey, derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import get_vote_weight
@@ -198,6 +199,10 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSetCurationThreadLocked": MsgSetCurationThreadLocked,
     "/mirage.core.v1.MsgSetCurationSubscriberOnly": MsgSetCurationSubscriberOnly,
     "/mirage.core.v1.MsgClaimCreatorRewards": MsgClaimCreatorRewards,
+    # SendTokens is relayed like any other user message and the handler spends a
+    # daily quota unit for it (deductRelayGasFee in module.go), so the quota
+    # projection has to see it.
+    "/mirage.core.v1.MsgSendTokens": MsgSendTokens,
 }
 
 
@@ -397,10 +402,22 @@ class MessageProcessor:
             )
 
     def refresh_message_signer_runtime(self, type_url: str, value: bytes) -> None:
-        """Refresh quota state after a successful user message may consume it."""
+        """Refresh quota state after a successful user message may consume it.
+
+        A type with no mapping is one this build does not decode at all, which
+        covers retired messages replayed from history and authority-only messages
+        that never spend a user's quota. process_core_message has already logged
+        the loud unhandled_message_type line for anything genuinely unknown, one
+        call before this one, so there is nothing to add here by repeating it —
+        and nothing to gain by raising: the quota number is a projection of chain
+        state that the next mapped message re-reads anyway, whereas halting makes
+        the block unprojectable on every restart and takes the platform down with
+        it. That is the same trade process_core_message documents for itself.
+        """
         proto_cls = TYPE_URL_TO_PROTO.get(type_url)
         if proto_cls is None:
-            raise RuntimeError(f"missing protobuf mapping for runtime refresh: {type_url}")
+            logger.debug("[quota] no mapping for %s; nothing to refresh", type_url)
+            return
         parsed = proto_cls()
         parsed.ParseFromString(value)
         owner = derive_owner_from_msg(MessageToDict(parsed, preserving_proto_field_name=True))
