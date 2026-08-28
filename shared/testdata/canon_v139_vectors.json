@@ -1,205 +1,203 @@
 {
-  "envelope": {
-    "pubkey_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-    "block_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "difficulty": 21,
-    "timestamp": 1750000000,
-    "nonce": 7
-  },
-  "vectors": [
-    {
-      "msg": "MsgCreateCurationTeam",
-      "fields": {
-        "community": "technology",
-        "name": "Team A",
-        "description": "desc",
-        "policy": "policy"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73674372656174654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965065465616d20416604646573636706706f6c696379"
+    "envelope": {
+        "pubkey_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "block_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "difficulty": 21,
+        "timestamp": 1750000000,
+        "nonce": 7
     },
-    {
-      "msg": "MsgSetCurationTeamProfile",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "name": "Team A",
-        "description": "desc",
-        "policy": "policy"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5465616d50726f66696c65000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366065465616d20416704646573636806706f6c696379"
-    },
-    {
-      "msg": "MsgInviteCurator",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "mirage1target"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d7367496e7669746543757261746f72000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
-    },
-    {
-      "msg": "MsgRevokeCuratorInvite",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "mirage1target"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675265766f6b6543757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
-    },
-    {
-      "msg": "MsgAcceptCuratorInvite",
-      "fields": {
-        "community": "technology",
-        "team_id": 3
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d736741636365707443757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
-    },
-    {
-      "msg": "MsgDeclineCuratorInvite",
-      "fields": {
-        "community": "technology",
-        "team_id": 3
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73674465636c696e6543757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
-    },
-    {
-      "msg": "MsgLeaveCurationTeam",
-      "fields": {
-        "community": "technology",
-        "team_id": 3
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73674c656176654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
-    },
-    {
-      "msg": "MsgRemoveCurator",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "mirage1target"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d736752656d6f766543757261746f72000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
-    },
-    {
-      "msg": "MsgTransferCurationTeam",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "new_owner": "mirage1new"
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675472616e736665724375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660a6d6972616765316e6577"
-    },
-    {
-      "msg": "MsgDeleteCurationTeam",
-      "fields": {
-        "community": "technology",
-        "team_id": 3
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d736744656c6574654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
-    },
-    {
-      "msg": "MsgSetCurationPreference",
-      "fields": {
-        "community": "technology",
-        "mode": 0,
-        "pinned_team_id": 0
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965006600"
-    },
-    {
-      "msg": "MsgSetCurationPreference",
-      "fields": {
-        "community": "technology",
-        "mode": 1,
-        "pinned_team_id": 3
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965016603"
-    },
-    {
-      "msg": "MsgSetCurationPreference",
-      "fields": {
-        "community": "technology",
-        "mode": 2,
-        "pinned_team_id": 0
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965026600"
-    },
-    {
-      "msg": "MsgSetCurationPostHidden",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "abc123",
-        "hidden": true
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f737448696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066162633132336701"
-    },
-    {
-      "msg": "MsgSetCurationUserHidden",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "mirage1target",
-        "hidden": true
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5573657248696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d6972616765317461726765746701"
-    },
-    {
-      "msg": "MsgSetCurationPostHidden",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "abc123",
-        "hidden": false
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f737448696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066162633132336700"
-    },
-    {
-      "msg": "MsgSetCurationUserHidden",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "target": "mirage1target",
-        "hidden": false
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5573657248696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d6972616765317461726765746700"
-    },
-    {
-      "msg": "MsgSetCurationThreadLocked",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "root_hash": "def456",
-        "locked": true
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5468726561644c6f636b6564000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066465663435366701"
-    },
-    {
-      "msg": "MsgSetCurationThreadLocked",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "root_hash": "def456",
-        "locked": false
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5468726561644c6f636b6564000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066465663435366700"
-    },
-    {
-      "msg": "MsgSetCurationSubscriberOnly",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "enabled": true
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e537562736372696265724f6e6c79000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036601"
-    },
-    {
-      "msg": "MsgSetCurationSubscriberOnly",
-      "fields": {
-        "community": "technology",
-        "team_id": 3,
-        "enabled": false
-      },
-      "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e537562736372696265724f6e6c79000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036600"
-    }
-  ]
+    "vectors": [
+        {
+            "msg": "MsgCreateCurationTeam",
+            "fields": {
+                "community": "technology",
+                "name": "Team A",
+                "description": "desc"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674372656174654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965065465616d2041660464657363"
+        },
+        {
+            "msg": "MsgSetCurationTeamProfile",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "name": "Team A",
+                "description": "desc"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5465616d50726f66696c65000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366065465616d2041670464657363"
+        },
+        {
+            "msg": "MsgInviteCurator",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "mirage1target"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d7367496e7669746543757261746f72000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
+        },
+        {
+            "msg": "MsgRevokeCuratorInvite",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "mirage1target"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675265766f6b6543757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
+        },
+        {
+            "msg": "MsgAcceptCuratorInvite",
+            "fields": {
+                "community": "technology",
+                "team_id": 3
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d736741636365707443757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
+        },
+        {
+            "msg": "MsgDeclineCuratorInvite",
+            "fields": {
+                "community": "technology",
+                "team_id": 3
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674465636c696e6543757261746f72496e76697465000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
+        },
+        {
+            "msg": "MsgLeaveCurationTeam",
+            "fields": {
+                "community": "technology",
+                "team_id": 3
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674c656176654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
+        },
+        {
+            "msg": "MsgRemoveCurator",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "mirage1target"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d736752656d6f766543757261746f72000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d697261676531746172676574"
+        },
+        {
+            "msg": "MsgTransferCurationTeam",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "new_owner": "mirage1new"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675472616e736665724375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660a6d6972616765316e6577"
+        },
+        {
+            "msg": "MsgDeleteCurationTeam",
+            "fields": {
+                "community": "technology",
+                "team_id": 3
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d736744656c6574654375726174696f6e5465616d000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503"
+        },
+        {
+            "msg": "MsgSetCurationPreference",
+            "fields": {
+                "community": "technology",
+                "mode": 0,
+                "pinned_team_id": 0
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965006600"
+        },
+        {
+            "msg": "MsgSetCurationPreference",
+            "fields": {
+                "community": "technology",
+                "mode": 1,
+                "pinned_team_id": 3
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965016603"
+        },
+        {
+            "msg": "MsgSetCurationPreference",
+            "fields": {
+                "community": "technology",
+                "mode": 2,
+                "pinned_team_id": 0
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e507265666572656e6365000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965026600"
+        },
+        {
+            "msg": "MsgSetCurationPostHidden",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "abc123",
+                "hidden": true
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f737448696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066162633132336701"
+        },
+        {
+            "msg": "MsgSetCurationUserHidden",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "mirage1target",
+                "hidden": true
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5573657248696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d6972616765317461726765746701"
+        },
+        {
+            "msg": "MsgSetCurationPostHidden",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "abc123",
+                "hidden": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f737448696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066162633132336700"
+        },
+        {
+            "msg": "MsgSetCurationUserHidden",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "mirage1target",
+                "hidden": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5573657248696464656e000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660d6d6972616765317461726765746700"
+        },
+        {
+            "msg": "MsgSetCurationThreadLocked",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "root_hash": "def456",
+                "locked": true
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5468726561644c6f636b6564000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066465663435366701"
+        },
+        {
+            "msg": "MsgSetCurationThreadLocked",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "root_hash": "def456",
+                "locked": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e5468726561644c6f636b6564000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066465663435366700"
+        },
+        {
+            "msg": "MsgSetCurationSubscriberOnly",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "enabled": true
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e537562736372696265724f6e6c79000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036601"
+        },
+        {
+            "msg": "MsgSetCurationSubscriberOnly",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "enabled": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e537562736372696265724f6e6c79000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036600"
+        }
+    ]
 }

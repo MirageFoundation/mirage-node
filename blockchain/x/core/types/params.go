@@ -277,8 +277,7 @@ func DefaultParams() Params {
 		MaxPendingCuratorInvitesPerTeam:     10,
 		MaxPendingCuratorInvitesPerUser:     100,
 		MaxCurationTeamNameLength:           64,
-		MaxCurationTeamDescriptionLength:    280,
-		MaxCurationTeamPolicyLength:         4000,
+		MaxCurationTeamDescriptionLength:    4000,
 		SubscriptionTransitionsPerBlock:     100,
 		CurationPruneKeysPerBlock:           500,
 		CreatorEpochClosuresPerBlock:        4,
@@ -306,7 +305,6 @@ func HistoricalDefaultParams() Params {
 	p.MaxPendingCuratorInvitesPerUser = 0
 	p.MaxCurationTeamNameLength = 0
 	p.MaxCurationTeamDescriptionLength = 0
-	p.MaxCurationTeamPolicyLength = 0
 	p.SubscriptionTransitionsPerBlock = 0
 	p.CurationPruneKeysPerBlock = 0
 	p.CreatorEpochClosuresPerBlock = 0
@@ -547,7 +545,6 @@ func (p Params) ValidateV139() error {
 		{"max_pending_curator_invites_per_user", p.MaxPendingCuratorInvitesPerUser, 1, 1000},
 		{"max_curation_team_name_length", p.MaxCurationTeamNameLength, 1, 100000},
 		{"max_curation_team_description_length", p.MaxCurationTeamDescriptionLength, 1, 100000},
-		{"max_curation_team_policy_length", p.MaxCurationTeamPolicyLength, 1, 100000},
 		{"subscription_transitions_per_block", p.SubscriptionTransitionsPerBlock, 1, 100000},
 		{"curation_prune_keys_per_block", p.CurationPruneKeysPerBlock, 1, 100000},
 		{"creator_epoch_closures_per_block", p.CreatorEpochClosuresPerBlock, 1, 100000},

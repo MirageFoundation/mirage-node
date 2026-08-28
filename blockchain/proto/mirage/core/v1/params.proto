@@ -160,7 +160,7 @@ message Params {
   reserved 60, 61; // were community title and description limits
   uint64 max_curation_team_name_length = 62;
   uint64 max_curation_team_description_length = 63;
-  uint64 max_curation_team_policy_length = 64;
+  reserved 64; // was max_curation_team_policy_length
   uint64 subscription_transitions_per_block = 65;
   uint64 curation_prune_keys_per_block = 66;
   uint64 creator_epoch_closures_per_block = 67;

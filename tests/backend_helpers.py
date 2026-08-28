@@ -56,6 +56,13 @@ from tests.common import (
 )
 from cosmpy.aerial.wallet import LocalWallet
 
+from shared.canon import (
+    canon_base_create_curation_team as _canon_base_create_curation_team_raw,
+    canon_base_set_curation_preference as _canon_base_set_curation_preference_raw,
+    canon_base_set_curation_post_hidden as _canon_base_set_curation_post_hidden_raw,
+    canon_base_set_curation_team_profile as _canon_base_set_curation_team_profile_raw,
+)
+
 def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
     """Send tokens from wallet to target address via the backend API."""
     addr = str(wallet.address())
@@ -1212,3 +1219,186 @@ def _wait_next_block(timeout: float = 8.0) -> int:
             return cur
         time.sleep(0.2)
     raise RuntimeError(f"timeout waiting for next block (start={start})")
+
+
+def _do_create_curation_team(
+    backend: str,
+    wallet,
+    community: str,
+    name: str,
+    description: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    """Create a curator team via the backend API; return response body."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    slug = (community or "").strip().lower()
+    base = _canon_base_create_curation_team_raw(pub, _lb_bytes(lb), d, ts, slug, name, description, nonce)
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "community": slug,
+        "name": name,
+        "description": description,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/create_curation_team", payload)
+    return resp or {}
+
+
+def _do_set_curation_preference(
+    backend: str,
+    wallet,
+    community: str,
+    mode: int,
+    pinned_team_id: int = 0,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    slug = (community or "").strip().lower()
+    base = _canon_base_set_curation_preference_raw(
+        pub, _lb_bytes(lb), d, ts, slug, mode, pinned_team_id, nonce
+    )
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "community": slug,
+        "mode": int(mode),
+        "pinned_team_id": int(pinned_team_id),
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/set_curation_preference", payload)
+    return resp or {}
+
+
+def _do_set_curation_post_hidden(
+    backend: str,
+    wallet,
+    community: str,
+    team_id: int,
+    target: str,
+    hidden: bool = True,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    slug = (community or "").strip().lower()
+    base = _canon_base_set_curation_post_hidden_raw(
+        pub, _lb_bytes(lb), d, ts, slug, team_id, target, hidden, nonce
+    )
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "community": slug,
+        "team_id": int(team_id),
+        "target": target,
+        "hidden": bool(hidden),
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/set_curation_post_hidden", payload)
+    return resp or {}
+
+
+def _do_set_curation_team_profile(
+    backend: str,
+    wallet,
+    community: str,
+    team_id: int,
+    name: str,
+    description: str = "",
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    slug = (community or "").strip().lower()
+    base = _canon_base_set_curation_team_profile_raw(
+        pub, _lb_bytes(lb), d, ts, slug, team_id, name, description, nonce
+    )
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "community": slug,
+        "team_id": int(team_id),
+        "name": name,
+        "description": description,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/set_curation_team_profile", payload)
+    return resp or {}
+
+
+def _wait_curation_team(
+    backend: str,
+    community: str,
+    *,
+    owner: str | None = None,
+    name: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    """Poll community teams until a matching live team appears."""
+    slug = (community or "").strip().lower()
+    owner_l = (owner or "").strip().lower() or None
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/communities/{slug}/teams")
+        if code == 200 and isinstance(data, dict):
+            for item in data.get("items") or []:
+                if item.get("deleted"):
+                    continue
+                if owner_l and str(item.get("owner") or "").lower() != owner_l:
+                    continue
+                if name is not None and str(item.get("name") or "") != name:
+                    continue
+                return item
+        time.sleep(0.5)
+    return None
+

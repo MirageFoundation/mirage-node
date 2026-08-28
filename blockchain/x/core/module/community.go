@@ -166,7 +166,7 @@ func (am AppModule) CreateCurationTeam(ctx context.Context, req *types.MsgCreate
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	if _, err := am.k.CreateCurationTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
+	if _, err := am.k.CreateCurationTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription()); err != nil {
 		return nil, err
 	}
 	return &types.MsgCreateCurationTeamResponse{}, nil
@@ -189,7 +189,7 @@ func (am AppModule) SetCurationTeamProfile(ctx context.Context, req *types.MsgSe
 	if isGov {
 		return nil, fmt.Errorf("governance team profile changes must use a team recovery message")
 	}
-	if err := am.k.UpdateCurationTeamProfile(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
+	if err := am.k.UpdateCurationTeamProfile(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), req.GetName(), req.GetDescription()); err != nil {
 		return nil, err
 	}
 	return &types.MsgSetCurationTeamProfileResponse{}, nil

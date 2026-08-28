@@ -83,7 +83,7 @@ def get_default_team(cur, community: str) -> dict[str, Any] | None:
     """Return this node's live default: paid subscribers, then oldest team."""
     cur.execute(
         """
-        SELECT team_id, owner, name, description, policy, subscriber_only,
+        SELECT team_id, owner, name, description, subscriber_only,
                subscriber_count, created_height, created_order
         FROM curation_teams
         WHERE community=%s AND deleted_height IS NULL
@@ -100,11 +100,10 @@ def get_default_team(cur, community: str) -> dict[str, Any] | None:
         "owner": row[1],
         "name": row[2],
         "description": row[3],
-        "policy": row[4],
-        "subscriber_only": bool(row[5]),
-        "subscriber_count": int(row[6]),
-        "created_height": int(row[7]),
-        "created_order": int(row[8]),
+        "subscriber_only": bool(row[4]),
+        "subscriber_count": int(row[5]),
+        "created_height": int(row[6]),
+        "created_order": int(row[7]),
     }
 
 

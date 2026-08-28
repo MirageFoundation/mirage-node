@@ -114,6 +114,19 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/core/unblock_community": ENVELOPE,
     "/api/core/create_curation_team": ENVELOPE,
     "/api/core/set_curation_preference": ENVELOPE,
+    "/api/core/set_curation_team_profile": ENVELOPE,
+    "/api/core/invite_curator": ENVELOPE,
+    "/api/core/revoke_curator_invite": ENVELOPE,
+    "/api/core/accept_curator_invite": ENVELOPE,
+    "/api/core/decline_curator_invite": ENVELOPE,
+    "/api/core/leave_curation_team": ENVELOPE,
+    "/api/core/remove_curator": ENVELOPE,
+    "/api/core/transfer_curation_team": ENVELOPE,
+    "/api/core/delete_curation_team": ENVELOPE,
+    "/api/core/set_curation_post_hidden": ENVELOPE,
+    "/api/core/set_curation_user_hidden": ENVELOPE,
+    "/api/core/set_curation_thread_locked": ENVELOPE,
+    "/api/core/set_curation_subscriber_only": ENVELOPE,
     "/api/core/claim_creator_rewards": ENVELOPE,
     "/api/communities": PUBLIC,
     "/api/communities/<slug>": PUBLIC,
@@ -148,6 +161,7 @@ _AUTH_CALLS = {
     "_verify_admin_stats_request": "admin",
     "get_user_level": "level",
     "_parse_envelope_nonce": "nonce",
+    "_parse_relay_envelope": "nonce",
     "verify_envelope": "envelope",
     # Cross-module helpers in routes.core — markers declared here because the
     # inventory walk only resolves callees defined in the same route file.
@@ -226,6 +240,25 @@ def _route_inventory(backend_src: str) -> Dict[str, Tuple[str, Set[str]]]:
                 if not isinstance(dec.args[0], ast.Constant):
                     continue
                 inventory[dec.args[0].value] = (f"{fname}:{name}", resolve(name))
+        # v1.39 registers many curation relay routes via _curation_team_route("path", ...),
+        # which the decorator walk cannot see (path is a Name, not a Constant).
+        for node in tree.body:
+            if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+                continue
+            call = node.value
+            if not isinstance(call.func, ast.Name) or call.func.id != "_curation_team_route":
+                continue
+            if not call.args or not isinstance(call.args[0], ast.Constant):
+                continue
+            path_value = call.args[0].value
+            if not isinstance(path_value, str):
+                continue
+            handler_markers = set()
+            if "_curation_team_route" in funcs:
+                handler_markers = resolve("_curation_team_route")
+            # Nested handler always parses a relay envelope.
+            handler_markers |= {"nonce"}
+            inventory[path_value] = (f"{fname}:_curation_team_route", handler_markers)
     return inventory
 
 

@@ -96,6 +96,7 @@ from tests.cases.test_backend_indexer import (
     test_rumble_embeds,
 )
 from tests.cases.test_backend_hardening import test_backend_hardening
+from tests.cases.test_backend_curation import test_curation_backend
 from tests.cases.test_backend_net_tags import test_net_tags, test_net_tags_live
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_install import test_install
@@ -163,6 +164,7 @@ ALL_CATEGORIES = {
     "redgifs_thumbnails": test_redgifs_thumbnails,
     "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
+    "curation": test_curation_backend,
     "net_tags": test_net_tags,
     "net_tags_live": test_net_tags_live,
     "indexer_topic_edit": test_indexer_topic_edit,

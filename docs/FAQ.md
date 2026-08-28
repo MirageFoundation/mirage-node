@@ -837,7 +837,7 @@ community: there is no registration, claim, title, founder, or owner. Posting to
 slug starts an uncurated community immediately.
 
 Anyone can follow a community and post in it. A community becomes curated when at least one
-live curator team exists for its slug. Teams publish their own description and policy, but
+live curator team exists for its slug. Teams publish their own description, but
 no team owns or officially represents the community.
 
 Communities are network wide and not owned by a node, which is why switching nodes does not

@@ -40,7 +40,6 @@ export default function CurationTeamView() {
     const { getInfo, getStatus } = usePendingCuration();
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
-    const [policy, setPolicy] = useState('');
     const [invitee, setInvitee] = useState('');
     const [moderationTarget, setModerationTarget] = useState('');
     const [error, setError] = useState('');
@@ -60,7 +59,6 @@ export default function CurationTeamView() {
         if (!team) return;
         setName(team.name);
         setDescription(team.description);
-        setPolicy(team.policy);
     }, [team]);
 
     const run = async (operation) => {
@@ -73,7 +71,7 @@ export default function CurationTeamView() {
     const statusFor = (action, target, fallback) => getStatus(action, community, Number(teamId), target, fallback);
     const saveProfile = (event) => {
         event.preventDefault();
-        return run(() => tx.updateCurationTeam(community, Number(teamId), name, description, policy));
+        return run(() => tx.updateCurationTeam(community, Number(teamId), name, description));
     };
 
     if (loading) return <Page>Loading curator team…</Page>;
@@ -88,7 +86,6 @@ export default function CurationTeamView() {
         <Card>
             <h2>About</h2>
             <p>{team.description || 'No description provided.'}</p>
-            <Meta>{team.policy || 'No moderation policy provided.'}</Meta>
             <Meta>Leader: {team.owner}</Meta>
         </Card>
 
@@ -148,9 +145,13 @@ export default function CurationTeamView() {
         {isLeader && <Card>
             <h2>Team settings</h2>
             <Form onSubmit={saveProfile}>
-                <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={team.name} aria-label="Team name" />
-                <Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={team.description || 'Description'} aria-label="Team description" />
-                <Textarea value={policy} onChange={(event) => setPolicy(event.target.value)} placeholder={team.policy || 'Policy'} aria-label="Team policy" />
+                <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={team.name || 'e.g. Signal Desk'} aria-label="Team name" />
+                <Textarea
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    placeholder={team.description || 'What this lens stands for — include how you moderate'}
+                    aria-label="Team description"
+                />
                 <Button type="submit" disabled={!!pendingFor('set_curation_team_profile')}>
                     {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
                 </Button>

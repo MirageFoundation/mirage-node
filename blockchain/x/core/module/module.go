@@ -1243,7 +1243,6 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"max_curation_team_description_length": func(d *types.Params, s types.Params) {
 		d.MaxCurationTeamDescriptionLength = s.MaxCurationTeamDescriptionLength
 	},
-	"max_curation_team_policy_length": func(d *types.Params, s types.Params) { d.MaxCurationTeamPolicyLength = s.MaxCurationTeamPolicyLength },
 	"subscription_transitions_per_block": func(d *types.Params, s types.Params) {
 		d.SubscriptionTransitionsPerBlock = s.SubscriptionTransitionsPerBlock
 	},

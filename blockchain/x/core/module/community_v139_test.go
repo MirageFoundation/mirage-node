@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -45,10 +46,10 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	joinOpenCommunity(t, mk, ctx, curator, slug)
 	unjoined := genAddr(35)
 	setPaidProfile(t, mk, ctx, unjoined)
-	_, err := mk.CreateCurationTeam(ctx, unjoined, slug, "Unjoined", "", "")
+	_, err := mk.CreateCurationTeam(ctx, unjoined, slug, "Unjoined", "")
 	require.ErrorContains(t, err, "must join community")
 
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "Team description", "Policy")
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "Team description")
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), teamID)
 	require.NoError(t, mk.InviteCurator(ctx, leader, slug, teamID, curator))
@@ -113,7 +114,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	freeTier := mk.GetParams(ctx).GetTierConfig(types.LevelFree)
 	require.NotNil(t, freeTier)
 	require.NoError(t, mk.JoinCommunity(ctx, free, slug, uint32(freeTier.MaxJoinedCommunities)))
-	_, err = mk.CreateCurationTeam(ctx, free, slug, "Free", "", "")
+	_, err = mk.CreateCurationTeam(ctx, free, slug, "Free", "")
 	require.ErrorContains(t, err, "active subscriber")
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
@@ -180,7 +181,7 @@ func TestCurationTeamMemberAndPendingInviteCap(t *testing.T) {
 	slug := "ten-curators"
 	setPaidProfile(t, mk, ctx, leader)
 	joinOpenCommunity(t, mk, ctx, leader, slug)
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Ten", "", "")
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Ten", "")
 	require.NoError(t, err)
 
 	var curators []string
@@ -202,7 +203,7 @@ func TestCurationTeamMemberAndPendingInviteCap(t *testing.T) {
 	otherLeader := genAddr(72)
 	setPaidProfile(t, mk, ctx, otherLeader)
 	joinOpenCommunity(t, mk, ctx, otherLeader, slug)
-	otherTeamID, err := mk.CreateCurationTeam(ctx, otherLeader, slug, "Other", "", "")
+	otherTeamID, err := mk.CreateCurationTeam(ctx, otherLeader, slug, "Other", "")
 	require.NoError(t, err)
 	require.ErrorContains(t, mk.InviteCurator(ctx, otherLeader, slug, otherTeamID, curators[0]), "already curates")
 }
@@ -217,7 +218,7 @@ func TestLeaderExpiryTransfersToEarliestPaidCurator(t *testing.T) {
 		setPaidProfile(t, mk, ctx, owner)
 		joinOpenCommunity(t, mk, ctx, owner, slug)
 	}
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Expiry", "", "")
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Expiry", "")
 	require.NoError(t, err)
 	for _, curator := range []string{first, second} {
 		require.NoError(t, mk.InviteCurator(ctx, leader, slug, teamID, curator))
@@ -237,7 +238,7 @@ func TestLeaderExpiryTransfersToEarliestPaidCurator(t *testing.T) {
 		setPaidProfile(t, mk, ctx, owner)
 		joinOpenCommunity(t, mk, ctx, owner, soloSlug)
 	}
-	soloTeamID, err := mk.CreateCurationTeam(ctx, soloLeader, soloSlug, "Solo", "", "")
+	soloTeamID, err := mk.CreateCurationTeam(ctx, soloLeader, soloSlug, "Solo", "")
 	require.NoError(t, err)
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
@@ -265,7 +266,7 @@ func TestV139MigrationRecountsPinnedPaidSubscribersAndDropsCommunityState(t *tes
 		require.NoError(t, mk.SetSubscription(ctx, owner, types.LevelSubscriber, ctx.BlockTime().Unix()+86400))
 		joinOpenCommunity(t, mk, ctx, owner, slug)
 	}
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Legacy", "Migrated", "")
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Legacy", "Migrated")
 	require.NoError(t, err)
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
@@ -295,6 +296,34 @@ func TestV139MigrationRecountsPinnedPaidSubscribersAndDropsCommunityState(t *tes
 	require.NoError(t, err)
 	require.False(t, hasCommunity)
 	require.NoError(t, mk.MigrateV139(ctx))
+}
+
+func TestCurationTeamDescriptionLimitAndNoPolicy(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(41)
+	slug := "desc-limit"
+	setPaidProfile(t, mk, ctx, leader)
+	joinOpenCommunity(t, mk, ctx, leader, slug)
+
+	params := mk.GetParams(ctx)
+	require.Equal(t, uint64(4000), params.MaxCurationTeamDescriptionLength)
+	require.NotContains(t, params.String(), "max_curation_team_policy_length")
+
+	over := strings.Repeat("x", int(params.MaxCurationTeamDescriptionLength)+1)
+	_, err := mk.CreateCurationTeam(ctx, leader, slug, "Long", over)
+	require.ErrorContains(t, err, "description exceeds")
+
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Ok", "guidance in description")
+	require.NoError(t, err)
+	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "guidance in description", team.Description)
+	require.NoError(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, "Ok", "updated guidance"))
+	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "updated guidance", team.Description)
 }
 
 func TestRetiredCommunityOwnershipHandlersReject(t *testing.T) {

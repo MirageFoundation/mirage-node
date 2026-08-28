@@ -225,14 +225,14 @@ export async function setBiography(biography) {
     return h.setBiography(biography);
 }
 
-export async function createCuratorTeam(community, name, description, policy) {
+export async function createCuratorTeam(community, name, description) {
     const h = await getHandler();
-    return h.createCuratorTeam(community, name, description, policy);
+    return h.createCuratorTeam(community, name, description);
 }
 
-export async function updateCurationTeam(community, teamId, name, description, policy) {
+export async function updateCurationTeam(community, teamId, name, description) {
     const h = await getHandler();
-    return h.updateCurationTeam(community, teamId, name, description, policy);
+    return h.updateCurationTeam(community, teamId, name, description);
 }
 
 export async function inviteCurationTeamMember(community, teamId, invitee) {

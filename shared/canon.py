@@ -662,12 +662,11 @@ def canon_base_unblock_community(pubkey, last_block_hash, difficulty, timestamp,
     return bytes(out)
 
 
-def canon_base_create_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, name, description, policy, nonce=0):
+def canon_base_create_curation_team(pubkey, last_block_hash, difficulty, timestamp, community, name, description, nonce=0):
     out = _canon_envelope("MsgCreateCurationTeam", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
     out += _enc_str(101, name)
     out += _enc_str(102, description)
-    out += _enc_str(103, policy)
     return bytes(out)
 
 
@@ -679,13 +678,12 @@ def canon_base_set_curation_preference(pubkey, last_block_hash, difficulty, time
     return bytes(out)
 
 
-def canon_base_set_curation_team_profile(pubkey, last_block_hash, difficulty, timestamp, community, team_id, name, description, policy, nonce=0):
+def canon_base_set_curation_team_profile(pubkey, last_block_hash, difficulty, timestamp, community, team_id, name, description, nonce=0):
     out = _canon_envelope("MsgSetCurationTeamProfile", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
     out += _enc_u64(101, int(team_id))
     out += _enc_str(102, name)
     out += _enc_str(103, description)
-    out += _enc_str(104, policy)
     return bytes(out)
 
 

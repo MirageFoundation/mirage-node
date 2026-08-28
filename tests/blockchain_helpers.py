@@ -67,6 +67,10 @@ from shared.canon import (
     canon_base_subscribe as _canon_base_subscribe_raw,
     canon_base_vote as _canon_base_vote_raw,
     canon_base_annotate as _canon_base_annotate_raw,
+    canon_base_create_curation_team as _canon_base_create_curation_team_raw,
+    canon_base_set_curation_team_profile as _canon_base_set_curation_team_profile_raw,
+    canon_base_set_curation_preference as _canon_base_set_curation_preference_raw,
+    canon_base_set_curation_post_hidden as _canon_base_set_curation_post_hidden_raw,
     canon_signed_with_pow,
 )
 from shared.datatypes import (
@@ -102,6 +106,10 @@ from shared.datatypes import (
     MsgLeaveCommunity,
     MsgBlockCommunity,
     MsgUnblockCommunity,
+    MsgCreateCurationTeam,
+    MsgSetCurationTeamProfile,
+    MsgSetCurationPreference,
+    MsgSetCurationPostHidden,
 )
 
 from tests.common import (
@@ -1667,6 +1675,143 @@ def _build_msg_set_auto_renewal(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.auto_renew = auto_renew
+    return msg
+
+
+
+def _build_msg_create_curation_team(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    name: str,
+    description: str = "",
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgCreateCurationTeam:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_create_curation_team_raw(
+        pub, lb_bytes, diff, ts, slug, name, description, nonce=nonce
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgCreateCurationTeam()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    msg.name = name
+    msg.description = description
+    return msg
+
+
+def _build_msg_set_curation_team_profile(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    name: str,
+    description: str = "",
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationTeamProfile:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_set_curation_team_profile_raw(
+        pub, lb_bytes, diff, ts, slug, team_id, name, description, nonce=nonce
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetCurationTeamProfile()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.name = name
+    msg.description = description
+    return msg
+
+
+def _build_msg_set_curation_preference(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    mode: int,
+    pinned_team_id: int = 0,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationPreference:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_set_curation_preference_raw(
+        pub, lb_bytes, diff, ts, slug, mode, pinned_team_id, nonce=nonce
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetCurationPreference()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    msg.mode = int(mode)
+    msg.pinned_team_id = int(pinned_team_id)
+    return msg
+
+
+def _build_msg_set_curation_post_hidden(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    hidden: bool = True,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationPostHidden:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    slug = str(community or "").strip().lower()
+    base = _canon_base_set_curation_post_hidden_raw(
+        pub, lb_bytes, diff, ts, slug, team_id, target, hidden, nonce=nonce
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetCurationPostHidden()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = sig
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = target
+    msg.hidden = bool(hidden)
     return msg
 
 

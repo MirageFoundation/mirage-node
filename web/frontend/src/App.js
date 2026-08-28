@@ -1135,6 +1135,10 @@ class App extends Component {
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="following" />}
                                             />
                                             <Route
+                                                path="/c/:topic/teams/new"
+                                                element={<CurationTeamsView createOnly />}
+                                            />
+                                            <Route
                                                 path="/c/:topic/teams/:teamId"
                                                 element={<CurationTeamView />}
                                             />

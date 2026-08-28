@@ -172,6 +172,8 @@ const ERROR_MAP = {
 
     // Subscription
     not_subscriber: "This action requires an active subscription.",
+    must_join_community: "Follow this community before creating a curator team.",
+    already_curator: "You already curate a team in this community.",
     invalid_level: "Invalid subscription level.",
     invalid_period_count: "Choose between 1 and 12 subscription periods.",
     insufficient_balance: "Insufficient balance to complete this transaction.",

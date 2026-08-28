@@ -373,9 +373,6 @@ export default function DiscoverView({ state }) {
         <>
             <HeaderRow>
                 <HeaderTitle>Communities</HeaderTitle>
-                <Button to="/curator-teams/new" variant="primary" size="sm">
-                    Create curator team
-                </Button>
             </HeaderRow>
             <SearchRow>
                 <SearchField>

@@ -858,7 +858,7 @@ message MsgCreateCommunity {
   string description = 102;
   string original_team_name = 103;
   string bio = 104;
-  string policy = 105;
+  reserved 105; // was policy
 }
 
 message MsgCreateCommunityResponse {}
@@ -971,7 +971,7 @@ message MsgCreateCurationTeam {
   string community = 100;
   string name = 101;
   string description = 102;
-  string policy = 103;
+  reserved 103; // was policy — description carries moderation guidance
 }
 
 message MsgCreateCurationTeamResponse {}
@@ -990,7 +990,7 @@ message MsgSetCurationTeamProfile {
   uint64 team_id = 101;
   string name = 102;
   string description = 103;
-  string policy = 104;
+  reserved 104; // was policy — description carries moderation guidance
 }
 
 message MsgSetCurationTeamProfileResponse {}
@@ -1239,7 +1239,7 @@ message MsgGovCreateCommunity {
   string description = 5;
   string original_team_name = 6;
   string bio = 7;
-  string policy = 8;
+  reserved 8; // was policy
 }
 
 message MsgGovCreateCommunityResponse {}
@@ -1260,7 +1260,7 @@ message MsgGovCreateCurationTeam {
   string owner = 3;
   string name = 4;
   string description = 5;
-  string policy = 6;
+  reserved 6; // was policy — description carries moderation guidance
 }
 
 message MsgGovCreateCurationTeamResponse {}

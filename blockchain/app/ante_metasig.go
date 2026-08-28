@@ -704,7 +704,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeString(100, m.Community)
 				w.writeString(101, m.Name)
 				w.writeString(102, m.Description)
-				w.writeString(103, m.Policy)
 			}); err != nil {
 				return ctx, err
 			}
@@ -714,7 +713,6 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(101, m.TeamId)
 				w.writeString(102, m.Name)
 				w.writeString(103, m.Description)
-				w.writeString(104, m.Policy)
 			}); err != nil {
 				return ctx, err
 			}

@@ -764,19 +764,54 @@ const TopicHeroDescription = styled.div`
 `;
 
 const CommunityLensBar = styled.div`
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    width: 100%;
+    margin: 0;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
-    font-size: 0.68rem;
+
     @media (max-width: 600px) {
-        align-items: flex-start;
-        flex-direction: column;
+        flex-wrap: wrap;
+        row-gap: 0.35rem;
         padding: 0.5rem 0;
     }
+`;
+
+const CommunityLensLeading = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    min-width: 0;
+    flex: 1 1 auto;
+`;
+
+const CommunityLensTitle = styled.h1`
+    margin: 0;
+    padding: 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    min-width: 0;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 0 1 auto;
+`;
+
+const CommunityLensControls = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    flex: 0 0 auto;
+    margin-left: auto;
 `;
 
 /**
@@ -1113,14 +1148,22 @@ const MainView = ({
                                 </TopicHeroDescription>
                             </TopicHeroCard>}
 
-                            {isLoggedIn && isCurrentTopic && !isUrlTopicBlocked && <CommunityLensBar>
-                                <strong>{communityLabel(urlTopic)}</strong>
-                                <CurationLensPicker
-                                    community={urlTopic}
-                                    viewer={viewerAddress}
-                                    onChange={handleLensChange}
-                                />
-                            </CommunityLensBar>}
+                            {isCurrentTopic && !isUrlTopicBlocked && (
+                                <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
+                                    <CommunityLensLeading>
+                                        <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
+                                        <CurationLensPicker
+                                            community={urlTopic}
+                                            viewer={viewerAddress}
+                                            onChange={handleLensChange}
+                                        />
+                                    </CommunityLensLeading>
+                                    <CommunityLensControls>
+                                        <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                        <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
+                                    </CommunityLensControls>
+                                </CommunityLensBar>
+                            )}
 
                             {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
                                 {/* Keep only the feed title row at the top for home/following. */}
@@ -1235,7 +1278,10 @@ const MainView = ({
                                 has loaded, so guests never flash an empty/splash state) */}
                             {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
-                                    <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
+                                    {/* Community feeds already show the real title in CommunityLensBar. */}
+                                    {!isCurrentTopic && (
+                                        <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
+                                    )}
                                     <FeedCardSkeletonList count={5} />
                                 </FeedSkeletonColumn>
                             )}
@@ -1279,17 +1325,10 @@ const MainView = ({
                                     const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
                                     return hasValidTitle && hasValidTopic && !p.deleted;
                                 });
-                                // Feed header is now owned by ListFeedView (sort + view controls only).
-                                // Create-post action and nav tabs live in the left rail / sidebar,
-                                // so we no longer inject a sidebar column here.
-                                // Feed header is shown on all/topic feeds only.
-                                // Home/following keep the toolbar controls without an
-                                // extra title header above the posts.
-                                const isTopicFeed = !!urlTopic && !['home', 'following', 'all'].includes(urlTopic);
-                                const showFeedToolbar = urlTopic === 'all' || isTopicFeed;
-                                let feedTitle = null;
-                                if (urlTopic === 'all') feedTitle = 'All';
-                                else if (isTopicFeed) feedTitle = communityLabel(urlTopic);
+                                // Community feeds own title + lens + sort/view in CommunityLensBar.
+                                // Only the All feed still uses ListFeedView's toolbar title row.
+                                const showFeedToolbar = urlTopic === 'all';
+                                const feedTitle = urlTopic === 'all' ? 'All' : null;
                                 return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
                             })()}
 

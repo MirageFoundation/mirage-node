@@ -10,7 +10,7 @@ import (
 	"mirage/x/core/types"
 )
 
-func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, description, policy string) (uint64, error) {
+func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, description string) (uint64, error) {
 	params := k.GetParams(ctx)
 	if _, err := types.CanonicalAccBytes(owner); err != nil {
 		return 0, err
@@ -23,9 +23,6 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	}
 	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
 		return 0, fmt.Errorf("description exceeds max_curation_team_description_length")
-	}
-	if uint64(utf8.RuneCountInString(policy)) > params.MaxCurationTeamPolicyLength {
-		return 0, fmt.Errorf("policy exceeds max_curation_team_policy_length")
 	}
 	core, found, err := k.loadProfile(ctx, owner)
 	if err != nil {
@@ -81,7 +78,6 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 		Owner:           owner,
 		Name:            name,
 		Description:     description,
-		Policy:          policy,
 		CreatedHeight:   ctx.BlockHeight(),
 		CreatedOrder:    next,
 		NextMemberOrder: 2,
@@ -108,7 +104,6 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 		sdk.NewAttribute("owner", owner),
 		sdk.NewAttribute("name", name),
 		sdk.NewAttribute("description", description),
-		sdk.NewAttribute("policy", policy),
 		sdk.NewAttribute("created_height", fmt.Sprintf("%d", team.CreatedHeight)),
 		sdk.NewAttribute("created_order", fmt.Sprintf("%d", team.CreatedOrder)),
 	))
@@ -280,7 +275,7 @@ func (k Keeper) RequireTeamCurator(ctx sdk.Context, actor, slug string, teamID u
 	return k.requireTeamActor(ctx, actor, slug, teamID, false)
 }
 
-func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, teamID uint64, name, description, policy string) error {
+func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, teamID uint64, name, description string) error {
 	team, err := k.RequireTeamOwner(ctx, actor, slug, teamID)
 	if err != nil {
 		return err
@@ -291,9 +286,6 @@ func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, t
 	}
 	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
 		return fmt.Errorf("description exceeds max_curation_team_description_length")
-	}
-	if uint64(utf8.RuneCountInString(policy)) > params.MaxCurationTeamPolicyLength {
-		return fmt.Errorf("policy exceeds max_curation_team_policy_length")
 	}
 	oldNorm := types.NormalizeTeamNameKey(team.Name)
 	newNorm := types.NormalizeTeamNameKey(name)
@@ -313,7 +305,6 @@ func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, t
 	}
 	team.Name = name
 	team.Description = description
-	team.Policy = policy
 	if err := k.SetCurationTeam(ctx, team); err != nil {
 		return err
 	}
@@ -323,7 +314,6 @@ func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, t
 		sdk.NewAttribute("owner", team.Owner),
 		sdk.NewAttribute("name", team.Name),
 		sdk.NewAttribute("description", team.Description),
-		sdk.NewAttribute("policy", team.Policy),
 	))
 	return nil
 }

@@ -30,7 +30,7 @@ func (am AppModule) GovCreateCurationTeam(ctx context.Context, req *types.MsgGov
 		return nil, err
 	}
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	if _, err := am.k.CreateCurationTeam(sdkCtx, strings.TrimSpace(req.GetOwner()), strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription(), req.GetPolicy()); err != nil {
+	if _, err := am.k.CreateCurationTeam(sdkCtx, strings.TrimSpace(req.GetOwner()), strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription()); err != nil {
 		return nil, err
 	}
 	return &types.MsgGovCreateCurationTeamResponse{}, nil

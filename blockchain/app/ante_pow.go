@@ -782,7 +782,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				w.writeString(100, m.Community)
 				w.writeString(101, m.Name)
 				w.writeString(102, m.Description)
-				w.writeString(103, m.Policy)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err
@@ -793,7 +792,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				w.writeUvarint(101, m.TeamId)
 				w.writeString(102, m.Name)
 				w.writeString(103, m.Description)
-				w.writeString(104, m.Policy)
 			}), verifyPoW)
 			if err != nil {
 				return ctx, err

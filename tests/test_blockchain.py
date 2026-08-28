@@ -76,6 +76,7 @@ from tests.cases.test_blockchain_features import (
     test_send_tokens_raw_log_present,
 )
 from tests.cases.test_blockchain_net_tags import test_net_tags_chain
+from tests.cases.test_blockchain_curation import test_curation_chain
 
 ALL_CATEGORIES = {
     "net_tags_chain": test_net_tags_chain,
@@ -107,6 +108,7 @@ ALL_CATEGORIES = {
     "envelope_replay": test_envelope_replay,
     "mandatory_nonce": test_mandatory_nonce,
     "envelope_fields": test_envelope_fields,
+    "curation": test_curation_chain,
 }
 
 STATELESS_CATEGORIES = {

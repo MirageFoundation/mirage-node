@@ -54,7 +54,7 @@ message CurationTeam {
   string owner = 3;
   string name = 4;
   string description = 5;
-  string policy = 6;
+  reserved 6; // was policy — description carries moderation guidance
   reserved 7; // was is_original
   bool subscriber_only = 8;
   uint64 subscriber_count = 9;

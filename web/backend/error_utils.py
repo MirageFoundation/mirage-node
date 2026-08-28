@@ -141,6 +141,8 @@ ERRORS = {
     "invalid_user_level": "invalid user level",
     # Subscription
     "not_subscriber": "active subscription required",
+    "must_join_community": "follow this community before creating a curator team",
+    "already_curator": "already a curator in this community",
     "invalid_level": "invalid level (must be 1; use set_auto_renewal to change auto-renewal)",
     "invalid_period_count": "period_count must be in [1,12]",
     "insufficient_balance": "insufficient balance",

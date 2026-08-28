@@ -85,7 +85,6 @@ def run(db, chain, logger):
                 name TEXT NOT NULL,
                 normalized_name TEXT NOT NULL,
                 bio TEXT NOT NULL,
-                policy TEXT NOT NULL,
                 is_original BOOLEAN NOT NULL,
                 subscriber_only BOOLEAN NOT NULL DEFAULT FALSE,
                 supporter_count NUMERIC(20,0) NOT NULL DEFAULT 0,

@@ -215,7 +215,7 @@ def community_teams(slug: str):
         with connect_db() as conn:
             cur = conn.cursor()
             sql = """
-                SELECT t.team_id, t.owner, t.name, t.description, t.policy,
+                SELECT t.team_id, t.owner, t.name, t.description,
                        t.subscriber_only, t.subscriber_count, t.deleted_height,
                        COUNT(m.curator) AS member_count
                 FROM curation_teams t
@@ -238,11 +238,10 @@ def community_teams(slug: str):
                 "owner": r[1],
                 "name": r[2],
                 "description": r[3],
-                "policy": r[4],
-                "subscriber_only": bool(r[5]),
-                "subscriber_count": str(r[6]),
-                "deleted": r[7] is not None,
-                "member_count": int(r[8]),
+                "subscriber_only": bool(r[4]),
+                "subscriber_count": str(r[5]),
+                "deleted": r[6] is not None,
+                "member_count": int(r[7]),
             }
             for r in rows
         ]
@@ -263,7 +262,7 @@ def community_team_detail(slug: str, team_id: int):
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT owner, name, description, policy, subscriber_only,
+                SELECT owner, name, description, subscriber_only,
                        subscriber_count, created_height, created_order, deleted_height
                 FROM curation_teams
                 WHERE community=%s AND team_id=%s
@@ -301,12 +300,11 @@ def community_team_detail(slug: str, team_id: int):
                 "owner": row[0],
                 "name": row[1],
                 "description": row[2],
-                "policy": row[3],
-                "subscriber_only": bool(row[4]),
-                "subscriber_count": str(row[5]),
-                "created_height": int(row[6]),
-                "created_order": str(row[7]),
-                "deleted": row[8] is not None,
+                "subscriber_only": bool(row[3]),
+                "subscriber_count": str(row[4]),
+                "created_height": int(row[5]),
+                "created_order": str(row[6]),
+                "deleted": row[7] is not None,
                 "members": members,
             }
         )

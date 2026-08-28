@@ -2204,15 +2204,14 @@ class MessageProcessor:
                 cur.execute(
                     """
                     INSERT INTO curation_teams(
-                        community, team_id, owner, name, normalized_name, description, policy,
+                        community, team_id, owner, name, normalized_name, description,
                         subscriber_only, subscriber_count, created_height, created_order, deleted_height
-                    ) VALUES(%s,%s,%s,%s,LOWER(TRIM(%s)),%s,%s,%s,%s,%s,%s,NULLIF(%s,0))
+                    ) VALUES(%s,%s,%s,%s,LOWER(TRIM(%s)),%s,%s,%s,%s,%s,NULLIF(%s,0))
                     ON CONFLICT (community, team_id) DO UPDATE SET
                         owner=EXCLUDED.owner,
                         name=EXCLUDED.name,
                         normalized_name=EXCLUDED.normalized_name,
                         description=EXCLUDED.description,
-                        policy=EXCLUDED.policy,
                         subscriber_only=EXCLUDED.subscriber_only,
                         subscriber_count=EXCLUDED.subscriber_count,
                         created_height=EXCLUDED.created_height,
@@ -2226,7 +2225,6 @@ class MessageProcessor:
                         team["name"],
                         team["name"],
                         team["description"],
-                        team["policy"],
                         team["subscriber_only"],
                         team["subscriber_count"],
                         team["created_height"],

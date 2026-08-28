@@ -127,12 +127,24 @@ def check_params() -> None:
         ok("two subscription tiers")
     else:
         fail(f"tier count={len(tiers)}")
-    retired = {"max_community_title_length", "max_community_description_length"}
+    retired = {
+        "max_community_title_length",
+        "max_community_description_length",
+        "max_curation_team_policy_length",
+    }
     present = sorted(retired.intersection(params))
     if present:
-        fail(f"retired community metadata params remain: {present}")
+        fail(f"retired community/curation params remain: {present}")
     else:
-        ok("community title and description params retired")
+        ok("retired community metadata and team policy params are gone")
+    try:
+        desc_limit = int(params["max_curation_team_description_length"])
+    except (KeyError, TypeError, ValueError):
+        desc_limit = 0
+    if desc_limit == 4000:
+        ok("max_curation_team_description_length=4000")
+    else:
+        fail(f"max_curation_team_description_length={params.get('max_curation_team_description_length')!r}")
 
 
 def check_params_reach_backend() -> None:

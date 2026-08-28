@@ -525,7 +525,6 @@ def _build_pool():
     add_f(msg4, "max_pending_curator_invites_per_user", 59, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_curation_team_name_length", 62, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_curation_team_description_length", 63, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "max_curation_team_policy_length", 64, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "subscription_transitions_per_block", 65, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "curation_prune_keys_per_block", 66, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "creator_epoch_closures_per_block", 67, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -648,7 +647,6 @@ def _build_pool():
         ("description", 102, STRING, False),
         ("original_team_name", 103, STRING, False),
         ("bio", 104, STRING, False),
-        ("policy", 105, STRING, False),
     ])
     add_msg_fields("MsgSetCommunityMetadata", [
         ("community", 100, STRING, False),
@@ -673,14 +671,12 @@ def _build_pool():
         ("community", 100, STRING, False),
         ("name", 101, STRING, False),
         ("description", 102, STRING, False),
-        ("policy", 103, STRING, False),
     ])
     add_msg_fields("MsgSetCurationTeamProfile", [
         ("community", 100, STRING, False),
         ("team_id", 101, UINT64, False),
         ("name", 102, STRING, False),
         ("description", 103, STRING, False),
-        ("policy", 104, STRING, False),
     ])
     add_msg_fields("MsgInviteCurator", [
         ("community", 100, STRING, False),
@@ -783,7 +779,7 @@ def _build_pool():
     add_f(curation_team, "owner", 3, STRING)
     add_f(curation_team, "name", 4, STRING)
     add_f(curation_team, "description", 5, STRING)
-    add_f(curation_team, "policy", 6, STRING)
+    # field 6 was policy — reserved; description carries moderation guidance
     add_f(curation_team, "subscriber_only", 8, BOOL)
     add_f(curation_team, "subscriber_count", 9, UINT64)
     add_f(curation_team, "created_height", 10, INT64)

@@ -94,7 +94,6 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 				w.writeString(100, str(fields, "community"))
 				w.writeString(101, str(fields, "name"))
 				w.writeString(102, str(fields, "description"))
-				w.writeString(103, str(fields, "policy"))
 			}
 		case "MsgSetCurationTeamProfile":
 			fill = func(w *canonWriter) {
@@ -102,7 +101,6 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 				w.writeUvarint(101, u64(fields, "team_id"))
 				w.writeString(102, str(fields, "name"))
 				w.writeString(103, str(fields, "description"))
-				w.writeString(104, str(fields, "policy"))
 			}
 		case "MsgInviteCurator", "MsgRevokeCuratorInvite", "MsgRemoveCurator":
 			fill = func(w *canonWriter) {

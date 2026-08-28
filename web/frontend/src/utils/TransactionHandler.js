@@ -14,8 +14,8 @@ import { curationPendingKey, invalidateCurationReads, requireCommunitySlug, requ
 const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
 
 const CURATION_TX_SPECS = Object.freeze({
-    create_curation_team: ['MsgCreateCurationTeam', 'core/create_curation_team', [['community', 100, 'string'], ['name', 101, 'string'], ['description', 102, 'string'], ['policy', 103, 'string']]],
-    set_curation_team_profile: ['MsgSetCurationTeamProfile', 'core/set_curation_team_profile', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['name', 102, 'string'], ['description', 103, 'string'], ['policy', 104, 'string']]],
+    create_curation_team: ['MsgCreateCurationTeam', 'core/create_curation_team', [['community', 100, 'string'], ['name', 101, 'string'], ['description', 102, 'string']]],
+    set_curation_team_profile: ['MsgSetCurationTeamProfile', 'core/set_curation_team_profile', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['name', 102, 'string'], ['description', 103, 'string']]],
     invite_curator: ['MsgInviteCurator', 'core/invite_curator', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string']]],
     revoke_curator_invite: ['MsgRevokeCuratorInvite', 'core/revoke_curator_invite', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string']]],
     accept_curator_invite: ['MsgAcceptCuratorInvite', 'core/accept_curator_invite', [['community', 100, 'string'], ['team_id', 101, 'uint']]],
@@ -1047,7 +1047,7 @@ class TransactionHandler {
         }
     }
 
-    async createCuratorTeam(community, name, description = '', policy = '') {
+    async createCuratorTeam(community, name, description = '') {
         try {
             const slug = requireCommunitySlug(community);
             const teamName = String(name || '').trim();
@@ -1056,12 +1056,11 @@ class TransactionHandler {
                 community: slug,
                 name: teamName,
                 description: String(description),
-                policy: String(policy),
             }, slug);
         } catch (e) { return this._failFromException(e); }
     }
 
-    async updateCurationTeam(community, teamId, name, description = '', policy = '') {
+    async updateCurationTeam(community, teamId, name, description = '') {
         try {
             const slug = requireCommunitySlug(community);
             const id = requireTeamId(teamId);
@@ -1069,7 +1068,7 @@ class TransactionHandler {
             if (!teamName) throw new Error('team name is required');
             return this._enqueueCuration('set_curation_team_profile', {
                 community: slug, team_id: id, name: teamName,
-                description: String(description), policy: String(policy),
+                description: String(description),
             }, slug, id);
         } catch (e) { return this._failFromException(e); }
     }
@@ -2008,6 +2007,9 @@ class TransactionHandler {
         if (!data || typeof data !== 'object') return;
         if (data.username !== undefined) Storage.save('username', data.username);
         if (data.user_level !== undefined && data.user_level !== null) Storage.save('user_level', String(data.user_level));
+        if (Object.prototype.hasOwnProperty.call(data, 'effective_paid')) {
+            Storage.save('effective_paid', data.effective_paid === true ? '1' : '0');
+        }
         if (data.server_balance !== undefined) Storage.save('server_balance', String(data.server_balance));
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {

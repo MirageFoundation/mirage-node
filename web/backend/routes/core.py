@@ -499,6 +499,12 @@ def _classify_exception(err_str: str):
         return get_message("node_catching_up"), 503
     if "envelope_timestamp too old" in low:
         return get_message("envelope_expired"), 400
+    if "requires an active subscriber" in low:
+        return get_message("not_subscriber"), 400
+    if "must join community" in low:
+        return get_message("must_join_community"), 400
+    if "already a curator in this community" in low:
+        return get_message("already_curator"), 400
     # Chain simulation / broadcast rejections (HTTP 400 from chain = client error)
     if "simulate_gas http 400" in low:
         return "transaction rejected", 400
@@ -4288,11 +4294,12 @@ def core_create_curation_team():
         community = str(data.get("community", "")).strip().lower()
         name = str(data.get("name", "") or "")
         description = str(data.get("description", "") or "")
-        policy = str(data.get("policy", "") or "")
         if not community or not name:
             return jsonify({"error": "community and name required"}), 400
+        if not is_subscriber(env["user_addr"]):
+            return api_error_code("not_subscriber")
         pow_err = _maybe_pow_precheck(
-            rid, "create_curation_team", env, canon_base_create_curation_team, community, name, description, policy
+            rid, "create_curation_team", env, canon_base_create_curation_team, community, name, description
         )
         if pow_err:
             return pow_err
@@ -4301,7 +4308,6 @@ def core_create_curation_team():
         msg.community = community
         msg.name = name
         msg.description = description
-        msg.policy = policy
         return _broadcast_core_msg(
             rid,
             "create_curation_team",
@@ -4434,8 +4440,6 @@ def _curation_team_route(path, log_name, type_url, msg_cls, fields):
                 msg.name = str(data.get("name", "") or "")
             if "description" in fields:
                 msg.description = str(data.get("description", "") or "")
-            if "policy" in fields:
-                msg.policy = str(data.get("policy", "") or "")
             if "hidden" in fields:
                 msg.hidden = bool(data.get("hidden"))
             if "locked" in fields:
@@ -4458,7 +4462,7 @@ _curation_team_route(
     "set_curation_team_profile",
     "/mirage.core.v1.MsgSetCurationTeamProfile",
     MsgSetCurationTeamProfile,
-    {"community", "team_id", "name", "description", "policy"},
+    {"community", "team_id", "name", "description"},
 )
 _curation_team_route(
     "/api/core/invite_curator",
