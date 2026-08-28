@@ -2454,7 +2454,7 @@ func (app *App) RegisterUpgradeHandlers() {
 		"v1.39.0",
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.39.0 (communities, two-tier, creator pool)...")
+			sdkCtx.Logger().Info("Starting upgrade to v1.39.0 (communities, free/subscriber/admin tiers, creator pool)...")
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, fmt.Errorf("v1.39.0: RunMigrations failed: %w", err)

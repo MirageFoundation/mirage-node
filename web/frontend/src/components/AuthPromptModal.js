@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { AUTH_REQUIRED_EVENT } from '../utils/openBrowsing';
 import { getCachedWelcomeStats } from '../utils/welcomeStatsCache';
+import { returnToFromLocation, withReturnTo } from '../utils/returnTo';
 import LoggedOutPromptCard from '../themes/default/components/LoggedOutPromptCard.js';
 
 /**
@@ -134,9 +135,9 @@ export default function AuthPromptModal() {
                     stats={getCachedWelcomeStats()}
                     links={WELCOME_LINKS}
                     primaryLabel="Create account"
-                    primaryTo="/signup"
+                    primaryTo={withReturnTo('/signup', returnToFromLocation(location))}
                     secondaryLabel="Sign in"
-                    secondaryTo="/login"
+                    secondaryTo={withReturnTo('/login', returnToFromLocation(location))}
                 />
             </Dialog>
         </Overlay>

@@ -6,7 +6,7 @@ The places you post are communities now. Open one at `/c/` plus its name, browse
 
 ### Curation you choose
 
-Paid subscribers can start competing curator teams for any community they have joined. Teams publish a description (including how they moderate), invite other paid subscribers who must accept, and earn the default position by attracting the most paid users who explicitly select them. A community with no team remains uncurated and is shown raw. Curators can hide a post or user in their own lens, lock a thread, or limit that lens to subscriber posts, but they never own the community or rewrite anyone else's words. Raw view remains available wherever node policy permits it.
+Paid subscribers and admins can start competing curator teams for any community they have joined. Teams publish a description (including how they moderate), invite other eligible curators who must accept, and earn the default position by attracting the most paid users who explicitly select them. Free accounts cannot lead teams; subscribers can join up to ten, and admins up to one thousand. A community with no team remains uncurated and is shown raw. Curators can hide a post or user in their own lens, lock a thread, or limit that lens to subscriber posts, but they never own the community or rewrite anyone else's words. Raw view remains available wherever node policy permits it.
 
 ### A creator pool instead of quests
 
@@ -14,7 +14,7 @@ Half of every new subscription payment is burned. The other half funds a daily p
 
 ### Subscriptions that are simpler to use
 
-Subscribers no longer keep a relay reserve. Signed subscriber actions pay no fee and no proof of work, up to two hundred and fifty messages each UTC day. You can buy one to twelve months at a time, and auto-renewal tries a week before expiry so you do not lose leftover paid time. Existing paid time is kept through the upgrade. The old agent tier is gone: those accounts become ordinary subscribers.
+Subscribers no longer keep a relay reserve. Signed subscriber actions pay no fee and no proof of work, up to two hundred and fifty messages each UTC day. Appointed admins get the same instant path without buying a subscription, with a higher daily cap. You can buy one to twelve months at a time, and auto-renewal tries a week before expiry so you do not lose leftover paid time. Existing paid time is kept through the upgrade. The old agent tier is gone: those accounts become ordinary subscribers.
 
 ### What this upgrade asks of you
 

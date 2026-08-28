@@ -45,8 +45,8 @@ func TestDeductRelayGasFeeFailsFastOnCorruptProfile(t *testing.T) {
 }
 
 // TestDeductRelayGasFeeNoOpOnMissingProfile: v1.39.0 quota consume is keyed
-// off EffectivePaid. A missing profile is unpaid, so there is no quota to
-// charge and nothing to diverge.
+// off the owner's tier max_daily_relays. A missing profile is free-tier, so
+// there is no quota to charge and nothing to diverge.
 func TestDeductRelayGasFeeFailsFastOnMissingProfile(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()

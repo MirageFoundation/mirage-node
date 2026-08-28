@@ -1262,11 +1262,23 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"subscription_renewal_attempts_per_block": func(d *types.Params, s types.Params) {
 		d.SubscriptionRenewalAttemptsPerBlock = s.SubscriptionRenewalAttemptsPerBlock
 	},
-	"subscriber_daily_relay_limit": func(d *types.Params, s types.Params) { d.SubscriberDailyRelayLimit = s.SubscriberDailyRelayLimit },
+	"subscriber_daily_relay_limit": func(d *types.Params, s types.Params) {
+		d.SubscriberDailyRelayLimit = s.SubscriberDailyRelayLimit
+		// Keep the subscriber tier field in lockstep so runtime quota
+		// (tiers[level].max_daily_relays) and legacy proposals agree.
+		if len(d.Tiers) > 1 && d.Tiers[1] != nil {
+			d.Tiers[1].MaxDailyRelays = s.SubscriberDailyRelayLimit
+		}
+	},
 	"max_subscription_periods_per_purchase": func(d *types.Params, s types.Params) {
 		d.MaxSubscriptionPeriodsPerPurchase = s.MaxSubscriptionPeriodsPerPurchase
 	},
-	"tiers":         func(d *types.Params, s types.Params) { d.Tiers = s.Tiers },
+	"tiers": func(d *types.Params, s types.Params) {
+		d.Tiers = s.Tiers
+		if len(d.Tiers) > 1 && d.Tiers[1] != nil {
+			d.SubscriberDailyRelayLimit = d.Tiers[1].MaxDailyRelays
+		}
+	},
 	"award_configs": func(d *types.Params, s types.Params) { d.AwardConfigs = s.AwardConfigs },
 }
 
@@ -1318,7 +1330,26 @@ func applyParamUpdates(current types.Params, updates types.Params, mask *gogotyp
 	if reflect.DeepEqual(original, current) {
 		return types.Params{}, nil, fmt.Errorf("update_mask does not change any selected field")
 	}
+	syncSubscriberRelayLimit(&current, seen)
 	return current, changed, nil
+}
+
+// Subscriber daily quota lives on both Params.SubscriberDailyRelayLimit (legacy
+// governance field) and Tiers[1].MaxDailyRelays. Keep them identical so a
+// proposal that touches only one does not leave ValidateV139 failing.
+func syncSubscriberRelayLimit(p *types.Params, seen map[string]struct{}) {
+	if p == nil || len(p.Tiers) < 2 || p.Tiers[1] == nil {
+		return
+	}
+	_, touchedGlobal := seen["subscriber_daily_relay_limit"]
+	_, touchedTiers := seen["tiers"]
+	if touchedGlobal && !touchedTiers {
+		p.Tiers[1].MaxDailyRelays = p.SubscriberDailyRelayLimit
+		return
+	}
+	if touchedTiers && !touchedGlobal {
+		p.SubscriberDailyRelayLimit = p.Tiers[1].MaxDailyRelays
+	}
 }
 
 // UpdateParams stores new params after full Validate().
@@ -3137,7 +3168,7 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	return &types.MsgSetAutoRenewalResponse{}, nil
 }
 
-// Award handler accepts MsgAward, burns MIRAGE (free for admins level >= 100).
+// Award handler accepts MsgAward and burns MIRAGE unless the giver is an admin (level >= 100).
 func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgAwardResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	gasStart := sdkCtx.GasMeter().GasConsumed()
@@ -3181,9 +3212,11 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 		return nil, fmt.Errorf("unknown award_type: %s", awardType)
 	}
 
-	isAdmin := userLevel >= 100
+	if params.GetTierConfig(userLevel) == nil {
+		return nil, fmt.Errorf("tier config not found")
+	}
 	burnAmount := ac.Cost
-	if isAdmin {
+	if userLevel >= types.LevelAdminMin {
 		burnAmount = 0
 	}
 
@@ -3198,7 +3231,7 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 		"target", target,
 		"award_type", awardType,
 		"burned", burnAmount,
-		"admin", isAdmin,
+		"level", userLevel,
 	)
 
 	if owner != "" && authority != govAuthority {

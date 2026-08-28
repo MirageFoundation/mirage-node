@@ -165,7 +165,7 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 		if err != nil {
 			return err
 		}
-		if !found || !core.EffectivePaid {
+		if !found || !types.CanCurate(core) {
 			continue
 		}
 		if successor == "" || m.order < bestOrder || (m.order == bestOrder && m.addr < successor) {

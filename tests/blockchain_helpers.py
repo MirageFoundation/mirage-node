@@ -10,6 +10,7 @@ import os
 import random
 import time
 import tomllib
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 import grpc
@@ -159,6 +160,19 @@ def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float
 
     with contextlib.redirect_stdout(io.StringIO()):
         return int(compute_pow(base, diff, base_bits, pow_factor, lb))
+
+
+def _compute_pows_parallel(
+    jobs: list[tuple[bytes, int, int, float, str]],
+) -> list[int]:
+    """Order-preserving parallel PoW. Argon2 is CPU-bound; 8 workers fit local docker."""
+    if not jobs:
+        return []
+    if len(jobs) == 1:
+        return [_compute_pow_quiet(*jobs[0])]
+    workers = min(8, len(jobs))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(lambda j: _compute_pow_quiet(*j), jobs))
 
 
 def _pow_digest(base: bytes, lb_hex: str, proof: int) -> bytes:
@@ -313,11 +327,18 @@ def _get_chain_params() -> dict:
 
 
 def _get_tier_config(level: int) -> dict:
-    """Map user level to tier array index: 0->0, 1->1."""
+    """Map user level to tier array index: 0→0, 1→1, ≥100→2."""
     params = _get_chain_params()
     tiers = params.get("tiers") or []
-    idx_map = {0: 0, 1: 1}
-    idx = idx_map.get(int(level), -1)
+    lvl = int(level)
+    if lvl == 0:
+        idx = 0
+    elif lvl == 1:
+        idx = 1
+    elif lvl >= 100:
+        idx = 2
+    else:
+        idx = -1
     if idx < 0 or idx >= len(tiers):
         raise RuntimeError(f"tier index {idx} (level={level}) not in params")
     return tiers[idx]

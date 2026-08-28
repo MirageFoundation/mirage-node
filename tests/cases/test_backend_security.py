@@ -427,21 +427,23 @@ def test_security(backend: str):
             _fail("attack.award_invalid_pubkey_rejected", str(e))
 
     # ------ Operations on deleted posts ------
-    del_post = _do_post(backend, free_wallet, "test", f"Del target {_rand_str(4)}", "to be deleted")
+    del_post = _do_post(backend, sub_wallet, "test", f"Del target {_rand_str(4)}", "to be deleted", skip_pow=True)
     if del_post:
-        _wait_indexed(backend, free_addr, del_post)
-        _do_delete(backend, free_wallet, del_post)
-        time.sleep(3)
+        _wait_indexed(backend, sub_addr, del_post)
+        del_resp = _do_delete(backend, sub_wallet, del_post, skip_pow=True)
+        del_txh = str((del_resp or {}).get("tx_hash", "")).lower()
+        if del_txh:
+            _wait_tx_deliver(del_txh, timeout=15.0)
 
         # 10.7 Edit deleted post — handled gracefully
         resp = _do_edit(
             backend,
-            free_wallet,
+            sub_wallet,
             override_hash=del_post,
             topic="test",
             title="Edited deleted",
             content="body",
-            skip_pow=False,
+            skip_pow=True,
         )
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower()
@@ -451,7 +453,7 @@ def test_security(backend: str):
             _pass("attack.edit_deleted_post submitted (soft delete allows)")
 
         # 10.8 Vote on deleted post — handled gracefully
-        resp = _do_vote(backend, free_wallet, del_post, 1)
+        resp = _do_vote(backend, sub_wallet, del_post, 1, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower()
         if not txh or "not found" in err or "deleted" in err:
@@ -460,7 +462,9 @@ def test_security(backend: str):
             _pass("attack.vote_deleted_post submitted (soft delete allows)")
 
         # 10.9 Comment on deleted post — handled gracefully
-        comment_del = _do_post(backend, free_wallet, "", "", "Comment on deleted", target=del_post)
+        comment_del = _do_post(
+            backend, sub_wallet, "", "", "Comment on deleted", target=del_post, skip_pow=True
+        )
         if not comment_del:
             _pass("attack.comment_deleted_post_handled (rejected)")
         else:
@@ -471,18 +475,19 @@ def test_security(backend: str):
     # ------ Race conditions ------
 
     # 10.10 Rapid edits — 3 rapid edits in succession, handled gracefully
-    race_post = _do_post(backend, free_wallet, "test", f"Race {_rand_str(4)}", "race body")
+    race_post = _do_post(backend, sub_wallet, "test", f"Race {_rand_str(4)}", "race body", skip_pow=True)
     if race_post:
-        _wait_indexed(backend, free_addr, race_post)
+        _wait_indexed(backend, sub_addr, race_post)
         ok_count = 0
         for i in range(3):
             resp = _do_edit(
                 backend,
-                free_wallet,
+                sub_wallet,
                 override_hash=race_post,
                 topic="test",
                 title=f"Rapid edit {i}",
                 content=f"rapid body {i}",
+                skip_pow=True,
             )
             txh = str(resp.get("tx_hash", "")).lower()
             if txh or resp.get("error"):
@@ -827,7 +832,7 @@ def test_validation(backend: str):
             _pass(f"validation.username_{label} skipped (registration disabled)")
             continue
         try:
-            resp = _do_set_username_raw(backend, free_wallet, uname)
+            resp = _do_set_username_raw(backend, sub_wallet, uname, skip_pow=True)
             _expect_http_error(f"validation.username_{label}_rejected", resp, 400, expected)
         except Exception as e:
             _fail(f"validation.username_{label}_rejected", str(e))
@@ -839,8 +844,7 @@ def test_validation(backend: str):
             resp = _do_set_username_raw(backend, free_wallet, test_uname)
             txh = str(resp.get("tx_hash", "")).lower()
             if txh:
-                time.sleep(5)
-                resolved = get_username_from_address(backend, free_addr)
+                resolved = _wait_username(backend, free_addr, timeout=15.0)
                 if resolved and resolved.startswith("Anon-"):
                     _pass("validation.free_username_anon_prefix", username=resolved)
                 elif resolved:
@@ -924,11 +928,11 @@ def test_validation(backend: str):
     # ------ Report validation ------
 
     # 11.16 Report with oversized reason — rejected
-    test_post = _do_post(backend, free_wallet, "test", f"Report test {_rand_str(4)}", "body")
+    test_post = _do_post(backend, sub_wallet, "test", f"Report test {_rand_str(4)}", "body", skip_pow=True)
     if test_post:
-        _wait_indexed(backend, free_addr, test_post)
+        _wait_indexed(backend, sub_addr, test_post)
         try:
-            resp = _do_report(backend, free_wallet, test_post, "x" * 2000)
+            resp = _do_report(backend, sub_wallet, test_post, "x" * 2000, skip_pow=True)
             _expect_http_error("validation.report_reason_too_long_rejected", resp, 400, "reason too long")
         except Exception as e:
             _fail("validation.report_reason_too_long_rejected", str(e))

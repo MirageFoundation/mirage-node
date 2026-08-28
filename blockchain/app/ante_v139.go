@@ -118,12 +118,12 @@ func requireZeroFeeEligible(ctx sdk.Context, ck corekeeper.Keeper, tx sdk.Tx) er
 		if err != nil {
 			return err
 		}
-		paid, err := ck.IsEffectivePaid(ctx, owner)
+		usesQuota, err := ck.UsesRelayQuota(ctx, owner)
 		if err != nil {
 			return err
 		}
-		if !paid {
-			return fmt.Errorf("zero-fee Subscriber relay requires effective_paid")
+		if !usesQuota {
+			return fmt.Errorf("zero-fee relay requires a relay-quota tier")
 		}
 	}
 	return nil

@@ -261,9 +261,8 @@ export function useCreatePost({
             const chain = JSON.parse(chainRaw || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            // v1.39: Free (0) + Subscriber (1). Admins and leftover level-10
-            // accounts use the Subscriber tier limits.
-            const tierIndex = userLevel === 0 ? 0 : 1;
+            // Free=0, Subscriber=1, Admin(>=100)=2 — matches LevelToTierIndex.
+            const tierIndex = userLevel === 0 ? 0 : userLevel >= 100 ? 2 : 1;
             const isAdmin = userLevel >= 100;
             let tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxTitle = parseInt(tier.max_title_length) || 0;

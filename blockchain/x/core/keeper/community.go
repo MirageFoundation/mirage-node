@@ -449,10 +449,14 @@ func (k Keeper) ConsumeSubscriberQuota(ctx sdk.Context, owner string) error {
 		if err != nil {
 			return err
 		}
-		if !found || !core.EffectivePaid {
+		if !found {
 			return nil
 		}
 		params := k.GetParams(ctx)
+		limit := params.DailyRelayLimit(int(core.Level))
+		if limit == 0 {
+			return nil
+		}
 		q, _, err := k.getQuota(ctx, owner)
 		if err != nil {
 			return err
@@ -462,9 +466,9 @@ func (k Keeper) ConsumeSubscriberQuota(ctx sdk.Context, owner string) error {
 		if q.UtcEpoch != epoch {
 			used = 0
 		}
-		if used >= params.SubscriberDailyRelayLimit {
+		if used >= limit {
 			return fmt.Errorf("subscriber_daily_limit_reached epoch=%d limit=%d used=%d remaining=0 reset=%d",
-				epoch, params.SubscriberDailyRelayLimit, used, (epoch+1)*86400)
+				epoch, limit, used, (epoch+1)*86400)
 		}
 		return nil
 	}
@@ -472,10 +476,14 @@ func (k Keeper) ConsumeSubscriberQuota(ctx sdk.Context, owner string) error {
 	if err != nil {
 		return err
 	}
-	if !found || !core.EffectivePaid {
+	if !found {
 		return nil
 	}
 	params := k.GetParams(ctx)
+	limit := params.DailyRelayLimit(int(core.Level))
+	if limit == 0 {
+		return nil
+	}
 	epoch := types.UTCEpoch(ctx.BlockTime().Unix())
 	q, _, err := k.getQuota(ctx, owner)
 	if err != nil {
@@ -485,9 +493,9 @@ func (k Keeper) ConsumeSubscriberQuota(ctx sdk.Context, owner string) error {
 		q.UtcEpoch = epoch
 		q.Count = 0
 	}
-	if q.Count >= params.SubscriberDailyRelayLimit {
+	if q.Count >= limit {
 		return fmt.Errorf("subscriber_daily_limit_reached epoch=%d limit=%d used=%d remaining=0 reset=%d",
-			epoch, params.SubscriberDailyRelayLimit, q.Count, (epoch+1)*86400)
+			epoch, limit, q.Count, (epoch+1)*86400)
 	}
 	q.Count++
 	return k.setProto(ctx, types.KeySubscriberQuota(owner), &q)
@@ -510,4 +518,17 @@ func (k Keeper) IsEffectivePaid(ctx sdk.Context, owner string) (bool, error) {
 		return false, err
 	}
 	return found && core.EffectivePaid, nil
+}
+
+// UsesRelayQuota is true when the owner's tier skips PoW and consumes a daily
+// envelope quota (max_daily_relays > 0). Admins qualify without EffectivePaid.
+func (k Keeper) UsesRelayQuota(ctx sdk.Context, owner string) (bool, error) {
+	core, found, err := k.loadProfile(ctx, owner)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	return k.GetParams(ctx).DailyRelayLimit(int(core.Level)) > 0, nil
 }

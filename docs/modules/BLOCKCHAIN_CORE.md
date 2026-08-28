@@ -278,7 +278,7 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgVote`: Upvote or downvote content
 - `MsgEdit`: Edit existing content (within time window)
 - `MsgDelete`: Mark content as deleted (enforced by indexer)
-- `MsgAward`: Give an award to a post/comment (burns MIRAGE, free for admins)
+- `MsgAward`: Give an award to a post/comment (burns MIRAGE unless the giver is an admin, level >= 100)
 
 **Profile Messages:**
 - `MsgSetUsername`: Claim or change username
@@ -289,7 +289,7 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgBlockCommunity`, `MsgUnblockCommunity`: Personal community blocking
 
 **Curation Messages:**
-- `MsgCreateCurationTeam`: Start a subscriber-led curator team
+- `MsgCreateCurationTeam`: Start a curator team (paid subscribers and admins)
 - `MsgSetCurationPreference`: Select the node default, a team, or raw view
 - Invitation and membership messages: Maintain a consent-based paid curator roster
 - Moderation messages: Hide posts/users, lock threads, and set subscriber-only lenses

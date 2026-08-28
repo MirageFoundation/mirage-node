@@ -171,7 +171,7 @@ const ERROR_MAP = {
     pow_not_allowed_agents: "That agent feature is no longer available.",
 
     // Subscription
-    not_subscriber: "This action requires an active subscription.",
+    not_subscriber: "This action requires an active subscription or an admin account.",
     must_join_community: "Follow this community before creating a curator team.",
     already_curator: "You already curate a team in this community.",
     invalid_level: "Invalid subscription level.",

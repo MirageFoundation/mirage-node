@@ -425,9 +425,18 @@ class MessageProcessor:
             return
         with self.db._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT effective_paid FROM profiles WHERE LOWER(owner)=LOWER(%s)", (owner,))
+                cur.execute(
+                    """
+                    SELECT COALESCE(effective_paid, FALSE), COALESCE(level, 0)
+                    FROM profiles WHERE LOWER(owner)=LOWER(%s)
+                    """,
+                    (owner,),
+                )
                 row = cur.fetchone()
-        if not row or not bool(row[0]):
+        if not row:
+            return
+        # Relay-quota tiers: paid subscribers and admins (max_daily_relays > 0).
+        if not (bool(row[0]) or int(row[1] or 0) >= 100):
             return
         self.update_subscription_runtime(owner)
 
@@ -1785,6 +1794,10 @@ class MessageProcessor:
                         "time_iso": self.iso_timestamp(ts),
                     },
                 )
+            # Admins use the relay-quota path (max_daily_relays > 0) without
+            # EffectivePaid, so project quota as soon as level is appointed.
+            if level >= 100:
+                self.update_subscription_runtime(target)
         except Exception as e:
             logger.error("Error handling set_level: %s", e, exc_info=True)
 

@@ -54,6 +54,42 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).not.toMatch(/await selectLens/);
     });
 
+    it('shows Uncensored only when a community has no curator teams', () => {
+        const pickerSrc = readFileSync(
+            join(frontendSrc, 'themes/default/components/CurationLensPicker.js'),
+            'utf8',
+        );
+        expect(pickerSrc).toMatch(/uncensoredOnly/);
+        expect(pickerSrc).toMatch(/FixedLens/);
+        expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
+        expect(pickerSrc).toMatch(/Node default/);
+        expect(pickerSrc).toMatch(/>Uncensored</);
+    });
+
+    it('passes return paths through Sign in and Subscribe on the teams page', () => {
+        const teams = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
+            'utf8',
+        );
+        expect(teams).toMatch(/withReturnTo\('\/login'/);
+        expect(teams).toMatch(/withReturnTo\('\/subscription'/);
+    });
+
+    it('treats admins as eligible to create curator teams without effective_paid', () => {
+        const teams = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
+            'utf8',
+        );
+        const subscription = readFileSync(
+            join(frontendSrc, 'logic/useSubscription.js'),
+            'utf8',
+        );
+        expect(subscription).toMatch(/export const canCurate = \(effectivePaid, level\) => Boolean\(effectivePaid\) \|\| Number\(level\) >= 100/);
+        expect(subscription).toMatch(/if \(n >= 100\) return 2/);
+        expect(teams).toMatch(/canCurate\(data\.effective_paid, data\.user_level\)/);
+        expect(teams).toMatch(/or an admin account/);
+    });
+
     it('does not show Create curator team on the Communities discover page', () => {
         const discover = readFileSync(
             join(frontendSrc, 'themes/default/routes/DiscoverView.js'),

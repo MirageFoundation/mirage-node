@@ -443,6 +443,7 @@ def _build_pool():
     add_f(tier_config, "can_have_flair", 20, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "max_biography_length", 21, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_curation_memberships", 22, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_daily_relays", 23, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # AwardConfig (used in Params.award_configs)
     award_config = file_proto.message_type.add()

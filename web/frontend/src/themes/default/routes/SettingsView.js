@@ -909,7 +909,7 @@ export default function SettingsView({ state }) {
                                     <ToggleRow as="div">
                                         <div>
                                             <ToggleLabel>Hide downvoted posts</ToggleLabel>
-                                            <ToggleDesc>Immediately remove posts you downvote from feed</ToggleDesc>
+                                            <ToggleDesc>Remove them from Newest and Magic as soon as you vote. Refresh hides them either way.</ToggleDesc>
                                         </div>
                                         <Toggle checked={hideDownvotedPosts} onChange={e => {
                                             const val = !!e.target.checked;

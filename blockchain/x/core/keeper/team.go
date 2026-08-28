@@ -28,8 +28,8 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if err != nil {
 		return 0, err
 	}
-	if !found || !core.EffectivePaid {
-		return 0, fmt.Errorf("creating a curation team requires an active subscriber")
+	if !found || !types.CanCurate(core) {
+		return 0, fmt.Errorf("creating a curation team requires an active subscriber or admin")
 	}
 	if _, joined, err := k.GetPreference(ctx, owner, slug); err != nil {
 		return 0, err
@@ -132,8 +132,8 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 	if err != nil {
 		return err
 	}
-	if !found || !core.EffectivePaid {
-		return fmt.Errorf("invitee must be an active subscriber")
+	if !found || !types.CanCurate(core) {
+		return fmt.Errorf("invitee must be an active subscriber or admin")
 	}
 	if _, joined, err := k.GetPreference(ctx, target, slug); err != nil {
 		return err
@@ -343,8 +343,8 @@ func (k Keeper) SetCurationTeamOwner(ctx sdk.Context, slug string, teamID uint64
 	if err != nil {
 		return err
 	}
-	if !found || !core.EffectivePaid {
-		return fmt.Errorf("new owner must be an active subscriber")
+	if !found || !types.CanCurate(core) {
+		return fmt.Errorf("new owner must be an active subscriber or admin")
 	}
 	member, err := k.storeHas(ctx, types.KeyCurationTeamMember(slug, teamID, newOwner))
 	if err != nil {
@@ -409,8 +409,8 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 	if err != nil {
 		return err
 	}
-	if !found || !core.EffectivePaid {
-		return fmt.Errorf("must be an active subscriber")
+	if !found || !types.CanCurate(core) {
+		return fmt.Errorf("must be an active subscriber or admin")
 	}
 	if _, joined, err := k.GetPreference(ctx, actor, slug); err != nil {
 		return err
@@ -671,8 +671,8 @@ func (k Keeper) requireTeamActor(ctx sdk.Context, actor, slug string, teamID uin
 	if err != nil {
 		return nil, err
 	}
-	if !found || !core.EffectivePaid {
-		return nil, fmt.Errorf("must be an active subscriber")
+	if !found || !types.CanCurate(core) {
+		return nil, fmt.Errorf("must be an active subscriber or admin")
 	}
 	if ownerOnly {
 		if team.Owner != actor {

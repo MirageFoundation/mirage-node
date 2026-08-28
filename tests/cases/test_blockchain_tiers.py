@@ -408,13 +408,21 @@ def test_tier_features(backend: str) -> None:
     else:
         _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1}")
 
-    # 15.5 Only the free and subscriber tiers exist; the Agent tier is gone.
+    # 15.5 Three tiers: free, subscriber, admin. The Agent tier is gone.
     params = _get_chain_params()
     num_tiers = len(params.get("tiers") or [])
-    if num_tiers == 2:
-        _pass("tierfeature.exactly_2_tiers")
+    if num_tiers == 3:
+        _pass("tierfeature.exactly_3_tiers")
     else:
-        _fail("tierfeature.exactly_2_tiers", f"got {num_tiers}")
+        _fail("tierfeature.exactly_3_tiers", f"got {num_tiers}")
+    admin = _get_tier_config(100)
+    if int(admin.get("period_fee", -1)) == 0 and int(admin.get("max_curation_memberships", -1)) == 1000:
+        _pass("tierfeature.admin_appointed_not_purchased")
+    else:
+        _fail(
+            "tierfeature.admin_appointed_not_purchased",
+            f"fee={admin.get('period_fee')} curation={admin.get('max_curation_memberships')}",
+        )
 
     # 15.6 Free user content limit is enforced at chain
     fw = WALLETS["free"]

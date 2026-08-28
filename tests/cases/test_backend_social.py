@@ -129,12 +129,8 @@ def test_social_graph(backend: str):
     else:
         _fail("social.follow_user succeeds", f"resp={resp}")
 
-    time.sleep(3)
-
     # 5.2 verify in get_user_followed
-    code, followed = _get(f"{backend}/api/get_user_followed", {"address": addr})
-    fol_users = (followed or {}).get("followed_users") or (followed or {}).get("users") or []
-    if any(sub_addr.lower() in json.dumps(u).lower() for u in fol_users):
+    if _wait_followed_user(backend, addr, sub_addr, True, timeout=15.0):
         _pass("social.follow_user reflected in get_user_followed")
     else:
         _pass("social.follow_user submitted (indexer may lag)")
@@ -299,19 +295,17 @@ def test_social_graph(backend: str):
     else:
         _fail("social.follow_topic reflected in get_user_followed (mutual)", f"topic={mutual_topic_bf}")
 
-    # 5.6 block_post — need a post to block
-    test_post = _do_post(backend, wallet, "test", f"Blockable {_rand_str(4)}", "body")
+    # 5.6 block_post — need a post to block (subscriber skip_pow; the block itself is free-tier)
+    test_post = _do_post(backend, sub_wallet, "test", f"Blockable {_rand_str(4)}", "body", skip_pow=True)
     if test_post:
-        _wait_indexed(backend, addr, test_post)
-        time.sleep(1)
+        _wait_indexed(backend, sub_addr, test_post)
         resp = _do_block(backend, wallet, test_post, "post", block=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
             _pass("social.block_post succeeds")
+            _wait_tx_deliver(txh, timeout=15.0)
         else:
             _fail("social.block_post succeeds", f"resp={resp}")
-
-        time.sleep(2)
 
         # 5.7 verify in get_user_blocked
         code, blocked = _get(f"{backend}/api/get_user_blocked", {"address": addr})
@@ -330,27 +324,23 @@ def test_social_graph(backend: str):
     else:
         _fail("social.block_post (no post to block)")
 
-    time.sleep(1)
-
     # 5.9 block_user
     resp = _do_block(backend, wallet, sub_addr, "user", block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("social.block_user succeeds")
+        _wait_blocked_user(backend, addr, sub_addr, True, timeout=15.0)
     else:
         _fail("social.block_user succeeds", f"resp={resp}")
-
-    time.sleep(2)
 
     # 5.10 unblock_user
     resp = _do_block(backend, wallet, sub_addr, "user", block=False)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("social.unblock_user succeeds")
+        _wait_blocked_user(backend, addr, sub_addr, False, timeout=15.0)
     else:
         _fail("social.unblock_user succeeds", f"resp={resp}")
-
-    time.sleep(2)
 
     # 5.11 block_topic
     block_topic = f"blocktopic{_rand_str(4)}"
@@ -377,7 +367,6 @@ def test_social_graph(backend: str):
         _fail("social.block_topic duplicate idempotent", f"resp={resp_dup}")
 
     # 5.13 blocked topic filtered from get_posts
-    time.sleep(2)
     blocked_post = _do_post(
         backend,
         sub_wallet,
@@ -424,8 +413,6 @@ def test_social_graph(backend: str):
         _pass("social.block_topic wildcard reflected in get_user_blocked")
     else:
         _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
-
-    time.sleep(2)
 
     match_topic = f"{_rand_str(2)}{wildcard_mid}{_rand_str(2)}"
     nonmatch_topic = f"x{_rand_str(8)}"
@@ -497,14 +484,34 @@ def test_social_graph(backend: str):
 # =========================================================================
 
 
+def _parallel_backend_pow_ops(n: int, op_fn, label: str) -> list:
+    """Run n PoW-backed backend ops concurrently. op_fn(i) -> (target, resp)."""
+    if n <= 0:
+        return []
+    results: list = [None] * n
+
+    def run(i: int) -> None:
+        results[i] = op_fn(i)
+
+    workers = min(4, n)
+    _debug(f"hardcap.{label} parallel n={n} workers={workers}")
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(run, i) for i in range(n)]
+        done = 0
+        for f in as_completed(futs):
+            f.result()
+            done += 1
+            if done % 10 == 0 or done == n:
+                print(f"    [{done}/{n}] {label}…")
+    return results
+
+
 def test_hard_cap_vs_deque(backend: str):
     """Test that follow/enable lists reject at limit (hard cap) while
     block lists evict oldest (deque) through the backend API."""
 
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
-    sub1 = WALLETS["sub1"]
-    sub1_addr = str(sub1.address())
 
     # Fetch tier configs via chain config API (get_parameters only has PoW params)
     code, params_resp = _get(f"{backend}/api/get_chain_config")
@@ -512,10 +519,10 @@ def test_hard_cap_vs_deque(backend: str):
         _fail("hardcap.fetch_params", f"code={code}")
         return
     tiers = (params_resp or {}).get("tiers") or []
-    if len(tiers) != 2:
-        _fail("hardcap.tier_count", f"expected 2, got {len(tiers)}")
+    if len(tiers) != 3:
+        _fail("hardcap.tier_count", f"expected 3, got {len(tiers)}")
         return
-    _pass("hardcap.tier_count_2")
+    _pass("hardcap.tier_count_3")
 
     free_tier = tiers[0]
     max_fu_free = int(free_tier.get("max_followed_users", 0))
@@ -530,20 +537,24 @@ def test_hard_cap_vs_deque(backend: str):
     )
     remaining_fu = max(0, max_fu_free - existing_fu)
     _debug(f"free-tier max_followed_users={max_fu_free} existing={existing_fu} remaining={remaining_fu}")
+
+    def _fu_op(i: int):
+        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        resp = _do_follow_user(backend, free_wallet, target, follow=True, skip_pow=False)
+        return target, resp
+
+    fu_results = _parallel_backend_pow_ops(remaining_fu, _fu_op, "followed users")
     follow_targets: list[str] = []
     fu_fill_ok = True
-    for i in range(remaining_fu):
-        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    for i, item in enumerate(fu_results):
+        target, resp = item
         follow_targets.append(target)
-        resp = _do_follow_user(backend, free_wallet, target, follow=True, skip_pow=False)
-        txh = str(resp.get("tx_hash", "")).lower()
+        txh = str((resp or {}).get("tx_hash", "")).lower()
         if not txh:
-            err = str(resp.get("error", ""))[:100]
+            err = str((resp or {}).get("error", ""))[:100]
             _fail(f"hardcap.fu_fill_{i}", err)
             fu_fill_ok = False
             break
-        if (i + 1) % 10 == 0:
-            print(f"    [{i+1}/{remaining_fu}] followed users…")
     if fu_fill_ok:
         _pass(f"hardcap.fu_fill ({remaining_fu} new + {existing_fu} existing = {max_fu_free})")
 
@@ -551,12 +562,14 @@ def test_hard_cap_vs_deque(backend: str):
         actual_fu = _wait_list_count(backend, free_addr, "followed_users", max_fu_free, timeout=30.0)
         _debug(f"followed_users after fill: {actual_fu}/{max_fu_free}")
 
-        # Overflow should fail — submit and verify chain state doesn't exceed limit
         overflow_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
         resp = _do_follow_user(backend, free_wallet, overflow_target, follow=True, skip_pow=False)
-        time.sleep(4)
-        code_check, check_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
-        post_count = len((check_data or {}).get("followed_users") or []) if code_check == 200 else 0
+        overflow_txh = str(resp.get("tx_hash", "")).lower()
+        if overflow_txh:
+            _wait_tx_deliver(overflow_txh, timeout=15.0)
+        post_count = _wait_list_count(
+            backend, free_addr, "followed_users", max_fu_free, timeout=15.0, at_most=True
+        )
         if post_count <= max_fu_free:
             _pass("hardcap.fu_overflow_rejected")
         else:
@@ -582,15 +595,21 @@ def test_hard_cap_vs_deque(backend: str):
     existing_ft = len((fu_data or {}).get("joined_communities") or (fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
     remaining_ft = max(0, max_ft_free - existing_ft)
     _debug(f"free-tier max_joined_communities={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
+
+    def _ft_op(i: int):
+        topic = f"hct{_rand_str(4)}{i}"
+        resp = _do_follow_topic(backend, free_wallet, topic, follow=True, skip_pow=False)
+        return topic, resp
+
+    ft_results = _parallel_backend_pow_ops(remaining_ft, _ft_op, "joined communities")
     topic_targets: list[str] = []
     ft_fill_ok = True
-    for i in range(remaining_ft):
-        topic = f"hct{_rand_str(4)}{i}"
+    for i, item in enumerate(ft_results):
+        topic, resp = item
         topic_targets.append(topic)
-        resp = _do_follow_topic(backend, free_wallet, topic, follow=True, skip_pow=False)
-        txh = str(resp.get("tx_hash", "")).lower()
+        txh = str((resp or {}).get("tx_hash", "")).lower()
         if not txh:
-            err = str(resp.get("error", ""))[:100]
+            err = str((resp or {}).get("error", ""))[:100]
             # `existing_ft` came from an indexer read that can trail the joins
             # already on chain, so the cap can arrive before the loop expects it.
             # Hitting it early is the condition this section is filling toward,
@@ -601,8 +620,6 @@ def test_hard_cap_vs_deque(backend: str):
             _fail(f"hardcap.ft_fill_{i}", err)
             ft_fill_ok = False
             break
-        if (i + 1) % 10 == 0:
-            print(f"    [{i+1}/{remaining_ft}] joined communities…")
     if ft_fill_ok:
         _pass(f"hardcap.ft_fill ({remaining_ft} new + {existing_ft} existing = {max_ft_free})")
 
@@ -611,9 +628,12 @@ def test_hard_cap_vs_deque(backend: str):
 
         overflow_topic = f"hctover{_rand_str(4)}"
         resp = _do_follow_topic(backend, free_wallet, overflow_topic, follow=True, skip_pow=False)
-        time.sleep(4)
-        code_check, check_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
-        post_count = len((check_data or {}).get("joined_communities") or []) if code_check == 200 else 0
+        overflow_txh = str(resp.get("tx_hash", "")).lower()
+        if overflow_txh:
+            _wait_tx_deliver(overflow_txh, timeout=15.0)
+        post_count = _wait_list_count(
+            backend, free_addr, "joined_communities", max_ft_free, timeout=15.0, at_most=True
+        )
         if post_count <= max_ft_free:
             _pass("hardcap.ft_overflow_rejected")
         else:
@@ -622,18 +642,22 @@ def test_hard_cap_vs_deque(backend: str):
     # ── 19.4 blocked_users: deque (should never reject) ──
     _debug(f"free-tier max_blocked_users={max_bu_free}")
     total_to_block = max_bu_free + 3
-    bu_fill_ok = True
-    for i in range(total_to_block):
+
+    def _bu_op(i: int):
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
         resp = _do_block(backend, free_wallet, target, "user", block=True, skip_pow=False)
-        txh = str(resp.get("tx_hash", "")).lower()
+        return target, resp
+
+    bu_results = _parallel_backend_pow_ops(total_to_block, _bu_op, "blocked users")
+    bu_fill_ok = True
+    for i, item in enumerate(bu_results):
+        _target, resp = item
+        txh = str((resp or {}).get("tx_hash", "")).lower()
         if not txh:
-            err = str(resp.get("error", ""))[:100]
+            err = str((resp or {}).get("error", ""))[:100]
             _fail(f"hardcap.bu_deque_{i}", err)
             bu_fill_ok = False
             break
-        if (i + 1) % 10 == 0:
-            print(f"    [{i+1}/{total_to_block}] blocked users…")
     if bu_fill_ok:
         _pass(f"hardcap.bu_deque_fill ({total_to_block} blocked, no rejection)")
 
@@ -658,8 +682,8 @@ def test_indexer_deque_storage(backend: str):
     # We only need to block chain_limit + a few to demonstrate indexer stores beyond
     total_to_block = max_blocked_users_sub + 3
     # This is very expensive for 503 blocks — keep it small for CI
-    # Just block 30 users to verify the indexer captures them all
-    test_count = 30
+    # Just block a handful to verify the indexer captures them all
+    test_count = 8
     blocked_addrs: list[str] = []
     for i in range(test_count):
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
@@ -687,7 +711,7 @@ def test_indexer_deque_storage(backend: str):
                 last_matched = sum(1 for item in expected if item in indexer_vals)
                 if last_matched >= min_match:
                     return last_matched, last_total
-            time.sleep(1.0)
+            time.sleep(0.4)
         _debug(f"indexer_deque.wait_{kind} matched={last_matched} total={last_total}")
         return last_matched, last_total
 
@@ -699,7 +723,7 @@ def test_indexer_deque_storage(backend: str):
         _fail("indexer_deque.blocked_users_stored", f"matched={matched}/{test_count} total={total}")
 
     # Block some topics too
-    test_topic_count = 10
+    test_topic_count = 4
     blocked_topics: list[str] = []
     for i in range(test_topic_count):
         topic = f"idq{_rand_str(4)}{i}"

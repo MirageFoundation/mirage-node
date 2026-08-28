@@ -90,24 +90,22 @@ func (d *PowDecorator) getUserLevel(ctx sdk.Context, pubkey []byte) (level int, 
 	return int(core.Level), addr, nil
 }
 
-// canUsePoW checks whether a user may use PoW instead of paying relayed gas.
-// Only free tier (level 0) may use PoW; paid users (>=1) must use reserve.
+// canUsePoW checks whether a user may use PoW instead of the daily relay quota.
+// Tiers with max_daily_relays == 0 (free) use PoW; relay-quota tiers must skip it.
 //
 // Decode errors from getUserLevel propagate; callers MUST reject the tx on
 // non-nil err to avoid silent free-tier routing on a corrupt profile.
 func (d *PowDecorator) canUsePoW(ctx sdk.Context, pubkey []byte) (allowed bool, reason string, err error) {
-	_, addr, lerr := d.getUserLevel(ctx, pubkey)
+	level, addr, lerr := d.getUserLevel(ctx, pubkey)
 	if lerr != nil {
 		return false, "", lerr
 	}
-	paid, perr := d.Keeper.IsEffectivePaid(ctx, addr)
-	if perr != nil {
-		return false, "", perr
+	params := d.Keeper.GetParams(ctx)
+	limit := params.DailyRelayLimit(level)
+	if limit == 0 {
+		return true, "pow path", nil
 	}
-	if !paid {
-		return true, "free path", nil
-	}
-	return false, fmt.Sprintf("effective_paid user must skip PoW, addr=%s", addr), nil
+	return false, fmt.Sprintf("relay-quota tier must skip PoW, addr=%s level=%d limit=%d", addr, level, limit), nil
 }
 
 // routePoWTx unifies the canUsePoW + checkRelayQuotaHeadroom decision used by
@@ -164,20 +162,16 @@ func (d *PowDecorator) checkRelayQuotaHeadroom(ctx sdk.Context, pubkey []byte, p
 		return fmt.Errorf("CONSENSUS_FATAL:PROFILE_DECODE addr=%s bytes=%d: %w", addr, len(bz), err)
 	}
 
-	if !core.EffectivePaid {
+	limit := params.DailyRelayLimit(int(core.Level))
+	if limit == 0 {
 		return nil
 	}
 
-	// Admins (level >= 100) are manually appointed and not quota-bound.
-	if core.Level >= 100 {
-		return nil
-	}
-
-	// A paid user may carry at most as many messages in one transaction as the
-	// daily relay quota still has room for.
+	// A relay-quota user may carry at most as many messages in one transaction
+	// as the daily relay quota still has room for.
 	//
 	// Routing is decided once per message from the state as it stood before any
-	// handler ran, and a paid user's PoW is waived at that point, so without this
+	// handler ran, and a relay user's PoW is waived at that point, so without this
 	// bound N was limited only by transaction size and block gas (review L-5).
 	// The resource being spent is the daily relay quota: v1.39.0 burned every
 	// escrowed reserve and stopped funding ReserveFunds, so a bound derived from
@@ -197,13 +191,13 @@ func (d *PowDecorator) checkRelayQuotaHeadroom(ctx sdk.Context, pubkey []byte, p
 			used = 0
 		}
 		var remaining uint64
-		if params.SubscriberDailyRelayLimit > used {
-			remaining = params.SubscriberDailyRelayLimit - used
+		if limit > used {
+			remaining = limit - used
 		}
 		if msgCount > remaining {
 			ctx.Logger().Error("checkRelayQuotaHeadroom: transaction carries more messages than the daily relay quota allows",
 				"owner", addr, "level", core.Level, "messages", msgCount,
-				"limit", params.SubscriberDailyRelayLimit, "used", used, "remaining", remaining)
+				"limit", limit, "used", used, "remaining", remaining)
 			return fmt.Errorf(
 				"insufficient relay quota: %d messages in one transaction but only %d remain today; submit them separately",
 				msgCount, remaining)

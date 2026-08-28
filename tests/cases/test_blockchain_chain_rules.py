@@ -241,7 +241,7 @@ def test_fee(backend: str) -> None:
     _, code, log, _, _ = _submit_tx(
         [(_fee_post(), "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub, fee_amount=0
     )
-    _check_reject("fee.zero_fee_rejected", code, log, "requires effective_paid")
+    _check_reject("fee.zero_fee_rejected", code, log, "requires a relay-quota tier")
 
     # 4.2 Wrong denom
     _, code, log, _, _ = _submit_tx(

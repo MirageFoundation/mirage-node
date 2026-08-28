@@ -123,8 +123,33 @@ def check_params() -> None:
     else:
         fail(f"subscriber_daily_relay_limit={params.get('subscriber_daily_relay_limit')!r}")
     tiers = params.get("tiers") or []
-    if len(tiers) == 2:
-        ok("two subscription tiers")
+    if len(tiers) == 3:
+        ok("three subscription tiers (free/subscriber/admin)")
+        try:
+            free_cap = int((tiers[0] or {}).get("max_curation_memberships", -1))
+            sub_cap = int((tiers[1] or {}).get("max_curation_memberships", -1))
+            admin_cap = int((tiers[2] or {}).get("max_curation_memberships", -1))
+            admin_fee = int((tiers[2] or {}).get("period_fee", -1))
+            free_relays = int((tiers[0] or {}).get("max_daily_relays", -1))
+            sub_relays = int((tiers[1] or {}).get("max_daily_relays", -1))
+            admin_relays = int((tiers[2] or {}).get("max_daily_relays", -1))
+        except (TypeError, ValueError):
+            free_cap = sub_cap = admin_cap = admin_fee = -1
+            free_relays = sub_relays = admin_relays = -1
+        if free_cap == 0 and sub_cap == 10 and admin_cap == 1000 and admin_fee == 0:
+            ok("curation membership caps free=0 subscriber=10 admin=1000")
+        else:
+            fail(
+                f"curation membership caps unexpected: free={free_cap} "
+                f"subscriber={sub_cap} admin={admin_cap} admin_fee={admin_fee}"
+            )
+        if free_relays == 0 and sub_relays == relay_limit and 1 <= admin_relays <= 10000:
+            ok(f"daily relay caps free=0 subscriber={sub_relays} admin={admin_relays}")
+        else:
+            fail(
+                f"daily relay caps unexpected: free={free_relays} "
+                f"subscriber={sub_relays} admin={admin_relays}"
+            )
     else:
         fail(f"tier count={len(tiers)}")
     retired = {

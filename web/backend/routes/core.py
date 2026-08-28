@@ -499,7 +499,7 @@ def _classify_exception(err_str: str):
         return get_message("node_catching_up"), 503
     if "envelope_timestamp too old" in low:
         return get_message("envelope_expired"), 400
-    if "requires an active subscriber" in low:
+    if "requires an active subscriber" in low or "requires an active subscriber or admin" in low:
         return get_message("not_subscriber"), 400
     if "must join community" in low:
         return get_message("must_join_community"), 400
@@ -527,6 +527,29 @@ def get_nonce_for_subscriber(last_block_hash: str) -> str:
     import time
 
     return str(int(time.time()))
+
+
+def _profile_paid_and_level(addr: str) -> tuple[bool, int]:
+    """Return (effective_paid, level) from the indexer DB. Missing profile → (False, 0)."""
+    addr_lc = (addr or "").strip().lower()
+    if not addr_lc:
+        return False, 0
+    try:
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT COALESCE(effective_paid, FALSE), COALESCE(level, 0)
+                FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1
+                """,
+                (addr_lc,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False, 0
+            return bool(row[0]), int(row[1] or 0)
+    except Exception:
+        return False, 0
 
 
 def is_subscriber(addr: str) -> bool:
@@ -562,26 +585,35 @@ def is_subscriber(addr: str) -> bool:
         if addr_lc in per_request:
             return per_request[addr_lc]
 
-    try:
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COALESCE(effective_paid, FALSE) FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
-                (addr_lc,),
-            )
-            row = cur.fetchone()
-            is_sub = bool(row[0]) if row and row[0] is not None else False
-            if is_sub:
-                cache[addr_lc] = (now, True)
-                # Bound cache size
-                if len(cache) > 4096:
-                    oldest = min(cache.items(), key=lambda kv: kv[1][0])[0]
-                    cache.pop(oldest, None)
-            if per_request is not None:
-                per_request[addr_lc] = is_sub
-            return is_sub
-    except Exception:
-        return False
+    is_sub, _level = _profile_paid_and_level(addr_lc)
+    if is_sub:
+        cache[addr_lc] = (now, True)
+        if len(cache) > 4096:
+            oldest = min(cache.items(), key=lambda kv: kv[1][0])[0]
+            cache.pop(oldest, None)
+    if per_request is not None:
+        per_request[addr_lc] = is_sub
+    return is_sub
+
+
+def is_admin(addr: str) -> bool:
+    """True when the profile level is an appointed admin (level >= 100)."""
+    _paid, level = _profile_paid_and_level(addr)
+    return level >= 100
+
+
+def can_curate(addr: str) -> bool:
+    """Paid subscribers and admins may lead/join curator teams (matches chain CanCurate)."""
+    paid, level = _profile_paid_and_level(addr)
+    return paid or level >= 100
+
+
+def is_relay_exempt(addr: str) -> bool:
+    """Skip PoW / use zero-fee relay path when the tier has max_daily_relays > 0.
+
+    Equivalent to paid subscriber or admin under current defaults.
+    """
+    return can_curate(addr)
 
 
 def _get_post_owner(txhash: str) -> str | None:
@@ -881,8 +913,8 @@ def core_set_username():
         if not re.fullmatch(r"[A-Za-z0-9-]+", username):
             return api_error_code("username_invalid_format")
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        if not is_subscriber(user_addr):
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        if not is_relay_exempt(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             try:
@@ -965,11 +997,11 @@ def core_set_username():
         body_bytes = body.SerializeToString()
         content_len = len(msg.username)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1050,8 +1082,8 @@ def core_set_biography():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        if not is_subscriber(user_addr):
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        if not is_relay_exempt(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             try:
@@ -1110,11 +1142,11 @@ def core_set_biography():
         body_bytes = body.SerializeToString()
         content_len = len(msg.biography)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1206,7 +1238,7 @@ def core_block_post():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_block_post(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
@@ -1236,11 +1268,11 @@ def core_block_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1332,7 +1364,7 @@ def core_block_user():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_block_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
@@ -1362,11 +1394,11 @@ def core_block_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1424,7 +1456,7 @@ def core_unblock_post():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_unblock_post(
                     pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce
@@ -1456,11 +1488,11 @@ def core_unblock_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1518,7 +1550,7 @@ def core_unblock_user():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_unblock_user(
                     pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce
@@ -1550,11 +1582,11 @@ def core_unblock_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1631,7 +1663,7 @@ def core_follow_user():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_follow_user(
                     pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce
@@ -1662,11 +1694,11 @@ def core_follow_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(user)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1747,7 +1779,7 @@ def core_unfollow_user():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             try:
                 base = canon_base_unfollow_user(
                     pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce
@@ -1778,11 +1810,11 @@ def core_unfollow_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target) + len(user)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -1860,7 +1892,7 @@ def core_delete_post():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
@@ -1908,11 +1940,11 @@ def core_delete_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -2005,7 +2037,7 @@ def core_delete_user():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        if not is_subscriber(user_addr):
+        if not is_relay_exempt(user_addr):
             required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
@@ -2041,11 +2073,11 @@ def core_delete_user():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -2332,8 +2364,8 @@ def core_edit():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        if not is_subscriber(user_addr):
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        if not is_relay_exempt(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             topic_for_canon = topic if (topic and not is_comment) else ""
@@ -2412,11 +2444,11 @@ def core_edit():
         media_len = sum(len(m) for m in media)
         content_len = len(target) + len(topic) + len(title) + len(content) + len(tag) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -2620,11 +2652,11 @@ def core_annotate():
         media_len = sum(len(m) for m in media)
         content_len = len(topic) + len(title) + len(content) + len(tag) + len(appendix) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -2820,8 +2852,7 @@ def core_post():
             p = expect_params()
             tiers = p.get("tiers") or []
             level = get_user_level(user_addr)
-            # Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2
-            idx = {0: 0, 1: 1, 10: 2}.get(level, 2 if level >= 100 else -1)
+            idx = 0 if level == 0 else 1 if level == 1 else 2 if level >= 100 else -1
             if idx < 0 or idx >= len(tiers):
                 return api_error_code("invalid_user_level")
             tier_cfg = tiers[idx] or {}
@@ -2865,8 +2896,8 @@ def core_post():
                     400,
                 )
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        if not is_subscriber(user_addr):
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        if not is_relay_exempt(user_addr):
             if not (has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             required = _min_required_difficulty()
@@ -2949,11 +2980,11 @@ def core_post():
         media_len = sum(len(m) for m in media)
         content_len = len(target) + len(topic) + len(title) + len(content) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -3063,12 +3094,12 @@ def core_vote():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        user_is_sub = is_subscriber(user_addr)
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        user_is_relay = is_relay_exempt(user_addr)
         log_event(
-            rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty
+            rid, "vote.relay_check", user_addr=user_addr, is_relay_exempt=user_is_relay, pow_difficulty=difficulty
         )
-        if not user_is_sub:
+        if not user_is_relay:
             if not (has_difficulty and has_pow):
                 log_event(rid, "vote.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
                 return api_error_code(
@@ -3165,11 +3196,11 @@ def core_vote():
         body_bytes = body.SerializeToString()
         content_len = len(target)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
         if code != 0:
             extra = {
@@ -3277,8 +3308,8 @@ def core_send_tokens():
         if int(amount) > have:
             return jsonify({"error": "insufficient balance", "balance": have, "needed": int(amount)}), 400
 
-        # Free users require PoW; subscribers skip PoW (chain uses reserve)
-        if not is_subscriber(user_addr):
+        # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
+        if not is_relay_exempt(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             try:
@@ -3341,11 +3372,11 @@ def core_send_tokens():
         body_bytes = body.SerializeToString()
         content_len = len(target)
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
 
         if code != 0:
@@ -3533,11 +3564,11 @@ def core_subscribe():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
 
         if code != 0:
@@ -3686,11 +3717,11 @@ def core_set_auto_renewal():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
 
         if code != 0:
@@ -3817,11 +3848,11 @@ def core_award():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         gas_est = int(estimate_total_gas_limit(body_bytes, 0))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_subscriber(user_addr)
+            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
         )
 
         if code != 0:
@@ -4116,10 +4147,10 @@ def _broadcast_core_msg(rid: str, log_name: str, type_url: str, msg, extra_len: 
     body = TxBody(messages=[any_msg], memo="")
     body_bytes = body.SerializeToString()
     gas_est = int(estimate_total_gas_limit(body_bytes, extra_len))
-    tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_subscriber(user_addr))
+    tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
     gas_used = int(simulate_gas(tx_bytes_est))
     gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-    tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit, zero_fee=is_subscriber(user_addr))
+    tx_hash, code, height, raw_log = build_and_broadcast_tx(body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr))
     if code != 0:
         extra = {"height": height, "user_addr": user_addr}
         return _tx_error(rid, f"core/{log_name}", type_url.rsplit(".", 1)[-1], code, tx_hash, raw_log, extra)
@@ -4139,7 +4170,7 @@ def _fill_envelope(msg, env: dict, validator_addr: str):
 
 
 def _maybe_pow_precheck(rid, action, env, base_fn, *args):
-    if is_subscriber(env["user_addr"]):
+    if is_relay_exempt(env["user_addr"]):
         return None
     try:
         base = base_fn(
@@ -4296,7 +4327,7 @@ def core_create_curation_team():
         description = str(data.get("description", "") or "")
         if not community or not name:
             return jsonify({"error": "community and name required"}), 400
-        if not is_subscriber(env["user_addr"]):
+        if not can_curate(env["user_addr"]):
             return api_error_code("not_subscriber")
         pow_err = _maybe_pow_precheck(
             rid, "create_curation_team", env, canon_base_create_curation_team, community, name, description

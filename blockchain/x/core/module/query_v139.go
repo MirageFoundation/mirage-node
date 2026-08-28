@@ -323,7 +323,17 @@ func (am AppModule) SubscriptionRenewal(ctx context.Context, req *types.QuerySub
 func (am AppModule) SubscriberQuota(ctx context.Context, req *types.QuerySubscriberQuotaRequest) (*types.QuerySubscriberQuotaResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
-	q, err := am.k.GetSubscriberQuota(sdkCtx, strings.TrimSpace(req.GetAddress()))
+	addr := strings.TrimSpace(req.GetAddress())
+	core, found, err := am.k.LoadProfile(sdkCtx, addr)
+	if err != nil {
+		return nil, err
+	}
+	level := 0
+	if found {
+		level = int(core.Level)
+	}
+	limit := params.DailyRelayLimit(level)
+	q, err := am.k.GetSubscriberQuota(sdkCtx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -333,12 +343,12 @@ func (am AppModule) SubscriberQuota(ctx context.Context, req *types.QuerySubscri
 		used = 0
 	}
 	remaining := uint64(0)
-	if params.SubscriberDailyRelayLimit > used {
-		remaining = params.SubscriberDailyRelayLimit - used
+	if limit > used {
+		remaining = limit - used
 	}
 	return &types.QuerySubscriberQuotaResponse{
 		Epoch:     epoch,
-		Limit:     params.SubscriberDailyRelayLimit,
+		Limit:     limit,
 		Used:      used,
 		Remaining: remaining,
 		ResetAt:   (epoch + 1) * 86400,

@@ -101,10 +101,31 @@ func LevelToTierIndex(level int) int {
 	case level == LevelSubscriber:
 		return 1
 	case level >= LevelAdminMin:
-		return 1
+		return 2
 	default:
 		return -1
 	}
+}
+
+// CanCurate reports whether a profile may lead or join curator teams.
+// Paid subscribers and admins (level >= 100) are eligible; free accounts are not.
+func CanCurate(core ProfileCore) bool {
+	return core.EffectivePaid || int(core.Level) >= LevelAdminMin
+}
+
+// UsesRelayPath reports whether this tier skips PoW and consumes a daily relay quota.
+func (t *TierConfig) UsesRelayPath() bool {
+	return t != nil && t.MaxDailyRelays > 0
+}
+
+// DailyRelayLimit returns the UTC-day envelope quota for a user level.
+// 0 means the account uses proof of work (no relay quota).
+func (p Params) DailyRelayLimit(level int) uint64 {
+	tier := p.GetTierConfig(level)
+	if tier == nil {
+		return 0
+	}
+	return tier.MaxDailyRelays
 }
 
 // HistoricalDefaultTiers is the three-tier config written by pre-v1.39
@@ -188,6 +209,7 @@ func DefaultTiers() []*TierConfig {
 			CanHaveFlair:           false,
 			MaxBiographyLength:     0,
 			MaxCurationMemberships: 0,
+			MaxDailyRelays:         0,
 		},
 		{
 			PeriodFee:              100_000_000_000,
@@ -206,7 +228,29 @@ func DefaultTiers() []*TierConfig {
 			CanHaveBanner:          true,
 			CanHaveFlair:           true,
 			MaxBiographyLength:     512,
-			MaxCurationMemberships: 500,
+			MaxCurationMemberships: 10,
+			MaxDailyRelays:         250,
+		},
+		{
+			// Admin is appointed via governance, not purchased. PeriodFee must stay 0.
+			PeriodFee:              0,
+			MaxFollowedUsers:       500,
+			MaxJoinedCommunities:   500,
+			MaxBlockedUsers:        500,
+			MaxBlockedPosts:        500,
+			MaxBlockedCommunities:  500,
+			MaxTitleLength:         300,
+			MaxContentLength:       20000,
+			EditingTimeMins:        360,
+			VoteWeight:             1.33,
+			CanRemoveAnon:          true,
+			CanHaveBiography:       true,
+			CanHaveAvatar:          true,
+			CanHaveBanner:          true,
+			CanHaveFlair:           true,
+			MaxBiographyLength:     512,
+			MaxCurationMemberships: 1000,
+			MaxDailyRelays:         1000,
 		},
 	}
 }
@@ -222,7 +266,7 @@ func DefaultAwardConfigs() []*AwardConfig {
 }
 
 // DefaultParams returns a default set of parameters.
-// These defaults reflect v1.39.0 economics (Free=0, Subscriber=1).
+// These defaults reflect v1.39.0 economics (Free=0, Subscriber=1, Admin>=100).
 func DefaultParams() Params {
 	return Params{
 		// Minting
@@ -427,7 +471,7 @@ func (p Params) Validate() error {
 	if p.SubscriptionPeriod > MaxSubscriptionPeriodMinutes {
 		return fmt.Errorf("subscription_period must be in [0,%d]", MaxSubscriptionPeriodMinutes)
 	}
-	// Validate tiers. Historical blobs have 3; v1.39 has 2.
+	// Validate tiers. Pre-v1.39 blobs have 2 or 3; v1.39 requires exactly 3.
 	if n := len(p.Tiers); n != 2 && n != 3 {
 		return fmt.Errorf("tiers must contain exactly 2 or 3 entries")
 	}
@@ -504,8 +548,11 @@ func (p Params) ValidateV139() error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if len(p.Tiers) != 2 {
-		return fmt.Errorf("v1.39: tiers must contain exactly 2 entries")
+	if len(p.Tiers) != 3 {
+		return fmt.Errorf("v1.39: tiers must contain exactly 3 entries")
+	}
+	if p.Tiers[2].PeriodFee != 0 {
+		return fmt.Errorf("v1.39: admin tier period_fee must be 0")
 	}
 	if p.MinCommunitySize == 0 || p.MaxCommunitySize == 0 || p.MinCommunitySize > p.MaxCommunitySize || p.MaxCommunitySize > 100 {
 		return fmt.Errorf("v1.39: min/max_community_size must be in [1,100] with min <= max")
@@ -527,6 +574,18 @@ func (p Params) ValidateV139() error {
 	}
 	if p.SubscriberDailyRelayLimit < 1 || p.SubscriberDailyRelayLimit > 10000 {
 		return fmt.Errorf("subscriber_daily_relay_limit must be in [1,10000]")
+	}
+	if p.Tiers[0].MaxDailyRelays != 0 {
+		return fmt.Errorf("free tier max_daily_relays must be 0 (PoW path)")
+	}
+	if p.Tiers[1].MaxDailyRelays < 1 || p.Tiers[1].MaxDailyRelays > 10000 {
+		return fmt.Errorf("subscriber tier max_daily_relays must be in [1,10000]")
+	}
+	if p.Tiers[1].MaxDailyRelays != p.SubscriberDailyRelayLimit {
+		return fmt.Errorf("subscriber_daily_relay_limit must equal tiers[1].max_daily_relays")
+	}
+	if p.Tiers[2].MaxDailyRelays < 1 || p.Tiers[2].MaxDailyRelays > 10000 {
+		return fmt.Errorf("admin tier max_daily_relays must be in [1,10000]")
 	}
 	if p.MaxSubscriptionPeriodsPerPurchase < 1 || p.MaxSubscriptionPeriodsPerPurchase > 12 {
 		return fmt.Errorf("max_subscription_periods_per_purchase must be in [1,12]")
@@ -638,7 +697,7 @@ func (p Params) GetAwardConfig(name string) *AwardConfig {
 }
 
 // GetTierConfig returns the tier config for the given user level.
-// Maps user levels (0, 1, 100+) to tier array indices (0, 1).
+// Maps user levels (0, 1, 100+) to tier array indices (0, 1, 2).
 // Returns nil for invalid levels (2-99 except 100+, and negative).
 func (p Params) GetTierConfig(level int) *TierConfig {
 	if len(p.Tiers) == 0 {

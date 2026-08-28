@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "styled-components";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { formatMirageCompact } from "../utils/formatters";
 import Api from "../utils/api";
@@ -8,6 +8,7 @@ import { subscribe as txSubscribe, setAutoRenewal as txSetAutoRenewal } from "..
 import { usePendingSubscribes } from "./usePendingSubscribes.js";
 import transactionHandler from "../utils/TransactionHandler";
 import { formatError } from "../utils/errorMessages";
+import { readReturnTo } from "../utils/returnTo";
 export const TIER_NAMES = {
     0: 'Free',
     1: 'Subscriber',
@@ -28,6 +29,8 @@ export const getTierColor = level => {
     return TIER_COLORS[0];
 };
 export const isAdmin = level => level >= 100;
+// Paid subscribers and admins may lead/join curator teams (matches types.CanCurate).
+export const canCurate = (effectivePaid, level) => Boolean(effectivePaid) || Number(level) >= 100;
 export const TIERS = [{
     level: 0,
     name: 'Free'
@@ -36,10 +39,13 @@ export const TIERS = [{
     name: 'Subscriber'
 }];
 
-// Map user level to the chain `tiers` array index. v1.39 has Free + Subscriber.
+// Map user level to the chain `tiers` array index.
+// Free=0, Subscriber=1, Admin(>=100)=2 — see LevelToTierIndex in params.go.
 export const levelToTierIndex = level => {
-    if (level === 0) return 0;
-    if (level >= 1) return 1;
+    const n = Number(level);
+    if (n === 0) return 0;
+    if (n === 1) return 1;
+    if (n >= 100) return 2;
     return -1;
 };
 export const buildTierConfig = chainTiers => {
@@ -90,6 +96,7 @@ export function useSubscription({
     state
 }) {
     const location = useLocation();
+    const navigate = useNavigate();
     const address = Storage.load('publicKey', '') || '';
     const [userLevel, setUserLevel] = useState(0);
     const [subscriptionExpiry, setSubscriptionExpiry] = useState(0);
@@ -549,6 +556,15 @@ export function useSubscription({
                 expectedAutoRenew,
                 expectedLevel
             });
+            // Paid upgrade from a deep link (?next=) — send the user back once
+            // status has refreshed so the destination page sees effective_paid.
+            if (tier.level > 0) {
+                const next = readReturnTo(location.search);
+                if (next) {
+                    console.debug('[subscription] returning after subscribe', { next });
+                    navigate(next, { replace: true });
+                }
+            }
         } catch (e) {
             setError(String(e?.message || e || 'Unknown error'));
         } finally {

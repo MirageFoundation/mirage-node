@@ -724,7 +724,7 @@ export function useMain({
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // Track posts the viewer downvoted to hide with animation on Home
+    // Track posts the viewer downvoted to hide with animation
     useEffect(() => {
         const timeoutSet = downvoteTimeoutsRef.current;
         const handler = e => {
@@ -733,11 +733,9 @@ export function useMain({
             const dir = Number(detail?.direction);
             if (!pid || dir >= 0) return;
 
-            // Only hide if the setting is enabled AND we are on the Home feed
-            // The setting explicitly says "(Home feed only)", so we shouldn't animate on other feeds
-            // where the post will reappear anyway.
-            const isHome = currentTopicRef.current === 'home';
-            if (!hideDownvotedPostsRef.current || !isHome) return;
+            // Immediate hide is opt-in. Newest/Magic omit downvotes on the next
+            // feed fetch regardless of this setting.
+            if (!hideDownvotedPostsRef.current) return;
 
             // First, add to hiding set to trigger animation
             setHidingPostsSet(prev => {
@@ -881,6 +879,8 @@ export function useMain({
                         const existingPostsInOrder = currentOrder.filter(id => {
                             const post = currentPosts[id];
                             if (!post || post.deleted) return false;
+                            const dir = Number(post.direction ?? post.user_vote ?? post.my_vote ?? 0);
+                            if (Number.isFinite(dir) && dir < 0) return false;
                             if (topic === 'all') {
                                 const hasTitle = typeof post.title === 'string' && post.title.trim().length > 0;
                                 const hasTopic = typeof post.topic === 'string' && post.topic.trim().length > 0;

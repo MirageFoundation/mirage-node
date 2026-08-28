@@ -12,25 +12,76 @@ import { usePendingCuration } from '../../../logic/usePendingCuration';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
 
-const Page = styled.main`max-width: 820px; margin: 0 auto; padding: 1rem; color: ${({ theme }) => requireThemeColor(theme, 'text')};`;
-const Card = styled.section`
-    padding: 0.85rem; margin-top: 0.75rem; border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    border-radius: 10px; background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+const Page = styled.main`
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 0.75rem 1rem 1.5rem;
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    font-size: 0.75rem;
+    line-height: 1.45;
 `;
-const Row = styled.div`display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; padding: 0.45rem 0; flex-wrap: wrap;`;
+const BackLink = styled(Link)`
+    display: block;
+    min-width: 0;
+    margin-bottom: 0.45rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    font-size: 0.65rem;
+    font-weight: 500;
+    text-decoration: none;
+    &:hover { text-decoration: underline; }
+`;
+const Title = styled.h1`
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+`;
+const Card = styled.section`
+    display: grid;
+    gap: 0.4rem;
+    padding: 0.7rem 0.75rem;
+    margin-top: 0.65rem;
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 10px;
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+`;
+const CardTitle = styled.h2`
+    margin: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
+`;
+const Row = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.35rem 0;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+`;
 const Actions = styled.div`display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;`;
-const Form = styled.form`display: grid; gap: 0.55rem; margin-top: 0.6rem;`;
+const Form = styled.form`display: grid; gap: 0.5rem; margin-top: 0.15rem;`;
 const Input = styled.input`
-    padding: 0.5rem; border-radius: 7px; border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    padding: 0.45rem 0.55rem; border-radius: 7px; border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     background: ${({ theme }) => requireThemeColor(theme, 'inputBackground')}; color: inherit;
+    font: inherit; font-size: 0.75rem;
 `;
 const Textarea = styled.textarea`
-    min-height: 4.5rem; padding: 0.5rem; border-radius: 7px; resize: vertical;
+    min-height: 4.5rem; padding: 0.45rem 0.55rem; border-radius: 7px; resize: vertical;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     background: ${({ theme }) => requireThemeColor(theme, 'inputBackground')}; color: inherit;
+    font: inherit; font-size: 0.75rem; line-height: 1.4;
 `;
-const Meta = styled.div`font-size: 0.7rem; line-height: 1.5; color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};`;
-const ErrorText = styled.div`color: ${({ theme }) => requireThemeColor(theme, 'voteDown')}; font-size: 0.7rem;`;
+const Meta = styled.div`font-size: 0.65rem; line-height: 1.45; color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};`;
+const ErrorText = styled.div`color: ${({ theme }) => requireThemeColor(theme, 'voteDown')}; font-size: 0.65rem;`;
+const Body = styled.p`margin: 0; font-size: 0.75rem; line-height: 1.45;`;
 
 export default function CurationTeamView() {
     const { topic: community, teamId } = useParams();
@@ -77,33 +128,37 @@ export default function CurationTeamView() {
     if (loading) return <Page>Loading curator team…</Page>;
     if (loadError || !team) return <Page><ErrorText>{loadError || 'Curator team not found.'}</ErrorText></Page>;
 
+    const communityName = communityLabel(community);
+
     return <Page>
-        <Helmet><title>{team.name} · {communityLabel(community)} | Mirage</title></Helmet>
-        <Link to={`/c/${encodeURIComponent(community)}/teams`}>← {communityLabel(community)} teams</Link>
-        <h1>{team.name}</h1>
+        <Helmet><title>{team.name} · {communityName} | Mirage</title></Helmet>
+        <BackLink to={`/c/${encodeURIComponent(community)}/teams`} title={`${communityName} teams`}>
+            ← Back to teams
+        </BackLink>
+        <Title>{team.name}</Title>
         {team.deleted && <ErrorText>This curator team has been deleted.</ErrorText>}
         <Meta>{String(team.team_id) === String(communityDetail?.default_team?.team_id) ? 'Node default · ' : ''}{team.subscriber_count} paid subscribers</Meta>
         <Card>
-            <h2>About</h2>
-            <p>{team.description || 'No description provided.'}</p>
+            <CardTitle>About</CardTitle>
+            <Body>{team.description || 'No description provided.'}</Body>
             <Meta>Leader: {team.owner}</Meta>
         </Card>
 
         {!team.deleted && myInvitation && <Card>
-            <h2>Team invitation</h2>
-            <p>The leader invited you to join this curator team.</p>
+            <CardTitle>Team invitation</CardTitle>
+            <Body>The leader invited you to join this curator team.</Body>
             <Actions>
-                <Button disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), true))}>
+                <Button size="xs" disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), true))}>
                     {getStatus('accept_curator_invite', community, Number(teamId), viewer, 'Accepting…') || 'Accept'}
                 </Button>
-                <Button variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), false))}>
+                <Button size="xs" variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), false))}>
                     {getStatus('decline_curator_invite', community, Number(teamId), viewer, 'Declining…') || 'Decline'}
                 </Button>
             </Actions>
         </Card>}
 
         <Card>
-            <h2>Curators ({members.length})</h2>
+            <CardTitle>Curators ({members.length})</CardTitle>
             {members.map((member) => <Row key={member.address}>
                 <span>{member.username || member.address}{member.address === team.owner ? ' · leader' : ''}</span>
                 {isLeader && member.address !== team.owner && <Actions>
@@ -122,7 +177,7 @@ export default function CurationTeamView() {
                 });
             }}>
                 <Input aria-label="User address to invite" value={invitee} onChange={(event) => setInvitee(event.target.value)} placeholder="mirage1…" required />
-                <Button type="submit" disabled={!!pendingFor('invite_curator', invitee.trim().toLowerCase())}>
+                <Button type="submit" size="xs" disabled={!!pendingFor('invite_curator', invitee.trim().toLowerCase())}>
                     {statusFor('invite_curator', invitee.trim().toLowerCase(), 'Inviting…') || 'Invite curator'}
                 </Button>
             </Form>}
@@ -143,7 +198,7 @@ export default function CurationTeamView() {
         </Card>
 
         {isLeader && <Card>
-            <h2>Team settings</h2>
+            <CardTitle>Team settings</CardTitle>
             <Form onSubmit={saveProfile}>
                 <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={team.name || 'e.g. Signal Desk'} aria-label="Team name" />
                 <Textarea
@@ -152,7 +207,7 @@ export default function CurationTeamView() {
                     placeholder={team.description || 'What this lens stands for — include how you moderate'}
                     aria-label="Team description"
                 />
-                <Button type="submit" disabled={!!pendingFor('set_curation_team_profile')}>
+                <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
                     {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
                 </Button>
             </Form>
@@ -162,7 +217,7 @@ export default function CurationTeamView() {
                     {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
                 </Button>
             </Row>
-            <Button variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
+            <Button size="xs" variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
                 if (window.confirm('Delete this curator team? Posts in the community will remain available.')) {
                     run(() => tx.deleteCurationTeam(community, Number(teamId)));
                 }
@@ -170,7 +225,7 @@ export default function CurationTeamView() {
         </Card>}
 
         {isCurator && <Card>
-            <h2>Moderation tools</h2>
+            <CardTitle>Moderation tools</CardTitle>
             <Meta>Enter a post hash, thread root hash, or user address, then choose the team-scoped action.</Meta>
             <Form onSubmit={(event) => event.preventDefault()}>
                 <Input value={moderationTarget} onChange={(event) => setModerationTarget(event.target.value)} placeholder="Post hash, thread root, or mirage1…" aria-label="Moderation target" />

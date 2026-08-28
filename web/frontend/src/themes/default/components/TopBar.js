@@ -10,6 +10,7 @@ import ConfirmDialog from './ConfirmDialog.js';
 import UserAvatar from './UserAvatar.js';
 import { getAuthorColor, getAuthorTooltip } from '../../../utils/tierColors';
 import { signPlainPayload } from '../../../utils/signPlain';
+import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
 
 /**
  * Reddit-style TopBar for the default theme.
@@ -754,8 +755,8 @@ function GuestMenu() {
             {open && (
                 <Dropdown role="menu">
                     <MenuSectionLabel>Account</MenuSectionLabel>
-                    <MenuItem to="/signup" onClick={() => setOpen(false)}>Sign up</MenuItem>
-                    <MenuItem to="/login" onClick={() => setOpen(false)}>Log in</MenuItem>
+                    <MenuItem to={withReturnTo('/signup', returnToFromLocation(location))} onClick={() => setOpen(false)}>Sign up</MenuItem>
+                    <MenuItem to={withReturnTo('/login', returnToFromLocation(location))} onClick={() => setOpen(false)}>Log in</MenuItem>
                     <MenuDivider />
                     <MenuSectionLabel>Mode</MenuSectionLabel>
                     <ModeTrack role="group" aria-label="Theme mode">
@@ -1213,7 +1214,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                             </UserMenuWrapper>
                         ) : (
                             <>
-                                <LoginPillLink to="/login">Sign in</LoginPillLink>
+                                <LoginPillLink to={withReturnTo('/login', returnToFromLocation(location))}>Sign in</LoginPillLink>
                                 <GuestMenu />
                             </>
                         )}

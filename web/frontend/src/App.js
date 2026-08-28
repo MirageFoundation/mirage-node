@@ -17,6 +17,7 @@ import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
 import { installCrossTabSessionWatcher, onSessionReset, resetClientSession } from './utils/sessionLifecycle';
 import { updateNotification } from './utils/notifications';
+import { withReturnTo } from './utils/returnTo';
 
 
 // Lazy import wrapper that handles chunk load failures after deployments.
@@ -383,7 +384,8 @@ class App extends Component {
             Storage.remove('publicKey');
             Storage.remove('username');
             this.setState({ publicKey: '', username: '', seedPhrase: '' });
-            window.location.replace('/login');
+            const here = `${window.location.pathname}${window.location.search}`;
+            window.location.replace(withReturnTo('/login', here));
             return;
         }
 
@@ -1078,8 +1080,10 @@ class App extends Component {
 
         seedVault.lock();
         this.setState({ vaultLocked: false, seedPhrase: '', publicKey: '', username: '' }, () => {
-            // Client-side navigate to /login (no full reload, no flicker)
-            window.history.replaceState(null, '', '/login');
+            // Client-side navigate to /login (no full reload, no flicker).
+            // Keep the page they were on so a successful sign-in can return.
+            const here = `${window.location.pathname}${window.location.search}`;
+            window.history.replaceState(null, '', withReturnTo('/login', here));
             window.dispatchEvent(new PopStateEvent('popstate'));
         });
     };

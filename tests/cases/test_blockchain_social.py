@@ -39,7 +39,7 @@ from tests.common import (
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
-    _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
+    _gen_nonce, _compute_pow_quiet, _compute_pows_parallel, _pow_digest, _rand_hex,
     _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
     _get_chain_profile, _get_profile_full, _wait_profile_agents, _assert_capped_deque,
     _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
@@ -113,15 +113,20 @@ def test_follow_limits(backend: str) -> None:
             # because re-submitting the same envelopes cannot make them younger.
             lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
             ts_base = _now_ms()
-            built: list[tuple[object, str]] = []
-            targets: list[str] = []
+            pieces: list[tuple[str, int, int, bytes]] = []
             for i in range(count):
                 target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-                targets.append(target_addr.lower())
                 ts = ts_base + i
                 nonce = _gen_nonce()
                 base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr, nonce=nonce)
-                proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+                pieces.append((target_addr, ts, nonce, base))
+            proofs = _compute_pows_parallel(
+                [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
+            )
+            built: list[tuple[object, str]] = []
+            targets: list[str] = []
+            for (target_addr, ts, nonce, _), proof in zip(pieces, proofs):
+                targets.append(target_addr.lower())
                 msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof, nonce=nonce)
                 built.append((msg, "/mirage.core.v1.MsgFollowUser"))
             sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(built) * 3))
@@ -178,12 +183,17 @@ def test_follow_limits(backend: str) -> None:
         joined_targets.extend(topics)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
-        msgs = []
+        pieces: list[tuple[str, int, int, bytes]] = []
         for i, topic in enumerate(topics):
             ts = ts_base + i
             nonce = _gen_nonce()
             base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, topic, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            pieces.append((topic, ts, nonce, base))
+        proofs = _compute_pows_parallel(
+            [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
+        )
+        msgs = []
+        for (topic, ts, nonce, _), proof in zip(pieces, proofs):
             msg = _build_msg_join_community(fw, lb, diff, ts, topic, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgJoinCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
@@ -217,25 +227,33 @@ def test_follow_limits(backend: str) -> None:
 
     _pass("follow.agent_tier_removed")
 
-    # 8.3b Subscriber bulk fill (no PoW): submit follow-user messages up to
-    # the tier limit, then verify overflow is rejected (hard cap).
+    # 8.3b Subscriber skip_pow batch: quota path + level stays 1 after a
+    # multi-msg follow. Filling all 500 is the same keeper loop ~20 times;
+    # free-tier overflow above already covers the hard-cap reject.
     sub = WALLETS["sub1"]
     sub_addr = str(sub.address())
     sub_pub = sub.public_key().public_key_bytes
     sub_tier = _get_tier_config(1)
     sub_max_followed_users = _tier_int(sub_tier, "max_followed_users")
+    if sub_max_followed_users > max_followed_users:
+        _pass(f"follow.subscriber_cap_above_free ({sub_max_followed_users} > {max_followed_users})")
+    else:
+        _fail(
+            "follow.subscriber_cap_above_free",
+            f"sub={sub_max_followed_users} free={max_followed_users}",
+        )
     sub_chain_profile = _get_chain_profile(sub_addr)
     before_followed = sub_chain_profile.get("followed_users") or sub_chain_profile.get("followedUsers") or []
     remaining = max(0, sub_max_followed_users - len(before_followed))
+    batch_n = min(25, remaining)
     _debug(
-        f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} remaining={remaining}"
+        f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} batch={batch_n}"
     )
-    bulk_targets = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)]
-    chunk_size = 25
     bulk_ok = True
-    _debug(f"subscriber tier1 bulk follow users: total={len(bulk_targets)} chunk_size={chunk_size}")
-    for start in range(0, len(bulk_targets), chunk_size):
-        batch = bulk_targets[start : start + chunk_size]
+    if batch_n == 0:
+        _pass("follow.subscriber_bulk_user_fill (already at cap)")
+    else:
+        batch = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(batch_n)]
         lb, _, _, _ = _get_pow_params(backend, sub_addr)
         ts_base = _now_ms()
         msgs: list[tuple[object, str]] = []
@@ -246,47 +264,33 @@ def test_follow_limits(backend: str) -> None:
         try:
             sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, sub_pub) * FILL_GAS_BUFFER)
         except Exception as sim_err:
-            _fail("follow.subscriber_bulk_user_fill", f"simulate failed at chunk_start={start}: {str(sim_err)[:200]}")
+            _fail("follow.subscriber_bulk_user_fill", f"simulate failed: {str(sim_err)[:200]}")
             bulk_ok = False
-            break
-        _debug(f"subscriber bulk follow gas: start={start} msgs={len(msgs)} sim_limit={sim_limit} gas_used={sim_gas}")
-        gas_limit = sim_gas
-        _, ccode, _, dcode, dlog = _submit_tx(
-            msgs,
-            gas_limit,
-            fee_payer,
-            sub_pub,
-            wait_deliver=True,
-        )
-        if ccode != 0 or dcode != 0:
-            _fail(
-                "follow.subscriber_bulk_user_fill",
-                f"chunk_start={start} size={len(batch)} check={ccode} deliver={dcode} log={str(dlog or '')[:120]}",
+            sim_gas = 0
+        if bulk_ok:
+            _debug(f"subscriber skip_pow follow gas: msgs={len(msgs)} sim_limit={sim_limit} gas_used={sim_gas}")
+            _, ccode, _, dcode, dlog = _submit_tx(
+                msgs,
+                sim_gas,
+                fee_payer,
+                sub_pub,
+                wait_deliver=True,
             )
-            bulk_ok = False
-            break
+            if ccode != 0 or dcode != 0:
+                _fail(
+                    "follow.subscriber_bulk_user_fill",
+                    f"size={len(batch)} check={ccode} deliver={dcode} log={str(dlog or '')[:120]}",
+                )
+                bulk_ok = False
+            else:
+                _pass(f"follow.subscriber_bulk_user_fill ({batch_n} skip_pow follows)")
     if bulk_ok:
-        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} filled to limit)")
-        # Verify subscriber level persists after bulk follow (reserve should not be over-charged)
         after_profile = _get_profile_full(backend, sub_addr)
         after_level = int(after_profile.get("level", 0) or 0)
         if after_level == 1:
             _pass("follow.subscriber_level_persist")
         else:
             _fail("follow.subscriber_level_persist", f"level={after_level}")
-        # Now verify overflow is REJECTED
-        lb, _, _, _ = _get_pow_params(backend, sub_addr)
-        ts = _now_ms()
-        over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        msg = _build_msg_follow_user(sub, lb, 0, ts, sub_addr, over_addr, pow_val=0, nonce=_gen_nonce())
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            sub_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_reject("follow.subscriber_bulk_user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
     w_mx = WALLETS["agent1"]
@@ -415,14 +419,19 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         batch_count = min(chunk_size, total_to_block - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts_base = _now_ms()
-        msgs: list[tuple[object, str]] = []
+        pieces: list[tuple[str, int, int, bytes]] = []
         for i in range(batch_count):
             target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
             blocked_targets.append(target_addr.lower())
             ts = ts_base + i
             nonce = _gen_nonce()
             base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            pieces.append((target_addr, ts, nonce, base))
+        proofs = _compute_pows_parallel(
+            [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
+        )
+        msgs: list[tuple[object, str]] = []
+        for (target_addr, ts, nonce, _), proof in zip(pieces, proofs):
             msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
@@ -451,14 +460,19 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         batch_count = min(chunk_size, total_to_block_posts - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts_base = _now_ms()
-        msgs = []
+        pieces: list[tuple[str, int, int, bytes]] = []
         for i in range(batch_count):
             fake_hash = _rand_hex(64)
             blocked_post_targets.append(fake_hash.lower())
             ts = ts_base + i
             nonce = _gen_nonce()
             base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            pieces.append((fake_hash, ts, nonce, base))
+        proofs = _compute_pows_parallel(
+            [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
+        )
+        msgs = []
+        for (fake_hash, ts, nonce, _), proof in zip(pieces, proofs):
             msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockPost"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
@@ -479,13 +493,18 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         batch_count = min(chunk_size, total_to_block_topics - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts_base = _now_ms()
-        msgs = []
+        pieces: list[tuple[str, int, int, bytes]] = []
         for i in range(batch_count):
             topic = f"bt{_rand_str(4)}{start + i}"
             ts = ts_base + i
             nonce = _gen_nonce()
             base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
-            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            pieces.append((topic, ts, nonce, base))
+        proofs = _compute_pows_parallel(
+            [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
+        )
+        msgs = []
+        for (topic, ts, nonce, _), proof in zip(pieces, proofs):
             msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))

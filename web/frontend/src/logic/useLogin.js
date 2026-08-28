@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { deriveKeysFromSeed, requireValidMnemonic } from "../utils/CryptoUtils.js";
 import Api from "../utils/api";
 import { createHandoff } from "../utils/onboardingSession";
+import { readReturnTo } from "../utils/returnTo";
 export function useLogin({
     state,
     setCredentials
@@ -13,15 +14,18 @@ export function useLogin({
     const [seedPhrase, setSeedPhrase] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const afterLoginPath = () => readReturnTo(location.search) || '/';
 
-    // If user is already signed in, redirect to home
+    // If user is already signed in, honor ?next= then fall back to home
     useEffect(() => {
         if (state.publicKey) {
-            navigate('/', {
+            const next = afterLoginPath();
+            console.debug('[Login] already signed in; redirect', { next });
+            navigate(next, {
                 replace: true
             });
         }
-    }, [state.publicKey, navigate]);
+    }, [state.publicKey, navigate, location.search]);
     useEffect(() => {
         mountedRef.current = true;
         return () => {
@@ -78,7 +82,9 @@ export function useLogin({
             }
 
             setCredentials(publicKey, username, normalizedSeed);
-            navigate('/');
+            const next = afterLoginPath();
+            console.debug('[Login] signed in; redirect', { next });
+            navigate(next, { replace: true });
         } catch (e) {
             if (mountedRef.current) setError(String(e?.message || e || 'Login failed'));
         } finally {

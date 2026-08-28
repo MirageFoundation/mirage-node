@@ -478,10 +478,10 @@ def test_tier_config_api(backend: str):
     _pass("tierapi.fetch_params")
 
     tiers = (params_resp or {}).get("tiers") or []
-    if len(tiers) != 2:
-        _fail("tierapi.exactly_2_tiers", f"got {len(tiers)}")
+    if len(tiers) != 3:
+        _fail("tierapi.exactly_3_tiers", f"got {len(tiers)}")
         return
-    _pass("tierapi.exactly_2_tiers")
+    _pass("tierapi.exactly_3_tiers")
 
     # Free tier (index 0)
     free = tiers[0]
@@ -587,6 +587,23 @@ def test_tier_config_api(backend: str):
             _pass(f"tierapi.sub_{flag}_true")
         else:
             _fail(f"tierapi.sub_{flag}_true", f"got={sub.get(flag)}")
+
+    admin = tiers[2]
+    if int(admin.get("period_fee", -1)) == 0:
+        _pass("tierapi.admin_period_fee_0")
+    else:
+        _fail("tierapi.admin_period_fee_0", f"got={admin.get('period_fee')}")
+    if int(admin.get("max_curation_memberships", -1)) == 1000:
+        _pass("tierapi.admin_max_curation_memberships_1000")
+    else:
+        _fail(
+            "tierapi.admin_max_curation_memberships_1000",
+            f"got={admin.get('max_curation_memberships')}",
+        )
+    if int(admin.get("max_daily_relays", -1)) == 1000:
+        _pass("tierapi.admin_max_daily_relays_1000")
+    else:
+        _fail("tierapi.admin_max_daily_relays_1000", f"got={admin.get('max_daily_relays')}")
 
     _pass("tierapi.agent_tier_removed")
 

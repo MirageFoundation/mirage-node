@@ -402,14 +402,13 @@ def test_security(backend: str) -> None:
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
     # 1. Verify LevelToTierIndex correctness via chain config endpoint.
-    #    The Agent tier is gone, so only free (0) and subscriber (1) remain and
-    #    no tier may still advertise can_be_agent.
+    #    Free (0), subscriber (1), admin (2). Agent is gone.
     try:
         _, params = _get(f"{backend}/api/get_chain_config")
         params = params or {}
         tiers = params.get("tiers", [])
-        if len(tiers) != 2:
-            _fail("security.tier_count", f"expected 2 tiers, got {len(tiers)}")
+        if len(tiers) != 3:
+            _fail("security.tier_count", f"expected 3 tiers, got {len(tiers)}")
         else:
             _pass("security.tier_count")
 

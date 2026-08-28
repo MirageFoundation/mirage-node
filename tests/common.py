@@ -830,11 +830,19 @@ def setup_test_wallets(backend: str) -> bool:
     except Exception:
         _send_start_height = 1
 
-    # Set usernames for all wallets (required before any other core transaction)
-    username_tx_hashes: list[tuple[str, str]] = []
-    for name, w in WALLETS.items():
+    # Set usernames for all wallets (required before any other core transaction).
+    # Each free-tier set_username needs PoW; run them concurrently so setup
+    # is one proof-time, not five.
+    def _username_job(name_w: tuple[str, object]) -> tuple[str, str, dict]:
+        name, w = name_w
         uname = f"test{name}{_rand_str(4)}"
         resp = _do_set_username_raw(backend, w, uname, skip_pow=False)
+        return name, uname, resp or {}
+
+    username_tx_hashes: list[tuple[str, str]] = []
+    with ThreadPoolExecutor(max_workers=len(WALLETS)) as pool:
+        username_results = list(pool.map(_username_job, list(WALLETS.items())))
+    for name, uname, resp in username_results:
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         if resp and resp.get("error"):
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {resp.get('error')}")
@@ -857,10 +865,6 @@ def setup_test_wallets(backend: str) -> bool:
         if code != 0:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: tx failed in block (code={code})")
             return False
-
-    # Brief delay so indexer can process the blocks before we poll get_profile
-    _debug("waiting for indexer to process set_username blocks...")
-    time.sleep(10)
 
     # Wait until usernames are visible in indexer (get_profile)
     for name, w in WALLETS.items():
@@ -918,7 +922,14 @@ def setup_test_wallets(backend: str) -> bool:
 
     # Wait for faucet transactions to be included
     print("  Waiting for faucet transactions...")
-    time.sleep(6)
+    faucet_deadline = time.perf_counter() + 20.0
+    while time.perf_counter() < faucet_deadline:
+        try:
+            if all(_get_spendable_balance(str(w.address())) > 0 for w in WALLETS.values()):
+                break
+        except Exception:
+            pass
+        time.sleep(0.4)
 
     # Verify balances — use chain query directly (backend/indexer may lag)
     miraged = _miraged_cmd()
@@ -956,10 +967,11 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level 1: {err}")
             return False
 
-    # Wait for the subscription to be reflected in the indexer DB. The backend gates
-    # every zero-fee, PoW-exempt path on effective_paid, not on the level column, so
-    # waiting for user_level>=1 can return before the flag is set and leave the next
-    # request (a skip_pow biography, say) rejected as a free user's.
+    # Wait for the subscription to be reflected in the indexer DB. Subscriber
+    # zero-fee / PoW-exempt paths still key off effective_paid. Admins
+    # (level >= 100) use the relay-quota path from their tier without that flag.
+    # Waiting only for user_level>=1 can return before the paid flag is set and
+    # leave the next request (a skip_pow biography, say) rejected as a free user's.
     for name in ("sub1", "sub2", "agent1", "agent2"):
         w = WALLETS[name]
         addr = str(w.address())
@@ -995,18 +1007,28 @@ def setup_test_wallets(backend: str) -> bool:
             "It verifies that level 10 accounts can hold biographies."
         ),
     }
+    bio_tx_hashes: list[tuple[str, str]] = []
     for name, bio in AGENT_BIOS.items():
         w = WALLETS[name]
         resp = _do_set_biography(backend, w, bio, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
+            bio_tx_hashes.append((name, txh))
             print(f"  Biography {name}: set ({len(bio)} chars, tx: {txh[:16]}...)")
         else:
             err = resp.get("error", resp)
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Biography {name}: {err}")
             return False
 
-    time.sleep(4)
+    for name, txh in bio_tx_hashes:
+        result = _wait_tx_deliver(txh)
+        if result is None:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Biography {name}: tx not delivered")
+            return False
+        code, _ = result
+        if code != 0:
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Biography {name}: tx failed in block (code={code})")
+            return False
 
     print(f"  {_COLOR_GREEN}Setup complete{_COLOR_RESET}")
     return True

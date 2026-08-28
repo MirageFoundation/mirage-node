@@ -523,7 +523,7 @@ func TestPostTitleLengthSubscriberHigherLimit(t *testing.T) {
 
 func TestDefaultTiersExactValues(t *testing.T) {
 	tiers := types.DefaultTiers()
-	require.Len(t, tiers, 2)
+	require.Len(t, tiers, 3)
 
 	free := tiers[0]
 	require.Equal(t, uint64(0), free.PeriodFee)
@@ -537,6 +537,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	require.Equal(t, uint64(10), free.EditingTimeMins)
 	require.Equal(t, 1.0, free.VoteWeight)
 	require.Equal(t, uint64(0), free.MaxCurationMemberships)
+	require.Equal(t, uint64(0), free.MaxDailyRelays)
 	require.False(t, free.CanRemoveAnon)
 	require.False(t, free.CanHaveBiography)
 	require.False(t, free.CanHaveAvatar)
@@ -554,12 +555,19 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	require.Equal(t, uint64(20000), sub.MaxContentLength)
 	require.Equal(t, uint64(360), sub.EditingTimeMins)
 	require.Equal(t, 1.33, sub.VoteWeight)
-	require.Equal(t, uint64(500), sub.MaxCurationMemberships)
+	require.Equal(t, uint64(10), sub.MaxCurationMemberships)
+	require.Equal(t, uint64(250), sub.MaxDailyRelays)
 	require.True(t, sub.CanRemoveAnon)
 	require.True(t, sub.CanHaveBiography)
 	require.True(t, sub.CanHaveAvatar)
 	require.True(t, sub.CanHaveBanner)
 	require.True(t, sub.CanHaveFlair)
+
+	admin := tiers[2]
+	require.Equal(t, uint64(0), admin.PeriodFee)
+	require.Equal(t, uint64(1000), admin.MaxCurationMemberships)
+	require.Equal(t, uint64(1000), admin.MaxDailyRelays)
+	require.Equal(t, uint64(20000), admin.MaxContentLength)
 }
 
 func TestGetTierConfigValidLevels(t *testing.T) {
@@ -577,11 +585,12 @@ func TestGetTierConfigValidLevels(t *testing.T) {
 
 	admin := p.GetTierConfig(100)
 	require.NotNil(t, admin)
-	require.Equal(t, sub, admin, "admin maps to subscriber tier config")
+	require.Equal(t, uint64(1000), admin.MaxCurationMemberships)
+	require.NotEqual(t, sub, admin, "admin has its own tier config")
 
 	admin200 := p.GetTierConfig(200)
 	require.NotNil(t, admin200)
-	require.Equal(t, sub, admin200)
+	require.Equal(t, admin, admin200)
 }
 
 func TestGetTierConfigInvalidLevelsReturnNil(t *testing.T) {
@@ -608,8 +617,8 @@ func TestLevelToTierIndexExhaustive(t *testing.T) {
 	require.Equal(t, 0, types.LevelToTierIndex(0))
 	require.Equal(t, 1, types.LevelToTierIndex(1))
 	require.Equal(t, -1, types.LevelToTierIndex(10))
-	require.Equal(t, 1, types.LevelToTierIndex(100))
-	require.Equal(t, 1, types.LevelToTierIndex(255))
+	require.Equal(t, 2, types.LevelToTierIndex(100))
+	require.Equal(t, 2, types.LevelToTierIndex(255))
 
 	for _, invalid := range []int{-1, -100, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 50, 99} {
 		require.Equal(t, -1, types.LevelToTierIndex(invalid), "level %d should map to -1", invalid)

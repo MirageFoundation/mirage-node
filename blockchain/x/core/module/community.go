@@ -39,6 +39,17 @@ func (am AppModule) requirePaid(ctx sdk.Context, owner, reason string) (types.Pr
 	return core, nil
 }
 
+func (am AppModule) requireCuratorEligible(ctx sdk.Context, owner, reason string) (types.ProfileCore, error) {
+	core, err := am.requireUsername(ctx, owner, reason)
+	if err != nil {
+		return types.ProfileCore{}, err
+	}
+	if !types.CanCurate(core) {
+		return types.ProfileCore{}, fmt.Errorf("%s requires an active subscriber or admin", reason)
+	}
+	return core, nil
+}
+
 func govAuthority() string {
 	return authtypes.NewModuleAddress(govtypes.ModuleName).String()
 }
@@ -160,15 +171,24 @@ func (am AppModule) CreateCurationTeam(ctx context.Context, req *types.MsgCreate
 	if err != nil {
 		return nil, err
 	}
-	if _, err := am.requirePaid(sdkCtx, owner, "CreateCurationTeam"); err != nil {
+	core, err := am.requireCuratorEligible(sdkCtx, owner, "CreateCurationTeam")
+	if err != nil {
 		return nil, err
 	}
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	if _, err := am.k.CreateCurationTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription()); err != nil {
+	teamID, err := am.k.CreateCurationTeam(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetName(), req.GetDescription())
+	if err != nil {
 		return nil, err
 	}
+	sdkCtx.Logger().Info("CreateCurationTeam",
+		"owner", owner,
+		"community", strings.TrimSpace(req.GetCommunity()),
+		"team_id", teamID,
+		"level", core.Level,
+		"effective_paid", core.EffectivePaid,
+	)
 	return &types.MsgCreateCurationTeamResponse{}, nil
 }
 

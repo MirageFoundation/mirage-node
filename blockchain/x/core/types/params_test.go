@@ -12,28 +12,53 @@ import (
 
 func TestDefaultTiers(t *testing.T) {
 	tiers := DefaultTiers()
-	require.Len(t, tiers, 2, "expected 2 tiers: Free(0), Subscriber(1)")
+	require.Len(t, tiers, 3, "expected 3 tiers: Free(0), Subscriber(1), Admin(2)")
 
 	require.Equal(t, uint64(0), tiers[0].PeriodFee)
 	require.Equal(t, uint64(25), tiers[0].MaxBlockedCommunities)
 	require.Equal(t, uint64(0), tiers[0].MaxCurationMemberships)
+	require.Equal(t, uint64(0), tiers[0].MaxDailyRelays)
 
 	require.Equal(t, uint64(100_000_000_000), tiers[1].PeriodFee)
 	require.Equal(t, uint64(500), tiers[1].MaxBlockedCommunities)
-	require.Equal(t, uint64(500), tiers[1].MaxCurationMemberships)
+	require.Equal(t, uint64(10), tiers[1].MaxCurationMemberships)
+	require.Equal(t, uint64(250), tiers[1].MaxDailyRelays)
+
+	require.Equal(t, uint64(0), tiers[2].PeriodFee)
+	require.Equal(t, uint64(1000), tiers[2].MaxCurationMemberships)
+	require.Equal(t, uint64(1000), tiers[2].MaxDailyRelays)
 }
 
 func TestLevelToTierIndex(t *testing.T) {
 	require.Equal(t, 0, LevelToTierIndex(0))
 	require.Equal(t, 1, LevelToTierIndex(1))
-	require.Equal(t, 1, LevelToTierIndex(100))
-	require.Equal(t, 1, LevelToTierIndex(255))
+	require.Equal(t, 2, LevelToTierIndex(100))
+	require.Equal(t, 2, LevelToTierIndex(255))
 
 	require.Equal(t, -1, LevelToTierIndex(2))
 	require.Equal(t, -1, LevelToTierIndex(5))
 	require.Equal(t, -1, LevelToTierIndex(9))
 	require.Equal(t, -1, LevelToTierIndex(10))
 	require.Equal(t, -1, LevelToTierIndex(-1))
+}
+
+func TestDailyRelayLimit(t *testing.T) {
+	p := DefaultParams()
+	require.Equal(t, uint64(0), p.DailyRelayLimit(0))
+	require.Equal(t, uint64(250), p.DailyRelayLimit(1))
+	require.Equal(t, uint64(1000), p.DailyRelayLimit(100))
+	require.Equal(t, uint64(0), p.DailyRelayLimit(10), "retired agent level has no quota")
+	require.False(t, p.GetTierConfig(0).UsesRelayPath())
+	require.True(t, p.GetTierConfig(1).UsesRelayPath())
+	require.True(t, p.GetTierConfig(100).UsesRelayPath())
+}
+
+func TestCanCurate(t *testing.T) {
+	require.False(t, CanCurate(ProfileCore{Level: 0, EffectivePaid: false}))
+	require.True(t, CanCurate(ProfileCore{Level: 1, EffectivePaid: true}))
+	require.False(t, CanCurate(ProfileCore{Level: 1, EffectivePaid: false}))
+	require.True(t, CanCurate(ProfileCore{Level: 100, EffectivePaid: false}))
+	require.True(t, CanCurate(ProfileCore{Level: 100, EffectivePaid: true}))
 }
 
 func TestGetTierConfigMapping(t *testing.T) {
@@ -48,7 +73,9 @@ func TestGetTierConfigMapping(t *testing.T) {
 	require.Nil(t, p.GetTierConfig(9))
 	require.Nil(t, p.GetTierConfig(-1))
 
-	require.Equal(t, p.GetTierConfig(1), p.GetTierConfig(100))
+	require.NotEqual(t, p.GetTierConfig(1), p.GetTierConfig(100))
+	require.Equal(t, uint64(10), p.GetTierConfig(1).MaxCurationMemberships)
+	require.Equal(t, uint64(1000), p.GetTierConfig(100).MaxCurationMemberships)
 }
 
 func TestDefaultAwardConfigs(t *testing.T) {
@@ -439,5 +466,5 @@ func TestC1BugCondition(t *testing.T) {
 
 	// v1.39 retired Agent: level 10 is no longer a valid subscription level.
 	require.Equal(t, -1, LevelToTierIndex(level10))
-	require.Equal(t, 1, LevelToTierIndex(100), "admin maps to the subscriber tier")
+	require.Equal(t, 2, LevelToTierIndex(100), "admin maps to the admin tier")
 }

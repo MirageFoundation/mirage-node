@@ -1506,11 +1506,11 @@ def _indexer_hardening_2026_08_14_checks() -> None:
     # ── H-2: any admin level >= 100 resolves, matching the chain ─────────
 
     idx_map = {lvl: indexer_params.level_to_tier_index(lvl) for lvl in (0, 1, 10, 100, 101, 110, 150, 999)}
-    expected_idx = {0: 0, 1: 1, 10: 2, 100: 2, 101: 2, 110: 2, 150: 2, 999: 2}
+    expected_idx = {0: 0, 1: 1, 10: -1, 100: 2, 101: 2, 110: 2, 150: 2, 999: 2}
     if idx_map == expected_idx:
-        _pass("indexer_hardening.admin_levels_resolve_to_agent_tier")
+        _pass("indexer_hardening.admin_levels_resolve_to_admin_tier")
     else:
-        _fail("indexer_hardening.admin_levels_resolve_to_agent_tier", f"got {idx_map}")
+        _fail("indexer_hardening.admin_levels_resolve_to_admin_tier", f"got {idx_map}")
 
     if indexer_params.level_to_tier_index(50) == -1 and indexer_params.level_to_tier_index(2) == -1:
         _pass("indexer_hardening.unknown_levels_still_rejected")

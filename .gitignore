@@ -56,6 +56,7 @@ web/frontend/build/
 # build artifacts once reached a commit.
 web/frontend/build-*/
 web/frontend/node_modules/
+/node_modules/
 
 # Blockchain data
 .mirage

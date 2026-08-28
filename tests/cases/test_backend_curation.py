@@ -33,6 +33,38 @@ def _tx_ok(resp: dict) -> str:
     return str(resp.get("tx_hash") or "").lower()
 
 
+def _feed_ids(feed: dict | None) -> set[str]:
+    ids: set[str] = set()
+    for post in (feed or {}).get("posts") or []:
+        for key in ("post_id", "tx_hash", "hash"):
+            value = str(post.get(key) or "").lower()
+            if value:
+                ids.add(value)
+    return ids
+
+
+def _community_feed(
+    backend: str,
+    address: str,
+    slug: str,
+    *,
+    lens: str,
+    team_id: int | None = None,
+) -> tuple[int, dict]:
+    params = {
+        "address": address,
+        "community": slug,
+        "lens": lens,
+        "scope": "current",
+        "by": "newest",
+        "page": 1,
+        "limit": 25,
+    }
+    if team_id is not None:
+        params["team_id"] = str(team_id)
+    return _get(f"{backend}/api/get_posts", params)
+
+
 def test_curation_backend(backend: str) -> None:
     """Create gates, team shape (no policy), hide + lens filter."""
     free = WALLETS["free"]
@@ -143,6 +175,24 @@ def test_curation_backend(backend: str) -> None:
         return
     _pass("curation.backend_seed_post")
 
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    raw_visible = False
+    last_raw_code = 0
+    last_raw_feed: dict | None = None
+    while time.perf_counter() < deadline:
+        last_raw_code, last_raw_feed = _community_feed(backend, sub_addr, slug, lens="raw")
+        raw_visible = last_raw_code == 200 and post_tx in _feed_ids(last_raw_feed)
+        if raw_visible:
+            break
+        time.sleep(0.5)
+    if not raw_visible:
+        _debug(
+            f"curation.raw_before_hide code={last_raw_code} "
+            f"ids={sorted(_feed_ids(last_raw_feed))[:8]} err={(last_raw_feed or {}).get('error')}"
+        )
+        _fail("curation.backend_raw_lens_shows_post", f"post never appeared in raw lens ({post_tx})")
+        return
+
     # Pin preference so effective/default can resolve to this team.
     pref = _do_set_curation_preference(backend, sub, slug, mode=1, pinned_team_id=team_id, skip_pow=True)
     pref_tx = _tx_ok(pref)
@@ -170,46 +220,20 @@ def test_curation_backend(backend: str) -> None:
         return
     _pass("curation.backend_hide_post")
 
-    # Wait briefly for moderation projection.
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     team_hidden = False
     raw_visible = False
+    last_team_code = 0
+    last_raw_code = 0
+    last_team_feed: dict | None = None
+    last_raw_feed: dict | None = None
     while time.perf_counter() < deadline:
-        code_t, team_feed = _get(
-            f"{backend}/api/get_posts",
-            {
-                "address": sub_addr,
-                "community": slug,
-                "lens": "team",
-                "team_id": str(team_id),
-                "scope": "current",
-                "by": "newest",
-                "page": 1,
-                "limit": 25,
-            },
+        last_team_code, last_team_feed = _community_feed(
+            backend, sub_addr, slug, lens="team", team_id=team_id
         )
-        code_r, raw_feed = _get(
-            f"{backend}/api/get_posts",
-            {
-                "address": sub_addr,
-                "community": slug,
-                "lens": "raw",
-                "scope": "current",
-                "by": "newest",
-                "page": 1,
-                "limit": 25,
-            },
-        )
-        team_hashes = {
-            str(p.get("tx_hash") or p.get("hash") or "").lower()
-            for p in ((team_feed or {}).get("posts") or [])
-        }
-        raw_hashes = {
-            str(p.get("tx_hash") or p.get("hash") or "").lower()
-            for p in ((raw_feed or {}).get("posts") or [])
-        }
-        team_hidden = post_tx not in team_hashes
-        raw_visible = post_tx in raw_hashes
+        last_raw_code, last_raw_feed = _community_feed(backend, sub_addr, slug, lens="raw")
+        team_hidden = last_team_code == 200 and post_tx not in _feed_ids(last_team_feed)
+        raw_visible = last_raw_code == 200 and post_tx in _feed_ids(last_raw_feed)
         if team_hidden and raw_visible:
             break
         time.sleep(0.5)
@@ -217,10 +241,18 @@ def test_curation_backend(backend: str) -> None:
     if team_hidden:
         _pass("curation.backend_team_lens_hides_post")
     else:
+        _debug(
+            f"curation.team_after_hide code={last_team_code} "
+            f"ids={sorted(_feed_ids(last_team_feed))[:8]} err={(last_team_feed or {}).get('error')}"
+        )
         _fail("curation.backend_team_lens_hides_post", f"post still in team lens ({post_tx})")
     if raw_visible:
         _pass("curation.backend_raw_lens_shows_post")
     else:
+        _debug(
+            f"curation.raw_after_hide code={last_raw_code} "
+            f"ids={sorted(_feed_ids(last_raw_feed))[:8]} err={(last_raw_feed or {}).get('error')}"
+        )
         _fail("curation.backend_raw_lens_shows_post", f"post missing from raw lens ({post_tx})")
 
     _debug(f"curation.backend done community={slug} team_id={team_id}")

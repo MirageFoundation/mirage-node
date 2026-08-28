@@ -338,6 +338,48 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.vote_down reflected", f"votes={votes_after_down}")
 
+    # Newest and Magic omit the viewer's own downvotes on refresh. Profile
+    # listings (get_user_posts above) still show the post so the vote is visible.
+    # Community magic is the Magic assertion: that pool is small enough that
+    # this post is a candidate, unlike home magic's bounded discovery set.
+    hidden_newest = False
+    hidden_topic_newest = False
+    hidden_topic_magic = False
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
+        _code_n, feed_n = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "feed": "home", "by": "newest", "address": addr},
+        )
+        _code_tn, feed_tn = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "community": topic, "by": "newest", "address": addr},
+        )
+        _code_tm, feed_tm = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "community": topic, "by": "magic", "address": addr},
+        )
+        in_n = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_n or {}).get("posts") or []))
+        in_tn = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_tn or {}).get("posts") or []))
+        in_tm = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_tm or {}).get("posts") or []))
+        hidden_newest = not in_n
+        hidden_topic_newest = not in_tn
+        hidden_topic_magic = not in_tm
+        if hidden_newest and hidden_topic_newest and hidden_topic_magic:
+            break
+    if hidden_newest:
+        _pass("post.vote_down omitted from home newest")
+    else:
+        _fail("post.vote_down omitted from home newest", "downvoted post still in home newest feed")
+    if hidden_topic_newest:
+        _pass("post.vote_down omitted from community newest")
+    else:
+        _fail("post.vote_down omitted from community newest", "downvoted post still in community newest feed")
+    if hidden_topic_magic:
+        _pass("post.vote_down omitted from community magic")
+    else:
+        _fail("post.vote_down omitted from community magic", "downvoted post still in community magic feed")
+
     # 3.7 Clear vote
     _do_vote(backend, wallet, txh, 0)
     time.sleep(2)

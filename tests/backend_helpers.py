@@ -926,7 +926,7 @@ def _wait_list_count(
                     return actual
         except Exception:
             pass
-        time.sleep(1.0)
+        time.sleep(0.4)
     return actual
 
 

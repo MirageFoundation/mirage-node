@@ -1274,14 +1274,18 @@ power users can pay for convenience without turning Mirage into a pay to speak p
 
 ### What subscription tiers exist?
 
-Mirage currently has two tiers: Free and Subscriber.
+Mirage has Free and Subscriber as purchasable tiers. Admin is a separate appointed tier
+(level 100+) set by governance, not something you buy.
 
 Free is the default. It lets you browse, post, comment, vote, follow communities, follow
-users, and block content. Free users use browser proof of work for transactions.
+users, and block content. Free users use browser proof of work for transactions. Free
+accounts cannot lead or join curator teams.
 
 Subscriber is the convenience tier. It removes proof of work delays, removes the Anon prefix
 from usernames, increases limits, unlocks profile features like biography, avatar, and
-banner, and lets paid users lead or join curator teams.
+banner, and lets paid users lead or join curator teams (up to ten memberships).
+
+Admin accounts keep the high limits, skip proof of work with a higher daily message cap, give awards without burning MIRAGE, and can lead or join up to one thousand curator teams even without an active paid subscription.
 
 ### How do subscriptions work?
 

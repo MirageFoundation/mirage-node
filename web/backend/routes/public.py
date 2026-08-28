@@ -1204,6 +1204,57 @@ def _load_vote_totals_cached(
     return result
 
 
+def _viewer_downvoted(user_votes: dict[str, int], post_id: str) -> bool:
+    """True when the viewer has an active downvote on this post."""
+    return int(user_votes.get((post_id or "").lower(), 0) or 0) < 0
+
+
+def _load_viewer_downvote_ids(cur, viewer: str, post_ids: list[str]) -> dict[str, int]:
+    """Return {post_id: user_vote} for the viewer's active downvotes in post_ids."""
+    viewer_lower = (viewer or "").strip().lower()
+    if not viewer_lower or viewer_lower == "guest" or not post_ids:
+        return {}
+    id_ph = ",".join(["%s"] * len(post_ids))
+    cur.execute(
+        f"""SELECT LOWER(target), user_vote FROM votes
+            WHERE LOWER(owner) = %s AND LOWER(target) IN ({id_ph})
+              AND user_vote < 0""",
+        [viewer_lower] + post_ids,
+    )
+    out: dict[str, int] = {}
+    for tgt, vote in cur.fetchall():
+        if tgt:
+            out[tgt] = int(vote)
+    return out
+
+
+def _drop_viewer_downvotes(
+    posts: list[dict],
+    user_votes: dict[str, int],
+    *,
+    context: str = "",
+) -> list[dict]:
+    """Remove posts the viewer downvoted (newest + magic feed contract)."""
+    if not posts or not user_votes:
+        return posts
+    kept: list[dict] = []
+    dropped = 0
+    for post in posts:
+        pid = post.get("post_id") or ""
+        if _viewer_downvoted(user_votes, pid):
+            dropped += 1
+            continue
+        kept.append(post)
+    if dropped:
+        logger.debug(
+            "feed.hide_downvoted context=%s dropped=%d kept=%d",
+            context or "?",
+            dropped,
+            len(kept),
+        )
+    return kept
+
+
 def _load_vote_and_comment_stats(
     cur,
     post_ids: list[str],
@@ -1460,6 +1511,13 @@ def _get_following_feed(
             c["_N"] = 1.0
             c["_seen_count"] = 0
 
+        cand_ids = [c["post_id"] for c in candidates]
+        candidates = _drop_viewer_downvotes(
+            candidates,
+            _load_viewer_downvote_ids(cur, viewer_lower, cand_ids),
+            context="following.newest",
+        )
+
         start = (page - 1) * limit
         end = start + limit
         page_posts = candidates[start:end] if start < len(candidates) else []
@@ -1557,6 +1615,7 @@ def _get_following_feed(
             unique_awarders,
             viewer=viewer_lower,
             seen_posts=seen_posts,
+            user_votes=user_votes,
         )
         if should_hide:
             continue
@@ -1719,6 +1778,8 @@ def _get_home_feed_newest(
     posts: list[dict] = []
     batch_size = min(max(500, need * factor), MAX_CANDIDATE_POOL)
     last_ts = None
+    viewer_lower = (viewer or "").strip().lower()
+    downvote_votes: dict[str, int] = {}
 
     while len(posts) < need:
         ts_clause = "AND p.created_at < %s" if last_ts is not None else ""
@@ -1736,6 +1797,7 @@ def _get_home_feed_newest(
         rows = cur.fetchall()
         if not rows:
             break
+        batch: list[dict] = []
         for row in rows:
             post = _row_to_post(
                 row,
@@ -1748,7 +1810,14 @@ def _get_home_feed_newest(
                 viewer=viewer,
             )
             if post:
-                posts.append(post)
+                batch.append(post)
+        if batch:
+            downvote_votes.update(
+                _load_viewer_downvote_ids(cur, viewer_lower, [p["post_id"] for p in batch])
+            )
+            posts.extend(
+                _drop_viewer_downvotes(batch, downvote_votes, context="home.newest")
+            )
         last_ts = rows[-1][2]
         if len(rows) < batch_size:
             break
@@ -1767,7 +1836,6 @@ def _get_home_feed_newest(
 
     # Load vote/comment/award stats only for the posts we're returning
     page_ids = [p["post_id"] for p in page_posts]
-    viewer_lower = (viewer or "").strip().lower()
     vote_totals, comment_counts, user_votes, user_weight_map, _ = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
@@ -1937,6 +2005,7 @@ def _get_home_feed_magic(
             unique_awarders,
             viewer=viewer_lower,
             seen_posts=seen_posts,
+            user_votes=user_votes,
         )
 
         if should_hide:
@@ -2025,6 +2094,7 @@ def _score_magic(
     unique_awarders: dict[str, int] | None = None,
     viewer: str = "",
     seen_posts: dict[str, int] | None = None,
+    user_votes: dict[str, int] | None = None,
 ) -> tuple[float, dict, bool]:
     """
     Magic scoring: (S + V + U + P + A) × R × N
@@ -2053,6 +2123,9 @@ def _score_magic(
         return x
 
     pid = post["post_id"]
+    if user_votes and _viewer_downvoted(user_votes, pid):
+        logger.debug("feed.hide_downvoted context=magic pid=%s", (pid or "")[:12])
+        return 0.0, {}, True
     author = post["author"]
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
@@ -4261,7 +4334,8 @@ def _build_community_bootstrap(address: str) -> dict:
             """
             SELECT effective_paid, subscriber_quota_epoch, subscriber_quota_used,
                    renewal_next_attempt, renewal_last_attempt_epoch,
-                   renewal_warning_expiry, renewal_warning_sent
+                   renewal_warning_expiry, renewal_warning_sent,
+                   COALESCE(level, 0)
             FROM profiles
             WHERE LOWER(owner)=LOWER(%s)
             """,
@@ -4277,11 +4351,28 @@ def _build_community_bootstrap(address: str) -> dict:
     effective_paid = bool(row[0])
     quota_epoch = row[1]
     quota_used = row[2]
-    if effective_paid and (quota_epoch is None or quota_used is None):
-        raise RuntimeError("paid profile is missing subscriber quota projection")
+    user_level = int(row[7] or 0)
+    tiers = params.get("tiers") or []
+    if user_level == 0:
+        tier_idx = 0
+    elif user_level == 1:
+        tier_idx = 1
+    elif user_level >= 100:
+        tier_idx = 2
+    else:
+        raise RuntimeError(f"unknown profile level for daily relay quota: {user_level}")
+    if tier_idx >= len(tiers) or tiers[tier_idx] is None:
+        raise RuntimeError(f"chain params missing tier {tier_idx} for daily relay limit")
+    if "max_daily_relays" not in tiers[tier_idx]:
+        raise RuntimeError(f"tier {tier_idx} missing max_daily_relays")
+    limit = int(tiers[tier_idx]["max_daily_relays"])
+    uses_relay = limit > 0
+    if uses_relay and (quota_epoch is None or quota_used is None):
+        raise RuntimeError("relay-quota profile is missing subscriber quota projection")
     daily_quota = None
-    if effective_paid:
-        limit = int(params["subscriber_daily_relay_limit"])
+    if uses_relay:
+        if limit < 1:
+            raise RuntimeError("relay-quota tier has max_daily_relays < 1")
         used = int(quota_used)
         if used > limit:
             raise RuntimeError("subscriber quota projection exceeds chain limit")
@@ -4304,9 +4395,10 @@ def _build_community_bootstrap(address: str) -> dict:
             "warning_sent": bool(row[6]),
         }
     logger.debug(
-        "[renewal] bootstrap address=%s paid=%s warning_sent=%s",
+        "[renewal] bootstrap address=%s paid=%s level=%s warning_sent=%s",
         address[:12],
         effective_paid,
+        user_level,
         renewal_warning["warning_sent"] if renewal_warning is not None else None,
     )
     return {
@@ -5705,6 +5797,7 @@ def get_posts():
                     unique_awarders,
                     viewer=address_lower,
                     seen_posts=persisted_seen,
+                    user_votes=user_votes,
                 )
                 if should_hide:
                     continue
@@ -5730,6 +5823,9 @@ def get_posts():
                 p.pop("_score", None)
         else:
             # newest: pure chronological
+            candidates = _drop_viewer_downvotes(
+                candidates, user_votes, context=f"topic.newest.{topic_feed_type}"
+            )
             for c in candidates:
                 c["_N"] = 1.0
                 c["_seen_count"] = 0

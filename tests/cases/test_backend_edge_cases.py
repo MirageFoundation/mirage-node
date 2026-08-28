@@ -79,24 +79,30 @@ def test_edge_cases(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
+    sub = WALLETS["sub1"]
+    sub_addr = str(sub.address())
+    sub_pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
 
     def _try_post(topic, title, content, tag="", target="") -> Tuple[int, dict]:
+        # Reject-path posts go through the subscriber relay so we don't
+        # spend ~1s of PoW on payloads the backend drops before CheckTx.
         ts = _now_ms()
         nonce = _fresh_nonce()
-        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, target, topic, title, content, tag, 0, None, nonce)
-        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-        signed = canon_signed_with_pow(base, int(proof))
-        sig = sign_canonical(wallet, signed)
+        lb_sub, *_ = _fetch_params(backend, sub_addr)
+        base = _canon_base_post_raw(
+            sub_pub, _lb_bytes(lb_sub), 0, ts, target, topic, title, content, tag, 0, None, nonce
+        )
+        signed = canon_signed_with_pow(base, 0)
+        sig = sign_canonical(sub, signed)
         payload = {
-            "pubkey": _b64(pub),
+            "pubkey": _b64(sub_pub),
             "signature": _b64(sig),
-            "last_block_hash": lb,
+            "last_block_hash": lb_sub,
             "timestamp": ts,
             "envelope_nonce": str(nonce),
-            "pow_difficulty": diff,
-            "pow": int(proof),
+            "pow_difficulty": 0,
             "target": target,
             "topic": topic,
             "title": title,
@@ -672,12 +678,11 @@ def test_edge_cases(backend: str):
 
     # 9.12 XSS injection in content — should not cause server error
     xss_content = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
-    txh_xss = _do_post(backend, wallet, "test", f"XSS test {_rand_str(4)}", xss_content)
+    txh_xss = _do_post(backend, sub, "test", f"XSS test {_rand_str(4)}", xss_content, skip_pow=True)
     if txh_xss:
         _pass("edge.xss_content_accepted_safely", tx=txh_xss)
-        # Verify it's stored as-is (not interpreted)
-        time.sleep(2)
-        code_xss, feed_xss = _get(f"{backend}/api/get_user_posts", {"owner": addr, "limit": 10})
+        _wait_indexed(backend, sub_addr, txh_xss)
+        code_xss, feed_xss = _get(f"{backend}/api/get_user_posts", {"owner": sub_addr, "limit": 10})
         if code_xss == 200:
             posts_xss = (feed_xss or {}).get("posts") or []
             p_xss = next((p for p in posts_xss if str(p.get("post_id", "")).lower() == txh_xss), None)
@@ -711,7 +716,7 @@ def test_edge_cases(backend: str):
     # 9.14 Vote on non-existent post
     fake_target = "bb" * 32
     try:
-        resp_vote = _do_vote(backend, wallet, fake_target, 1)
+        resp_vote = _do_vote(backend, sub, fake_target, 1, skip_pow=True)
         txh_v = str(resp_vote.get("tx_hash", "")).lower()
         code_v = int(resp_vote.get("code", 0) or 0)
         if not txh_v or code_v != 0:
@@ -755,7 +760,7 @@ def test_edge_cases(backend: str):
 
     # 9.16 Self-follow (follow own address)
     try:
-        resp_self = _do_follow_user(backend, wallet, addr, follow=True)
+        resp_self = _do_follow_user(backend, sub, sub_addr, follow=True, skip_pow=True)
         txh_self = str(resp_self.get("tx_hash", "")).lower()
         # Self-follow may be accepted or rejected depending on chain logic
         if txh_self:
@@ -770,34 +775,8 @@ def test_edge_cases(backend: str):
     for tag in valid_tags:
         label = tag if tag else "empty"
         try:
-            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-            pub = wallet.public_key().public_key_bytes
-            ts = _now_ms()
-            nonce = _fresh_nonce()
             topic = f"vtag{_rand_str(4)}"
-            base = _canon_base_post_raw(
-                pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce
-            )
-            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-            signed = canon_signed_with_pow(base, int(proof))
-            sig = sign_canonical(wallet, signed)
-            payload = {
-                "pubkey": _b64(pub),
-                "signature": _b64(sig),
-                "last_block_hash": lb,
-                "timestamp": ts,
-                "envelope_nonce": str(nonce),
-                "pow_difficulty": diff,
-                "pow": int(proof),
-                "target": "",
-                "topic": topic,
-                "title": "Valid tag",
-                "content": "body",
-                "tag": tag,
-                "protocol_version": 1,
-            }
-            code, resp = _post(f"{backend}/api/core/post", payload)
-            txh = str((resp or {}).get("tx_hash", "") or "").lower()
+            txh = _do_post(backend, sub, topic, "Valid tag", "body", tag=tag, skip_pow=True)
             if txh:
                 _pass(f"edge.valid_tag_{label}_accepted")
             else:
@@ -808,8 +787,8 @@ def test_edge_cases(backend: str):
     # 9.18 Duplicate post (same topic+title in quick succession)
     try:
         dup_topic = f"dup{_rand_str(4)}"
-        txh1 = _do_post(backend, wallet, dup_topic, "Dup title", "body 1")
-        txh2 = _do_post(backend, wallet, dup_topic, "Dup title", "body 2")
+        txh1 = _do_post(backend, sub, dup_topic, "Dup title", "body 1", skip_pow=True)
+        txh2 = _do_post(backend, sub, dup_topic, "Dup title", "body 2", skip_pow=True)
         if txh1 and txh2:
             _pass("edge.duplicate_post_both_accepted")
         elif txh1:
@@ -859,23 +838,22 @@ def test_edge_cases(backend: str):
         ("del_in_media", [f"https://example.com/\x7fimg.jpg"]),
     ]
     for label, bad_media in media_nul_cases:
-        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-        pub = wallet.public_key().public_key_bytes
+        lb_sub, *_ = _fetch_params(backend, sub_addr)
         ts = _now_ms()
         nonce = _fresh_nonce()
         topic = f"med{_rand_str(4)}"
-        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", "body", "", 0, bad_media, nonce)
-        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-        signed = canon_signed_with_pow(base, int(proof))
-        sig = sign_canonical(wallet, signed)
+        base = _canon_base_post_raw(
+            sub_pub, _lb_bytes(lb_sub), 0, ts, "", topic, "Title", "body", "", 0, bad_media, nonce
+        )
+        signed = canon_signed_with_pow(base, 0)
+        sig = sign_canonical(sub, signed)
         payload = {
-            "pubkey": _b64(pub),
+            "pubkey": _b64(sub_pub),
             "signature": _b64(sig),
-            "last_block_hash": lb,
+            "last_block_hash": lb_sub,
             "timestamp": ts,
             "envelope_nonce": str(nonce),
-            "pow_difficulty": diff,
-            "pow": int(proof),
+            "pow_difficulty": 0,
             "target": "",
             "topic": topic,
             "title": "Title",
@@ -949,7 +927,7 @@ def test_frontend_bypass(backend: str):
             _pass(f"bypass.username_{label} skipped (registration disabled)")
             continue
         try:
-            resp = _do_set_username_raw(backend, free_wallet, uname)
+            resp = _do_set_username_raw(backend, sub1, uname, skip_pow=True)
             txh = str(resp.get("tx_hash", "")).lower()
             err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
             if not txh or "invalid" in err:
@@ -1027,7 +1005,7 @@ def test_frontend_bypass(backend: str):
     # Create a target post for vote tests
     vote_target = _do_post(backend, sub1, f"vote{_rand_str(4)}", "Vote target", "body", skip_pow=True)
     if vote_target:
-        time.sleep(3)
+        _wait_indexed(backend, sub1_addr, vote_target)
         for direction, label in [(2, "direction_2"), (-2, "direction_neg2"), (999, "direction_999")]:
             try:
                 resp = _do_vote(backend, sub1, vote_target, direction, skip_pow=True)
@@ -1055,7 +1033,7 @@ def test_frontend_bypass(backend: str):
         _, params = _get(f"{backend}/api/get_chain_config")
         params = params or {}
         tiers = params.get("tiers") or []
-        idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
+        idx = 0 if user_level == 0 else 1 if user_level == 1 else 2 if user_level >= 100 else -1
         if 0 <= idx < len(tiers):
             tier = tiers[idx]
             max_content = int(tier.get("max_content_length", 50000) or 50000)

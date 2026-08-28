@@ -194,10 +194,8 @@ def level_to_tier_index(level: int) -> int:
         return 0
     if level == 1:
         return 1
-    if level == 10:
-        return 2
     if level >= 100:
-        return 2  # admins get agent-tier capabilities
+        return 2
     return -1
 
 

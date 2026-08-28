@@ -1071,8 +1071,9 @@ const MainView = ({
                     orderedPosts = filteredPosts.filter(p => p && !p.deleted);
                 }
 
-                // Hide posts the viewer downvoted (Home only, client-side)
-                if (displayTopic === 'home' && hideDownvotedPosts) {
+                // Hide posts the viewer downvoted immediately when the setting is on.
+                // Newest/Magic also omit them on the next feed fetch (backend).
+                if (hideDownvotedPosts) {
                     orderedPosts = orderedPosts.filter(p => {
                         const postKey = String(p?.post_id || '').toLowerCase();
                         // If post is animating out, keep it in the list for now

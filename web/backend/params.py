@@ -90,12 +90,17 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
     if not tiers or not isinstance(tiers, list) or len(tiers) == 0:
         raise RuntimeError("missing or empty tiers in chain params")
     for idx, tier in enumerate(tiers):
-        if "max_biography_length" not in tier:
-            raise RuntimeError(f"missing max_biography_length in tier {idx}")
-        try:
-            tier["max_biography_length"] = int(tier["max_biography_length"])
-        except (TypeError, ValueError):
-            raise RuntimeError(f"invalid max_biography_length in tier {idx}: {tier.get('max_biography_length')}")
+        for key in (
+            "max_biography_length",
+            "max_curation_memberships",
+            "max_daily_relays",
+        ):
+            if key not in tier:
+                raise RuntimeError(f"missing {key} in tier {idx}")
+            try:
+                tier[key] = int(tier[key])
+            except (TypeError, ValueError):
+                raise RuntimeError(f"invalid {key} in tier {idx}: {tier.get(key)}")
     result["tiers"] = tiers
 
     award_configs = p.get("award_configs")

@@ -51,6 +51,20 @@ const Select = styled.select`
     }
 `;
 
+const FixedLens = styled.span`
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 0.55rem;
+    border-radius: 6px;
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    color: ${({ theme }) => requireThemeColor(theme, 'feedCtrlText')};
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+`;
+
 const Meta = styled.span`
     display: inline-flex;
     align-items: center;
@@ -86,6 +100,8 @@ const ManageLink = styled(Link)`
 
 function initialSelection(detail) {
     if (!detail) return LENS.DEFAULT;
+    // No live teams ⇒ nothing for "Node default" to mean; backend effective is already raw.
+    if (!detail.curated) return LENS.RAW;
     if (Number(detail.stored_mode) === CURATION_MODE.RAW) return LENS.RAW;
     if (Number(detail.effective_mode) === CURATION_MODE.PINNED && Number(detail.effective_team_id) > 0) {
         return `${LENS.TEAM}:${Number(detail.effective_team_id)}`;
@@ -101,8 +117,12 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     // Side effect only: toast when a stored pinned team is gone. Lens changes are local.
     useCurationPreference(community, detail);
     const liveTeams = useMemo(() => teams.filter((team) => !team.deleted), [teams]);
+    const curated = Boolean(detail?.curated);
     const authoritativeSelection = initialSelection(detail);
-    const selected = optimisticSelection || authoritativeSelection;
+    // Uncurated communities have only one meaningful lens; never leave Node default selected.
+    const selected = (!detailLoading && detail && !curated)
+        ? LENS.RAW
+        : (optimisticSelection || authoritativeSelection);
 
     useEffect(() => {
         setOptimisticSelection(null);
@@ -117,8 +137,9 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     useEffect(() => {
         if (detailLoading || teamsLoading) return;
         const [lens, rawTeamId] = selected.split(':');
+        console.debug('[lens] applying feed lens', { community, lens, teamId: rawTeamId || null, curated });
         onChange?.(lens, rawTeamId ? Number(rawTeamId) : null);
-    }, [detailLoading, onChange, selected, teamsLoading]);
+    }, [community, curated, detailLoading, onChange, selected, teamsLoading]);
 
     const change = (event) => {
         const selection = event.target.value;
@@ -129,24 +150,34 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     };
 
     const teamsPath = `/c/${encodeURIComponent(community)}/teams`;
-    const statusText = detail?.curated ? `${detail.live_team_count} live teams` : 'Uncurated';
+    const statusText = detailLoading
+        ? '…'
+        : (curated ? `${detail.live_team_count} live teams` : 'Uncurated');
+    const loading = detailLoading || teamsLoading;
+    // Wait for detail before collapsing to Uncensored — curated communities
+    // would otherwise flash the fixed label while the request is in flight.
+    const uncensoredOnly = Boolean(detail) && !detailLoading && !curated;
 
     return (
         <Wrap aria-label="Community lens">
-            <Select
-                value={selected}
-                onChange={change}
-                disabled={detailLoading || teamsLoading}
-                aria-label="Curation lens"
-            >
-                <option value={LENS.DEFAULT}>Node default</option>
-                {liveTeams.map((team) => (
-                    <option key={team.team_id} value={`${LENS.TEAM}:${team.team_id}`}>
-                        {team.name} · {team.subscriber_count} subscribers
-                    </option>
-                ))}
-                <option value={LENS.RAW}>Uncensored</option>
-            </Select>
+            {uncensoredOnly ? (
+                <FixedLens aria-label="Curation lens">Uncensored</FixedLens>
+            ) : (
+                <Select
+                    value={selected}
+                    onChange={change}
+                    disabled={loading}
+                    aria-label="Curation lens"
+                >
+                    <option value={LENS.DEFAULT}>Node default</option>
+                    {liveTeams.map((team) => (
+                        <option key={team.team_id} value={`${LENS.TEAM}:${team.team_id}`}>
+                            {team.name} · {team.subscriber_count} subscribers
+                        </option>
+                    ))}
+                    <option value={LENS.RAW}>Uncensored</option>
+                </Select>
+            )}
             <Meta>
                 <Status>{statusText}</Status>
                 <ManageLink to={teamsPath}>Curator teams</ManageLink>

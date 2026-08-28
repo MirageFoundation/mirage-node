@@ -147,16 +147,16 @@ def test_params(backend: str):
     else:
         _fail("params.pow_difficulty >= 0 (step format)", f"got {pd}")
 
-    # 1.4b two-tier max_blocked_communities. Tier config lives on
+    # 1.4b three-tier max_blocked_communities. Tier config lives on
     # get_chain_config; get_parameters carries only the PoW envelope inputs.
     _cc_code, chain_config = _get(f"{backend}/api/get_chain_config")
     if _cc_code != 200:
         _fail("params.get_chain_config returns valid data", f"code={_cc_code}")
         return
     tiers = (chain_config or {}).get("tiers") or []
-    expected_blocked = [25, 500]
-    if len(tiers) == 2:
-        got_blocked = [int((tiers[i] or {}).get("max_blocked_communities", -1)) for i in range(2)]
+    expected_blocked = [25, 500, 500]
+    if len(tiers) == 3:
+        got_blocked = [int((tiers[i] or {}).get("max_blocked_communities", -1)) for i in range(3)]
         if got_blocked == expected_blocked:
             _pass("params.max_blocked_communities tier limits", values=got_blocked)
         else:
@@ -164,16 +164,37 @@ def test_params(backend: str):
     else:
         _fail("params.max_blocked_communities tier limits", f"tiers_len={len(tiers)}")
 
-    # 1.4c two-tier max_biography_length
-    expected_bio = [0, 512]
-    if len(tiers) == 2:
-        got_bio = [int((tiers[i] or {}).get("max_biography_length", -1)) for i in range(2)]
+    # 1.4c three-tier max_biography_length
+    expected_bio = [0, 512, 512]
+    if len(tiers) == 3:
+        got_bio = [int((tiers[i] or {}).get("max_biography_length", -1)) for i in range(3)]
         if got_bio == expected_bio:
             _pass("params.max_biography_length tier limits", values=got_bio)
         else:
             _fail("params.max_biography_length tier limits", f"got {got_bio}")
     else:
         _fail("params.max_biography_length tier limits", f"tiers_len={len(tiers)}")
+
+    # 1.4d curation membership caps: free=0, subscriber=10, admin=1000
+    expected_curation = [0, 10, 1000]
+    if len(tiers) == 3:
+        got_curation = [int((tiers[i] or {}).get("max_curation_memberships", -1)) for i in range(3)]
+        if got_curation == expected_curation:
+            _pass("params.max_curation_memberships tier limits", values=got_curation)
+        else:
+            _fail("params.max_curation_memberships tier limits", f"got {got_curation}")
+    else:
+        _fail("params.max_curation_memberships tier limits", f"tiers_len={len(tiers)}")
+
+    # 1.4e daily relay caps
+    if len(tiers) == 3:
+        got_relays = [int((tiers[i] or {}).get("max_daily_relays", -1)) for i in range(3)]
+        if got_relays[0] == 0 and 1 <= got_relays[1] <= 10000 and 1 <= got_relays[2] <= 10000:
+            _pass("params.max_daily_relays tier limits", values=got_relays)
+        else:
+            _fail("params.max_daily_relays tier limits", f"got {got_relays}")
+    else:
+        _fail("params.max_daily_relays tier limits", f"tiers_len={len(tiers)}")
 
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")

@@ -115,7 +115,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	require.NotNil(t, freeTier)
 	require.NoError(t, mk.JoinCommunity(ctx, free, slug, uint32(freeTier.MaxJoinedCommunities)))
 	_, err = mk.CreateCurationTeam(ctx, free, slug, "Free", "")
-	require.ErrorContains(t, err, "active subscriber")
+	require.ErrorContains(t, err, "active subscriber or admin")
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
 		free,
@@ -296,6 +296,34 @@ func TestV139MigrationRecountsPinnedPaidSubscribersAndDropsCommunityState(t *tes
 	require.NoError(t, err)
 	require.False(t, hasCommunity)
 	require.NoError(t, mk.MigrateV139(ctx))
+}
+
+func TestAdminCanCreateCurationTeamWithoutEffectivePaid(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	admin := genAddr(42)
+	slug := "admin-community"
+	ensureUsername(t, mk, ctx, admin, "Anon-admin")
+	bz, found, err := mk.GetProfileCore(ctx, admin)
+	require.NoError(t, err)
+	require.True(t, found)
+	var core types.ProfileCore
+	require.NoError(t, json.Unmarshal(bz, &core))
+	core.Level = types.LevelAdminMin
+	core.EffectivePaid = false
+	out, err := json.Marshal(&core)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetProfileCore(ctx, admin, out))
+
+	adminTier := mk.GetParams(ctx).GetTierConfig(types.LevelAdminMin)
+	require.NotNil(t, adminTier)
+	require.Equal(t, uint64(1000), adminTier.MaxCurationMemberships)
+	require.Equal(t, uint64(1000), adminTier.MaxDailyRelays)
+	require.NoError(t, mk.JoinCommunity(ctx, admin, slug, uint32(adminTier.MaxJoinedCommunities)))
+
+	teamID, err := mk.CreateCurationTeam(ctx, admin, slug, "AdminTeam", "admin without paid flag")
+	require.NoError(t, err, "admin without EffectivePaid must be able to create a curator team")
+	require.Equal(t, uint64(1), teamID)
+	t.Logf("[debug] admin curated team_id=%d without effective_paid", teamID)
 }
 
 func TestCurationTeamDescriptionLimitAndNoPolicy(t *testing.T) {

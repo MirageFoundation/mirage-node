@@ -36,6 +36,10 @@ message TierConfig {
   // max_biography_length is the max biography length for this tier (0 = disabled)
   uint64 max_biography_length = 21;
   uint64 max_curation_memberships = 22;
+  // max_daily_relays is the UTC-day envelope quota for this tier.
+  // 0 means the account uses proof of work instead of the relay quota path.
+  uint64 max_daily_relays = 23;
+  reserved 24; // was can_award_free; free awards are hardcoded to level >= 100
 }
 
 // Params defines the parameters for the module.
@@ -100,8 +104,8 @@ message Params {
   // tiers defines the tier configurations, indexed by user-level-to-tier mapping.
   // The exact level -> tier-index mapping is defined by LevelToTierIndex in
   // x/core/types/params.go: level 0 (Free) -> 0, level 1 (Subscriber) -> 1,
-  // level >= 100 (Admin) -> 1 (inherits Subscriber limits).
-  // Levels 2-9 and 10 are invalid after v1.39.0.
+  // level >= 100 (Admin) -> 2. Levels 2-9 and 10 are invalid after v1.39.0.
+  // Admin is appointed via governance (period_fee must be 0); it is not purchased.
   repeated TierConfig tiers = 41;
 
   // subscription_reserve_percent is superseded by subscription_reserve_bps and
@@ -172,6 +176,9 @@ message Params {
   uint64 creator_epoch_expiries_per_block = 73;
   uint64 subscription_early_renewal_days = 74;
   uint64 subscription_renewal_attempts_per_block = 75;
+  // subscriber_daily_relay_limit must equal tiers[1].max_daily_relays.
+  // Kept so existing governance proposals and APIs that name this field still
+  // work; runtime quota reads tiers[level].max_daily_relays.
   uint64 subscriber_daily_relay_limit = 76;
   uint64 max_subscription_periods_per_purchase = 77;
 }

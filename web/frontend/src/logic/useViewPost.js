@@ -532,10 +532,8 @@ export function useViewPost({
             const chain = JSON.parse(localStorage.getItem('chainConfig') || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = userLevel === 0 ? 0 : 1;
-            // Admins (>=100) map to the subscriber tier on-chain (see
-            // LevelToTierIndex in params.go); they are NOT uncapped — the chain
-            // enforces that tier's max_content_length. Show that real cap.
+            // Free=0, Subscriber=1, Admin(>=100)=2 — matches LevelToTierIndex.
+            const tierIndex = userLevel === 0 ? 0 : userLevel >= 100 ? 2 : 1;
             const isAdmin = userLevel >= 100;
             const tier = tiers[tierIndex] || tiers[tiers.length - 1] || {};
             let maxContent = parseInt(tier.max_content_length) || 0;
