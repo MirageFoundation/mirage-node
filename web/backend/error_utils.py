@@ -130,7 +130,6 @@ ERRORS = {
     # Agents
     "invalid_agent_address": "invalid agent address",
     "duplicate_agent": "duplicate agent",
-    "agents_must_be_array": "agents must be an array",
     "agent_already_enabled": "agent is already enabled",
     "cannot_enable_self_as_agent": "cannot enable yourself as an agent",
     "cannot_set_self_as_agent": "cannot set yourself as an agent",
@@ -199,7 +198,6 @@ ERRORS = {
     # Communities / curation
     "community_required": "community required",
     "target_and_community_required": "target and community required",
-    "community_and_new_founder_required": "community and new_founder required",
     "community_and_name_required": "community and name required",
     "invalid_curation_mode": "invalid mode",
     "invalid_pinned_team_id": "invalid pinned_team_id",

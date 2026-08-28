@@ -1475,22 +1475,29 @@ def test_anon_visibility(backend: str) -> None:
     )
 
     # ── The guest feed is computed once, not per request ─────────────────
-    # Overlaying agent edits for guests put work on the busiest endpoint on the
-    # site, for a result every guest shares. Entries must be copies: both call
-    # sites merge into the response they get back.
+    # The guest feed is the busiest endpoint on the site and every guest shares
+    # the result, so it is computed once and cached. Entries must be copies:
+    # both call sites merge into the response they get back.
+    #
+    # The lens and team also have to be part of the key. Since v1.39.0 a guest
+    # sees whichever curator lens the community resolves to, and a key that
+    # ignored it would serve one team's moderation decisions under another's.
     _visibility_probe(
         "anon_visibility.guest_feed_cache_isolated",
         "import routes.public as rp\n"
         "rp._guest_feed_cache.clear()\n"
-        "k1 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set())\n"
-        "k2 = rp._guest_feed_cache_key('home', 'newest', 1, 25, set())\n"
-        "k3 = rp._guest_feed_cache_key('home', 'magic', 2, 25, set())\n"
+        "base = dict(viewer='', community='', scope='all', lens='default', team_id=None)\n"
+        "k1 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **base)\n"
+        "k2 = rp._guest_feed_cache_key('home', 'newest', 1, 25, set(), **base)\n"
+        "k3 = rp._guest_feed_cache_key('home', 'magic', 2, 25, set(), **base)\n"
+        "k4 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens='team', team_id=7))\n"
+        "k5 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens='team', team_id=8))\n"
         "rp._guest_feed_cache_put(k1, {'posts': [{'post_id': 'a'}], 'total': 1})\n"
         "hit = rp._guest_feed_cache_get(k1)\n"
         "hit['posts'][0]['post_id'] = 'mutated'\n"
         "again = rp._guest_feed_cache_get(k1)\n"
-        "ok = (again['posts'][0]['post_id'] == 'a' and len({k1, k2, k3}) == 3\n"
-        "      and rp._guest_feed_cache_get(k2) is None and rp._guest_feed_cache_get(k3) is None)\n"
+        "ok = (again['posts'][0]['post_id'] == 'a' and len({k1, k2, k3, k4, k5}) == 5\n"
+        "      and all(rp._guest_feed_cache_get(k) is None for k in (k2, k3, k4, k5)))\n"
         "rp._guest_feed_cache.clear()\n"
         "print('OK' if ok else ('BAD', hit, again))\n",
     )

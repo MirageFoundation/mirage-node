@@ -662,45 +662,9 @@ def test_tx_status_non_post_vote(backend: str):
         _skip("tx_status_npv.setup", "free wallet not available")
         return
 
-    # If invite codes are required, grab an existing unused code.
-    # v1.39.0 retired invite routes (410); skip lookup when gone.
-    invite_code = ""
-    try:
-        _code, ncfg = _get(f"{backend}/api/get_node_config")
-        if (ncfg or {}).get("registration_invite_code_required") is True:
-            addrs = []
-            validator_addr = str((ncfg or {}).get("validator_account_address") or "").strip()
-            if validator_addr:
-                addrs.append(validator_addr)
-            # fall back to known test wallets
-            for w in WALLETS.values():
-                try:
-                    addrs.append(str(w.address()))
-                except Exception:
-                    pass
-            saw_gone = False
-            for addr in addrs:
-                code, data = _get(f"{backend}/api/get_invite_codes", {"address": addr})
-                if code == 410:
-                    saw_gone = True
-                    continue
-                if code != 200:
-                    continue
-                codes = (data or {}).get("codes") or []
-                unused = next((c for c in codes if not c.get("is_used")), None)
-                if unused and unused.get("code"):
-                    invite_code = str(unused["code"])
-                    break
-            if not invite_code and not saw_gone:
-                _fail("tx_status_npv.invite_code_missing", "invite code required but none available")
-                return
-    except Exception as e:
-        _fail("tx_status_npv.invite_code_lookup", str(e))
-        return
-
     # Submit a set_username and check that get_tx_status can find it via tx_index
     uname = f"Anon-txidx{_rand_str(4)}"
-    resp = _do_set_username_raw(backend, free, uname, invite_code=invite_code or None)
+    resp = _do_set_username_raw(backend, free, uname)
     txh = str(resp.get("tx_hash", "") or "").lower()
     if not txh or len(txh) != 64:
         _fail("tx_status_npv.set_username_submit", f"resp={resp}")

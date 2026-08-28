@@ -924,18 +924,22 @@ def _wait_list_count(
 
 
 def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
+    """Wait until the indexer has recorded this post.
+
+    Asks get_tx_status rather than scanning the author's feed. The feed scan
+    used to request limit=100, which get_user_posts silently clamps to 50, so it
+    answered "not indexed" for any post the author had since buried under 50
+    newer ones. Every caller means "is it indexed yet", and this reads that
+    directly instead of inferring it from one page of one ordering.
+    """
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
     while time.perf_counter() < deadline:
-        try:
-            code, data = _get(f"{backend}/api/get_user_posts", {"owner": owner, "limit": 100, "page": 1})
-            if code == 200:
-                posts = (data or {}).get("posts") or []
-                if any(str(p.get("post_id", "")).lower() == h for p in posts):
-                    return True
-        except Exception:
-            pass
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and (data or {}).get("indexed") and data.get("success") is True:
+            return True
         time.sleep(0.5)
+    print(f"    [debug] _wait_indexed timeout owner={owner[:12]} tx={h[:16]}")
     return False
 
 

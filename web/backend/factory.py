@@ -96,7 +96,9 @@ def create_app(init_runtime: bool = True) -> Flask:
             from logging_utils import log_event, next_request_id
 
             log_event(next_request_id(), "[retired] v139 route", path=path, method=request.method)
-            return api_error_code("gone", 410)
+            # Name the dead endpoint so a client stuck on an old build can tell
+            # which call to drop, rather than seeing a bare 410 for the request.
+            return api_error_code("gone", 410, retired=path.rsplit("/", 1)[-1])
 
     # Global safety net: catch any unhandled exception and return a generic error
     @app.errorhandler(Exception)

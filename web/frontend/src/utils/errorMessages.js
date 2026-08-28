@@ -96,9 +96,13 @@ const ERROR_MAP = {
 
     // Communities / curation
     community_required: "A community is required.",
+    community_invalid: "That community name isn't valid.",
     target_and_community_required: "Both a target and a community are required.",
     community_and_name_required: "A community and a name are required.",
     invalid_curation_mode: "Invalid curation mode.",
+    invalid_curated: "Invalid curated filter.",
+    curation_team_not_found: "That curator team no longer exists.",
+    missing_viewer: "Sign in to load this view.",
     invalid_pinned_team_id: "Invalid pinned team.",
     epoch_ids_required: "At least one epoch is required.",
     too_many_epoch_ids: "You can claim at most 30 epochs at a time.",
