@@ -1149,10 +1149,6 @@ class DatabaseManager:
                     value = runtime[key]
                     return None if value is None else int(value)
 
-                def _opt_bool(key: str):
-                    value = runtime[key]
-                    return None if value is None else bool(value)
-
                 cur.execute(
                     """
                     UPDATE profiles
@@ -1170,7 +1166,8 @@ class DatabaseManager:
                         _opt_int("renewal_next_attempt"),
                         _opt_int("renewal_last_attempt_epoch"),
                         _opt_int("renewal_expiry"),
-                        _opt_bool("renewal_warning_sent"),
+                        # Column is NOT NULL DEFAULT FALSE — never write NULL.
+                        bool(runtime["renewal_warning_sent"]),
                         owner,
                     ),
                 )
