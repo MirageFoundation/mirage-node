@@ -766,28 +766,26 @@ const TopicHeroDescription = styled.div`
 const CommunityLensBar = styled.div`
     box-sizing: border-box;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
     width: 100%;
     margin: 0;
-    padding: 0.5rem 1rem;
+    padding: 0.55rem 1rem 0.45rem;
     border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
 
     @media (max-width: 600px) {
-        flex-wrap: wrap;
-        row-gap: 0.35rem;
-        padding: 0.5rem 0;
+        padding: 0.55rem 0 0.45rem;
     }
 `;
 
-const CommunityLensLeading = styled.div`
+const CommunityLensTopRow = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    justify-content: space-between;
+    gap: 0.75rem;
     min-width: 0;
-    flex: 1 1 auto;
 `;
 
 const CommunityLensTitle = styled.h1`
@@ -1151,18 +1149,18 @@ const MainView = ({
 
                             {isCurrentTopic && !isUrlTopicBlocked && (
                                 <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
-                                    <CommunityLensLeading>
+                                    <CommunityLensTopRow>
                                         <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
-                                        <CurationLensPicker
-                                            community={urlTopic}
-                                            viewer={viewerAddress}
-                                            onChange={handleLensChange}
-                                        />
-                                    </CommunityLensLeading>
-                                    <CommunityLensControls>
-                                        <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
-                                        <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
-                                    </CommunityLensControls>
+                                        <CommunityLensControls>
+                                            <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                            <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
+                                        </CommunityLensControls>
+                                    </CommunityLensTopRow>
+                                    <CurationLensPicker
+                                        community={urlTopic}
+                                        viewer={viewerAddress}
+                                        onChange={handleLensChange}
+                                    />
                                 </CommunityLensBar>
                             )}
 

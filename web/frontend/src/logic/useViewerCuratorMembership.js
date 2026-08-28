@@ -1,0 +1,175 @@
+import { useCallback, useEffect, useState } from 'react';
+import Api from '../utils/api';
+import Storage from '../utils/Storage';
+import { requireCommunitySlug } from '../utils/curation';
+
+/** community → { teamId, teamName } | null */
+const membershipCache = new Map();
+const inflight = new Map();
+
+function cacheKey(viewer, community) {
+    return `${String(viewer || '').toLowerCase()}::${String(community || '').toLowerCase()}`;
+}
+
+function clearMembershipCache(community = '') {
+    const slug = String(community || '').trim().toLowerCase();
+    if (!slug) {
+        membershipCache.clear();
+        inflight.clear();
+        console.debug('[curation] membership cache cleared');
+        return;
+    }
+    for (const key of [...membershipCache.keys()]) {
+        if (key.endsWith(`::${slug}`)) membershipCache.delete(key);
+    }
+    for (const key of [...inflight.keys()]) {
+        if (key.endsWith(`::${slug}`)) inflight.delete(key);
+    }
+    console.debug('[curation] membership cache cleared for community', { community: slug });
+}
+
+async function fetchMembership(community, viewer) {
+    const slug = requireCommunitySlug(community);
+    const owner = String(viewer || '').trim().toLowerCase();
+    if (!owner || owner === 'guest') return null;
+    const key = cacheKey(owner, slug);
+    if (membershipCache.has(key)) return membershipCache.get(key);
+    if (inflight.has(key)) return inflight.get(key);
+
+    const pending = (async () => {
+        const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, {
+            viewer: owner,
+        });
+        if (!data || !Array.isArray(data.items)) {
+            throw new Error('Invalid curator teams response');
+        }
+        if (!Array.isArray(data.viewer_team_ids)) {
+            throw new Error('Curator teams response missing viewer_team_ids');
+        }
+        const teamIdRaw = data.viewer_team_ids[0];
+        if (teamIdRaw == null) {
+            membershipCache.set(key, null);
+            return null;
+        }
+        const teamId = Number(teamIdRaw);
+        if (!Number.isSafeInteger(teamId) || teamId <= 0) {
+            throw new Error('Invalid viewer_team_ids entry');
+        }
+        const team = data.items.find((item) => Number(item.team_id) === teamId);
+        const result = {
+            teamId,
+            teamName: typeof team?.name === 'string' ? team.name : '',
+        };
+        membershipCache.set(key, result);
+        console.debug('[curation] viewer membership', {
+            community: slug,
+            teamId,
+            teamName: result.teamName,
+        });
+        return result;
+    })();
+
+    inflight.set(key, pending);
+    try {
+        return await pending;
+    } finally {
+        inflight.delete(key);
+    }
+}
+
+/**
+ * Resolve whether the logged-in viewer is a curator for `community`.
+ * One membership per community — returns that team's id/name, or null.
+ */
+export function useViewerCuratorMembership(community) {
+    const slug = String(community || '').trim().toLowerCase();
+    const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
+    const enabled = Boolean(slug && viewer && viewer !== 'guest');
+    const [membership, setMembership] = useState(() => {
+        if (!enabled) return null;
+        return membershipCache.get(cacheKey(viewer, slug)) ?? null;
+    });
+    const [loading, setLoading] = useState(enabled && !membershipCache.has(cacheKey(viewer, slug)));
+    const [error, setError] = useState('');
+
+    const refresh = useCallback(async () => {
+        if (!enabled) {
+            setMembership(null);
+            setLoading(false);
+            setError('');
+            return null;
+        }
+        setLoading(true);
+        setError('');
+        try {
+            clearMembershipCache(slug);
+            const next = await fetchMembership(slug, viewer);
+            setMembership(next);
+            return next;
+        } catch (err) {
+            const message = String(err?.message || err);
+            setError(message);
+            setMembership(null);
+            console.error('[curation] membership failed', { community: slug, error: message });
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, [enabled, slug, viewer]);
+
+    useEffect(() => {
+        if (!enabled) {
+            setMembership(null);
+            setLoading(false);
+            setError('');
+            return undefined;
+        }
+        let cancelled = false;
+        setLoading(!membershipCache.has(cacheKey(viewer, slug)));
+        fetchMembership(slug, viewer)
+            .then((next) => {
+                if (!cancelled) {
+                    setMembership(next);
+                    setError('');
+                }
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    setMembership(null);
+                    setError(String(err?.message || err));
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+
+        const onUpdate = (event) => {
+            const changed = String(event?.detail?.community || '').toLowerCase();
+            if (changed && changed !== slug) return;
+            clearMembershipCache(slug);
+            fetchMembership(slug, viewer)
+                .then((next) => {
+                    if (!cancelled) setMembership(next);
+                })
+                .catch(() => {
+                    if (!cancelled) setMembership(null);
+                });
+        };
+        window.addEventListener('curationUpdated', onUpdate);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('curationUpdated', onUpdate);
+        };
+    }, [enabled, slug, viewer]);
+
+    return {
+        teamId: membership?.teamId ?? null,
+        teamName: membership?.teamName ?? '',
+        loading,
+        error,
+        refresh,
+        isCurator: membership != null,
+    };
+}
+
+export default useViewerCuratorMembership;

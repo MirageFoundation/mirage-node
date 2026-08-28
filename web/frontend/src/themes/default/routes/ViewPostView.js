@@ -30,6 +30,7 @@ import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../co
 import { useBlocks } from "../../../logic/useBlocks";
 import UserAvatar from "../components/UserAvatar.js";
 import ContentTagBadge from "../components/ContentTagBadge";
+import CurateMenuItems from "../components/CurateMenuItems";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -1062,14 +1063,19 @@ const MenuItem = styled.button`
         color: ${({ theme }) => theme.colors.menuDangerText};
     }
 
-    &:hover {
+    &:hover:not(:disabled) {
         background: ${({ theme }) => theme.colors.menuItemHoverBg};
         color: ${({ theme }) => theme.colors.menuItemHoverText};
     }
 
-    &[data-danger="true"]:hover {
+    &[data-danger="true"]:hover:not(:disabled) {
         background: ${({ theme }) => theme.colors.menuItemHoverBg};
         color: ${({ theme }) => theme.colors.voteDown};
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
     }
 
     & > svg,
@@ -1080,6 +1086,16 @@ const MenuItem = styled.button`
         color: inherit;
     }
 `;
+
+const MenuHeader = styled.div`
+    padding: 10px 14px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1;
+    color: ${({ theme }) => theme.colors.menuHeaderText};
+    white-space: nowrap;
+`;
+
 /**
  * Markdown + media content slot inside the root post and each comment.
  * Font size matches `CardView::Body` so the post-details view reads the
@@ -2455,6 +2471,25 @@ function ViewPostView({
                                 <span>Mark {itemLabel} deleted</span>
                             </MenuItem>}
                         </>}
+                        {hasValidAccount && (
+                            <CurateMenuItems
+                                post={post}
+                                onDone={() => setOpenMenuId(null)}
+                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
+                                renderItem={(item) => (
+                                    <MenuItem
+                                        key={item.key}
+                                        type="button"
+                                        data-danger={item.danger ? 'true' : undefined}
+                                        disabled={item.disabled}
+                                        onClick={item.onClick}
+                                    >
+                                        {item.icon}
+                                        <span>{item.label}</span>
+                                    </MenuItem>
+                                )}
+                            />
+                        )}
                     </>;
                 })()}
             </MenuDropdown>, document.body)}

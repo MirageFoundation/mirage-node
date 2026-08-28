@@ -2,37 +2,40 @@ import { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
+import { HiOutlineUserGroup } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
 import * as tx from '../../../utils/tx';
 import { communityLabel, sanitizeCommunitySlug, isValidCommunitySlug } from '../../../utils/community';
+import { waitForOwnCurationTeam } from '../../../utils/curation';
 import { formatError } from '../../../utils/errorMessages';
 import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { canCurate } from '../../../logic/useSubscription';
+import { getMaxUsernameSize } from '../../../utils/chainParams';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
-
-/**
- * Curator teams list / create — typography matches Discover/Inbox (R7):
- * page title ~1.05rem, meta 0.62–0.7rem, body 0.75rem. Never put the
- * community slug in the page title: long slugs blow the header apart.
- */
 
 const Page = styled.main`
     max-width: 820px;
     margin: 0 auto;
-    padding: 0.75rem 1rem 1.5rem;
+    padding: 1.1rem 1rem 2rem;
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
+
+    @media (max-width: 600px) {
+        padding: 0.85rem 0 1.5rem;
+    }
 `;
 
 const HeaderRow = styled.div`
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    padding-bottom: 0.9rem;
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
 `;
 
 const TitleBlock = styled.div`
@@ -42,10 +45,10 @@ const TitleBlock = styled.div`
 
 const Title = styled.h1`
     margin: 0;
-    font-size: 1.05rem;
+    font-size: 1.35rem;
     font-weight: 700;
-    letter-spacing: -0.01em;
-    line-height: 1.25;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
 `;
 
 const Subline = styled.div`
@@ -53,9 +56,9 @@ const Subline = styled.div`
     align-items: baseline;
     gap: 0.35rem;
     min-width: 0;
-    margin-top: 0.2rem;
+    margin-top: 0.3rem;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.65rem;
+    font-size: 0.72rem;
     line-height: 1.4;
 `;
 
@@ -78,22 +81,14 @@ const HeaderActions = styled.div`
 
 const Card = styled.section`
     display: grid;
-    gap: 0.45rem;
-    padding: 0.7rem 0.75rem;
-    margin-top: 0.65rem;
+    gap: 0.65rem;
+    padding: 1rem;
+    margin-top: 0.85rem;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    border-radius: 10px;
+    border-radius: 12px;
     background: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    font-size: 0.75rem;
-    line-height: 1.45;
-`;
-
-const CardTitle = styled.h2`
-    margin: 0;
     font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    line-height: 1.3;
+    line-height: 1.45;
 `;
 
 const CardActions = styled.div`
@@ -106,45 +101,74 @@ const CardActions = styled.div`
 
 const TeamLink = styled(Link)`
     color: ${({ theme }) => requireThemeColor(theme, 'link')};
-    font-size: 0.8rem;
-    font-weight: 600;
+    font-size: 0.92rem;
+    font-weight: 700;
     text-decoration: none;
     &:hover { text-decoration: underline; }
 `;
 
 const Meta = styled.div`
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.65rem;
+    font-size: 0.72rem;
     line-height: 1.45;
 `;
 
 const Form = styled.form`
     display: grid;
-    gap: 0.5rem;
-    margin-top: 0.15rem;
+    gap: 0.9rem;
+`;
+
+const Field = styled.label`
+    display: grid;
+    gap: 0.35rem;
+`;
+
+const FieldLabel = styled.span`
+    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    font-size: 0.72rem;
+    font-weight: 650;
+`;
+
+const FieldHint = styled.span`
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.65rem;
+    line-height: 1.4;
 `;
 
 const Input = styled.input`
-    padding: 0.45rem 0.55rem;
-    border-radius: 7px;
+    min-height: 2.5rem;
+    padding: 0.55rem 0.7rem;
+    border-radius: 8px;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     background: ${({ theme }) => requireThemeColor(theme, 'inputBackground')};
     color: inherit;
     font: inherit;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
+
+    &:focus {
+        border-color: ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline: 2px solid color-mix(in srgb, ${({ theme }) => requireThemeColor(theme, 'focusBlue')} 20%, transparent);
+        outline-offset: 1px;
+    }
 `;
 
 const Textarea = styled.textarea`
-    min-height: 4.5rem;
-    padding: 0.45rem 0.55rem;
+    min-height: 7rem;
+    padding: 0.65rem 0.7rem;
     resize: vertical;
-    border-radius: 7px;
+    border-radius: 8px;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     background: ${({ theme }) => requireThemeColor(theme, 'inputBackground')};
     color: inherit;
     font: inherit;
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     line-height: 1.4;
+
+    &:focus {
+        border-color: ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline: 2px solid color-mix(in srgb, ${({ theme }) => requireThemeColor(theme, 'focusBlue')} 20%, transparent);
+        outline-offset: 1px;
+    }
 `;
 
 const ErrorText = styled.div`
@@ -163,6 +187,81 @@ const BackLink = styled(Link)`
     &:hover { text-decoration: underline; }
 `;
 
+const EmptyState = styled.section`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.65rem;
+    margin-top: 1rem;
+    padding: 2.5rem 1.25rem;
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 14px;
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+    text-align: center;
+`;
+
+const EmptyIcon = styled.div`
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 50%;
+    background: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    font-size: 1.35rem;
+`;
+
+const EmptyTitle = styled.h2`
+    margin: 0.15rem 0 0;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+`;
+
+const EmptyBody = styled.p`
+    max-width: 28rem;
+    margin: 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.75rem;
+    line-height: 1.55;
+`;
+
+const TeamCard = styled.section`
+    display: grid;
+    gap: 0.55rem;
+    margin-top: 0.75rem;
+    padding: 0.95rem 1rem;
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 12px;
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+    transition: border-color 120ms ease, transform 120ms ease;
+
+    &:hover {
+        border-color: ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        transform: translateY(-1px);
+    }
+`;
+
+const TeamHeader = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+`;
+
+const Badge = styled.span`
+    display: inline-flex;
+    align-items: center;
+    min-height: 1.35rem;
+    padding: 0 0.45rem;
+    border-radius: 999px;
+    background: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.62rem;
+    font-weight: 650;
+    white-space: nowrap;
+`;
+
 export default function CurationTeamsView({ createOnly = false }) {
     const params = useParams();
     const navigate = useNavigate();
@@ -173,6 +272,8 @@ export default function CurationTeamsView({ createOnly = false }) {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [error, setError] = useState('');
+    // idle | creating | verifying — keep the form mounted until the team is listed
+    const [createStatus, setCreateStatus] = useState('idle');
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const community = routeCommunity || sanitizeCommunitySlug(slug);
     const canLoad = Boolean(routeCommunity && isValidCommunitySlug(routeCommunity));
@@ -190,9 +291,12 @@ export default function CurationTeamsView({ createOnly = false }) {
     const [eligible, setEligible] = useState(null);
     const label = communityLabel(routeCommunity || previewSlug || '');
     const liveCount = teamState.teams.length;
-    const statusLabel = liveCount ? 'Curated' : 'Uncurated';
 
     useEffect(() => {
+        if (!createOnly) {
+            setEligible(null);
+            return undefined;
+        }
         if (!viewer) {
             setEligible(false);
             return undefined;
@@ -225,7 +329,9 @@ export default function CurationTeamsView({ createOnly = false }) {
                 console.error('[curation] eligibility check failed', { error: message });
             });
         return () => { cancelled = true; };
-    }, [viewer]);
+    }, [createOnly, viewer]);
+
+    const maxTeamNameLength = getMaxUsernameSize() ?? 30;
 
     const submit = async (event) => {
         event.preventDefault();
@@ -238,30 +344,98 @@ export default function CurationTeamsView({ createOnly = false }) {
             setError(formatError({ error_code: 'not_subscriber' }));
             return;
         }
-        setError('');
-        console.debug('[curation] create team form', {
-            community: nextSlug,
-            nameLength: name.length,
-            joined: communityState.detail?.viewer_joined === true,
-        });
-        const result = await tx.createCuratorTeam(nextSlug, name, description);
-        if (!result?.success) {
-            setError(formatError(result));
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            setError('Team name is required.');
             return;
         }
-        navigate(`/c/${encodeURIComponent(nextSlug)}/teams`);
+        if (trimmedName.length > maxTeamNameLength) {
+            setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
+            console.error('[curation] create team name too long', {
+                length: trimmedName.length,
+                max: maxTeamNameLength,
+            });
+            return;
+        }
+        setError('');
+        setCreateStatus('creating');
+        console.debug('[curation] create team form', {
+            community: nextSlug,
+            nameLength: trimmedName.length,
+            maxNameLength: maxTeamNameLength,
+            joined: communityState.detail?.viewer_joined === true,
+        });
+        try {
+            const result = await tx.createCuratorTeam(nextSlug, trimmedName, description);
+            if (!result?.success) {
+                setError(formatError(result));
+                setCreateStatus('idle');
+                return;
+            }
+            const txHash = result.tx_hash ? String(result.tx_hash).toLowerCase() : '';
+            if (!txHash) {
+                setError('Team creation succeeded without a transaction hash.');
+                console.error('[curation] create team missing tx_hash', { community: nextSlug });
+                setCreateStatus('idle');
+                return;
+            }
+
+            // Same staged wait as username changes: confirm the tx is indexed,
+            // then confirm the teams API actually lists our new team.
+            setCreateStatus('verifying');
+            console.debug('[curation] create team verifying', { community: nextSlug, txHash: txHash.slice(0, 12) });
+            const pollResult = await tx.pollTxStatus(txHash);
+            if (!pollResult) {
+                setError('Team creation timed out waiting for confirmation.');
+                setCreateStatus('idle');
+                return;
+            }
+            if (!pollResult.success) {
+                setError(pollResult.error_details?.message || 'Transaction rejected');
+                setCreateStatus('idle');
+                return;
+            }
+
+            const visible = await waitForOwnCurationTeam(nextSlug, viewer, trimmedName);
+            if (!visible) {
+                setError('Team created but is not visible yet. Open Teams and refresh in a moment.');
+                console.error('[curation] create team not visible after index', {
+                    community: nextSlug,
+                    name: trimmedName,
+                });
+                setCreateStatus('idle');
+                return;
+            }
+
+            console.debug('[curation] create team ready', {
+                community: nextSlug,
+                teamId: visible.team_id,
+            });
+            navigate(`/c/${encodeURIComponent(nextSlug)}/teams`);
+        } catch (err) {
+            const message = formatError(err);
+            setError(message);
+            console.error('[curation] create team failed', { community: nextSlug, error: message });
+            setCreateStatus('idle');
+        }
     };
+
+    const createBusy = createStatus !== 'idle' || !!pending;
+    const createButtonLabel = createStatus === 'verifying'
+        ? 'Verifying…'
+        : (getStatus('create_curation_team', community, 0, '', 'Creating…') || (createStatus === 'creating' ? 'Creating…' : 'Create team'));
 
     const teamsListPath = routeCommunity
         ? `/c/${encodeURIComponent(routeCommunity)}/teams`
         : '/communities';
     // Single phase for the create route — drives one title, one body, no stacked headings.
+    // While creating/verifying, keep the form mounted even if the team list starts to update.
     let createPhase = 'form';
     if (!viewer) createPhase = 'signin';
     else if (eligible === null) createPhase = 'checking';
     else if (eligible === false) createPhase = 'subscribe';
-    else if (alreadyCurator) createPhase = 'already';
-    else if (previewSlug && communityState.loading) createPhase = 'loading';
+    else if (alreadyCurator && createStatus === 'idle') createPhase = 'already';
+    else if (previewSlug && communityState.loading && createStatus === 'idle') createPhase = 'loading';
 
     const createTitle = {
         signin: 'Sign in',
@@ -274,38 +448,57 @@ export default function CurationTeamsView({ createOnly = false }) {
 
     const createForm = (
         <Card id="create">
-            {!createOnly && <CardTitle>New team</CardTitle>}
             <Meta>
-                You become this team&apos;s leader. Other teams in this community stay and compete as lenses.
+                You&apos;ll lead this team and define how this community is curated for users who choose it.
             </Meta>
             <Form onSubmit={submit}>
                 {createOnly && !routeCommunity && (
-                    <Input
-                        aria-label="Community slug"
-                        value={slug}
-                        onChange={(event) => setSlug(sanitizeCommunitySlug(event.target.value))}
-                        placeholder="community-slug"
-                        required
-                    />
+                    <Field>
+                        <FieldLabel>Community</FieldLabel>
+                        <Input
+                            aria-label="Community slug"
+                            value={slug}
+                            onChange={(event) => setSlug(sanitizeCommunitySlug(event.target.value))}
+                            placeholder="community-slug"
+                            required
+                            disabled={createBusy}
+                        />
+                    </Field>
                 )}
-                <Input
-                    aria-label="Team name"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                    placeholder="e.g. Signal Desk"
-                    required
-                />
-                <Textarea
-                    aria-label="Team description"
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder="What this lens stands for — include how you moderate (e.g. hide spam, keep adult content, no brigading)"
-                />
+                <Field>
+                    <FieldLabel>Team name</FieldLabel>
+                    <Input
+                        aria-label="Team name"
+                        value={name}
+                        onChange={(event) => setName(event.target.value.slice(0, maxTeamNameLength))}
+                        placeholder="e.g. Signal Desk"
+                        maxLength={maxTeamNameLength}
+                        required
+                        disabled={createBusy}
+                    />
+                    <FieldHint>Up to {maxTeamNameLength} characters.</FieldHint>
+                </Field>
+                <Field>
+                    <FieldLabel>Describe your curation approach:</FieldLabel>
+                    <Textarea
+                        aria-label="Describe your curation approach"
+                        value={description}
+                        onChange={(event) => setDescription(event.target.value)}
+                        placeholder="What users will see when they pick this team."
+                        disabled={createBusy}
+                    />
+                    <FieldHint>
+                        Help users understand what they&apos;ll see and include how you moderate spam, adult content, and brigading.
+                    </FieldHint>
+                </Field>
                 {error && <ErrorText>{error}</ErrorText>}
                 <CardActions>
-                    <Button type="submit" size="xs" disabled={!!pending}>
-                        {getStatus('create_curation_team', community, 0, '', 'Creating…') || 'Create team'}
+                    <Button type="submit" size="xs" disabled={createBusy} aria-busy={createBusy}>
+                        {createButtonLabel}
                     </Button>
+                    {routeCommunity && !createBusy && (
+                        <Button to={teamsListPath} size="xs" variant="secondary">Cancel</Button>
+                    )}
                 </CardActions>
             </Form>
         </Card>
@@ -384,75 +577,51 @@ export default function CurationTeamsView({ createOnly = false }) {
                     <Subline>
                         {label ? <Slug title={label}>{label}</Slug> : null}
                         {label ? <span aria-hidden="true">·</span> : null}
-                        <span>{statusLabel} · {liveCount} live</span>
+                        <span>{liveCount === 1 ? '1 live team' : `${liveCount} live teams`}</span>
                     </Subline>
                 </TitleBlock>
                 <HeaderActions>
-                    <Button to={createPath} size="xs">Create team</Button>
+                    {liveCount > 0 && (
+                        alreadyCurator && ownTeam ? (
+                            <Button
+                                to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}`}
+                                size="xs"
+                            >
+                                Open your team
+                            </Button>
+                        ) : (
+                            <Button to={createPath} size="xs">Create team</Button>
+                        )
+                    )}
                 </HeaderActions>
             </HeaderRow>
 
             {teamState.loading && <Card><Meta>Loading curator teams…</Meta></Card>}
             {teamState.error && <ErrorText>{teamState.error}</ErrorText>}
             {!teamState.loading && teamState.teams.map((team) => (
-                <Card key={team.team_id}>
-                    <TeamLink to={`/c/${encodeURIComponent(routeCommunity)}/teams/${team.team_id}`}>
-                        {team.name}
-                    </TeamLink>
-                    {String(team.team_id) === String(communityState.detail?.default_team?.team_id) && (
-                        <Meta>Node default</Meta>
-                    )}
+                <TeamCard key={team.team_id}>
+                    <TeamHeader>
+                        <TeamLink to={`/c/${encodeURIComponent(routeCommunity)}/teams/${team.team_id}`}>
+                            {team.name}
+                        </TeamLink>
+                        {String(team.team_id) === String(communityState.detail?.default_team?.team_id) && (
+                            <Badge>Node default</Badge>
+                        )}
+                    </TeamHeader>
                     <Meta>{team.description || 'No description provided.'}</Meta>
-                    <Meta>{team.subscriber_count} paid subscribers</Meta>
-                </Card>
+                    <Meta>{team.subscriber_count} subscribers</Meta>
+                </TeamCard>
             ))}
             {!teamState.loading && teamState.teams.length === 0 && (
-                <Card>
-                    <Meta>
-                        No curator teams yet. Posts stay available through the uncensored lens.
-                    </Meta>
-                </Card>
+                <EmptyState>
+                    <EmptyIcon><HiOutlineUserGroup aria-hidden="true" /></EmptyIcon>
+                    <EmptyTitle>No curator teams yet</EmptyTitle>
+                    <EmptyBody>
+                        This community currently uses the uncensored feed. Start a team to offer users a curated feed.
+                    </EmptyBody>
+                    <Button to={createPath} size="xs">Create the first team</Button>
+                </EmptyState>
             )}
-
-            {!viewer && (
-                <Card>
-                    <Meta>Sign in with a paid subscription or admin account to create a curator team.</Meta>
-                    <CardActions>
-                        <Button to={withReturnTo('/login', returnTo)} size="xs">Sign in</Button>
-                    </CardActions>
-                </Card>
-            )}
-            {viewer && eligible === null && <Card><Meta>Checking eligibility…</Meta></Card>}
-            {viewer && eligible === false && (
-                <Card>
-                    <Meta>Curator teams require an active paid subscription or an admin account.</Meta>
-                    <CardActions>
-                        <Button to={withReturnTo('/subscription', returnTo)} size="xs">Subscribe</Button>
-                    </CardActions>
-                    {error && <ErrorText>{error}</ErrorText>}
-                </Card>
-            )}
-            {viewer && eligible === true && !alreadyCurator && previewSlug && communityState.loading && (
-                <Card><Meta>Loading community…</Meta></Card>
-            )}
-            {viewer && eligible === true && alreadyCurator && (
-                <Card>
-                    <Meta>
-                        You already curate {ownTeam?.name || 'a team'} here. One membership per community.
-                    </Meta>
-                    {ownTeam && (
-                        <CardActions>
-                            <Button
-                                to={`/c/${encodeURIComponent(routeCommunity || previewSlug)}/teams/${ownTeam.team_id}`}
-                                size="xs"
-                            >
-                                Open your team
-                            </Button>
-                        </CardActions>
-                    )}
-                </Card>
-            )}
-            {viewer && eligible === true && !alreadyCurator && (!previewSlug || !communityState.loading) && createForm}
         </Page>
     );
 }

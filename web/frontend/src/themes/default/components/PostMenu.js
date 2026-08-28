@@ -25,6 +25,7 @@ import Storage from "../../../utils/Storage";
 import { communityLabel } from "../../../utils/community";
 import ConfirmDialog from "./ConfirmDialog";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
+import CurateMenuItems from "./CurateMenuItems";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 
@@ -101,13 +102,18 @@ const MenuItemBtn = styled.button`
     line-height: 1;
     transition: background 0.12s ease, color 0.12s ease;
 
-    &:hover {
+    &:hover:not(:disabled) {
         background: ${({ theme, $active }) =>
         $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
         color: ${({ theme, $active, $danger }) => {
         if ($danger) return theme.colors.voteDown;
         return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
     }};
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
     }
 
     & > svg {
@@ -121,6 +127,15 @@ const MenuItemBtn = styled.button`
         flex: 1 1 auto;
         min-width: 0;
     }
+`;
+
+const MenuHeader = styled.div`
+    padding: 10px 14px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    line-height: 1;
+    color: ${({ theme }) => theme.colors.menuHeaderText};
+    white-space: nowrap;
 `;
 
 // 3-dot button — identical rhythm to CardView's `MoreButton`. The svg is
@@ -487,6 +502,25 @@ export function MoreMenuChip({
                                 <HiOutlineShieldExclamation />
                                 <span>Mark post deleted</span>
                             </MenuItemBtn>
+                        )}
+                        {isLoggedIn && (
+                            <CurateMenuItems
+                                post={post}
+                                onDone={close}
+                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
+                                renderItem={(item) => (
+                                    <MenuItemBtn
+                                        key={item.key}
+                                        type="button"
+                                        $danger={item.danger}
+                                        disabled={item.disabled}
+                                        onClick={item.onClick}
+                                    >
+                                        {item.icon}
+                                        <span>{item.label}</span>
+                                    </MenuItemBtn>
+                                )}
+                            />
                         )}
                     </Menu>
                 )}

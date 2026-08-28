@@ -320,7 +320,7 @@ func DefaultParams() Params {
 		MaxCuratorsPerTeam:                  10,
 		MaxPendingCuratorInvitesPerTeam:     10,
 		MaxPendingCuratorInvitesPerUser:     100,
-		MaxCurationTeamNameLength:           64,
+		MaxCurationTeamNameLength:           30,
 		MaxCurationTeamDescriptionLength:    4000,
 		SubscriptionTransitionsPerBlock:     100,
 		CurationPruneKeysPerBlock:           500,

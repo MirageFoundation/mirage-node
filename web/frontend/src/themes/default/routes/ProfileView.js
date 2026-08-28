@@ -1486,7 +1486,7 @@ function ProfileCommentRow({ post }) {
  * live inside `ProfileViewAuthenticated` so React's rules-of-hooks
  * aren't violated when we short-circuit here.
  */
-export default function ProfileView({ state }) {
+export default function ProfileView({ state, updatePost }) {
     const routeParams = useParams();
     const viewerPublicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const viewerIsLoggedIn = !!(viewerPublicKey && viewerPublicKey !== 'guest');
@@ -1518,11 +1518,12 @@ export default function ProfileView({ state }) {
             </ContentGrid>
         );
     }
-    return <ProfileViewAuthenticated state={state} />;
+    return <ProfileViewAuthenticated state={state} updatePost={updatePost} />;
 }
 
 function ProfileViewAuthenticated({
-    state
+    state,
+    updatePost
 }) {
     const { caps } = useTheme();
     const profileHideFilterSelect = caps.profileHideFilterSelect;
@@ -2046,6 +2047,7 @@ function ProfileViewAuthenticated({
                                                 key={profileFeedView}
                                                 posts={recentPosts}
                                                 state={state}
+                                                updatePost={updatePost}
                                                 showSortTabs={false}
                                                 bleedShell={false}
                                             />

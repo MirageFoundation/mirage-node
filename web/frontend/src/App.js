@@ -1163,8 +1163,8 @@ class App extends Component {
                                             <Route path="/change_username" element={<ChangeUsernameView state={this.state} />} />
                                             <Route path="/sign_out" element={<SignOutView state={this.state} setCredentials={this.setCredentials} />} />
                                             <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
-                                            <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
-                                            <Route path="/profile" element={<ProfileView state={this.state} />} />
+                                            <Route path="/u/:identity" element={<ProfileView state={this.state} updatePost={this.updatePost} />} />
+                                            <Route path="/profile" element={<ProfileView state={this.state} updatePost={this.updatePost} />} />
 
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />

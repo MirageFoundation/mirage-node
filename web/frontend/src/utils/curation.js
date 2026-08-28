@@ -84,3 +84,62 @@ export function invalidateCurationReads(community = '') {
         console.debug('[lens] invalidated curation reads', { community: slug || null });
     } catch (_) { /* noop */ }
 }
+
+/**
+ * Poll the community teams list until the viewer's team is visible.
+ * Used after create_curation_team so the UI does not navigate to an empty list
+ * while the indexer is still catching up.
+ */
+export async function waitForOwnCurationTeam(community, owner, name, options = {}) {
+    const slug = requireCommunitySlug(community);
+    const ownerLower = String(owner || '').trim().toLowerCase();
+    const nameLower = String(name || '').trim().toLowerCase();
+    if (!ownerLower) throw new Error('owner is required');
+    if (!nameLower) throw new Error('team name is required');
+
+    const {
+        initialDelay = 0,
+        interval = 1500,
+        maxAttempts = 10,
+        timeoutMs = 5000,
+        sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    } = options;
+
+    if (initialDelay > 0) await sleep(initialDelay);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const data = await Api.get(
+                `communities/${encodeURIComponent(slug)}/teams`,
+                { viewer: ownerLower, _cb: Date.now() },
+                { timeoutMs },
+            );
+            const items = Array.isArray(data?.items) ? data.items : [];
+            const found = items.find((team) => (
+                String(team?.owner || '').toLowerCase() === ownerLower
+                && String(team?.name || '').toLowerCase() === nameLower
+            ));
+            if (found) {
+                console.debug('[curation] create team visible', {
+                    community: slug,
+                    teamId: found.team_id,
+                    attempt,
+                });
+                return found;
+            }
+            console.debug('[curation] create team not indexed yet', {
+                community: slug,
+                attempt,
+                count: items.length,
+            });
+        } catch (err) {
+            console.warn('[curation] create team visibility poll failed', {
+                community: slug,
+                attempt,
+                error: String(err?.message || err),
+            });
+        }
+        if (attempt < maxAttempts) await sleep(interval);
+    }
+    return null;
+}

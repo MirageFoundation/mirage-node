@@ -1,15 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
     LENS,
     curationPendingKey,
     lensCacheKey,
     lensQuery,
     normalizeLens,
+    waitForOwnCurationTeam,
 } from '../../src/utils/curation.js';
 import { currentCreatorEpoch, normalizeClaimEpochs } from '../../src/logic/useCreatorEarnings.js';
+import Api from '../../src/utils/api.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendSrc = join(here, '../../src');
@@ -125,9 +127,121 @@ describe('v1.39 curation UI contracts', () => {
         expect(create).not.toMatch(/Moderation policy/);
         expect(create).not.toMatch(/setPolicy/);
         expect(create).toMatch(/include how you moderate/);
+        expect(create).toMatch(/Describe your curation approach:/);
+        expect(create).not.toMatch(/About this lens/);
+        expect(create).toMatch(/getMaxUsernameSize\(\) \?\? 30/);
+        expect(create).toMatch(/maxLength=\{maxTeamNameLength\}/);
+        expect(create).toMatch(/waitForOwnCurationTeam/);
+        expect(create).toMatch(/pollTxStatus/);
+        expect(create).toMatch(/Verifying…/);
+        expect(create).toMatch(/curated feed/);
+        expect(create).not.toMatch(/curated lens/);
         expect(detail).not.toMatch(/Team policy/);
         expect(detail).not.toMatch(/setPolicy/);
         expect(detail).toMatch(/include how you moderate/);
+        expect(detail).not.toMatch(/this lens/);
+        expect(detail).not.toMatch(/CardTitle>About</);
+        expect(detail).toMatch(/CardTitle>Team settings</);
+        expect(detail).toMatch(/isLeader \? \(/);
+        expect(detail).toMatch(/maxLength=\{maxTeamNameLength\}/);
+        expect(detail).toMatch(/resolveUserIdentity/);
+        expect(detail).toMatch(/Username or mirage1/);
+        expect(detail).toMatch(/formatUserLabel/);
+        expect(detail).not.toMatch(/placeholder="mirage1…"/);
+        // Moderation lives on each post's ⋯ menu, not on the team page.
+        expect(detail).not.toMatch(/Moderation tools/);
+        expect(detail).not.toMatch(/moderationTarget/);
+        expect(detail).not.toMatch(/Hide post/);
+        expect(detail).not.toMatch(/Lock thread/);
+    });
+
+    it('puts Curate actions on every post overflow menu', () => {
+        const postMenu = readFileSync(
+            join(frontendSrc, 'themes/default/components/PostMenu.js'),
+            'utf8',
+        );
+        const cardView = readFileSync(
+            join(frontendSrc, 'themes/default/components/CardView.js'),
+            'utf8',
+        );
+        const viewPost = readFileSync(
+            join(frontendSrc, 'themes/default/routes/ViewPostView.js'),
+            'utf8',
+        );
+        const curateItems = readFileSync(
+            join(frontendSrc, 'themes/default/components/CurateMenuItems.js'),
+            'utf8',
+        );
+        const actions = readFileSync(
+            join(frontendSrc, 'logic/usePostCurateActions.js'),
+            'utf8',
+        );
+        const membership = readFileSync(
+            join(frontendSrc, 'logic/useViewerCuratorMembership.js'),
+            'utf8',
+        );
+
+        for (const src of [postMenu, cardView, viewPost]) {
+            expect(src).toMatch(/CurateMenuItems/);
+        }
+        expect(curateItems).toMatch(/Curate · /);
+        expect(curateItems).toMatch(/usePostCurateActions/);
+        expect(actions).toMatch(/moderateCurationPost/);
+        expect(actions).toMatch(/moderateCurationUser/);
+        expect(actions).toMatch(/setCurationThreadLocked/);
+        expect(actions).toMatch(/Hide post/);
+        expect(actions).toMatch(/Show post/);
+        expect(actions).toMatch(/Hide user/);
+        expect(actions).toMatch(/Show user/);
+        expect(actions).toMatch(/Lock thread/);
+        expect(actions).toMatch(/Unlock thread/);
+        expect(membership).toMatch(/viewer_team_ids/);
+        expect(membership).toMatch(/isCurator/);
+    });
+});
+
+describe('waitForOwnCurationTeam', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('returns the team once the owner+name appear in the list', async () => {
+        const sleep = vi.fn(async () => {});
+        const get = vi.spyOn(Api, 'get')
+            .mockResolvedValueOnce({ items: [] })
+            .mockResolvedValueOnce({
+                items: [{
+                    team_id: 3,
+                    owner: 'mirage1viewer',
+                    name: 'Signal Desk',
+                    description: '',
+                    subscriber_count: '0',
+                }],
+            });
+
+        const found = await waitForOwnCurationTeam('Tech', 'MIRAGE1VIEWER', 'Signal Desk', {
+            interval: 10,
+            maxAttempts: 5,
+            sleep,
+        });
+
+        expect(found.team_id).toBe(3);
+        expect(get).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns null when the team never appears within the budget', async () => {
+        const sleep = vi.fn(async () => {});
+        vi.spyOn(Api, 'get').mockResolvedValue({ items: [] });
+
+        const found = await waitForOwnCurationTeam('tech', 'mirage1viewer', 'Signal Desk', {
+            interval: 1,
+            maxAttempts: 3,
+            sleep,
+        });
+
+        expect(found).toBe(null);
+        expect(sleep).toHaveBeenCalledTimes(2);
     });
 });
 

@@ -2462,6 +2462,16 @@ func (app *App) RegisterUpgradeHandlers() {
 			if err := app.CoreKeeper.MigrateV139(sdkCtx); err != nil {
 				return nil, fmt.Errorf("v1.39.0: %w", err)
 			}
+			// Team names share the username cap (30). Clamp after MigrateV139 in
+			// case an earlier DefaultParams value was already written.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if params.MaxCurationTeamNameLength != 30 {
+				params.MaxCurationTeamNameLength = 30
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, fmt.Errorf("v1.39.0: set max_curation_team_name_length: %w", err)
+				}
+				sdkCtx.Logger().Info("v1.39.0: set max_curation_team_name_length", "value", 30)
+			}
 			sdkCtx.Logger().Info("Upgrade to v1.39.0 complete")
 			return toVM, nil
 		},

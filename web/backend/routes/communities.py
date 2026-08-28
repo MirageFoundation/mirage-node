@@ -211,6 +211,7 @@ def community_teams(slug: str):
     if not _valid_slug(slug):
         return api_error_code("community_invalid", 400)
     include_deleted = str(request.args.get("include_deleted") or "").lower() == "true"
+    viewer = (request.args.get("viewer") or "").strip().lower()
     try:
         with connect_db() as conn:
             cur = conn.cursor()
@@ -232,6 +233,25 @@ def community_teams(slug: str):
             """
             cur.execute(sql, (slug,))
             rows = cur.fetchall() or []
+            viewer_team_ids: list[str] = []
+            if viewer:
+                cur.execute(
+                    """
+                    SELECT team_id
+                    FROM curation_team_curators
+                    WHERE community=%s AND LOWER(curator)=%s
+                    ORDER BY team_id
+                    """,
+                    (slug, viewer),
+                )
+                viewer_team_ids = [str(r[0]) for r in cur.fetchall()]
+                log_event(
+                    rid,
+                    "[community] teams.viewer_membership",
+                    community=slug,
+                    viewer=viewer[:12],
+                    team_ids=viewer_team_ids,
+                )
         items = [
             {
                 "team_id": str(r[0]),
@@ -245,7 +265,12 @@ def community_teams(slug: str):
             }
             for r in rows
         ]
-        return jsonify({"items": items, "next_cursor": None, "has_more": False})
+        return jsonify({
+            "items": items,
+            "viewer_team_ids": viewer_team_ids,
+            "next_cursor": None,
+            "has_more": False,
+        })
     except Exception as e:
         log_event(rid, "communities.teams.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
@@ -334,20 +359,24 @@ def community_team_invitations(slug: str, team_id: int):
             if viewer == owner:
                 cur.execute(
                     """
-                    SELECT invitee, inviter, status, created_height, resolved_height
-                    FROM curation_team_invitations
-                    WHERE community=%s AND team_id=%s
-                    ORDER BY created_height DESC, invitee
+                    SELECT i.invitee, i.inviter, i.status, i.created_height, i.resolved_height,
+                           p.username
+                    FROM curation_team_invitations i
+                    LEFT JOIN profiles p ON LOWER(p.owner)=LOWER(i.invitee)
+                    WHERE i.community=%s AND i.team_id=%s
+                    ORDER BY i.created_height DESC, i.invitee
                     """,
                     (slug, team_id),
                 )
             else:
                 cur.execute(
                     """
-                    SELECT invitee, inviter, status, created_height, resolved_height
-                    FROM curation_team_invitations
-                    WHERE community=%s AND team_id=%s AND LOWER(invitee)=%s
-                    ORDER BY created_height DESC
+                    SELECT i.invitee, i.inviter, i.status, i.created_height, i.resolved_height,
+                           p.username
+                    FROM curation_team_invitations i
+                    LEFT JOIN profiles p ON LOWER(p.owner)=LOWER(i.invitee)
+                    WHERE i.community=%s AND i.team_id=%s AND LOWER(i.invitee)=%s
+                    ORDER BY i.created_height DESC
                     """,
                     (slug, team_id, viewer),
                 )
@@ -358,6 +387,7 @@ def community_team_invitations(slug: str, team_id: int):
                     "status": int(row[2]),
                     "created_height": int(row[3]),
                     "resolved_height": int(row[4]) if row[4] is not None else None,
+                    "username": row[5] or None,
                 }
                 for row in cur.fetchall()
             ]

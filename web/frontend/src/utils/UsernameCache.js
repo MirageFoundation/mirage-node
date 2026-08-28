@@ -1,3 +1,4 @@
+import { bech32 } from 'bech32';
 import Api from './api';
 import { onSessionReset } from './sessionLifecycle';
 
@@ -113,5 +114,66 @@ export async function resolveUsernames(addresses, opts = {}) {
         out[addr] = cacheMap[addr] || '';
     });
     return out;
+}
+
+export function isMirageAddress(value) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return false;
+    const candidate = trimmed.toLowerCase();
+    if (!candidate.startsWith('mirage1')) return false;
+    try {
+        const decoded = bech32.decode(candidate);
+        return !!(decoded && decoded.prefix === 'mirage');
+    } catch (_) {
+        return false;
+    }
+}
+
+export function formatUserLabel(username, address) {
+    const name = typeof username === 'string' ? username.trim() : '';
+    if (name) return `@${name}`;
+    const addr = String(address || '').trim();
+    if (!addr) return '';
+    if (addr.length <= 24) return addr;
+    return `${addr.slice(0, 14)}…${addr.slice(-8)}`;
+}
+
+/**
+ * Resolve a user-facing identity (username preferred, mirage1 address also OK)
+ * into a chain address for txs that require a bech32 target.
+ */
+export async function resolveUserIdentity(raw, opts = {}) {
+    const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 8000;
+    const trimmed = String(raw || '').trim().replace(/^@+/, '');
+    if (!trimmed) {
+        throw new Error('Enter a username or mirage1 address.');
+    }
+    if (isMirageAddress(trimmed)) {
+        const address = trimmed.toLowerCase();
+        console.debug('[UsernameCache] identity is address', { address: address.slice(0, 12) });
+        return { address, username: null, kind: 'address' };
+    }
+
+    const data = await Api.get(
+        'get_address_from_username',
+        { username: trimmed },
+        { timeoutMs },
+    );
+    if (!data || data.exists !== true || !data.address) {
+        console.error('[UsernameCache] username not found', { username: trimmed });
+        throw new Error(`User "${trimmed}" not found`);
+    }
+    const address = String(data.address).trim().toLowerCase();
+    if (!isMirageAddress(address)) {
+        throw new Error(`User "${trimmed}" resolved to an invalid address`);
+    }
+    const username = typeof data.username === 'string' && data.username.trim()
+        ? data.username.trim()
+        : trimmed;
+    console.debug('[UsernameCache] identity resolved from username', {
+        username,
+        address: address.slice(0, 12),
+    });
+    return { address, username, kind: 'username' };
 }
 

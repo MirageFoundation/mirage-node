@@ -88,7 +88,14 @@ export function useCurationTeam(community, teamId, viewer = '') {
                 if (typeof invitation.invitee !== 'string' || !Number.isInteger(invitation.status)) {
                     throw new Error('Invalid curator invitation response');
                 }
-                return { ...invitation, address: invitation.invitee };
+                if (invitation.username != null && typeof invitation.username !== 'string') {
+                    throw new Error('Invalid curator invitation username');
+                }
+                return {
+                    ...invitation,
+                    address: invitation.invitee,
+                    username: invitation.username || null,
+                };
             });
             const combined = { ...next, invitations };
             setTeam(combined);

@@ -6,9 +6,11 @@ import Storage from '../../../utils/Storage';
 import * as tx from '../../../utils/tx';
 import { communityLabel } from '../../../utils/community';
 import { formatError } from '../../../utils/errorMessages';
+import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
 import { useCurationTeam } from '../../../logic/useCurationTeams';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
+import { getMaxUsernameSize } from '../../../utils/chainParams';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -92,7 +94,7 @@ export default function CurationTeamView() {
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [invitee, setInvitee] = useState('');
-    const [moderationTarget, setModerationTarget] = useState('');
+    const [inviteBusy, setInviteBusy] = useState(false);
     const [error, setError] = useState('');
     const members = useMemo(() => team?.members || [], [team]);
     const invitations = useMemo(
@@ -120,9 +122,55 @@ export default function CurationTeamView() {
     };
     const pendingFor = (action, target = '') => getInfo(action, community, Number(teamId), target);
     const statusFor = (action, target, fallback) => getStatus(action, community, Number(teamId), target, fallback);
+    const maxTeamNameLength = getMaxUsernameSize() ?? 30;
     const saveProfile = (event) => {
         event.preventDefault();
-        return run(() => tx.updateCurationTeam(community, Number(teamId), name, description));
+        const trimmedName = name.trim();
+        if (!trimmedName) {
+            setError('Team name is required.');
+            return undefined;
+        }
+        if (trimmedName.length > maxTeamNameLength) {
+            setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
+            console.error('[curation] update team name too long', {
+                length: trimmedName.length,
+                max: maxTeamNameLength,
+            });
+            return undefined;
+        }
+        return run(() => tx.updateCurationTeam(community, Number(teamId), trimmedName, description));
+    };
+    const submitInvite = async (event) => {
+        event.preventDefault();
+        const raw = invitee.trim();
+        if (!raw) {
+            setError('Enter a username or mirage1 address.');
+            return;
+        }
+        setError('');
+        setInviteBusy(true);
+        try {
+            const identity = await resolveUserIdentity(raw);
+            console.debug('[curation] invite curator', {
+                community,
+                teamId: Number(teamId),
+                kind: identity.kind,
+                address: identity.address.slice(0, 12),
+                username: identity.username,
+            });
+            const result = await run(() => tx.inviteCurationTeamMember(
+                community,
+                Number(teamId),
+                identity.address,
+            ));
+            if (result?.success) setInvitee('');
+        } catch (err) {
+            const message = err instanceof Error ? err.message : formatError(err);
+            setError(message);
+            console.error('[curation] invite resolve failed', { error: message });
+        } finally {
+            setInviteBusy(false);
+        }
     };
 
     if (loading) return <Page>Loading curator team…</Page>;
@@ -137,11 +185,50 @@ export default function CurationTeamView() {
         </BackLink>
         <Title>{team.name}</Title>
         {team.deleted && <ErrorText>This curator team has been deleted.</ErrorText>}
-        <Meta>{String(team.team_id) === String(communityDetail?.default_team?.team_id) ? 'Node default · ' : ''}{team.subscriber_count} paid subscribers</Meta>
+        <Meta>{String(team.team_id) === String(communityDetail?.default_team?.team_id) ? 'Node default · ' : ''}{team.subscriber_count} subscribers</Meta>
+
         <Card>
-            <CardTitle>About</CardTitle>
-            <Body>{team.description || 'No description provided.'}</Body>
-            <Meta>Leader: {team.owner}</Meta>
+            <CardTitle>Team settings</CardTitle>
+            {isLeader ? (
+                <>
+                    <Form onSubmit={saveProfile}>
+                        <Input
+                            value={name}
+                            onChange={(event) => setName(event.target.value.slice(0, maxTeamNameLength))}
+                            placeholder={team.name || 'e.g. Signal Desk'}
+                            aria-label="Team name"
+                            maxLength={maxTeamNameLength}
+                        />
+                        <Textarea
+                            value={description}
+                            onChange={(event) => setDescription(event.target.value)}
+                            placeholder={team.description || 'Describe your curation approach — include how you moderate'}
+                            aria-label="Describe your curation approach"
+                        />
+                        <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
+                            {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
+                        </Button>
+                    </Form>
+                    <Row>
+                        <span>Subscriber-only posting</span>
+                        <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => run(() => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only))}>
+                            {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
+                        </Button>
+                    </Row>
+                    {!team.deleted && (
+                        <Button size="xs" variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
+                            if (window.confirm('Delete this curator team? Posts in the community will remain available.')) {
+                                run(() => tx.deleteCurationTeam(community, Number(teamId)));
+                            }
+                        }}>{statusFor('delete_curation_team', '', 'Deleting…') || 'Delete team'}</Button>
+                    )}
+                </>
+            ) : (
+                <>
+                    <Body>{team.description || 'No description provided.'}</Body>
+                    <Meta>Subscriber-only posting: {team.subscriber_only ? 'Enabled' : 'Disabled'}</Meta>
+                </>
+            )}
         </Card>
 
         {!team.deleted && myInvitation && <Card>
@@ -160,7 +247,10 @@ export default function CurationTeamView() {
         <Card>
             <CardTitle>Curators ({members.length})</CardTitle>
             {members.map((member) => <Row key={member.address}>
-                <span>{member.username || member.address}{member.address === team.owner ? ' · leader' : ''}</span>
+                <span title={member.address}>
+                    {formatUserLabel(member.username, member.address)}
+                    {member.address === team.owner ? ' · leader' : ''}
+                </span>
                 {isLeader && member.address !== team.owner && <Actions>
                     <Button size="xs" variant="subtle" disabled={!!pendingFor('transfer_curation_team', member.address)} onClick={() => run(() => tx.transferCurationTeamLeadership(community, Number(teamId), member.address))}>
                         {statusFor('transfer_curation_team', member.address, 'Transferring…') || 'Transfer leadership'}
@@ -170,19 +260,21 @@ export default function CurationTeamView() {
                     </Button>
                 </Actions>}
             </Row>)}
-            {isLeader && <Form onSubmit={(event) => {
-                event.preventDefault();
-                run(() => tx.inviteCurationTeamMember(community, Number(teamId), invitee)).then((result) => {
-                    if (result?.success) setInvitee('');
-                });
-            }}>
-                <Input aria-label="User address to invite" value={invitee} onChange={(event) => setInvitee(event.target.value)} placeholder="mirage1…" required />
-                <Button type="submit" size="xs" disabled={!!pendingFor('invite_curator', invitee.trim().toLowerCase())}>
-                    {statusFor('invite_curator', invitee.trim().toLowerCase(), 'Inviting…') || 'Invite curator'}
+            {isLeader && <Form onSubmit={submitInvite}>
+                <Input
+                    aria-label="Username or address to invite"
+                    value={invitee}
+                    onChange={(event) => setInvitee(event.target.value)}
+                    placeholder="Username or mirage1…"
+                    required
+                    disabled={inviteBusy}
+                />
+                <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
+                    {inviteBusy ? 'Inviting…' : 'Invite curator'}
                 </Button>
             </Form>}
             {invitations.filter((invite) => invite.address !== viewer).map((invite) => <Row key={invite.address}>
-                <Meta>Pending: {invite.address}</Meta>
+                <Meta title={invite.address}>Pending: {formatUserLabel(invite.username, invite.address)}</Meta>
                 {isLeader && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
                     {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
                 </Button>}
@@ -197,54 +289,6 @@ export default function CurationTeamView() {
             </Button>}
         </Card>
 
-        {isLeader && <Card>
-            <CardTitle>Team settings</CardTitle>
-            <Form onSubmit={saveProfile}>
-                <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={team.name || 'e.g. Signal Desk'} aria-label="Team name" />
-                <Textarea
-                    value={description}
-                    onChange={(event) => setDescription(event.target.value)}
-                    placeholder={team.description || 'What this lens stands for — include how you moderate'}
-                    aria-label="Team description"
-                />
-                <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
-                    {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
-                </Button>
-            </Form>
-            <Row>
-                <span>Subscriber-only posting</span>
-                <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => run(() => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only))}>
-                    {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
-                </Button>
-            </Row>
-            <Button size="xs" variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
-                if (window.confirm('Delete this curator team? Posts in the community will remain available.')) {
-                    run(() => tx.deleteCurationTeam(community, Number(teamId)));
-                }
-            }}>{statusFor('delete_curation_team', '', 'Deleting…') || 'Delete team'}</Button>
-        </Card>}
-
-        {isCurator && <Card>
-            <CardTitle>Moderation tools</CardTitle>
-            <Meta>Enter a post hash, thread root hash, or user address, then choose the team-scoped action.</Meta>
-            <Form onSubmit={(event) => event.preventDefault()}>
-                <Input value={moderationTarget} onChange={(event) => setModerationTarget(event.target.value)} placeholder="Post hash, thread root, or mirage1…" aria-label="Moderation target" />
-                <Actions>
-                    <Button size="xs" disabled={!!pendingFor('set_curation_post_hidden', moderationTarget.toLowerCase())} onClick={() => run(() => tx.moderateCurationPost(community, Number(teamId), moderationTarget, true))}>
-                        {statusFor('set_curation_post_hidden', moderationTarget.toLowerCase(), 'Moderating…') || 'Hide post'}
-                    </Button>
-                    <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_post_hidden', moderationTarget.toLowerCase())} onClick={() => run(() => tx.moderateCurationPost(community, Number(teamId), moderationTarget, false))}>Show post</Button>
-                    <Button size="xs" disabled={!!pendingFor('set_curation_user_hidden', moderationTarget.toLowerCase())} onClick={() => run(() => tx.moderateCurationUser(community, Number(teamId), moderationTarget, true))}>
-                        {statusFor('set_curation_user_hidden', moderationTarget.toLowerCase(), 'Moderating…') || 'Hide user'}
-                    </Button>
-                    <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_user_hidden', moderationTarget.toLowerCase())} onClick={() => run(() => tx.moderateCurationUser(community, Number(teamId), moderationTarget, false))}>Show user</Button>
-                    <Button size="xs" disabled={!!pendingFor('set_curation_thread_locked', moderationTarget.toLowerCase())} onClick={() => run(() => tx.setCurationThreadLocked(community, Number(teamId), moderationTarget, true))}>
-                        {statusFor('set_curation_thread_locked', moderationTarget.toLowerCase(), 'Moderating…') || 'Lock thread'}
-                    </Button>
-                    <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_thread_locked', moderationTarget.toLowerCase())} onClick={() => run(() => tx.setCurationThreadLocked(community, Number(teamId), moderationTarget, false))}>Unlock thread</Button>
-                </Actions>
-            </Form>
-        </Card>}
         {error && <ErrorText>{error}</ErrorText>}
     </Page>;
 }

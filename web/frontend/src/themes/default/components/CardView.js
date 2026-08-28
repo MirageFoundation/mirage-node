@@ -36,6 +36,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import ContentTagBadge from "./ContentTagBadge";
+import CurateMenuItems from "./CurateMenuItems";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
@@ -486,13 +487,18 @@ const MenuItemBtn = styled.button`
      *   - Light: bg lifts to a neutral tile, text stays normal.
      * Danger rows saturate from menuDangerText to voteDown on hover so
      * the red picks up emphasis under the pointer. */
-    &:hover {
+    &:hover:not(:disabled) {
         background: ${({ theme, $active }) =>
         $active ? theme.colors.menuSelectedBg : theme.colors.menuItemHoverBg};
         color: ${({ theme, $active, $danger }) => {
         if ($danger) return theme.colors.voteDown;
         return $active ? theme.colors.sidebarItemActiveText : theme.colors.menuItemHoverText;
     }};
+    }
+
+    &:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
     }
 
     & > svg {
@@ -1370,6 +1376,25 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         <HiOutlineShieldExclamation />
                                         <span>Mark post deleted</span>
                                     </MenuItemBtn>
+                                )}
+                                {isLoggedIn && (
+                                    <CurateMenuItems
+                                        post={post}
+                                        onDone={() => setMenuOpen(false)}
+                                        renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
+                                        renderItem={(item) => (
+                                            <MenuItemBtn
+                                                key={item.key}
+                                                type="button"
+                                                $danger={item.danger}
+                                                disabled={item.disabled}
+                                                onClick={item.onClick}
+                                            >
+                                                {item.icon}
+                                                <span>{item.label}</span>
+                                            </MenuItemBtn>
+                                        )}
+                                    />
                                 )}
                             </Menu>
                         )}

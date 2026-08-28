@@ -10,19 +10,30 @@ import { requireThemeColor } from '../../../utils/themeColor';
 const Wrap = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.55rem;
     min-width: 0;
-    flex: 1 1 auto;
+    width: 100%;
+    flex-wrap: wrap;
+`;
+
+const Label = styled.span`
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
 `;
 
 const Select = styled.select`
-    height: 28px;
-    max-width: 14rem;
+    height: 30px;
+    max-width: 18rem;
     min-width: 7.5rem;
-    padding: 0 1.6rem 0 0.55rem;
-    border-radius: 6px;
+    padding: 0 1.75rem 0 0.65rem;
+    border-radius: 999px;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    background-color: transparent;
+    background-color: ${({ theme }) => requireThemeColor(theme, 'panel')};
     background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
         linear-gradient(135deg, currentColor 50%, transparent 50%);
     background-position: calc(100% - 12px) calc(50% - 2px), calc(100% - 7px) calc(50% - 2px);
@@ -54,13 +65,14 @@ const Select = styled.select`
 const FixedLens = styled.span`
     display: inline-flex;
     align-items: center;
-    height: 28px;
-    padding: 0 0.55rem;
-    border-radius: 6px;
+    height: 30px;
+    padding: 0 0.7rem;
+    border-radius: 999px;
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
     color: ${({ theme }) => requireThemeColor(theme, 'feedCtrlText')};
-    font-size: 0.68rem;
-    font-weight: 500;
+    font-size: 0.7rem;
+    font-weight: 600;
     line-height: 1;
     white-space: nowrap;
 `;
@@ -68,7 +80,7 @@ const FixedLens = styled.span`
 const Meta = styled.span`
     display: inline-flex;
     align-items: center;
-    gap: 0.45rem;
+    gap: 0.55rem;
     min-width: 0;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.65rem;
@@ -91,11 +103,25 @@ const Status = styled.span`
 `;
 
 const ManageLink = styled(Link)`
+    display: inline-flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 0.65rem;
+    border-radius: 999px;
     color: ${({ theme }) => requireThemeColor(theme, 'link')};
-    font-size: 0.65rem;
-    font-weight: 500;
+    font-size: 0.68rem;
+    font-weight: 600;
     text-decoration: none;
-    &:hover { text-decoration: underline; }
+    white-space: nowrap;
+
+    &:hover {
+        background: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
+    }
+
+    &:focus-visible {
+        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+        outline-offset: 2px;
+    }
 `;
 
 function initialSelection(detail) {
@@ -157,6 +183,7 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
 
     return (
         <Wrap aria-label="Community lens">
+            <Label>Feed lens</Label>
             {uncensoredOnly ? (
                 <FixedLens aria-label="Curation lens">Uncensored</FixedLens>
             ) : (
@@ -180,7 +207,7 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                 {!detailLoading && curated && (
                     <Status>{`${detail.live_team_count} live teams`}</Status>
                 )}
-                <ManageLink to={teamsPath}>Curator teams</ManageLink>
+                <ManageLink to={teamsPath}>Curator teams →</ManageLink>
             </Meta>
         </Wrap>
     );
