@@ -171,6 +171,35 @@ func TestJoinCommunitySucceedsAfterLeave(t *testing.T) {
 	require.ElementsMatch(t, []string{"beta", "gamma"}, got)
 }
 
+// A stored list longer than the current cap has to stay readable. It happens
+// whenever a subscriber lapses to the free tier or governance lowers the limit,
+// and when the reader enforced the cap instead it failed GetProfiles for those
+// accounts, which crash-looped the indexer.
+func TestListJoinedCommunitiesReadsPastLoweredCap(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	params := mk.GetParams(ctx)
+	params.Tiers[0].MaxJoinedCommunities = 3
+	require.NoError(t, mk.SetParams(ctx, params))
+
+	for _, slug := range []string{"alpha", "beta", "gamma"} {
+		_, err := am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: slug})
+		require.NoError(t, err)
+	}
+
+	params.Tiers[0].MaxJoinedCommunities = 1
+	require.NoError(t, mk.SetParams(ctx, params))
+
+	got, err := mk.ListJoinedCommunities(ctx, owner)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"alpha", "beta", "gamma"}, got)
+
+	// Still a hard cap for new joins.
+	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{EnvelopePubkey: pub, Community: "delta"})
+	require.ErrorContains(t, err, "cap reached")
+}
+
 func TestJoinCommunityIdempotent(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()

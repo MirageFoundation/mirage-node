@@ -84,15 +84,11 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		slug   string
 		teamID uint64
 	}
-	params := k.GetParams(ctx)
-	tier := params.GetTierConfig(int(core.Level))
-	if tier == nil {
-		return fmt.Errorf("tier config missing for paid-state transition")
-	}
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamUserPrefix(owner), int(tier.MaxCurationMemberships)+1, func(key, value []byte) error {
-		if uint64(len(memberships)) >= tier.MaxCurationMemberships {
-			return fmt.Errorf("curation membership count exceeds tier maximum")
-		}
+	// Enumerate every membership, not just the first cap-many. This runs during
+	// finalization when a subscription expires, so bounding it by the current cap
+	// would turn "governance lowered max_curation_memberships" into a halt on the
+	// next expiry, and would leave the curator on teams they can no longer pay for.
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamUserPrefix(owner), 0, func(key, value []byte) error {
 		id, err := getU64(value)
 		if err != nil {
 			return err
@@ -147,11 +143,9 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 		order uint64
 	}
 	var members []mem
-	maxMembers := k.GetParams(ctx).MaxCuratorsPerTeam
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), int(maxMembers)+1, func(_, value []byte) error {
-		if uint64(len(members)) >= maxMembers {
-			return fmt.Errorf("team member count exceeds configured maximum")
-		}
+	// The successor has to be the oldest paid curator on the roster, so a partial
+	// roster picks the wrong one. Enumerate all of them.
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), 0, func(_, value []byte) error {
 		var m types.CurationTeamMember
 		if err := k.cdc.Unmarshal(value, &m); err != nil {
 			return err

@@ -236,18 +236,18 @@ func (k Keeper) ClearInvite(ctx sdk.Context, slug string, teamID uint64, target 
 	return k.clearInvite(ctx, slug, teamID, target)
 }
 
+// ClearPendingInvitationsForTarget must clear all of them, so the enumeration is
+// not bounded by the current per-user cap: a cap lowered after the invitations
+// were accepted into the store would otherwise abort this mid-way, and it runs on
+// the subscription-expiry path where that means a halt.
 func (k Keeper) ClearPendingInvitationsForTarget(ctx sdk.Context, target string) error {
-	params := k.GetParams(ctx)
 	type invitation struct {
 		slug   string
 		teamID uint64
 	}
 	var pending []invitation
 	pfx := types.KeyCurationInviteRevPrefix(target)
-	if err := k.iterPrefixKeys(ctx, pfx, int(params.MaxPendingCuratorInvitesPerUser)+1, func(key, _ []byte) error {
-		if uint64(len(pending)) >= params.MaxPendingCuratorInvitesPerUser {
-			return fmt.Errorf("pending invitation count exceeds configured maximum")
-		}
+	if err := k.iterPrefixKeys(ctx, pfx, 0, func(key, _ []byte) error {
 		rest := key[len(pfx):]
 		if len(rest) < 2 {
 			return fmt.Errorf("malformed reverse invitation key")
@@ -539,13 +539,12 @@ func (k Keeper) DeleteCurationTeam(ctx sdk.Context, slug string, teamID uint64) 
 	if !ok || !k.teamLive(team) {
 		return fmt.Errorf("team not found")
 	}
-	params := k.GetParams(ctx)
 	previousSubscriberCount := team.SubscriberCount
+	// Deleting a team has to drain the whole roster and invite list. Stopping at
+	// the current cap would leave orphaned members pointing at a deleted team if
+	// governance ever lowered max_curators_per_team below an existing roster.
 	var members []string
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), int(params.MaxCuratorsPerTeam)+1, func(key, _ []byte) error {
-		if uint64(len(members)) >= params.MaxCuratorsPerTeam {
-			return fmt.Errorf("team member count exceeds configured maximum")
-		}
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamMemberPrefix(slug, teamID), 0, func(key, _ []byte) error {
 		addr := sdk.AccAddress(key[len(key)-20:]).String()
 		members = append(members, addr)
 		return nil
@@ -558,10 +557,7 @@ func (k Keeper) DeleteCurationTeam(ctx sdk.Context, slug string, teamID uint64) 
 		}
 	}
 	var invitees []string
-	if err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), int(params.MaxCuratorsPerTeam)+1, func(key, _ []byte) error {
-		if uint64(len(invitees)) >= params.MaxCuratorsPerTeam {
-			return fmt.Errorf("team invitation count exceeds configured maximum")
-		}
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationInvitePrefix(slug, teamID), 0, func(key, _ []byte) error {
 		addr := sdk.AccAddress(key[len(key)-20:]).String()
 		invitees = append(invitees, addr)
 		return nil

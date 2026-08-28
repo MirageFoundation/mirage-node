@@ -155,25 +155,18 @@ func (k Keeper) teamLive(t *types.CurationTeam) bool {
 	return t != nil && t.DeletedHeight == 0
 }
 
+// ListJoinedCommunities returns every stored membership, deliberately without
+// consulting the tier cap. A stored list longer than the current cap is normal,
+// not corruption: the cap applies when JoinCommunity admits an entry, and a
+// subscriber who joined 100 communities keeps all of them when the subscription
+// lapses and the cap drops to the free tier's 25. Governance lowering a cap has
+// the same effect on every existing list at once. Rejecting the read instead
+// made those profiles unreadable, which crash-looped the indexer on the first
+// lapsed subscriber it paginated past.
 func (k Keeper) ListJoinedCommunities(ctx sdk.Context, owner string) ([]string, error) {
-	core, found, err := k.loadProfile(ctx, owner)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, fmt.Errorf("profile not found for joined-community list: %s", owner)
-	}
-	tier := k.GetParams(ctx).GetTierConfig(int(core.Level))
-	if tier == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", core.Level)
-	}
-	max := tier.MaxJoinedCommunities
 	var slugs []string
 	pfx := types.KeyJoinPrefix(owner)
-	err = k.iterPrefixKeys(ctx, pfx, int(max)+1, func(key, _ []byte) error {
-		if uint64(len(slugs)) >= max {
-			return fmt.Errorf("joined-community count exceeds tier maximum")
-		}
+	err := k.iterPrefixKeys(ctx, pfx, 0, func(key, _ []byte) error {
 		if len(key) < len(pfx)+2 {
 			return fmt.Errorf("join key too short for %s", owner)
 		}
