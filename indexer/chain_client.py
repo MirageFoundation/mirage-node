@@ -457,7 +457,7 @@ class ChainClient:
             "global_sequence": int(metadata.global_sequence),
             "created_height": int(metadata.created_height),
             "created_epoch": int(metadata.created_epoch),
-            "author_was_paid_at_creation": bool(metadata.author_was_paid_at_creation),
+            "was_subscriber_at_creation": bool(metadata.was_subscriber_at_creation),
             "deleted_height": int(metadata.deleted_height),
             "deleted_epoch": int(metadata.deleted_epoch),
         }
@@ -470,10 +470,11 @@ class ChainClient:
         ):
             raise RuntimeError(f"PostMetadata returned incomplete state for {target}")
         logger.debug(
-            "[curation] post metadata grpc tx=%s sequence=%s community=%s",
+            "[curation] post metadata grpc tx=%s sequence=%s community=%s was_subscriber=%s",
             target[:12],
             result["global_sequence"],
             result["community"],
+            result["was_subscriber_at_creation"],
         )
         return result
 

@@ -997,6 +997,7 @@ export default function SubscriptionView({ state }) {
     if (userIsAdmin) {
         return (
             <SubscriptionPageShell>
+                <AccountStatusNotices showRenewal={false} />
                 <Section style={{ marginTop: '0.85rem' }}>
                     <SectionBody>
                         <ActivePlanCard>

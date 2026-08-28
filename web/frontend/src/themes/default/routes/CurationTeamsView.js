@@ -188,7 +188,6 @@ export default function CurationTeamsView({ createOnly = false }) {
         ? `/c/${encodeURIComponent(routeCommunity)}/teams/new`
         : '/curator-teams/new';
     const [eligible, setEligible] = useState(null);
-    const [joining, setJoining] = useState(false);
     const label = communityLabel(routeCommunity || previewSlug || '');
     const liveCount = teamState.teams.length;
     const statusLabel = liveCount ? 'Curated' : 'Uncurated';
@@ -239,14 +238,11 @@ export default function CurationTeamsView({ createOnly = false }) {
             setError(formatError({ error_code: 'not_subscriber' }));
             return;
         }
-        if (previewSlug && communityState.detail && communityState.detail.viewer_joined !== true) {
-            setError(formatError({ error_code: 'must_join_community' }));
-            return;
-        }
         setError('');
         console.debug('[curation] create team form', {
             community: nextSlug,
             nameLength: name.length,
+            joined: communityState.detail?.viewer_joined === true,
         });
         const result = await tx.createCuratorTeam(nextSlug, name, description);
         if (!result?.success) {
@@ -259,7 +255,6 @@ export default function CurationTeamsView({ createOnly = false }) {
     const teamsListPath = routeCommunity
         ? `/c/${encodeURIComponent(routeCommunity)}/teams`
         : '/communities';
-    const joined = communityState.detail?.viewer_joined === true;
     // Single phase for the create route — drives one title, one body, no stacked headings.
     let createPhase = 'form';
     if (!viewer) createPhase = 'signin';
@@ -267,7 +262,6 @@ export default function CurationTeamsView({ createOnly = false }) {
     else if (eligible === false) createPhase = 'subscribe';
     else if (alreadyCurator) createPhase = 'already';
     else if (previewSlug && communityState.loading) createPhase = 'loading';
-    else if (previewSlug && communityState.detail && !joined) createPhase = 'follow';
 
     const createTitle = {
         signin: 'Sign in',
@@ -275,7 +269,6 @@ export default function CurationTeamsView({ createOnly = false }) {
         subscribe: 'Subscribe',
         already: 'Your team',
         loading: 'New team',
-        follow: 'Follow community',
         form: 'New team',
     }[createPhase];
 
@@ -317,18 +310,6 @@ export default function CurationTeamsView({ createOnly = false }) {
             </Form>
         </Card>
     );
-
-    const followCommunity = async () => {
-        setJoining(true);
-        setError('');
-        const result = await tx.followTopic(previewSlug);
-        setJoining(false);
-        if (!result?.success) {
-            setError(formatError(result));
-            return;
-        }
-        communityState.refresh().catch(() => {});
-    };
 
     // Create route: one quiet title + one body. No "Create…" header stacked on a "Create…" card.
     if (createOnly) {
@@ -386,17 +367,6 @@ export default function CurationTeamsView({ createOnly = false }) {
                     </Card>
                 )}
                 {createPhase === 'loading' && <Card><Meta>Loading community…</Meta></Card>}
-                {createPhase === 'follow' && (
-                    <Card>
-                        <Meta>Follow this community before creating a team.</Meta>
-                        <CardActions>
-                            <Button type="button" size="xs" disabled={joining} onClick={followCommunity}>
-                                {joining ? 'Following…' : 'Follow'}
-                            </Button>
-                        </CardActions>
-                        {error && <ErrorText>{error}</ErrorText>}
-                    </Card>
-                )}
                 {createPhase === 'form' && createForm}
             </Page>
         );
@@ -482,18 +452,7 @@ export default function CurationTeamsView({ createOnly = false }) {
                     )}
                 </Card>
             )}
-            {viewer && eligible === true && !alreadyCurator && previewSlug && communityState.detail && !joined && (
-                <Card>
-                    <Meta>Follow this community before creating a team.</Meta>
-                    <CardActions>
-                        <Button type="button" size="xs" disabled={joining} onClick={followCommunity}>
-                            {joining ? 'Following…' : 'Follow'}
-                        </Button>
-                    </CardActions>
-                    {error && <ErrorText>{error}</ErrorText>}
-                </Card>
-            )}
-            {viewer && eligible === true && !alreadyCurator && (!previewSlug || joined) && createForm}
+            {viewer && eligible === true && !alreadyCurator && (!previewSlug || !communityState.loading) && createForm}
         </Page>
     );
 }

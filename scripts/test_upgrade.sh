@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local release rehearsal: reset from the latest mirage.vote backup, deploy the
-# current tree, raise the PoW limit, then launch test_blockchain / test_backend
+# current tree, confirm the suite PoW/relay limits, then launch test_blockchain / test_backend
 # / verify_upgrade as detached docker exec jobs. When the release registers a
 # chain upgrade handler it also passes the software-upgrade proposal and waits
 # for the halt and the plan to apply.
@@ -56,7 +56,7 @@ die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Local release rehearsal: reset from the latest mirage.vote backup, deploy the
-current tree, raise the PoW limit, then launch test_blockchain / test_backend /
+current tree, confirm the suite PoW/relay limits, then launch test_blockchain / test_backend /
 verify_upgrade as detached docker exec jobs. A release that registers a chain
 upgrade handler additionally passes the software-upgrade proposal and waits for
 the halt and the plan to apply.

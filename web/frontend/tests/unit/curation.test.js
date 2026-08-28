@@ -64,6 +64,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
         expect(pickerSrc).toMatch(/Node default/);
         expect(pickerSrc).toMatch(/>Uncensored</);
+        // Fixed "Uncensored" already means no teams — no redundant Uncurated chip.
+        expect(pickerSrc).not.toMatch(/'Uncurated'/);
+        expect(pickerSrc).not.toMatch(/"Uncurated"/);
     });
 
     it('passes return paths through Sign in and Subscribe on the teams page', () => {

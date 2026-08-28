@@ -205,6 +205,8 @@ def run(db, chain, logger):
                     f"{community}/{team_id}: indexer={subscriber_count} chain={chain_count}"
                 )
 
+        # Column is still author_was_paid_at_creation here; the rename
+        # migration (v1_39_0_was_subscriber_at_creation) runs after this file.
         cur.execute(
             """
             SELECT txhash
@@ -246,7 +248,7 @@ def run(db, chain, logger):
                     metadata["global_sequence"],
                     metadata["created_height"],
                     metadata["created_epoch"],
-                    metadata["author_was_paid_at_creation"],
+                    metadata["was_subscriber_at_creation"],
                     metadata["deleted_height"],
                     metadata["deleted_epoch"],
                     txhash,

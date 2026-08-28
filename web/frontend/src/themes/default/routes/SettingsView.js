@@ -6,6 +6,7 @@ import Storage from "../../../utils/Storage";
 import seedVault from "../../../utils/SeedVault";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, CappedPageColumn } from "../Layout";
 import { useSettings, RadioInput } from "../../../logic/useSettings";
+import AccountStatusNotices from "../components/AccountStatusNotices";
 
 const SettingsWrap = styled.div`
     width: 90%;
@@ -1107,6 +1108,8 @@ export default function SettingsView({ state }) {
                             </SettingRow>}
 
                             <SectionHeader>Account</SectionHeader>
+
+                            <AccountStatusNotices showRenewal={false} />
 
                             <SettingRow>
                                 <SettingLabel>Delete account</SettingLabel>

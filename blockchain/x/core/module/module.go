@@ -1533,7 +1533,7 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		Author:                  owner,
 		CreatedHeight:           sdkCtx.BlockHeight(),
 		CreatedEpoch:            types.UTCEpoch(sdkCtx.BlockTime().Unix()),
-		AuthorWasPaidAtCreation: paid,
+		WasSubscriberAtCreation: paid,
 		GlobalSequence:          seq,
 	}
 	if isComment {

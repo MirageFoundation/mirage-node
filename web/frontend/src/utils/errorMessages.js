@@ -172,7 +172,7 @@ const ERROR_MAP = {
 
     // Subscription
     not_subscriber: "This action requires an active subscription or an admin account.",
-    must_join_community: "Follow this community before creating a curator team.",
+    must_join_community: "Follow this community first.",
     already_curator: "You already curate a team in this community.",
     invalid_level: "Invalid subscription level.",
     invalid_period_count: "Choose between 1 and 12 subscription periods.",

@@ -87,25 +87,22 @@ def test_curation_backend(backend: str) -> None:
         else:
             _pass("curation.backend_free_create_rejected")
 
-    # Unjoined paid create rejected.
+    # Paid create without joining first must succeed.
     lonely = f"c{_rand_str(8)}"
     unjoined = _do_create_curation_team(backend, sub, lonely, "Lonely", "no join", skip_pow=True)
     unjoined_tx = _tx_ok(unjoined)
-    if unjoined.get("error"):
-        _pass("curation.backend_unjoined_create_rejected")
-    elif unjoined_tx:
-        status = _wait_tx_status(backend, unjoined_tx, require_details=False)
-        if status and status.get("success") is False:
-            _pass("curation.backend_unjoined_create_rejected")
-        else:
-            _fail("curation.backend_unjoined_create_rejected", f"resp={unjoined} status={status}")
-    else:
-        _fail("curation.backend_unjoined_create_rejected", f"resp={unjoined}")
+    if not unjoined_tx:
+        _fail("curation.backend_unjoined_create_allowed", f"resp={unjoined}")
+        return
+    if not _wait_tx_status(
+        backend, unjoined_tx, expect_type="create_curation_team", require_details=False
+    ):
+        _fail("curation.backend_unjoined_create_allowed", f"tx={unjoined_tx}")
+        return
+    _pass("curation.backend_unjoined_create_allowed")
 
-    # Join then create.
+    # Join is still required later for pinning a preference; create does not need it.
     join_resp = _do_follow_topic(backend, sub, slug, follow=True, skip_pow=True)
-    join_tx = _tx_ok(join_resp) if isinstance(join_resp, dict) and "tx_hash" in (join_resp or {}) else None
-    # _do_follow_topic returns resp dict
     if not isinstance(join_resp, dict):
         _fail("curation.backend_join", f"resp={join_resp}")
         return

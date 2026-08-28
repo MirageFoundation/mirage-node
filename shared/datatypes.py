@@ -912,7 +912,7 @@ def _build_pool():
     add_f(post_metadata, "global_sequence", 5, UINT64)
     add_f(post_metadata, "created_height", 6, INT64)
     add_f(post_metadata, "created_epoch", 7, INT64)
-    add_f(post_metadata, "author_was_paid_at_creation", 8, BOOL)
+    add_f(post_metadata, "was_subscriber_at_creation", 8, BOOL)
     add_f(post_metadata, "deleted_height", 9, INT64)
     add_f(post_metadata, "deleted_epoch", 10, INT64)
     add_f(post_metadata, "deletion_actor", 11, STRING)

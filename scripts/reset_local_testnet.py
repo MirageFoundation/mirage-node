@@ -49,6 +49,13 @@ LOCAL_BLOCK_TIME_SECONDS = 3
 LOCAL_RETENTION_BLOCKS = read_positive_int("RETENTION_BLOCKS")
 LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_BLOCKS * LOCAL_BLOCK_TIME_SECONDS
 
+# Local-only suite limits. Written into genesis so tests do not wait on
+# governance after every reset. Same values as
+# scripts/proposals/proposal_set_pow_message_limit_9999999.json and
+# scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json.
+LOCAL_POW_MESSAGE_LIMIT = "9999999"
+LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT = "10000"
+
 LOCAL_EVIDENCE_PARAMS = {
     "max_age_num_blocks": str(LOCAL_RETENTION_BLOCKS),
     "max_age_duration": str(LOCAL_RETENTION_SECONDS * 1_000_000_000),
@@ -760,9 +767,7 @@ def find_module_account_address(auth_accounts: list, module_name: str) -> str | 
     return None
 
 
-def transform_to_single_validator(
-    export_path: Path, cons_pub_b64: str, *, easy_difficulty: bool = False
-) -> tuple[str, str, str, str]:
+def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple[str, str, str, str]:
     status("Building single-validator genesis...")
     with open(export_path, "r", encoding="utf-8") as f:
         gen = json.load(f)
@@ -815,9 +820,13 @@ def transform_to_single_validator(
     # handler is what removes them, so leaving them here is also what lets a local run rehearse
     # that cleanup against real state.
 
-    if easy_difficulty:
-        core_params["pow_message_limit"] = "9999999"
-        status("Easy difficulty: set pow_message_limit=9999999")
+    core_params["pow_message_limit"] = LOCAL_POW_MESSAGE_LIMIT
+    core_params["subscriber_daily_relay_limit"] = LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT
+    status(
+        "Local test limits: "
+        f"pow_message_limit={LOCAL_POW_MESSAGE_LIMIT} "
+        f"subscriber_daily_relay_limit={LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT}"
+    )
 
     app_state["core"] = core_state
 
@@ -1208,11 +1217,6 @@ def main():
     parser.add_argument("--user", default="root", help="SSH user (default: root)")
     parser.add_argument("--file", dest="backup_file", default=None, help="Use local backup tarball (skip remote)")
     parser.add_argument("--latest", action="store_true", help="Use the latest backup from ~/.mirage/backups/")
-    parser.add_argument(
-        "--easy-difficulty",
-        action="store_true",
-        help="Set pow_message_limit to 9999999 so difficulty never increases",
-    )
     args = parser.parse_args()
 
     status("Reset local testnet: BEGIN")
@@ -1247,9 +1251,7 @@ def main():
 
     # Step 6: Transform genesis to single-validator
     cons_pub_b64 = read_priv_validator_pubkey_b64()
-    new_genesis, val_addr, valoper, valcons_addr = transform_to_single_validator(
-        export_path, cons_pub_b64, easy_difficulty=args.easy_difficulty
-    )
+    new_genesis, val_addr, valoper, valcons_addr = transform_to_single_validator(export_path, cons_pub_b64)
 
     # Step 7: Prepare node directory (genesis, identity files, fresh data, postgres, indexer)
     prepare_local_node(new_genesis)

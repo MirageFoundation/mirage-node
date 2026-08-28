@@ -82,7 +82,8 @@ message PostMetadata {
   uint64 global_sequence = 5;
   int64 created_height = 6;
   int64 created_epoch = 7;
-  bool author_was_paid_at_creation = 8;
+  // EffectivePaid at post time (active subscriber or admin). Not a creator-pool flag.
+  bool was_subscriber_at_creation = 8;
   int64 deleted_height = 9;
   int64 deleted_epoch = 10;
   string deletion_actor = 11;

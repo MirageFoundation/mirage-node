@@ -52,7 +52,7 @@ def test_curation_chain(backend: str) -> None:
     )
     _check_deliver_reject("curation.free_create_rejected", ccode, dcode, dlog)
 
-    # Paid but not joined: must reject.
+    # Paid but not joined: create still succeeds.
     unjoined_slug = f"c{_rand_str(8)}"
     lb, _, _, _ = _get_pow_params(backend, sub_addr)
     ts = _now_ms()
@@ -66,7 +66,7 @@ def test_curation_chain(backend: str) -> None:
         sub_pub,
         wait_deliver=True,
     )
-    _check_deliver_reject("curation.unjoined_create_rejected", ccode, dcode, dlog)
+    _check_deliver_accept("curation.unjoined_create_allowed", ccode, dcode, dlog)
 
     # Paid + joined: create succeeds. Description may include moderation guidance.
     lb, _, _, _ = _get_pow_params(backend, sub_addr)

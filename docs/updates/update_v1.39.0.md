@@ -6,7 +6,7 @@ The places you post are communities now. Open one at `/c/` plus its name, browse
 
 ### Curation you choose
 
-Paid subscribers and admins can start competing curator teams for any community they have joined. Teams publish a description (including how they moderate), invite other eligible curators who must accept, and earn the default position by attracting the most paid users who explicitly select them. Free accounts cannot lead teams; subscribers can join up to ten, and admins up to one thousand. A community with no team remains uncurated and is shown raw. Curators can hide a post or user in their own lens, lock a thread, or limit that lens to subscriber posts, but they never own the community or rewrite anyone else's words. Raw view remains available wherever node policy permits it.
+Paid subscribers and admins can start competing curator teams for any community. Teams publish a description (including how they moderate), invite other eligible curators who must accept, and earn the default position by attracting the most paid users who explicitly select them. Free accounts cannot lead teams; subscribers can join up to ten, and admins up to one thousand. A community with no team remains uncurated and is shown raw. Curators can hide a post or user in their own lens, lock a thread, or limit that lens to subscriber posts, but they never own the community or rewrite anyone else's words. Raw view remains available wherever node policy permits it.
 
 ### A creator pool instead of quests
 

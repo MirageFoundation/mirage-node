@@ -31,11 +31,8 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if !found || !types.CanCurate(core) {
 		return 0, fmt.Errorf("creating a curation team requires an active subscriber or admin")
 	}
-	if _, joined, err := k.GetPreference(ctx, owner, slug); err != nil {
-		return 0, err
-	} else if !joined {
-		return 0, fmt.Errorf("must join community before creating a team")
-	}
+	// Creating a team does not require joining the community first. Invite
+	// accept still does — that path keeps GetPreference checks elsewhere.
 	if _, occupied, err := k.getU64Key(ctx, types.KeyCurationTeamUser(owner, slug)); err != nil {
 		return 0, err
 	} else if occupied {

@@ -60,6 +60,7 @@ export const buildTierConfig = chainTiers => {
         const maxContent = num('max_content_length');
         const maxCommunities = num('max_joined_communities');
         const maxUsers = num('max_followed_users');
+        const maxDailyRelays = num('max_daily_relays');
         const voteWeight = num('vote_weight');
         const followParts = [];
         if (maxCommunities > 0) followParts.push(`${maxCommunities} communities`);
@@ -67,14 +68,17 @@ export const buildTierConfig = chainTiers => {
         let features;
         if (meta.level === 0) {
             features = [
-                'PoW for transactions',
+                'PoW for every transaction',
                 maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
                 followParts.length > 0 && `Join or follow up to ${followParts.join(' and ')}`,
                 'Basic posting',
             ];
         } else {
+            if (maxDailyRelays < 1) {
+                throw new Error(`subscriber tier missing max_daily_relays`);
+            }
             features = [
-                'Instant posting',
+                `${maxDailyRelays.toLocaleString()} transactions per day without PoW`,
                 "Remove 'Anon-' prefix",
                 'Lead curator teams',
                 maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
@@ -483,10 +487,13 @@ export function useSubscription({
         } else {
             details.push('Profile banner not available.');
         }
+        const maxDailyRelays = num('max_daily_relays');
         if (tier.level === 0) {
-            details.push('Uses proof-of-work (PoW) for posts and votes.');
+            details.push('Uses proof-of-work (PoW) for every transaction.');
+        } else if (maxDailyRelays > 0) {
+            details.push(`${maxDailyRelays.toLocaleString()} transactions per day without PoW.`);
         } else {
-            details.push('No PoW required for posts or votes while subscribed.');
+            throw new Error(`paid tier ${tier.level} missing max_daily_relays`);
         }
         const seen = new Set();
         const deduped = [];

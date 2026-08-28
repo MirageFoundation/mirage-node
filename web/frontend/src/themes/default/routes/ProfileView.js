@@ -26,6 +26,7 @@ import Api from "../../../utils/api";
 import Tooltip from "../components/Tooltip.js";
 import { AWARD_TYPES } from "../../../logic/usePostGifts";
 import CreatorEarningsPanel from "../components/CreatorEarningsPanel";
+import AccountStatusNotices from "../components/AccountStatusNotices";
 
 /** Compact MIRAGE balance for the right-aside stats grid + main profile rows
  *  (e.g. `1.2K MIRAGE`). `formatMirageCompact` returns a lowercase suffix
@@ -1878,6 +1879,7 @@ function ProfileViewAuthenticated({
                                                 })()}
                                             </ProfileFieldValue>
                                         </ProfileFieldRow>
+                                        {isOwnProfile && <AccountStatusNotices showRenewal={false} />}
                                         {/* Gift Subscription confirmation moved to a root-level
                               * default `GiftSubscriptionDialog` modal (matches
                               * the Block / Report dialog visual language). The

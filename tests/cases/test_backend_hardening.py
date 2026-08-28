@@ -101,7 +101,7 @@ def _test_curation_visibility() -> None:
         "txhash": "a" * 64,
         "root_txhash": "b" * 64,
         "post_sequence": 12,
-        "author_was_paid_at_creation": True,
+        "was_subscriber_at_creation": True,
         "deleted": False,
         "viewer_blocks_author": False,
         "viewer_blocks_post": False,
@@ -122,7 +122,7 @@ def _test_curation_visibility() -> None:
     stale = resolve_visibility(**{**base, "stored_mode": MODE_PINNED, "stored_team_id": None})
     lock = resolve_visibility(**{**base, "lock_sequence": 11})
     paid = resolve_visibility(
-        **{**base, "team_subscriber_only": True, "author_was_paid_at_creation": False}
+        **{**base, "team_subscriber_only": True, "was_subscriber_at_creation": False}
     )
     if (
         default["visible"]

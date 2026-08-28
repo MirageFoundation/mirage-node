@@ -46,8 +46,11 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	joinOpenCommunity(t, mk, ctx, curator, slug)
 	unjoined := genAddr(35)
 	setPaidProfile(t, mk, ctx, unjoined)
-	_, err := mk.CreateCurationTeam(ctx, unjoined, slug, "Unjoined", "")
-	require.ErrorContains(t, err, "must join community")
+	lonelySlug := "lonely-community"
+	unjoinedTeamID, err := mk.CreateCurationTeam(ctx, unjoined, lonelySlug, "Unjoined", "")
+	require.NoError(t, err, "paid user may create a curator team without joining first")
+	require.Equal(t, uint64(1), unjoinedTeamID)
+	t.Logf("[debug] unjoined create community=%s team_id=%d", lonelySlug, unjoinedTeamID)
 
 	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "Team description")
 	require.NoError(t, err)

@@ -1179,7 +1179,7 @@ const MainView = ({
                                         </HomeFeedModeInline>
                                     </HomeFeedHeaderRow>
                                 </HomeFeedTitleBar>
-                                <AccountStatusNotices />
+                                <AccountStatusNotices showQuota={false} />
                             </FeedHeroColumn>}
 
                             {/* Android app banner - shown once for Android users until dismissed */}

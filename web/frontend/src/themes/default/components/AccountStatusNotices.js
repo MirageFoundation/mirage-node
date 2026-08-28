@@ -46,20 +46,26 @@ function validateRenewal(value) {
     return value;
 }
 
-export default function AccountStatusNotices() {
+/**
+ * @param {object} props
+ * @param {boolean} [props.showQuota=true] — daily no-PoW allowance (Profile / Settings / Subscription)
+ * @param {boolean} [props.showRenewal=true] — subscription expiry warning (Home / Subscription)
+ */
+export default function AccountStatusNotices({ showQuota = true, showRenewal = true } = {}) {
     const [statuses, setStatuses] = useState(readStatuses);
     useEffect(() => {
         const refresh = () => setStatuses(readStatuses());
         window.addEventListener('userStatusUpdated', refresh);
         return () => window.removeEventListener('userStatusUpdated', refresh);
     }, []);
-    const quota = validateQuota(statuses.quota);
-    const renewal = validateRenewal(statuses.renewal);
+    const quota = showQuota ? validateQuota(statuses.quota) : null;
+    const renewal = showRenewal ? validateRenewal(statuses.renewal) : null;
     const renewalDays = renewal ? Math.max(0, Math.ceil((renewal.expiry * 1000 - Date.now()) / 86400000)) : 0;
+    if (!quota && !renewal) return null;
     return <>
         {quota && <Notice $warning={quota.remaining === 0} role="status">
-            Daily sponsored actions: <strong>{quota.used} / {quota.limit}</strong> used, {quota.remaining} remaining.
-            Resets {new Date(quota.reset_at * 1000).toLocaleString()}.
+            Transactions without PoW today: <strong>{quota.used} / {quota.limit}</strong> used
+            ({quota.remaining} remaining). Resets {new Date(quota.reset_at * 1000).toLocaleString()}.
         </Notice>}
         {renewal && <Notice $warning role="alert">
             Your subscription expires in {renewalDays} day{renewalDays === 1 ? '' : 's'} ({new Date(renewal.expiry * 1000).toLocaleString()}).

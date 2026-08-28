@@ -326,15 +326,14 @@ scripts/test_upgrade.sh --wait   # block until done; exit 0 iff all three passed
 **BEFORE RUNNING `tests/test_backend.py` OR `tests/test_blockchain.py` — NON-NEGOTIABLE:**
 
 1. **RUN INSIDE LOCAL DOCKER ONLY.** Both suites submit real transactions. Host execution is disabled in `tests/common.py`; do not run either entry point with host Python. They may ONLY execute inside the local `mirage` container (`hostname=testnet`) against `127.0.0.1`. Never run them inside or against val1/val2/val3/val4 or any domain.
-2. **RAISE THE TEST LIMITS FIRST.** PoW difficulty scales with recent message volume, so a suite that submits hundreds of txs makes itself progressively slower until it crawls and times out. A subscriber's daily relay quota is spent the same way: the suites run as a handful of wallets, so `sub1` alone burns a real user's whole day and the rest of the run fails with `subscriber_daily_limit_reached`. Submit both proposals before the run:
+2. **TEST LIMITS.** PoW difficulty scales with recent message volume, so a suite that submits hundreds of txs makes itself progressively slower until it crawls and times out. A subscriber's daily relay quota is spent the same way: the suites run as a handful of wallets, so `sub1` alone burns a real user's whole day and the rest of the run fails with `subscriber_daily_limit_reached`. `scripts/reset_local_testnet.py` writes `pow_message_limit=9999999` and `subscriber_daily_relay_limit=10000` into genesis, so a fresh local reset already has the suite limits. If the chain was not reset that way, raise them with:
 
 ```bash
 python3 scripts/submit_proposal.py local scripts/proposals/proposal_set_pow_message_limit_9999999.json
 python3 scripts/submit_proposal.py local scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json
 ```
 
-Do this after every `scripts/reset_local_testnet.py`, since the reset restores the original values. If a suite run is inexplicably slow or stalls on `[pow]` lines, this step was skipped.
-The suite runner queries both chain parameters and aborts before wallet setup unless they are exactly `9999999` and `10000`.
+The suite runner queries both chain parameters and aborts before wallet setup unless they are exactly `9999999` and `10000`. If a suite run is inexplicably slow or stalls on `[pow]` lines, the limits were not raised.
 
 Then run a suite inside the container:
 

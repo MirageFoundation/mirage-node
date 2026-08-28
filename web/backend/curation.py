@@ -20,7 +20,7 @@ def resolve_visibility(
     txhash: str | None,
     root_txhash: str | None,
     post_sequence: int | None,
-    author_was_paid_at_creation: bool | None,
+    was_subscriber_at_creation: bool | None,
     deleted: bool,
     viewer_blocks_author: bool,
     viewer_blocks_post: bool,
@@ -52,7 +52,7 @@ def resolve_visibility(
         return _result(False, True, "team_hidden_post", effective_mode, effective_team)
     if team_hidden_author and not viewer_follows_author:
         return _result(False, True, "team_hidden_author", effective_mode, effective_team)
-    if team_subscriber_only and not author_was_paid_at_creation:
+    if team_subscriber_only and not was_subscriber_at_creation:
         return _result(False, True, "subscriber_only", effective_mode, effective_team)
     if lock_sequence is not None and post_sequence is not None and post_sequence > lock_sequence:
         return _result(False, True, "thread_locked", effective_mode, effective_team)
@@ -226,7 +226,7 @@ def filter_posts(
         """
         SELECT LOWER(p.txhash), LOWER(p.owner), LOWER(COALESCE(p.community,'')),
                p.protocol_version, LOWER(COALESCE(p.root_txhash,p.root_post_id,p.txhash)),
-               p.post_sequence, p.author_was_paid_at_creation
+               p.post_sequence, p.was_subscriber_at_creation
         FROM posts p
         WHERE LOWER(p.txhash)=ANY(%s)
         """,
@@ -239,7 +239,7 @@ def filter_posts(
             "protocol_version": int(row[3]),
             "root_txhash": row[4],
             "post_sequence": int(row[5]) if row[5] is not None else None,
-            "author_was_paid_at_creation": row[6],
+            "was_subscriber_at_creation": row[6],
         }
         for row in cur.fetchall()
     }
@@ -258,7 +258,7 @@ def filter_posts(
         if scope == "legacy":
             visible.append(post)
             continue
-        if meta["post_sequence"] is None or meta["author_was_paid_at_creation"] is None:
+        if meta["post_sequence"] is None or meta["was_subscriber_at_creation"] is None:
             raise RuntimeError(f"protocol-1 post is missing required curation metadata: {post_id}")
         community = meta["community"]
         if not community:
@@ -330,7 +330,7 @@ def filter_posts(
             txhash=post_id,
             root_txhash=meta["root_txhash"],
             post_sequence=meta["post_sequence"],
-            author_was_paid_at_creation=bool(meta["author_was_paid_at_creation"]),
+            was_subscriber_at_creation=bool(meta["was_subscriber_at_creation"]),
             deleted=False,
             viewer_blocks_author=False,
             viewer_blocks_post=False,
@@ -346,6 +346,14 @@ def filter_posts(
             temporary_raw=False,
             node_blocked=False,
         )
+        if visibility["reason"] == "subscriber_only":
+            log.debug(
+                "curation.subscriber_only hide post=%s community=%s team=%s was_subscriber=%s",
+                post_id[:12],
+                community,
+                team_id,
+                bool(meta["was_subscriber_at_creation"]),
+            )
         post["lens"] = {
             "requested": requested_lens,
             "effective_mode": visibility["effective_mode"],

@@ -150,9 +150,6 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     };
 
     const teamsPath = `/c/${encodeURIComponent(community)}/teams`;
-    const statusText = detailLoading
-        ? '…'
-        : (curated ? `${detail.live_team_count} live teams` : 'Uncurated');
     const loading = detailLoading || teamsLoading;
     // Wait for detail before collapsing to Uncensored — curated communities
     // would otherwise flash the fixed label while the request is in flight.
@@ -179,7 +176,10 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                 </Select>
             )}
             <Meta>
-                <Status>{statusText}</Status>
+                {/* Fixed Uncensored already means no curator lens — skip the empty-state chip. */}
+                {!detailLoading && curated && (
+                    <Status>{`${detail.live_team_count} live teams`}</Status>
+                )}
                 <ManageLink to={teamsPath}>Curator teams</ManageLink>
             </Meta>
         </Wrap>

@@ -172,7 +172,7 @@ class DatabaseManager:
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS post_sequence NUMERIC(20,0)")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS created_height BIGINT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS created_epoch BIGINT")
-                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS author_was_paid_at_creation BOOLEAN")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS was_subscriber_at_creation BOOLEAN")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_height BIGINT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS deleted_epoch BIGINT")
                 # v1.12.0: dedicated media field (JSON array of URLs)
@@ -1119,7 +1119,7 @@ class DatabaseManager:
                         post_sequence = %s,
                         created_height = %s,
                         created_epoch = %s,
-                        author_was_paid_at_creation = %s,
+                        was_subscriber_at_creation = %s,
                         deleted_height = NULLIF(%s, 0),
                         deleted_epoch = NULLIF(%s, 0)
                     WHERE LOWER(txhash) = %s AND protocol_version = 1
@@ -1132,7 +1132,7 @@ class DatabaseManager:
                         int(metadata["global_sequence"]),
                         int(metadata["created_height"]),
                         int(metadata["created_epoch"]),
-                        bool(metadata["author_was_paid_at_creation"]),
+                        bool(metadata["was_subscriber_at_creation"]),
                         int(metadata["deleted_height"]),
                         int(metadata["deleted_epoch"]),
                         target,
