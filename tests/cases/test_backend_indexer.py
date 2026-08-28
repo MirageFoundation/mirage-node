@@ -2750,11 +2750,19 @@ def test_tx_index(backend: str):
             else:
                 _fail("tx_index.tx_type_correct", f"status={fstatus}")
 
-    # Clean up follow
-    try:
-        _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
-    except Exception:
-        pass
+    # Clean up the follow, and wait for the unfollow to be *indexed* rather than
+    # merely committed. The replay pair below re-follows this same target, and
+    # the backend refuses a duplicate follow from its own indexed view before it
+    # ever builds a transaction — so an unprojected unfollow makes both halves of
+    # the pair fail with already_followed and the replay is never exercised.
+    unfollow_resp = _do_follow_user(backend, sub1, follow_target, follow=False, skip_pow=True)
+    unfollow_txh = str((unfollow_resp or {}).get("tx_hash", "") or "").lower()
+    if not unfollow_txh:
+        _fail("tx_index.failure_write.unfollow_cleanup", f"resp={unfollow_resp}")
+        return
+    if not _wait_tx_status(backend, unfollow_txh, expect_type="unfollow_user", require_details=False):
+        _fail("tx_index.failure_write.unfollow_cleanup", f"unfollow {unfollow_txh[:16]} not indexed")
+        return
 
     # ── 3. Failed tx (same-nonce) is recorded with success=false ──────
 
@@ -2776,7 +2784,7 @@ def test_tx_index(backend: str):
     t2 = str(t2_raw).lower() if t2_raw else ""
 
     if not t1 and not t2:
-        _fail("tx_index.failure_write", "both txs failed to submit")
+        _fail("tx_index.failure_write", f"both txs failed to submit: resp1={r1} resp2={r2}")
     elif (not t1) != (not t2):
         # One rejected at CheckTx — ensure we captured an error response
         fail_resp = r1 if not t1 else r2
