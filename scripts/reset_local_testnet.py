@@ -49,12 +49,12 @@ LOCAL_BLOCK_TIME_SECONDS = 3
 LOCAL_RETENTION_BLOCKS = read_positive_int("RETENTION_BLOCKS")
 LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_BLOCKS * LOCAL_BLOCK_TIME_SECONDS
 
-# Local-only suite limits. Written into genesis so tests do not wait on
-# governance after every reset. Same values as
-# scripts/proposals/proposal_set_pow_message_limit_9999999.json and
-# scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json.
+# Local-only suite limit. Written into genesis so tests do not wait on
+# governance after every reset. Same value as
+# scripts/proposals/proposal_set_pow_message_limit_9999999.json.
+# subscriber_daily_relay_limit is not injected here: the backup binary that
+# InitGenesis this file does not know that field yet.
 LOCAL_POW_MESSAGE_LIMIT = "9999999"
-LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT = "10000"
 
 LOCAL_EVIDENCE_PARAMS = {
     "max_age_num_blocks": str(LOCAL_RETENTION_BLOCKS),
@@ -821,12 +821,7 @@ def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple
     # that cleanup against real state.
 
     core_params["pow_message_limit"] = LOCAL_POW_MESSAGE_LIMIT
-    core_params["subscriber_daily_relay_limit"] = LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT
-    status(
-        "Local test limits: "
-        f"pow_message_limit={LOCAL_POW_MESSAGE_LIMIT} "
-        f"subscriber_daily_relay_limit={LOCAL_SUBSCRIBER_DAILY_RELAY_LIMIT}"
-    )
+    status(f"Local test limits: pow_message_limit={LOCAL_POW_MESSAGE_LIMIT}")
 
     app_state["core"] = core_state
 

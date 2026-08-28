@@ -58,7 +58,7 @@ from tests.cases.test_backend_content import (
     test_recent_content,
     test_anon_visibility,
 )
-from tests.cases.test_backend_social import test_social_graph, test_hard_cap_vs_deque, test_indexer_deque_storage
+from tests.cases.test_backend_social import test_social_graph
 from tests.cases.test_backend_tokens import test_pow, test_tokens
 from tests.cases.test_backend_subscriptions import (
     test_subscriber,
@@ -88,10 +88,7 @@ from tests.cases.test_backend_authz import (
 )
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import (
-    test_indexer,
-    test_tx_index,
     test_indexer_hardening,
-    test_indexer_topic_edit,
     test_redgifs_thumbnails,
     test_rumble_embeds,
 )
@@ -144,10 +141,8 @@ ALL_CATEGORIES = {
     "reports": test_reports,
     "frontend_bypass": test_frontend_bypass,
     "rate_limit": test_rate_limit,
-    "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "tier_config_api": test_tier_config_api,
     "subscribe_validation": test_subscribe_validation,
-    "indexer_deque": test_indexer_deque_storage,
     "content_limits": test_content_limits,
     "anon_visibility": test_anon_visibility,
     "profile_fields": test_profile_fields,
@@ -159,7 +154,6 @@ ALL_CATEGORIES = {
     "tx_status_matrix": test_tx_status_matrix,
     "failed_tx": test_failed_tx_status,
     "failed_tx_npv": test_failed_tx_non_post_vote,
-    "indexer": test_indexer,
     "indexer_hardening": test_indexer_hardening,
     "redgifs_thumbnails": test_redgifs_thumbnails,
     "rumble_embeds": test_rumble_embeds,
@@ -167,8 +161,6 @@ ALL_CATEGORIES = {
     "curation": test_curation_backend,
     "net_tags": test_net_tags,
     "net_tags_live": test_net_tags_live,
-    "indexer_topic_edit": test_indexer_topic_edit,
-    "tx_index": test_tx_index,
     "subscribe_gift_validation": test_subscribe_gift_validation,
     "subscribe_gift_agent": test_subscribe_gift_agent,
     "seen_posts": test_seen_posts,

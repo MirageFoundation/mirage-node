@@ -61,11 +61,9 @@ from tests.cases.test_blockchain_tiers import (
     test_subscribe_gift_extends_expiry,
     test_tier_features,
 )
-from tests.cases.test_blockchain_social import test_follow_limits, test_hard_cap_vs_deque
 from tests.cases.test_blockchain_governance import test_governance_reject, test_direct_bank
 from tests.cases.test_blockchain_params import (
     test_params_schema,
-    test_params_mask_governance,
     test_mint_split_params,
 )
 from tests.cases.test_blockchain_features import (
@@ -88,16 +86,13 @@ ALL_CATEGORIES = {
     "staking": test_staking,
     "msg_validation": test_msg_validation,
     "direct_bank": test_direct_bank,
-    "follow_limits": test_follow_limits,
     "msg_format": test_msg_format,
     "malicious_inputs": test_malicious_inputs,
     "tier_enforcement": test_tier_enforcement,
     "auto_renewal": test_chain_auto_renewal,
     "governance": test_governance_reject,
     "params_schema": test_params_schema,
-    "params_mask": test_params_mask_governance,
     "mint_split": test_mint_split_params,
-    "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "subscribe_validation": test_subscribe_validation,
     "subscribe_gift_extends": test_subscribe_gift_extends_expiry,
     "tier_features": test_tier_features,
@@ -131,15 +126,9 @@ STATELESS_CATEGORIES = {
     "net_tags_chain",
 }
 
-# params_mask is deliberately absent from STATELESS_CATEGORIES: it changes a
-# chain parameter and restores it, so it must not run beside categories that
-# read the same parameter.
-
-# Source probes and governance transactions from the validator key; neither
-# needs the five suite wallets.
+# Source probes from the validator key; no suite wallets needed.
 WALLETLESS_CATEGORIES = {
     "params_schema",
-    "params_mask",
 }
 
 

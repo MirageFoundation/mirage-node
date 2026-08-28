@@ -326,10 +326,9 @@ scripts/test_upgrade.sh --wait   # block until done; exit 0 iff all three passed
 **BEFORE RUNNING `tests/test_backend.py` OR `tests/test_blockchain.py` — NON-NEGOTIABLE:**
 
 1. **RUN INSIDE LOCAL DOCKER ONLY.** Both suites submit real transactions. Host execution is disabled in `tests/common.py`; do not run either entry point with host Python. They may ONLY execute inside the local `mirage` container (`hostname=testnet`) against `127.0.0.1`. Never run them inside or against val1/val2/val3/val4 or any domain.
-2. **TEST LIMITS.** PoW difficulty scales with recent message volume, so a suite that submits hundreds of txs makes itself progressively slower until it crawls and times out. A subscriber's daily relay quota is spent the same way: the suites run as a handful of wallets, so `sub1` alone burns a real user's whole day and the rest of the run fails with `subscriber_daily_limit_reached`. `scripts/reset_local_testnet.py` writes `pow_message_limit=9999999` and `subscriber_daily_relay_limit=10000` into genesis, so a fresh local reset already has the suite limits. If the chain was not reset that way, raise them with:
+2. **TEST LIMITS.** PoW difficulty scales with recent message volume, so a suite that submits hundreds of txs makes itself progressively slower until it crawls and times out. A subscriber's daily relay quota is spent the same way: the suites run as a handful of wallets, so `sub1` alone burns a real user's whole day and the rest of the run fails with `subscriber_daily_limit_reached`. `scripts/reset_local_testnet.py` writes `pow_message_limit=9999999` into genesis (the backup binary already knows that field). After the current tree is deployed, raise `subscriber_daily_relay_limit=10000` if it is not already there:
 
 ```bash
-python3 scripts/submit_proposal.py local scripts/proposals/proposal_set_pow_message_limit_9999999.json
 python3 scripts/submit_proposal.py local scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json
 ```
 
@@ -342,9 +341,15 @@ docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in /root/.mirage/en
 docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage python3 tests/test_blockchain.py'
 ```
 
+Cap fills, indexer projection, and governance mask round-trips live in `tests/test_extended.py` and are not part of rehearsal:
+
+```bash
+docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in /root/.mirage/env/*.env; do . "$f"; done; set +a; PYTHONPATH=/opt/mirage python3 tests/test_extended.py'
+```
+
 When every selected backend category is walletless, the runner skips wallet provisioning automatically; use `--category` for focused source, schema, and database probes instead of generating unnecessary chain traffic.
 
-- **Two test suites**: `tests/test_backend.py` (backend API/integration) and `tests/test_blockchain.py` (direct chain-level tx submission). Both are thin entry points.
+- **Three test suites**: `tests/test_backend.py` (backend API/integration), `tests/test_blockchain.py` (direct chain-level tx submission), and `tests/test_extended.py` (cap fills, indexer projection, governance mask). Rehearsal runs the first two. All three are thin entry points.
 - **Test cases** live in `tests/cases/`, prefixed by suite: `test_backend_*.py` and `test_blockchain_*.py`.
 - **Shared infrastructure** is in `tests/common.py`. Backend tx helpers in `tests/backend_helpers.py`. Blockchain gRPC helpers in `tests/blockchain_helpers.py`.
 - Add new tests to the appropriate `tests/cases/test_{suite}_{domain}.py` file. Never create standalone test files.

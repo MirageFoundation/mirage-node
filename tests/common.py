@@ -1185,6 +1185,7 @@ def run_suite(
 
     def _run_category(cat_name: str, fn) -> None:
         print(f"\n{_COLOR_BOLD}[{cat_name}]{_COLOR_RESET}")
+        t0 = time.time()
         with _RESULTS_LOCK:
             _CATEGORY_BY_THREAD[threading.get_ident()] = cat_name
         try:
@@ -1192,6 +1193,9 @@ def run_suite(
         except Exception as e:
             _fail(f"{cat_name}.UNEXPECTED_ERROR", str(e))
         finally:
+            elapsed = time.time() - t0
+            print(f"  [{cat_name}] elapsed={elapsed:.1f}s")
+            _debug(f"category {cat_name} elapsed={elapsed:.1f}s")
             with _RESULTS_LOCK:
                 _CATEGORY_BY_THREAD.pop(threading.get_ident(), None)
 

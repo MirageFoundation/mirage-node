@@ -642,183 +642,6 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.subscribe_invalid", ccode, dcode, dlog)
 
-    # 6.10 Block limits — use the FREE wallet (tier 0) so we hit the real
-    # free-tier ceiling and can verify overflow is rejected.
-    tier0 = _get_tier_config(0)
-    max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
-    max_blocked_users = _tier_int(tier0, "max_blocked_users")
-    max_blocked_communities = _tier_int(tier0, "max_blocked_communities")
-
-    bw = WALLETS["free"]
-    bw_addr = str(bw.address())
-    bw_pub = bw.public_key().public_key_bytes
-
-    # Ensure the free wallet has a profile core so GetProfile queries work
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-    ts = _now_ms()
-    bw_uname = f"bw{_rand_str(6)}"
-    nonce = _gen_nonce()
-    base = _canon_base_set_username_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, bw_uname, nonce=nonce)
-    proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=proof, nonce=nonce)
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg, "/mirage.core.v1.MsgSetUsername")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        bw_pub,
-        wait_deliver=True,
-    )
-    if ccode != 0 or dcode != 0:
-        _debug(f"free wallet SetUsername FAILED check={ccode} deliver={dcode} log={dlog}")
-
-    # ── blocked posts fill + overflow ────────────────────────────
-    _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
-    fill_ok = True
-    blocked_post_targets: list[str] = []
-    for i in range(max_blocked_posts):
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        if i > 0 and i % 10 == 0:
-            print(f"    [{i}/{max_blocked_posts}] blocked posts…")
-        target = _rand_hex(64)
-        blocked_post_targets.append(target)
-        nonce = _gen_nonce()
-        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockPost")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        if ccode != 0 or dcode != 0:
-            _fail("msg.block_post_fill", f"index={i} check={ccode} deliver={dcode}")
-            fill_ok = False
-            break
-    else:
-        _pass(f"msg.block_post_fill ({max_blocked_posts} blocked)")
-
-    if fill_ok:
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        over_target = _rand_hex(64)
-        nonce = _gen_nonce()
-        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_post(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockPost")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
-        chain_profile = _get_chain_profile(bw_addr)
-        got = [str(v).lower() for v in (chain_profile.get("blocked_posts") or chain_profile.get("blockedPosts") or [])]
-        expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
-        _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
-
-    # ── blocked users fill + overflow ────────────────────────────
-    _debug(f"free-tier max_blocked_users={max_blocked_users}")
-    fill_ok = True
-    blocked_user_targets: list[str] = []
-    for i in range(max_blocked_users):
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        blocked_user_targets.append(target.lower())
-        nonce = _gen_nonce()
-        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        if ccode != 0 or dcode != 0:
-            _fail("msg.block_user_fill", f"index={i} check={ccode} deliver={dcode}")
-            fill_ok = False
-            break
-    else:
-        _pass(f"msg.block_user_fill ({max_blocked_users} blocked)")
-
-    if fill_ok:
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        over_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        nonce = _gen_nonce()
-        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_user(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
-        chain_profile = _get_chain_profile(bw_addr)
-        got = [str(v).lower() for v in (chain_profile.get("blocked_users") or chain_profile.get("blockedUsers") or [])]
-        expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
-        _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
-
-    # ── blocked topics fill + overflow ───────────────────────────
-    _debug(f"free-tier max_blocked_communities={max_blocked_communities}")
-    fill_ok = True
-    blocked_topic_targets: list[str] = []
-    for i in range(max_blocked_communities):
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        topic = f"t{_rand_str(6)}{i}"
-        blocked_topic_targets.append(topic)
-        nonce = _gen_nonce()
-        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        if ccode != 0 or dcode != 0:
-            _fail("msg.block_topic_fill", f"index={i} check={ccode} deliver={dcode}")
-            fill_ok = False
-            break
-    else:
-        _pass(f"msg.block_topic_fill ({max_blocked_communities} blocked)")
-
-    if fill_ok:
-        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        over_topic = f"t{_rand_str(6)}over"
-        nonce = _gen_nonce()
-        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
-        chain_profile = _get_chain_profile(bw_addr)
-        got = [
-            str(v).lower() for v in (chain_profile.get("blocked_communities") or chain_profile.get("blockedCommunities") or [])
-        ]
-        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_communities:]
-        _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
-
     # 6.11 Unblock post (happy path: block then unblock)
     lb, _, _, _ = _get_pow_params(backend, str(w2.address()))
     ts = _now_ms()
@@ -1084,6 +907,185 @@ def test_msg_validation(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
+
+
+def test_block_list_cap_fills(backend: str) -> None:
+    """Fill free-tier block lists to the cap and check deque overflow.
+
+    Each entry is its own delivered tx, so this is minutes of chain time.
+    Lives in tests/test_extended.py, not the rehearsal suites.
+    """
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    tier0 = _get_tier_config(0)
+    max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
+    max_blocked_users = _tier_int(tier0, "max_blocked_users")
+    max_blocked_communities = _tier_int(tier0, "max_blocked_communities")
+
+    bw = WALLETS["free"]
+    bw_addr = str(bw.address())
+    bw_pub = bw.public_key().public_key_bytes
+
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+    ts = _now_ms()
+    bw_uname = f"bw{_rand_str(6)}"
+    nonce = _gen_nonce()
+    base = _canon_base_set_username_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, bw_uname, nonce=nonce)
+    proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=proof, nonce=nonce)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetUsername")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        bw_pub,
+        wait_deliver=True,
+    )
+    if ccode != 0 or dcode != 0:
+        _debug(f"free wallet SetUsername FAILED check={ccode} deliver={dcode} log={dlog}")
+
+    _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
+    fill_ok = True
+    blocked_post_targets: list[str] = []
+    for i in range(max_blocked_posts):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        if i > 0 and i % 10 == 0:
+            print(f"    [{i}/{max_blocked_posts}] blocked posts…")
+        target = _rand_hex(64)
+        blocked_post_targets.append(target)
+        nonce = _gen_nonce()
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockPost")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("msg.block_post_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
+            break
+    else:
+        _pass(f"msg.block_post_fill ({max_blocked_posts} blocked)")
+
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_target = _rand_hex(64)
+        nonce = _gen_nonce()
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_post(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockPost")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_posts") or chain_profile.get("blockedPosts") or [])]
+        expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
+        _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
+
+    _debug(f"free-tier max_blocked_users={max_blocked_users}")
+    fill_ok = True
+    blocked_user_targets: list[str] = []
+    for i in range(max_blocked_users):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        blocked_user_targets.append(target.lower())
+        nonce = _gen_nonce()
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockUser")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("msg.block_user_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
+            break
+    else:
+        _pass(f"msg.block_user_fill ({max_blocked_users} blocked)")
+
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        nonce = _gen_nonce()
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_user(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockUser")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_users") or chain_profile.get("blockedUsers") or [])]
+        expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
+        _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
+
+    _debug(f"free-tier max_blocked_communities={max_blocked_communities}")
+    fill_ok = True
+    blocked_topic_targets: list[str] = []
+    for i in range(max_blocked_communities):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        topic = f"t{_rand_str(6)}{i}"
+        blocked_topic_targets.append(topic)
+        nonce = _gen_nonce()
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("msg.block_topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
+            break
+    else:
+        _pass(f"msg.block_topic_fill ({max_blocked_communities} blocked)")
+
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_topic = f"t{_rand_str(6)}over"
+        nonce = _gen_nonce()
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockCommunity")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [
+            str(v).lower() for v in (chain_profile.get("blocked_communities") or chain_profile.get("blockedCommunities") or [])
+        ]
+        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_communities:]
+        _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
 
 
 def _required_validator_fee_budget_umirage() -> int:
