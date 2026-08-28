@@ -505,16 +505,28 @@ class ChainClient:
                 renewal = renewal_method(QuerySubscriptionRenewalRequest(address=owner), timeout=timeout)
             except grpc.RpcError as e:
                 raise RuntimeError(f"subscription runtime gRPC failed for {owner}: {e}") from e
+        # No renewal schedule (free / appointed admin / cleared) → NULL columns.
+        # Do not invent expiry=0; bootstrap used to treat that as a real warning.
+        if renewal.HasField("state"):
+            renewal_expiry = int(renewal.state.expiry)
+            renewal_next_attempt = int(renewal.state.next_attempt_unix)
+            renewal_last_attempt_epoch = int(renewal.state.last_attempt_epoch)
+            renewal_warning_sent = bool(renewal.state.warning_sent)
+        else:
+            renewal_expiry = None
+            renewal_next_attempt = None
+            renewal_last_attempt_epoch = None
+            renewal_warning_sent = None
         result = {
             "quota_epoch": int(quota.epoch),
             "quota_limit": int(quota.limit),
             "quota_used": int(quota.used),
             "quota_remaining": int(quota.remaining),
             "quota_reset_at": int(quota.reset_at),
-            "renewal_expiry": int(renewal.state.expiry),
-            "renewal_next_attempt": int(renewal.state.next_attempt_unix),
-            "renewal_last_attempt_epoch": int(renewal.state.last_attempt_epoch),
-            "renewal_warning_sent": bool(renewal.state.warning_sent),
+            "renewal_expiry": renewal_expiry,
+            "renewal_next_attempt": renewal_next_attempt,
+            "renewal_last_attempt_epoch": renewal_last_attempt_epoch,
+            "renewal_warning_sent": renewal_warning_sent,
         }
         if result["quota_limit"] < result["quota_used"] or result["quota_remaining"] != (
             result["quota_limit"] - result["quota_used"]

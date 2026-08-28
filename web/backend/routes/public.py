@@ -4384,22 +4384,28 @@ def _build_community_bootstrap(address: str) -> dict:
             "reset_at": (int(quota_epoch) + 1) * 86400,
         }
     renewal_values = row[3:7]
-    if effective_paid and any(value is None for value in renewal_values):
-        raise RuntimeError("paid profile is missing renewal projection")
     renewal_warning = None
-    if all(value is not None for value in renewal_values):
+    # Appointed admins (and free users) have no paid subscription. Their renewal
+    # columns may still be projected as zeros after a quota backfill — never
+    # surface that as a "subscription expires" warning (epoch → 12/31/1969).
+    if effective_paid:
+        if any(value is None for value in renewal_values):
+            raise RuntimeError("paid profile is missing renewal projection")
+        expiry = int(row[5])
+        if expiry <= 0:
+            raise RuntimeError(f"paid profile has non-positive renewal expiry: {expiry}")
         renewal_warning = {
-            "expiry": int(row[5]),
+            "expiry": expiry,
             "next_attempt": int(row[3]),
             "last_attempt_epoch": int(row[4]),
             "warning_sent": bool(row[6]),
         }
     logger.debug(
-        "[renewal] bootstrap address=%s paid=%s level=%s warning_sent=%s",
+        "[renewal] bootstrap address=%s paid=%s level=%s warning=%s",
         address[:12],
         effective_paid,
         user_level,
-        renewal_warning["warning_sent"] if renewal_warning is not None else None,
+        renewal_warning["expiry"] if renewal_warning is not None else None,
     )
     return {
         "community_preferences": preferences,

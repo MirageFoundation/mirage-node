@@ -1145,6 +1145,14 @@ class DatabaseManager:
         """Persist quota and renewal state in the existing profile columns."""
         with self._connect() as conn:
             with conn.cursor() as cur:
+                def _opt_int(key: str):
+                    value = runtime[key]
+                    return None if value is None else int(value)
+
+                def _opt_bool(key: str):
+                    value = runtime[key]
+                    return None if value is None else bool(value)
+
                 cur.execute(
                     """
                     UPDATE profiles
@@ -1159,10 +1167,10 @@ class DatabaseManager:
                     (
                         int(runtime["quota_epoch"]),
                         int(runtime["quota_used"]),
-                        int(runtime["renewal_next_attempt"]),
-                        int(runtime["renewal_last_attempt_epoch"]),
-                        int(runtime["renewal_expiry"]),
-                        bool(runtime["renewal_warning_sent"]),
+                        _opt_int("renewal_next_attempt"),
+                        _opt_int("renewal_last_attempt_epoch"),
+                        _opt_int("renewal_expiry"),
+                        _opt_bool("renewal_warning_sent"),
                         owner,
                     ),
                 )

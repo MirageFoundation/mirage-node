@@ -37,6 +37,12 @@ function validateRenewal(value) {
     if (!value || !Number.isInteger(value.expiry) || !Number.isInteger(value.next_attempt) || !Number.isInteger(value.last_attempt_epoch) || typeof value.warning_sent !== 'boolean') {
         throw new Error('Invalid renewal_warning status');
     }
+    // expiry<=0 is unpaid / admin / cleared schedule — never a real renewal notice
+    // (Date(0) renders as 12/31/1969 in US timezones).
+    if (value.expiry <= 0) {
+        console.debug('[AccountStatusNotices] ignoring non-positive renewal expiry', value);
+        return null;
+    }
     return value;
 }
 
