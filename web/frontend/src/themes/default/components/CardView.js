@@ -18,7 +18,6 @@ import {
     HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
     HiOutlineArrowDownTray,
-    HiOutlineShieldExclamation,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
@@ -36,7 +35,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import ContentTagBadge from "./ContentTagBadge";
-import CurateMenuItems from "./CurateMenuItems";
+import { ModMenuChip } from "./PostMenu";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
@@ -772,16 +771,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setBlockOpen(false);
     }, []);
 
-    /**
-     * Sub-plan 06.11 E — feed-row admin parity. Adds the Mark-deleted row
-     * to the more-menu for admins viewing other users' posts.
-     */
-    const isAdminVisible = (() => {
-        if (!isLoggedIn || isOwnPost || !postId || !safePost.user_id) return false;
-        try { return Number(Storage.load('user_level', '0')) >= 100; }
-        catch (_) { return false; }
-    })();
-
     const handleCardClick = useCallback((e) => {
         if (isInteractiveTarget(e.target)) return;
         if (linkTarget && linkTarget !== '#') navigate(linkTarget);
@@ -1301,6 +1290,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </PopoverRoot>
                     )}
+                    <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                     <PopoverRoot ref={menuRef} onClick={stop}>
                         <MoreButton
                             type="button"
@@ -1370,31 +1360,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             <span>Gift Subscription</span>
                                         </MenuItemBtn>
                                     </>
-                                )}
-                                {isAdminVisible && (
-                                    <MenuItemBtn type="button" $danger onClick={handleDelete}>
-                                        <HiOutlineShieldExclamation />
-                                        <span>Mark post deleted</span>
-                                    </MenuItemBtn>
-                                )}
-                                {isLoggedIn && (
-                                    <CurateMenuItems
-                                        post={post}
-                                        onDone={() => setMenuOpen(false)}
-                                        renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
-                                        renderItem={(item) => (
-                                            <MenuItemBtn
-                                                key={item.key}
-                                                type="button"
-                                                $danger={item.danger}
-                                                disabled={item.disabled}
-                                                onClick={item.onClick}
-                                            >
-                                                {item.icon}
-                                                <span>{item.label}</span>
-                                            </MenuItemBtn>
-                                        )}
-                                    />
                                 )}
                             </Menu>
                         )}
@@ -1546,10 +1511,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             />
             <ConfirmDialog
                 open={activeDialog === 'delete_post'}
-                title={isOwnPost ? 'Delete this post?' : 'Mark post as deleted?'}
-                message={isOwnPost
-                    ? 'This will permanently remove your post from every feed. This action cannot be undone.'
-                    : 'This will permanently remove this post from every feed. This action cannot be undone.'}
+                title="Delete this post?"
+                message="This will permanently remove your post from every feed. This action cannot be undone."
                 confirmLabel="Delete post"
                 confirmVariant="danger"
                 pending={dialogPending}

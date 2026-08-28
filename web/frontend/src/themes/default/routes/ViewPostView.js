@@ -30,7 +30,7 @@ import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../co
 import { useBlocks } from "../../../logic/useBlocks";
 import UserAvatar from "../components/UserAvatar.js";
 import ContentTagBadge from "../components/ContentTagBadge";
-import CurateMenuItems from "../components/CurateMenuItems";
+import { ModMenuChip } from "../components/PostMenu";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -46,7 +46,6 @@ import {
     HiOutlineEyeSlash,
     HiOutlineFlag,
     HiOutlineHashtag,
-    HiOutlineShieldExclamation,
     HiOutlineArrowDownTray,
 } from "react-icons/hi2";
 /**
@@ -1001,7 +1000,9 @@ const MenuButton = styled.button`
 `;
 const MenuContainer = styled.div`
     position: relative;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
 `;
 /**
  * Post / comment options dropdown.
@@ -1085,15 +1086,6 @@ const MenuItem = styled.button`
         flex-shrink: 0;
         color: inherit;
     }
-`;
-
-const MenuHeader = styled.div`
-    padding: 10px 14px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1;
-    color: ${({ theme }) => theme.colors.menuHeaderText};
-    white-space: nowrap;
 `;
 
 /**
@@ -2322,8 +2314,6 @@ function ViewPostView({
         const publicKeyStr = String(state.publicKey || '').trim();
         const hasValidAccount = publicKeyStr && publicKeyStr !== 'guest';
         const isOwnPost = post && state && post.user_id === state.publicKey;
-        const userLevel = Number(Storage.load('user_level', '0')) || 0;
-        const isAdmin = hasValidAccount && userLevel >= 100;
         const isOpen = openMenuId === post.post_id;
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
@@ -2342,6 +2332,7 @@ function ViewPostView({
             setOpenMenuId(isOpen ? null : post.post_id);
         };
         return <MenuContainer>
+            <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
             <MenuButton ref={el => menuButtonRefs.current[post.post_id] = el} onClick={handleMenuClick} aria-label="Post menu">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="1.5"></circle>
@@ -2463,33 +2454,7 @@ function ViewPostView({
                                 <HiOutlineGift />
                                 <span>{formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}</span>
                             </MenuItem>}
-                            {isAdmin && <MenuItem data-danger="true" onClick={() => {
-                                setOpenMenuId(null);
-                                handleDeletePost(post.post_id);
-                            }}>
-                                <HiOutlineShieldExclamation />
-                                <span>Mark {itemLabel} deleted</span>
-                            </MenuItem>}
                         </>}
-                        {hasValidAccount && (
-                            <CurateMenuItems
-                                post={post}
-                                onDone={() => setOpenMenuId(null)}
-                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
-                                renderItem={(item) => (
-                                    <MenuItem
-                                        key={item.key}
-                                        type="button"
-                                        data-danger={item.danger ? 'true' : undefined}
-                                        disabled={item.disabled}
-                                        onClick={item.onClick}
-                                    >
-                                        {item.icon}
-                                        <span>{item.label}</span>
-                                    </MenuItem>
-                                )}
-                            />
-                        )}
                     </>;
                 })()}
             </MenuDropdown>, document.body)}

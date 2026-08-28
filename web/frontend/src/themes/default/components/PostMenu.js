@@ -27,6 +27,7 @@ import ConfirmDialog from "./ConfirmDialog";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
 import CurateMenuItems from "./CurateMenuItems";
 import usePostGifts from "../../../logic/usePostGifts";
+import { usePostCurateActions } from "../../../logic/usePostCurateActions";
 import { updateNotification } from "../../../utils/notifications";
 
 /**
@@ -40,6 +41,8 @@ import { updateNotification } from "../../../utils/notifications";
  *   • MoreMenuChip — 3-dot ellipsis button with Copy link + Follow
  *     user/topic + Give Award + Gift Mirage + Gift Subscription.
  *     Matches the `MoreButton` menu in CardView.
+ *   • ModMenuChip — shield button (admin / curator only) with Mark post
+ *     deleted + Curate actions. Separate from the ⋯ menu on purpose.
  *   • BlockChip — filled circle chip with a slashed-circle icon that
  *     opens Block user / Block post / Block topic / Report post.
  *     Matches the `ActionIconChip $danger` block menu in CardView.
@@ -167,6 +170,14 @@ const MoreButton = styled.button`
     }
 `;
 
+// Shield trigger — heroicons outline uses stroke, not fill.
+const ModButton = styled(MoreButton)`
+    svg {
+        fill: none;
+        stroke: currentColor;
+    }
+`;
+
 // Block icon chip — identical to CardView's `ActionIconChip $danger`.
 // `line-height: 0` + `display: block` on the svg forces optical centering.
 const BlockIconChip = styled.button`
@@ -289,16 +300,6 @@ export function MoreMenuChip({
     useOutsidePopover(rootRef, open, close);
 
     const handleToggle = useCallback(e => { stop(e); setOpen(v => !v); }, []);
-
-    /**
-     * Sub-plan 06.11 E — feed-row admin parity. Adds the Mark-deleted row
-     * for admins viewing other users' posts.
-     */
-    const isAdminVisible = (() => {
-        if (!isLoggedIn || isOwnPost || !postId || !authorAddress) return false;
-        try { return Number(Storage.load('user_level', '0')) >= 100; }
-        catch (_) { return false; }
-    })();
 
     const handleCopyLink = useCallback(e => {
         stop(e); setOpen(false);
@@ -497,40 +498,13 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                             </>
                         )}
-                        {isAdminVisible && (
-                            <MenuItemBtn type="button" $danger onClick={handleDelete}>
-                                <HiOutlineShieldExclamation />
-                                <span>Mark post deleted</span>
-                            </MenuItemBtn>
-                        )}
-                        {isLoggedIn && (
-                            <CurateMenuItems
-                                post={post}
-                                onDone={close}
-                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
-                                renderItem={(item) => (
-                                    <MenuItemBtn
-                                        key={item.key}
-                                        type="button"
-                                        $danger={item.danger}
-                                        disabled={item.disabled}
-                                        onClick={item.onClick}
-                                    >
-                                        {item.icon}
-                                        <span>{item.label}</span>
-                                    </MenuItemBtn>
-                                )}
-                            />
-                        )}
                     </Menu>
                 )}
             </PopoverRoot>
             <ConfirmDialog
                 open={deleteDialogOpen}
-                title={isOwnPost ? 'Delete this post?' : 'Mark post as deleted?'}
-                message={isOwnPost
-                    ? "This will mark the post as deleted on-chain. You can't undo this action."
-                    : 'This will permanently remove this post from every feed. This action cannot be undone.'}
+                title="Delete this post?"
+                message="This will mark the post as deleted on-chain. You can't undo this action."
                 confirmLabel="Delete post"
                 confirmVariant="danger"
                 pending={deletePending}
@@ -574,6 +548,122 @@ export function MoreMenuChip({
                     }
                 }}
                 onCancel={cancelAward}
+            />
+        </>
+    );
+}
+
+// ─── ModMenuChip ────────────────────────────────────────────────────────────
+//
+// Shield button shown only to community curators and/or admins. Holds
+// Mark-post-deleted (admin) and Curate actions — kept out of the ⋯ menu
+// so ordinary post actions stay short.
+
+export function ModMenuChip({
+    post,
+    state,
+    updatePost,
+    align = 'right',
+}) {
+    const rootRef = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [deletePending, setDeletePending] = useState(false);
+
+    const { isLoggedIn, postId, authorAddress, isOwnPost } = usePostIdentity(post, state);
+    const { visible: curateVisible } = usePostCurateActions(post);
+
+    const isAdminVisible = (() => {
+        if (!isLoggedIn || isOwnPost || !postId || !authorAddress) return false;
+        try { return Number(Storage.load('user_level', '0')) >= 100; }
+        catch (_) { return false; }
+    })();
+
+    const show = isAdminVisible || curateVisible;
+    const close = useCallback(() => setOpen(false), []);
+    useOutsidePopover(rootRef, open, close);
+    const handleToggle = useCallback(e => { stop(e); setOpen(v => !v); }, []);
+
+    const handleMarkDeleted = useCallback(e => {
+        stop(e);
+        setOpen(false);
+        setDeletePending(false);
+        setDeleteDialogOpen(true);
+    }, []);
+
+    const confirmMarkDeleted = useCallback(async () => {
+        if (!postId) { setDeleteDialogOpen(false); return; }
+        setDeletePending(true);
+        try { await tx.deletePost(postId); } catch (_) { /* noop */ }
+        if (typeof updatePost === 'function') {
+            try { updatePost(postId, { deleted: true }); } catch (_) { /* noop */ }
+        }
+        setDeleteDialogOpen(false);
+        setDeletePending(false);
+        console.debug('[mod] mark post deleted', { postId: String(postId).slice(0, 12) });
+    }, [postId, updatePost]);
+
+    const cancelMarkDeleted = useCallback(() => {
+        setDeleteDialogOpen(false);
+        setDeletePending(false);
+    }, []);
+
+    if (!post || !postId || !show) return null;
+
+    return (
+        <>
+            <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
+                <ModButton
+                    type="button"
+                    aria-label="Moderation menu"
+                    aria-haspopup="menu"
+                    aria-expanded={open}
+                    onClick={handleToggle}
+                >
+                    <HiOutlineShieldExclamation />
+                </ModButton>
+                {open && (
+                    <Menu role="menu" aria-label="Moderation menu" $align={align}>
+                        {isAdminVisible && (
+                            <>
+                                <MenuHeader>Admin</MenuHeader>
+                                <MenuItemBtn type="button" $danger onClick={handleMarkDeleted}>
+                                    <HiOutlineShieldExclamation />
+                                    <span>Mark post deleted</span>
+                                </MenuItemBtn>
+                            </>
+                        )}
+                        {curateVisible && (
+                            <CurateMenuItems
+                                post={post}
+                                onDone={close}
+                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
+                                renderItem={(item) => (
+                                    <MenuItemBtn
+                                        key={item.key}
+                                        type="button"
+                                        $danger={item.danger}
+                                        disabled={item.disabled}
+                                        onClick={item.onClick}
+                                    >
+                                        {item.icon}
+                                        <span>{item.label}</span>
+                                    </MenuItemBtn>
+                                )}
+                            />
+                        )}
+                    </Menu>
+                )}
+            </PopoverRoot>
+            <ConfirmDialog
+                open={deleteDialogOpen}
+                title="Mark post as deleted?"
+                message="This will permanently remove this post from every feed. This action cannot be undone."
+                confirmLabel="Delete post"
+                confirmVariant="danger"
+                pending={deletePending}
+                onConfirm={confirmMarkDeleted}
+                onCancel={cancelMarkDeleted}
             />
         </>
     );

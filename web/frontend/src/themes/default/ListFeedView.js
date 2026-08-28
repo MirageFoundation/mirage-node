@@ -8,7 +8,7 @@ import { HiChevronDown } from "react-icons/hi2";
 import CardView from "./components/CardView";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
-import { MoreMenuChip, BlockChip } from "./components/PostMenu";
+import { MoreMenuChip, ModMenuChip, BlockChip } from "./components/PostMenu";
 import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
 import Tooltip from "./components/Tooltip";
 import ContentTagBadge from "./components/ContentTagBadge";
@@ -1330,8 +1330,9 @@ function CompactRow({ post, state, updatePost }) {
                         </>
                     )}
                 </CompactHeader>
-                {/* 3-dot overflow — same dropdown as CardView's MoreButton. */}
+                {/* Shield mod menu (admin/curator) + 3-dot overflow. */}
                 <CompactTopActions>
+                    <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                     <MoreMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                 </CompactTopActions>
             </CompactTopRow>

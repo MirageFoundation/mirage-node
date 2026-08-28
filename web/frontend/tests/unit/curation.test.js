@@ -152,6 +152,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(create).toMatch(/Verifying…/);
         expect(create).toMatch(/curated feed/);
         expect(create).not.toMatch(/curated lens/);
+        expect(create).toMatch(/No curator team for this community/);
+        expect(create).toMatch(/no curator team yet/);
+        expect(create).not.toMatch(/No curator teams yet/);
         expect(detail).not.toMatch(/Team policy/);
         expect(detail).not.toMatch(/setPolicy/);
         expect(detail).toMatch(/include how you moderate/);
@@ -173,7 +176,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).not.toMatch(/Lock thread/);
     });
 
-    it('puts Curate actions on every post overflow menu', () => {
+    it('puts Curate + admin delete on a separate ModMenuChip shield menu', () => {
         const postMenu = readFileSync(
             join(frontendSrc, 'themes/default/components/PostMenu.js'),
             'utf8',
@@ -184,6 +187,10 @@ describe('v1.39 curation UI contracts', () => {
         );
         const viewPost = readFileSync(
             join(frontendSrc, 'themes/default/routes/ViewPostView.js'),
+            'utf8',
+        );
+        const listFeed = readFileSync(
+            join(frontendSrc, 'themes/default/ListFeedView.js'),
             'utf8',
         );
         const curateItems = readFileSync(
@@ -199,8 +206,15 @@ describe('v1.39 curation UI contracts', () => {
             'utf8',
         );
 
-        for (const src of [postMenu, cardView, viewPost]) {
-            expect(src).toMatch(/CurateMenuItems/);
+        expect(postMenu).toMatch(/export function ModMenuChip/);
+        expect(postMenu).toMatch(/Moderation menu/);
+        expect(postMenu).toMatch(/Mark post deleted/);
+        expect(postMenu).toMatch(/CurateMenuItems/);
+        // ⋯ menu must not own curate / admin-delete anymore.
+        expect(postMenu).not.toMatch(/isAdminVisible && \(\s*\n\s*<MenuItemBtn[^>]*Mark post deleted/s);
+        for (const src of [cardView, viewPost, listFeed]) {
+            expect(src).toMatch(/ModMenuChip/);
+            expect(src).not.toMatch(/CurateMenuItems/);
         }
         expect(curateItems).toMatch(/Curate · /);
         expect(curateItems).toMatch(/usePostCurateActions/);

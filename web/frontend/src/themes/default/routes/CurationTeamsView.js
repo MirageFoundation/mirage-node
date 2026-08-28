@@ -599,9 +599,9 @@ export default function CurationTeamsView({ createOnly = false }) {
             {!teamState.loading && teamState.teams.length === 0 && (
                 <EmptyState>
                     <EmptyIcon><HiOutlineUserGroup aria-hidden="true" /></EmptyIcon>
-                    <EmptyTitle>No curator teams yet</EmptyTitle>
+                    <EmptyTitle>No curator team for this community</EmptyTitle>
                     <EmptyBody>
-                        This community currently uses the uncensored feed. Start a team to offer users a curated feed.
+                        This community has no curator team yet, so everyone sees the uncensored feed. Create one to offer a curated feed.
                     </EmptyBody>
                     <Button to={createPath} size="xs">Create the first team</Button>
                 </EmptyState>

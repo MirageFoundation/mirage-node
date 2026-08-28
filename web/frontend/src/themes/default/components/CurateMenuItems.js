@@ -12,10 +12,10 @@ const DefaultHeader = styled.div`
 `;
 
 /**
- * Shared Curate section for post overflow menus.
+ * Shared Curate section for the post Mod (shield) menu.
  *
- * Callers supply `renderItem(item)` so CardView / PostMenu / ViewPostView
- * can keep their own menu row components. Optional `renderHeader`.
+ * Callers supply `renderItem(item)` so ModMenuChip can keep its own menu
+ * row components. Optional `renderHeader`.
  */
 export default function CurateMenuItems({ post, onDone, renderItem, renderHeader }) {
     const { visible, items, teamName } = usePostCurateActions(post);
