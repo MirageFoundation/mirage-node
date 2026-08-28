@@ -95,6 +95,21 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if err := k.storeSet(ctx, types.KeyCurationTeamName(slug, norm), putU64(next)); err != nil {
 		return 0, err
 	}
+	// Founder is the first subscriber: join (if needed) and pin this team.
+	// Counts via CanCurate so paid founders and admins both register as 1 sub.
+	if err := k.JoinCommunity(ctx, owner, slug, uint32(tier.MaxJoinedCommunities)); err != nil {
+		return 0, err
+	}
+	if err := k.SetCurationPreference(
+		ctx,
+		owner,
+		slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED,
+		next,
+		types.CanCurate(core),
+	); err != nil {
+		return 0, err
+	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_team_created",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", next)),
@@ -103,6 +118,7 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 		sdk.NewAttribute("description", description),
 		sdk.NewAttribute("created_height", fmt.Sprintf("%d", team.CreatedHeight)),
 		sdk.NewAttribute("created_order", fmt.Sprintf("%d", team.CreatedOrder)),
+		sdk.NewAttribute("subscriber_count", "1"),
 	))
 	return next, nil
 }

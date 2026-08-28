@@ -7,7 +7,7 @@ import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
 import * as tx from '../../../utils/tx';
 import { communityLabel, sanitizeCommunitySlug, isValidCommunitySlug } from '../../../utils/community';
-import { waitForOwnCurationTeam } from '../../../utils/curation';
+import { formatSubscriberCount, waitForOwnCurationTeam } from '../../../utils/curation';
 import { formatError } from '../../../utils/errorMessages';
 import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
@@ -247,19 +247,6 @@ const TeamHeader = styled.div`
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-`;
-
-const Badge = styled.span`
-    display: inline-flex;
-    align-items: center;
-    min-height: 1.35rem;
-    padding: 0 0.45rem;
-    border-radius: 999px;
-    background: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.62rem;
-    font-weight: 650;
-    white-space: nowrap;
 `;
 
 export default function CurationTeamsView({ createOnly = false }) {
@@ -604,12 +591,9 @@ export default function CurationTeamsView({ createOnly = false }) {
                         <TeamLink to={`/c/${encodeURIComponent(routeCommunity)}/teams/${team.team_id}`}>
                             {team.name}
                         </TeamLink>
-                        {String(team.team_id) === String(communityState.detail?.default_team?.team_id) && (
-                            <Badge>Node default</Badge>
-                        )}
                     </TeamHeader>
                     <Meta>{team.description || 'No description provided.'}</Meta>
-                    <Meta>{team.subscriber_count} subscribers</Meta>
+                    <Meta>{formatSubscriberCount(Number(team.subscriber_count))}</Meta>
                 </TeamCard>
             ))}
             {!teamState.loading && teamState.teams.length === 0 && (

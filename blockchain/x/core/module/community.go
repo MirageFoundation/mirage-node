@@ -394,7 +394,8 @@ func (am AppModule) SetCurationPreference(ctx context.Context, req *types.MsgSet
 	if err := am.consumeQuota(sdkCtx, owner); err != nil {
 		return nil, err
 	}
-	if err := am.k.SetCurationPreference(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetMode(), req.GetPinnedTeamId(), core.EffectivePaid); err != nil {
+	// Admins and paid subscribers both count toward team subscriber_count.
+	if err := am.k.SetCurationPreference(sdkCtx, owner, strings.TrimSpace(req.GetCommunity()), req.GetMode(), req.GetPinnedTeamId(), types.CanCurate(core)); err != nil {
 		return nil, err
 	}
 	return &types.MsgSetCurationPreferenceResponse{}, nil

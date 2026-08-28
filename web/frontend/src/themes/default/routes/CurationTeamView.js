@@ -6,9 +6,9 @@ import Storage from '../../../utils/Storage';
 import * as tx from '../../../utils/tx';
 import { communityLabel } from '../../../utils/community';
 import { formatError } from '../../../utils/errorMessages';
+import { formatSubscriberCount } from '../../../utils/curation';
 import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
 import { useCurationTeam } from '../../../logic/useCurationTeams';
-import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { getMaxUsernameSize } from '../../../utils/chainParams';
 import Button from '../components/Button';
@@ -89,7 +89,6 @@ export default function CurationTeamView() {
     const { topic: community, teamId } = useParams();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const { team, loading, error: loadError } = useCurationTeam(community, teamId, viewer);
-    const { detail: communityDetail } = useCommunityDetail(community, viewer);
     const { getInfo, getStatus } = usePendingCuration();
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
@@ -185,7 +184,7 @@ export default function CurationTeamView() {
         </BackLink>
         <Title>{team.name}</Title>
         {team.deleted && <ErrorText>This curator team has been deleted.</ErrorText>}
-        <Meta>{String(team.team_id) === String(communityDetail?.default_team?.team_id) ? 'Node default · ' : ''}{team.subscriber_count} subscribers</Meta>
+        <Meta>{formatSubscriberCount(Number(team.subscriber_count))}</Meta>
 
         <Card>
             <CardTitle>Team settings</CardTitle>

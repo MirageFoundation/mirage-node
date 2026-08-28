@@ -132,9 +132,10 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 		}
 	}
 
-	paidOwners := map[string]bool{}
+	// Pins from paid subscribers and admins both count as team subscribers.
+	subscriberEligible := map[string]bool{}
 	for _, p := range profiles {
-		paidOwners[p.owner] = p.core.EffectivePaid
+		subscriberEligible[p.owner] = types.CanCurate(p.core)
 	}
 	if err := k.migrateFollowedTopics(ctx); err != nil {
 		return err
@@ -154,7 +155,7 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	if err := k.deletePrefix(ctx, []byte(types.ProfileBlockedTopicsPrefix)); err != nil {
 		return err
 	}
-	if err := k.migrateCuratorDefinedCommunities(ctx, paidOwners); err != nil {
+	if err := k.migrateCuratorDefinedCommunities(ctx, subscriberEligible); err != nil {
 		return err
 	}
 
@@ -322,7 +323,7 @@ func (k Keeper) migrateBlockedTopics(ctx sdk.Context) error {
 	return k.deletePrefix(ctx, []byte(types.BlockedTopicsPrefix))
 }
 
-func (k Keeper) migrateCuratorDefinedCommunities(ctx sdk.Context, paid map[string]bool) error {
+func (k Keeper) migrateCuratorDefinedCommunities(ctx sdk.Context, subscriberEligible map[string]bool) error {
 	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCommunity), 0, func(_, value []byte) error {
 		var legacy types.Community
 		if err := k.cdc.Unmarshal(value, &legacy); err != nil {
@@ -375,7 +376,7 @@ func (k Keeper) migrateCuratorDefinedCommunities(ctx sdk.Context, paid map[strin
 		if len(slugPart) != 2+n {
 			return fmt.Errorf("v1.39.0: malformed joined-community slug")
 		}
-		if !paid[owner] || len(value) == 0 {
+		if !subscriberEligible[owner] || len(value) == 0 {
 			return nil
 		}
 		var pref types.CommunityPreference
@@ -428,6 +429,65 @@ func (k Keeper) migrateCuratorDefinedCommunities(ctx sdk.Context, paid map[strin
 	return nil
 }
 
+// EnsureCurationTeamFoundersSubscribed pins each live team's owner to that
+// team so the founder counts as the first subscriber. Idempotent; gated by
+// UpgradeV139FounderSubsKey. Safe to call from BeginBlock after v1.39.0.
+func (k Keeper) EnsureCurationTeamFoundersSubscribed(ctx sdk.Context) error {
+	done, err := k.storeHas(ctx, []byte(types.UpgradeV139FounderSubsKey))
+	if err != nil {
+		return err
+	}
+	if done {
+		return nil
+	}
+	params := k.GetParams(ctx)
+	pinned := 0
+	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCurationTeam), 0, func(_, value []byte) error {
+		var team types.CurationTeam
+		if err := k.cdc.Unmarshal(value, &team); err != nil {
+			return fmt.Errorf("v1.39.0: decode curation team for founder pin: %w", err)
+		}
+		if team.DeletedHeight != 0 || team.Community == "" || team.TeamId == 0 || team.Owner == "" {
+			return nil
+		}
+		core, found, err := k.loadProfile(ctx, team.Owner)
+		if err != nil {
+			return err
+		}
+		if !found || !types.CanCurate(core) {
+			ctx.Logger().Info("v1.39.0: skip founder pin; owner cannot curate",
+				"community", team.Community, "team_id", team.TeamId, "owner", team.Owner)
+			return nil
+		}
+		tier := params.GetTierConfig(int(core.Level))
+		if tier == nil {
+			return fmt.Errorf("v1.39.0: tier missing for founder %s", team.Owner)
+		}
+		if err := k.JoinCommunity(ctx, team.Owner, team.Community, uint32(tier.MaxJoinedCommunities)); err != nil {
+			return fmt.Errorf("v1.39.0: join founder %s to %s: %w", team.Owner, team.Community, err)
+		}
+		if err := k.SetCurationPreference(
+			ctx,
+			team.Owner,
+			team.Community,
+			types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED,
+			team.TeamId,
+			true,
+		); err != nil {
+			return fmt.Errorf("v1.39.0: pin founder %s to %s/%d: %w", team.Owner, team.Community, team.TeamId, err)
+		}
+		pinned++
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := k.storeSet(ctx, []byte(types.UpgradeV139FounderSubsKey), []byte{1}); err != nil {
+		return err
+	}
+	ctx.Logger().Info("v1.39.0: founder subscriber pins complete", "teams_touched", pinned)
+	return nil
+}
+
 func (k Keeper) deletePrefix(ctx sdk.Context, prefix []byte) error {
 	var keys [][]byte
 	if err := k.iterPrefixKeys(ctx, prefix, 0, func(key, _ []byte) error {
@@ -449,6 +509,9 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 		return err
 	} else if !done {
 		return nil
+	}
+	if err := k.EnsureCurationTeamFoundersSubscribed(ctx); err != nil {
+		return err
 	}
 	params := k.GetParams(ctx)
 	if err := k.advanceCreatorClock(ctx, params); err != nil {

@@ -29,6 +29,38 @@ export function requireTeamId(value) {
     return teamId;
 }
 
+/** Format a subscriber count as `1 sub` or `N subs`. */
+export function formatSubscriberCount(count) {
+    const n = Number(count);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+        throw new Error(`invalid subscriber count: ${count}`);
+    }
+    return n === 1 ? '1 sub' : `${n} subs`;
+}
+
+/** Live team with the most subscribers (ties → lowest team_id). */
+export function teamIdWithMostSubscribers(teams) {
+    if (!Array.isArray(teams) || teams.length === 0) return null;
+    let bestId = null;
+    let bestCount = -1;
+    for (const team of teams) {
+        if (team?.deleted) continue;
+        const id = Number(team.team_id);
+        const count = Number(team.subscriber_count);
+        if (!Number.isSafeInteger(id) || id <= 0) {
+            throw new Error(`invalid team_id: ${team.team_id}`);
+        }
+        if (!Number.isFinite(count) || count < 0) {
+            throw new Error(`invalid subscriber_count: ${team.subscriber_count}`);
+        }
+        if (count > bestCount || (count === bestCount && (bestId == null || id < bestId))) {
+            bestCount = count;
+            bestId = id;
+        }
+    }
+    return bestId;
+}
+
 export function normalizeLens(lens, teamId = null) {
     const requested = String(lens || LENS.EFFECTIVE).trim().toLowerCase();
     if (!VALID_LENSES.has(requested)) throw new Error(`invalid lens: ${requested}`);

@@ -172,7 +172,7 @@ def run(db, chain, logger):
                  AND p.pinned_team_id=t.team_id
                 LEFT JOIN profiles pr
                   ON LOWER(pr.owner)=LOWER(p.owner)
-                 AND pr.effective_paid=TRUE
+                 AND (pr.effective_paid=TRUE OR pr.level >= 100)
                 WHERE t.deleted_height IS NULL
                 GROUP BY t.community, t.team_id
             )

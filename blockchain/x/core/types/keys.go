@@ -103,7 +103,8 @@ const (
 
 	ProtocolVersionV139 uint32 = 1
 
-	UpgradeV139CompleteKey = "upgrade/v1.39.0/complete"
+	UpgradeV139CompleteKey     = "upgrade/v1.39.0/complete"
+	UpgradeV139FounderSubsKey  = "upgrade/v1.39.0/founder_subscribers"
 
 	EngagementKindUpvote      byte = 0x01
 	EngagementKindDirectReply byte = 0x02

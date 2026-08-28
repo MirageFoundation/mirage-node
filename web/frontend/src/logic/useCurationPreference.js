@@ -20,8 +20,8 @@ export function useCurationPreference(community, detail) {
             && !staleToastShown.current
         ) {
             staleToastShown.current = true;
-            updateNotification('That team is no longer available; showing the node default.', 6, true);
-            console.debug('[lens] stale team selection resolved to default', { community: slug });
+            updateNotification('That team is no longer available; showing the team with the most subscribers.', 6, true);
+            console.debug('[lens] stale team selection resolved to most-subscribed team', { community: slug });
         }
     }, [detail, slug]);
 

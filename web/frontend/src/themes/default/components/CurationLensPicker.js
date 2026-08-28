@@ -4,7 +4,12 @@ import { Link } from 'react-router-dom';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
 import { useCurationPreference } from '../../../logic/useCurationPreference';
-import { CURATION_MODE, LENS } from '../../../utils/curation';
+import {
+    CURATION_MODE,
+    LENS,
+    formatSubscriberCount,
+    teamIdWithMostSubscribers,
+} from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
 
 const Wrap = styled.div`
@@ -124,15 +129,26 @@ const ManageLink = styled(Link)`
     }
 `;
 
-function initialSelection(detail) {
-    if (!detail) return LENS.DEFAULT;
-    // No live teams ⇒ nothing for "Node default" to mean; backend effective is already raw.
+function pickAuthoritativeSelection(detail, mostSubsTeamId) {
+    if (!detail) {
+        return mostSubsTeamId ? `${LENS.TEAM}:${mostSubsTeamId}` : LENS.RAW;
+    }
     if (!detail.curated) return LENS.RAW;
     if (Number(detail.stored_mode) === CURATION_MODE.RAW) return LENS.RAW;
     if (Number(detail.effective_mode) === CURATION_MODE.PINNED && Number(detail.effective_team_id) > 0) {
         return `${LENS.TEAM}:${Number(detail.effective_team_id)}`;
     }
-    return LENS.DEFAULT;
+    // No explicit pin — use the team with the most subscribers.
+    if (mostSubsTeamId) return `${LENS.TEAM}:${mostSubsTeamId}`;
+    return LENS.RAW;
+}
+
+function sortTeamsBySubscribers(teams) {
+    return [...teams].sort((a, b) => {
+        const countDiff = Number(b.subscriber_count) - Number(a.subscriber_count);
+        if (countDiff !== 0) return countDiff;
+        return Number(a.team_id) - Number(b.team_id);
+    });
 }
 
 export default function CurationLensPicker({ community, viewer, onChange }) {
@@ -143,9 +159,11 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     // Side effect only: toast when a stored pinned team is gone. Lens changes are local.
     useCurationPreference(community, detail);
     const liveTeams = useMemo(() => teams.filter((team) => !team.deleted), [teams]);
+    const rankedTeams = useMemo(() => sortTeamsBySubscribers(liveTeams), [liveTeams]);
+    const mostSubsTeamId = useMemo(() => teamIdWithMostSubscribers(liveTeams), [liveTeams]);
     const curated = Boolean(detail?.curated);
-    const authoritativeSelection = initialSelection(detail);
-    // Uncurated communities have only one meaningful lens; never leave Node default selected.
+    const authoritativeSelection = pickAuthoritativeSelection(detail, mostSubsTeamId);
+    // Uncurated communities have only one meaningful lens.
     const selected = (!detailLoading && detail && !curated)
         ? LENS.RAW
         : (optimisticSelection || authoritativeSelection);
@@ -193,13 +211,15 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                     disabled={loading}
                     aria-label="Curation lens"
                 >
-                    <option value={LENS.DEFAULT}>Node default</option>
-                    {liveTeams.map((team) => (
+                    <option value={LENS.RAW}>Uncensored</option>
+                    {rankedTeams.length > 0 && (
+                        <option disabled value="__sep__">────────</option>
+                    )}
+                    {rankedTeams.map((team) => (
                         <option key={team.team_id} value={`${LENS.TEAM}:${team.team_id}`}>
-                            {team.name} · {team.subscriber_count} subscribers
+                            {team.name} ({formatSubscriberCount(Number(team.subscriber_count))})
                         </option>
                     ))}
-                    <option value={LENS.RAW}>Uncensored</option>
                 </Select>
             )}
             <Meta>

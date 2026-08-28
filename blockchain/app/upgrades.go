@@ -2472,6 +2472,9 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 				sdkCtx.Logger().Info("v1.39.0: set max_curation_team_name_length", "value", 30)
 			}
+			if err := app.CoreKeeper.EnsureCurationTeamFoundersSubscribed(sdkCtx); err != nil {
+				return nil, fmt.Errorf("v1.39.0: founder subscriber pins: %w", err)
+			}
 			sdkCtx.Logger().Info("Upgrade to v1.39.0 complete")
 			return toVM, nil
 		},

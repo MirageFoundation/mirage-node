@@ -50,11 +50,22 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	unjoinedTeamID, err := mk.CreateCurationTeam(ctx, unjoined, lonelySlug, "Unjoined", "")
 	require.NoError(t, err, "paid user may create a curator team without joining first")
 	require.Equal(t, uint64(1), unjoinedTeamID)
-	t.Logf("[debug] unjoined create community=%s team_id=%d", lonelySlug, unjoinedTeamID)
+	unjoinedTeam, found, err := mk.GetCurationTeam(ctx, lonelySlug, unjoinedTeamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(1), unjoinedTeam.SubscriberCount, "founder counts as the first subscriber")
+	joined, _, _, _, _, err := mk.ResolveEffectivePreference(ctx, unjoined, lonelySlug)
+	require.NoError(t, err)
+	require.True(t, joined, "create auto-joins the founder")
+	t.Logf("[debug] unjoined create community=%s team_id=%d subs=%d", lonelySlug, unjoinedTeamID, unjoinedTeam.SubscriberCount)
 
 	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "Team description")
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), teamID)
+	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(1), team.SubscriberCount, "founder is subscriber 1")
 	require.NoError(t, mk.InviteCurator(ctx, leader, slug, teamID, curator))
 	require.NoError(t, mk.AcceptCuratorInvite(ctx, curator, slug, teamID))
 	members, nextKey, err := mk.GetCurationTeamMembersPaginated(
@@ -84,11 +95,11 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 		teamID,
 		true,
 	))
-	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, "Team description", team.Description)
-	require.Equal(t, uint64(1), team.SubscriberCount)
+	require.Equal(t, uint64(2), team.SubscriberCount, "founder + curator")
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
 		curator,
@@ -99,7 +110,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	))
 	team, _, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), team.SubscriberCount)
+	require.Equal(t, uint64(2), team.SubscriberCount)
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
 		curator,
@@ -110,7 +121,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	))
 	team, _, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
-	require.Zero(t, team.SubscriberCount)
+	require.Equal(t, uint64(1), team.SubscriberCount, "founder remains after curator leaves pin")
 
 	free := genAddr(33)
 	ensureUsername(t, mk, ctx, free, "Anon-free")
@@ -129,7 +140,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	))
 	team, _, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
-	require.Zero(t, team.SubscriberCount)
+	require.Equal(t, uint64(1), team.SubscriberCount, "unpaid pin does not increment")
 
 	watcher := genAddr(34)
 	setPaidProfile(t, mk, ctx, watcher)
@@ -145,7 +156,7 @@ func TestOpenCommunityCurationLifecycle(t *testing.T) {
 	require.NoError(t, mk.LeaveCommunity(ctx, watcher, slug, true))
 	team, _, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
-	require.Zero(t, team.SubscriberCount)
+	require.Equal(t, uint64(1), team.SubscriberCount, "founder remains after watcher leaves")
 	require.NoError(t, mk.SetCurationPreference(
 		ctx,
 		curator,
@@ -294,7 +305,8 @@ func TestV139MigrationRecountsPinnedPaidSubscribersAndDropsCommunityState(t *tes
 	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, uint64(1), team.SubscriberCount)
+	// Founder auto-pin at create + explicit subscriber pin → 2 after recount.
+	require.Equal(t, uint64(2), team.SubscriberCount)
 	hasCommunity, err := mk.StoreService().OpenKVStore(ctx).Has(types.KeyCommunity(slug))
 	require.NoError(t, err)
 	require.False(t, hasCommunity)
@@ -326,7 +338,11 @@ func TestAdminCanCreateCurationTeamWithoutEffectivePaid(t *testing.T) {
 	teamID, err := mk.CreateCurationTeam(ctx, admin, slug, "AdminTeam", "admin without paid flag")
 	require.NoError(t, err, "admin without EffectivePaid must be able to create a curator team")
 	require.Equal(t, uint64(1), teamID)
-	t.Logf("[debug] admin curated team_id=%d without effective_paid", teamID)
+	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(1), team.SubscriberCount, "admin founder counts as a subscriber")
+	t.Logf("[debug] admin curated team_id=%d without effective_paid subs=%d", teamID, team.SubscriberCount)
 }
 
 func TestCurationTeamDescriptionLimitAndNoPolicy(t *testing.T) {

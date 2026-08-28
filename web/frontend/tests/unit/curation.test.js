@@ -5,9 +5,11 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
     LENS,
     curationPendingKey,
+    formatSubscriberCount,
     lensCacheKey,
     lensQuery,
     normalizeLens,
+    teamIdWithMostSubscribers,
     waitForOwnCurationTeam,
 } from '../../src/utils/curation.js';
 import { currentCreatorEpoch, normalizeClaimEpochs } from '../../src/logic/useCreatorEarnings.js';
@@ -64,11 +66,25 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/uncensoredOnly/);
         expect(pickerSrc).toMatch(/FixedLens/);
         expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
-        expect(pickerSrc).toMatch(/Node default/);
+        expect(pickerSrc).not.toMatch(/Node default/);
+        expect(pickerSrc).toMatch(/formatSubscriberCount/);
+        expect(pickerSrc).toMatch(/teamIdWithMostSubscribers/);
+        expect(pickerSrc).toMatch(/__sep__/);
         expect(pickerSrc).toMatch(/>Uncensored</);
         // Fixed "Uncensored" already means no teams — no redundant Uncurated chip.
         expect(pickerSrc).not.toMatch(/'Uncurated'/);
         expect(pickerSrc).not.toMatch(/"Uncurated"/);
+    });
+
+    it('formats subscriber counts as 1 sub / N subs', () => {
+        expect(formatSubscriberCount(0)).toBe('0 subs');
+        expect(formatSubscriberCount(1)).toBe('1 sub');
+        expect(formatSubscriberCount(2)).toBe('2 subs');
+        expect(teamIdWithMostSubscribers([
+            { team_id: '2', subscriber_count: '1' },
+            { team_id: '1', subscriber_count: '3' },
+            { team_id: '3', subscriber_count: '3' },
+        ])).toBe(1);
     });
 
     it('passes return paths through Sign in and Subscribe on the teams page', () => {
@@ -147,6 +163,8 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).toMatch(/resolveUserIdentity/);
         expect(detail).toMatch(/Username or mirage1/);
         expect(detail).toMatch(/formatUserLabel/);
+        expect(detail).toMatch(/formatSubscriberCount/);
+        expect(detail).not.toMatch(/Node default/);
         expect(detail).not.toMatch(/placeholder="mirage1…"/);
         // Moderation lives on each post's ⋯ menu, not on the team page.
         expect(detail).not.toMatch(/Moderation tools/);
