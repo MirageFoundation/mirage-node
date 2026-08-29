@@ -788,6 +788,14 @@ const CommunityLensTopRow = styled.div`
     min-width: 0;
 `;
 
+const CommunityLensHeading = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    flex: 1 1 auto;
+`;
+
 const CommunityLensTitle = styled.h1`
     margin: 0;
     padding: 0;
@@ -1150,7 +1158,55 @@ const MainView = ({
                             {isCurrentTopic && !isUrlTopicBlocked && (
                                 <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
                                     <CommunityLensTopRow>
-                                        <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
+                                        <CommunityLensHeading>
+                                            <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
+                                            {isLoggedIn && (
+                                                <Button
+                                                    variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'}
+                                                    size="xs"
+                                                    minWidth="5.5rem"
+                                                    onMouseEnter={() => setTopicFollowHover(true)}
+                                                    onMouseLeave={() => setTopicFollowHover(false)}
+                                                    disabled={isTopicInProgress}
+                                                    onClick={async () => {
+                                                        const topicName = urlTopic;
+                                                        if (!topicName) return;
+                                                        const key = topicKeyLower;
+                                                        if (!key) return;
+                                                        if (isTopicPending(key)) return;
+                                                        console.debug('[community] follow toggle', {
+                                                            community: key,
+                                                            following: isTopicFollowing,
+                                                        });
+                                                        try {
+                                                            if (isTopicFollowing) {
+                                                                await unsubscribe(viewerAddress || 'guest', topicName);
+                                                                setFollowedTopicsSet(prev => {
+                                                                    const next = new Set(prev);
+                                                                    next.delete(key);
+                                                                    return next;
+                                                                });
+                                                            } else {
+                                                                await subscribe(viewerAddress || 'guest', topicName);
+                                                                setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                                            }
+                                                            invalidateTopicsCache();
+                                                        } catch (err) {
+                                                            console.error('[community] follow toggle failed', {
+                                                                community: key,
+                                                                error: String(err?.message || err),
+                                                            });
+                                                        }
+                                                    }}
+                                                >
+                                                    {isTopicInProgress
+                                                        ? formatTopicStatus(topicKeyLower)
+                                                        : isTopicFollowing
+                                                            ? (topicFollowHover ? 'Unfollow' : 'Following')
+                                                            : 'Follow'}
+                                                </Button>
+                                            )}
+                                        </CommunityLensHeading>
                                         <CommunityLensControls>
                                             <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
                                             <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />

@@ -45,7 +45,7 @@ describe('curation lenses', () => {
 });
 
 describe('v1.39 curation UI contracts', () => {
-    it('keeps lens selection local — never imports tx or setCurationPreference', () => {
+    it('persists Default / team / Uncensored for joined viewers', () => {
         const preferenceSrc = readFileSync(
             join(frontendSrc, 'logic/useCurationPreference.js'),
             'utf8',
@@ -54,12 +54,15 @@ describe('v1.39 curation UI contracts', () => {
             join(frontendSrc, 'themes/default/components/CurationLensPicker.js'),
             'utf8',
         );
-        expect(preferenceSrc).not.toMatch(/from ['"].*\/tx['"]/);
-        expect(preferenceSrc).not.toMatch(/setCurationPreference/);
-        expect(preferenceSrc).toMatch(/selecting locally \(no tx\)/);
+        expect(preferenceSrc).toMatch(/tx\.setCurationPreference/);
+        expect(preferenceSrc).toMatch(/LIVE_DEFAULT/);
         expect(preferenceSrc).toMatch(/lensChanged/);
-        expect(pickerSrc).toMatch(/view selection \(local only\)/);
-        expect(pickerSrc).not.toMatch(/await selectLens/);
+        expect(pickerSrc).toMatch(/selectLens\(lens, teamId\)/);
+        expect(pickerSrc).toMatch(/view selection \(local preview\)/);
+        expect(pickerSrc).toMatch(/persist selection/);
+        expect(pickerSrc).toMatch(/value=\{LENS\.DEFAULT\}/);
+        expect(pickerSrc).toMatch(/`Default \(\$\{defaultTeamName\}\)`/);
+        expect(pickerSrc).toMatch(/: 'Default'/);
     });
 
     it('shows Uncensored only when a community has no curator teams', () => {
@@ -70,14 +73,21 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/uncensoredOnly/);
         expect(pickerSrc).toMatch(/FixedLens/);
         expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
+        expect(pickerSrc).toMatch(/LENS\.DEFAULT/);
         expect(pickerSrc).not.toMatch(/Node default/);
         expect(pickerSrc).toMatch(/formatSubscriberCount/);
-        expect(pickerSrc).toMatch(/teamIdWithMostSubscribers/);
         expect(pickerSrc).toMatch(/__sep__/);
         expect(pickerSrc).toMatch(/>Uncensored</);
+        // LIVE_DEFAULT stays Default — do not present the most-subscribed team as selected.
+        expect(pickerSrc).not.toMatch(/teamIdWithMostSubscribers/);
+        expect(pickerSrc).not.toMatch(/No explicit pin/);
         // Fixed "Uncensored" already means no teams — no redundant Uncurated chip.
         expect(pickerSrc).not.toMatch(/'Uncurated'/);
         expect(pickerSrc).not.toMatch(/"Uncurated"/);
+        expect(pickerSrc).toMatch(/useViewerCuratorMembership/);
+        expect(pickerSrc).toMatch(/Open Curation/);
+        expect(pickerSrc).toMatch(/Curator teams →/);
+        expect(pickerSrc).toMatch(/manageLabel = isCurator \? 'Open Curation'/);
     });
 
     it('formats subscriber counts as 1 sub / N subs', () => {
@@ -107,8 +117,9 @@ describe('v1.39 curation UI contracts', () => {
         );
         expect(teams).toMatch(/withReturnTo\('\/login'/);
         expect(teams).toMatch(/withReturnTo\('\/subscription'/);
-        expect(teams).toMatch(/#hidden-users/);
-        expect(teams).toMatch(/Hidden users/);
+        // Hidden users are team-scoped — only on the team detail page.
+        expect(teams).not.toMatch(/#hidden-users/);
+        expect(teams).not.toMatch(/Hidden users/);
     });
 
     it('treats admins as eligible to create curator teams without effective_paid', () => {
@@ -142,6 +153,9 @@ describe('v1.39 curation UI contracts', () => {
         );
         expect(main).toMatch(/CommunityLensBar/);
         expect(main).toMatch(/FeedSortToggle/);
+        expect(main).toMatch(/CommunityLensHeading/);
+        expect(main).toMatch(/topicFollowHover \? 'Unfollow' : 'Following'/);
+        expect(main).toMatch(/\[community\] follow toggle/);
         expect(main).toMatch(/const feedTitle = urlTopic === 'all' \? 'All' : null/);
         expect(main).not.toMatch(/else if \(isTopicFeed\) feedTitle = communityLabel/);
     });
@@ -194,15 +208,32 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).not.toMatch(/Hide post/);
         expect(detail).not.toMatch(/Lock thread/);
         expect(detail).toMatch(/Hidden users/);
+        expect(detail).toMatch(/Hidden posts/);
         expect(detail).toMatch(/hidden-users/);
+        expect(detail).toMatch(/hidden-posts/);
         expect(detail).toMatch(/useHiddenCurationUsers/);
+        expect(detail).toMatch(/useHiddenCurationPosts/);
         expect(detail).toMatch(/moderateCurationUser/);
+        expect(detail).toMatch(/moderateCurationPost/);
+        expect(detail).toMatch(/Load 50 more/);
+        expect(detail).toMatch(/FormActions/);
+        expect(detail).toMatch(/justify-content: flex-end/);
         const teamsHook = readFileSync(
             join(frontendSrc, 'logic/useCurationTeams.js'),
             'utf8',
         );
         expect(teamsHook).toMatch(/export function useHiddenCurationUsers/);
-        expect(teamsHook).toMatch(/\/hidden-users/);
+        expect(teamsHook).toMatch(/export function useHiddenCurationPosts/);
+        expect(teamsHook).toMatch(/HIDDEN_LIST_INITIAL/);
+        expect(teamsHook).toMatch(/HIDDEN_LIST_MORE/);
+        expect(teamsHook).toMatch(/'hidden-users'/);
+        expect(teamsHook).toMatch(/'hidden-posts'/);
+        const curationUtils = readFileSync(
+            join(frontendSrc, 'utils/curation.js'),
+            'utf8',
+        );
+        expect(curationUtils).toMatch(/HIDDEN_LIST_INITIAL = 10/);
+        expect(curationUtils).toMatch(/HIDDEN_LIST_MORE = 50/);
     });
 
     it('puts Curate + admin delete on a separate ModMenuChip shield menu', () => {

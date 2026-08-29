@@ -286,12 +286,19 @@ def test_curation_backend(backend: str) -> None:
     last_list_body: dict | None = None
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     while time.perf_counter() < deadline:
-        last_list_code, last_list_body = _get(hidden_list_url, {"viewer": sub_addr})
+        last_list_code, last_list_body = _get(
+            hidden_list_url, {"viewer": sub_addr, "limit": 10, "offset": 0}
+        )
         addresses = {
             str(item.get("address") or "").lower()
             for item in ((last_list_body or {}).get("items") or [])
         }
-        listed = last_list_code == 200 and free_addr in addresses
+        listed = (
+            last_list_code == 200
+            and free_addr in addresses
+            and isinstance(last_list_body, dict)
+            and last_list_body.get("has_more") is False
+        )
         if listed:
             break
         time.sleep(0.5)
@@ -302,5 +309,36 @@ def test_curation_backend(backend: str) -> None:
             "curation.backend_hidden_users_lists_target",
             f"code={last_list_code} body={last_list_body}",
         )
+
+    hidden_posts_url = f"{backend}/api/communities/{slug}/teams/{team_id}/hidden-posts"
+    posts_listed = False
+    last_posts_code = 0
+    last_posts_body: dict | None = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        last_posts_code, last_posts_body = _get(
+            hidden_posts_url, {"viewer": sub_addr, "limit": 10, "offset": 0}
+        )
+        post_ids = {
+            str(item.get("post_id") or "").lower()
+            for item in ((last_posts_body or {}).get("items") or [])
+        }
+        posts_listed = last_posts_code == 200 and post_tx in post_ids
+        if posts_listed:
+            break
+        time.sleep(0.5)
+    if posts_listed:
+        _pass("curation.backend_hidden_posts_lists_target")
+    else:
+        _fail(
+            "curation.backend_hidden_posts_lists_target",
+            f"code={last_posts_code} body={last_posts_body}",
+        )
+
+    code, bad_limit = _get(hidden_posts_url, {"viewer": sub_addr, "limit": 51})
+    if code == 400 and isinstance(bad_limit, dict) and bad_limit.get("error_code") == "invalid_limit":
+        _pass("curation.backend_hidden_posts_limit_cap")
+    else:
+        _fail("curation.backend_hidden_posts_limit_cap", f"code={code} body={bad_limit}")
 
     _debug(f"curation.backend done community={slug} team_id={team_id}")

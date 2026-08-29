@@ -14,7 +14,11 @@ import {
     sliceRunes,
 } from '../../../utils/curation';
 import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
-import { useCurationTeam, useHiddenCurationUsers } from '../../../logic/useCurationTeams';
+import {
+    useCurationTeam,
+    useHiddenCurationPosts,
+    useHiddenCurationUsers,
+} from '../../../logic/useCurationTeams';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
@@ -75,6 +79,22 @@ const Row = styled.div`
 `;
 const Actions = styled.div`display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;`;
 const Form = styled.form`display: grid; gap: 0.5rem; margin-top: 0.15rem;`;
+/** Primary actions: content-width, right-aligned on desktop; full-width on mobile. */
+const FormActions = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+
+    @media (max-width: 600px) {
+        flex-direction: column;
+        align-items: stretch;
+        & > * {
+            width: 100%;
+        }
+    }
+`;
 const Input = styled.input`
     padding: 0.45rem 0.55rem; border-radius: 7px; border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
     background: ${({ theme }) => requireThemeColor(theme, 'inputBackground')}; color: inherit;
@@ -89,6 +109,21 @@ const Textarea = styled.textarea`
 const Meta = styled.div`font-size: 0.65rem; line-height: 1.45; color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};`;
 const ErrorText = styled.div`color: ${({ theme }) => requireThemeColor(theme, 'voteDown')}; font-size: 0.65rem;`;
 const Body = styled.p`margin: 0; font-size: 0.75rem; line-height: 1.45;`;
+const ItemLink = styled(Link)`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    text-decoration: none;
+    &:hover { text-decoration: underline; }
+`;
+const ItemLabel = styled.span`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
 
 export default function CurationTeamView() {
     const { topic: community, teamId } = useParams();
@@ -112,6 +147,10 @@ export default function CurationTeamView() {
         [members, team?.deleted, viewer],
     );
     const hiddenUsers = useHiddenCurationUsers(community, teamId, {
+        viewer,
+        enabled: isCurator,
+    });
+    const hiddenPosts = useHiddenCurationPosts(community, teamId, {
         viewer,
         enabled: isCurator,
     });
@@ -235,9 +274,11 @@ export default function CurationTeamView() {
                             maxLength={maxTeamDescriptionLength}
                         />
                         <Meta>{runeLength(description)} / {maxTeamDescriptionLength} characters</Meta>
-                        <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
-                            {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
-                        </Button>
+                        <FormActions>
+                            <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
+                                {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
+                            </Button>
+                        </FormActions>
                     </Form>
                     <Row>
                         <span>Subscriber-only posting</span>
@@ -246,11 +287,13 @@ export default function CurationTeamView() {
                         </Button>
                     </Row>
                     {!team.deleted && (
-                        <Button size="xs" variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
-                            if (window.confirm('Delete this curator team? Posts in the community will remain available.')) {
-                                run(() => tx.deleteCurationTeam(community, Number(teamId)));
-                            }
-                        }}>{statusFor('delete_curation_team', '', 'Deleting…') || 'Delete team'}</Button>
+                        <FormActions>
+                            <Button size="xs" variant="danger" disabled={!!pendingFor('delete_curation_team')} onClick={() => {
+                                if (window.confirm('Delete this curator team? Posts in the community will remain available.')) {
+                                    run(() => tx.deleteCurationTeam(community, Number(teamId)));
+                                }
+                            }}>{statusFor('delete_curation_team', '', 'Deleting…') || 'Delete team'}</Button>
+                        </FormActions>
                     )}
                 </>
             ) : (
@@ -299,9 +342,11 @@ export default function CurationTeamView() {
                     required
                     disabled={inviteBusy}
                 />
-                <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
-                    {inviteBusy ? 'Inviting…' : 'Invite curator'}
-                </Button>
+                <FormActions>
+                    <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
+                        {inviteBusy ? 'Inviting…' : 'Invite curator'}
+                    </Button>
+                </FormActions>
             </Form>}
             {invitations.filter((invite) => invite.address !== viewer).map((invite) => <Row key={invite.address}>
                 <Meta title={invite.address}>Pending: {formatUserLabel(invite.username, invite.address)}</Meta>
@@ -309,20 +354,24 @@ export default function CurationTeamView() {
                     {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
                 </Button>}
             </Row>)}
-            {isCurator && !isLeader && <Button
-                size="xs"
-                variant="danger"
-                disabled={!!pendingFor('leave_curation_team', viewer)}
-                onClick={() => run(() => tx.leaveCurationTeam(community, Number(teamId)))}
-            >
-                {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
-            </Button>}
+            {isCurator && !isLeader && (
+                <FormActions>
+                    <Button
+                        size="xs"
+                        variant="danger"
+                        disabled={!!pendingFor('leave_curation_team', viewer)}
+                        onClick={() => run(() => tx.leaveCurationTeam(community, Number(teamId)))}
+                    >
+                        {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
+                    </Button>
+                </FormActions>
+            )}
         </Card>
 
         {isCurator && (
             <Card id="hidden-users">
-                <CardTitle>Hidden users ({hiddenUsers.users.length})</CardTitle>
-                <Meta>Hidden from this team&apos;s feed.</Meta>
+                <CardTitle>Hidden users</CardTitle>
+                <Meta>Hidden from this team&apos;s feed. Newest first.</Meta>
                 {hiddenUsers.loading && hiddenUsers.users.length === 0 && <Meta>Loading hidden users…</Meta>}
                 {hiddenUsers.error && <ErrorText>{hiddenUsers.error}</ErrorText>}
                 {!hiddenUsers.loading && !hiddenUsers.error && hiddenUsers.users.length === 0 && (
@@ -330,9 +379,9 @@ export default function CurationTeamView() {
                 )}
                 {hiddenUsers.users.map((user) => (
                     <Row key={user.address}>
-                        <span title={user.address}>
+                        <ItemLabel title={user.address}>
                             {formatUserLabel(user.username, user.address)}
-                        </span>
+                        </ItemLabel>
                         <Button
                             size="xs"
                             variant="subtle"
@@ -348,6 +397,79 @@ export default function CurationTeamView() {
                         </Button>
                     </Row>
                 ))}
+                {hiddenUsers.hasMore && (
+                    <FormActions>
+                        <Button
+                            size="xs"
+                            variant="subtle"
+                            disabled={hiddenUsers.loadingMore}
+                            onClick={() => {
+                                console.debug('[curation] load more hidden users', {
+                                    community,
+                                    teamId,
+                                    loaded: hiddenUsers.users.length,
+                                });
+                                hiddenUsers.loadMore().catch(() => {});
+                            }}
+                        >
+                            {hiddenUsers.loadingMore ? 'Loading…' : 'Load 50 more'}
+                        </Button>
+                    </FormActions>
+                )}
+            </Card>
+        )}
+
+        {isCurator && (
+            <Card id="hidden-posts">
+                <CardTitle>Hidden posts</CardTitle>
+                <Meta>Hidden from this team&apos;s feed. Newest first.</Meta>
+                {hiddenPosts.loading && hiddenPosts.posts.length === 0 && <Meta>Loading hidden posts…</Meta>}
+                {hiddenPosts.error && <ErrorText>{hiddenPosts.error}</ErrorText>}
+                {!hiddenPosts.loading && !hiddenPosts.error && hiddenPosts.posts.length === 0 && (
+                    <Meta>No hidden posts.</Meta>
+                )}
+                {hiddenPosts.posts.map((post) => (
+                    <Row key={post.postId}>
+                        <ItemLink to={`/p/${encodeURIComponent(post.postId)}`} title={post.postId}>
+                            {post.title
+                                || (post.postId.length <= 24
+                                    ? post.postId
+                                    : `${post.postId.slice(0, 14)}…${post.postId.slice(-8)}`)}
+                        </ItemLink>
+                        <Button
+                            size="xs"
+                            variant="subtle"
+                            disabled={!!pendingFor('set_curation_post_hidden', post.postId)}
+                            onClick={() => run(() => tx.moderateCurationPost(
+                                community,
+                                Number(teamId),
+                                post.postId,
+                                false,
+                            ))}
+                        >
+                            {statusFor('set_curation_post_hidden', post.postId, 'Showing…') || 'Show'}
+                        </Button>
+                    </Row>
+                ))}
+                {hiddenPosts.hasMore && (
+                    <FormActions>
+                        <Button
+                            size="xs"
+                            variant="subtle"
+                            disabled={hiddenPosts.loadingMore}
+                            onClick={() => {
+                                console.debug('[curation] load more hidden posts', {
+                                    community,
+                                    teamId,
+                                    loaded: hiddenPosts.posts.length,
+                                });
+                                hiddenPosts.loadMore().catch(() => {});
+                            }}
+                        >
+                            {hiddenPosts.loadingMore ? 'Loading…' : 'Load 50 more'}
+                        </Button>
+                    </FormActions>
+                )}
             </Card>
         )}
 

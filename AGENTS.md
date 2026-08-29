@@ -5,6 +5,23 @@
 - After making code changes, STOP and wait for my go-ahead before committing.
 - Do NOT auto-commit when follow-up changes occur. Each commit requires fresh approval.
 
+### #2 RULE: DO NOT ASK OBVIOUS QUESTIONS.
+- This is about **preference / clarification spam**, not about deploy.
+- Take the recommended path and say what you did in one line. Do not open questionnaires for routine UI, copy, layout, or wiring choices.
+- **Obvious = do it, don't ask.** Examples that must NOT become questions:
+  - Where a missing control belongs when the user already named the surface
+  - Defaults that match existing patterns on the same screen
+  - Naming/copy that already exists elsewhere in the product
+- **Ask only when a wrong call is expensive:** schema changes, prod/UAT, destructive ops, conflicting requirements, or genuine product ambiguity.
+- One question max when you must ask. Never re-ask. Never stack optional preference prompts.
+- Also enforced in `.cursor/rules/ask-less.mdc`.
+
+### #3 RULE: DO NOT DEPLOY WHILE WORK IS STILL QUEUED.
+- The user often enqueues many follow-ups. **If anything else is enqueued / still coming, do NOT local-deploy.**
+- Finish the queued changes first; deploy once at the end, or when the user explicitly says `deploy`.
+- Do not ask “deploy now?” between items. Do not auto-deploy after every small fix.
+- When the queue is clear and a local deploy is needed to verify, either wait for an explicit `deploy` or do one deploy after the batch — never one deploy per message.
+
 ### SERVERS
 
 Addresses are not in this repo — it is public. They live in `.env` on the

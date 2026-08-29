@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as tx from '../utils/tx';
 import { updateNotification } from '../utils/notifications';
-import { CURATION_MODE, LENS, requireCommunitySlug } from '../utils/curation';
+import { CURATION_MODE, LENS, invalidateCurationReads, requireCommunitySlug } from '../utils/curation';
+import { formatError } from '../utils/errorMessages';
+import { usePendingCuration } from './usePendingCuration';
 
 /**
- * Lens choice is view-only in the client. Changing the dropdown must never
- * broadcast a chain tx — feed filtering already goes through ?lens= query params.
+ * Joined viewers persist Default / team / Uncensored so paid pins become
+ * measurable subscriber counts. Guests and unjoined viewers preview locally.
  */
 export function useCurationPreference(community, detail) {
     const slug = requireCommunitySlug(community);
     const [error, setError] = useState('');
     const staleToastShown = useRef(false);
+    const { getInfo, getStatus } = usePendingCuration();
+    const pending = getInfo('set_curation_preference', slug, 0, '');
 
     useEffect(() => {
         const storedMode = detail?.stored_mode;
@@ -20,33 +25,41 @@ export function useCurationPreference(community, detail) {
             && !staleToastShown.current
         ) {
             staleToastShown.current = true;
-            updateNotification('That team is no longer available; showing the team with the most subscribers.', 6, true);
-            console.debug('[lens] stale team selection resolved to most-subscribed team', { community: slug });
+            updateNotification('That team is no longer available; showing the default.', 6, true);
+            console.debug('[lens] stale team selection resolved to default', { community: slug });
         }
     }, [detail, slug]);
 
     const selectLens = useCallback(async (lens, teamId = null) => {
-        let pinnedTeamId = null;
-        if (lens === LENS.TEAM) {
+        let mode;
+        let pinnedTeamId = 0;
+        if (lens === LENS.DEFAULT) mode = CURATION_MODE.LIVE_DEFAULT;
+        else if (lens === LENS.RAW) mode = CURATION_MODE.RAW;
+        else if (lens === LENS.TEAM) {
+            mode = CURATION_MODE.PINNED;
             pinnedTeamId = Number(teamId);
-            if (!Number.isSafeInteger(pinnedTeamId) || pinnedTeamId <= 0) {
-                throw new Error('team lens requires a team id');
-            }
-        } else if (lens !== LENS.DEFAULT && lens !== LENS.RAW) {
-            throw new Error(`Cannot select lens: ${lens}`);
+        } else {
+            throw new Error(`Cannot persist lens: ${lens}`);
         }
         setError('');
-        console.debug('[lens] selecting locally (no tx)', { community: slug, lens, teamId: pinnedTeamId });
+        console.debug('[lens] selecting', { community: slug, lens, teamId: pinnedTeamId || null });
+        const result = await tx.setCurationPreference(slug, mode, pinnedTeamId);
+        if (!result?.success) {
+            const message = formatError(result);
+            setError(message);
+            throw new Error(message);
+        }
+        invalidateCurationReads(slug);
         window.dispatchEvent(new CustomEvent('lensChanged', {
-            detail: { community: slug, lens, teamId: pinnedTeamId },
+            detail: { community: slug, lens, teamId: pinnedTeamId || null },
         }));
-        return { success: true };
+        return result;
     }, [slug]);
 
     return {
         selectLens,
-        pending: false,
-        pendingStatus: '',
+        pending: !!pending,
+        pendingStatus: getStatus('set_curation_preference', slug, 0, '', 'Changing lens…'),
         error,
     };
 }

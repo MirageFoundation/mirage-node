@@ -44,6 +44,35 @@ def _team_summary(team: dict | None) -> dict | None:
     }
 
 
+def _parse_hidden_list_paging():
+    """Return ((offset, limit), None) or (None, error_response)."""
+    try:
+        offset = int(request.args.get("offset", 0))
+    except (TypeError, ValueError):
+        return None, api_error_code("invalid_offset", 400)
+    if offset < 0:
+        return None, api_error_code("invalid_offset", 400)
+    try:
+        limit = int(request.args.get("limit", 10))
+    except (TypeError, ValueError):
+        return None, api_error_code("invalid_limit", 400)
+    if limit < 1 or limit > 50:
+        return None, api_error_code("invalid_limit", 400)
+    return (offset, limit), None
+
+
+def _viewer_is_team_curator(cur, slug: str, team_id: int, viewer: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM curation_team_curators
+        WHERE community=%s AND team_id=%s AND LOWER(curator)=%s
+        LIMIT 1
+        """,
+        (slug, team_id, viewer),
+    )
+    return cur.fetchone() is not None
+
+
 @communities_bp.route("/api/communities")
 def list_communities():
     rid = next_request_id()
@@ -478,7 +507,7 @@ def community_team_moderation(slug: str, team_id: int):
 
 @communities_bp.route("/api/communities/<slug>/teams/<int:team_id>/hidden-users")
 def community_team_hidden_users(slug: str, team_id: int):
-    """Users this team currently hides — curator viewers only."""
+    """Users this team currently hides — curator viewers only. Newest first."""
     rid = next_request_id()
     slug = (slug or "").strip().lower()
     viewer = (request.args.get("viewer") or "").strip().lower()
@@ -486,18 +515,14 @@ def community_team_hidden_users(slug: str, team_id: int):
         return api_error_code("community_invalid", 400)
     if not viewer:
         return api_error_code("missing_viewer", 400)
+    paging, err = _parse_hidden_list_paging()
+    if err is not None:
+        return err
+    offset, limit = paging
     try:
         with connect_db() as conn:
             cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT 1 FROM curation_team_curators
-                WHERE community=%s AND team_id=%s AND LOWER(curator)=%s
-                LIMIT 1
-                """,
-                (slug, team_id, viewer),
-            )
-            if not cur.fetchone():
+            if not _viewer_is_team_curator(cur, slug, team_id, viewer):
                 return api_error_code("forbidden", 403)
             cur.execute(
                 """
@@ -506,34 +531,107 @@ def community_team_hidden_users(slug: str, team_id: int):
                 LEFT JOIN profiles p ON LOWER(p.owner)=LOWER(h.target_user)
                 WHERE h.community=%s AND h.team_id=%s
                 ORDER BY h.updated_height DESC, h.target_user
-                LIMIT 200
+                LIMIT %s OFFSET %s
                 """,
-                (slug, team_id),
+                (slug, team_id, limit + 1, offset),
             )
-            items = [
-                {
-                    "address": str(row[0]).lower(),
-                    "username": row[1] or None,
-                }
-                for row in cur.fetchall()
-            ]
+            rows = cur.fetchall() or []
+        has_more = len(rows) > limit
+        items = [
+            {
+                "address": str(row[0]).lower(),
+                "username": row[1] or None,
+            }
+            for row in rows[:limit]
+        ]
         log_event(
             rid,
             "[community] teams.hidden_users",
             community=slug,
             team_id=team_id,
             viewer=viewer[:12],
+            offset=offset,
+            limit=limit,
             count=len(items),
+            has_more=has_more,
         )
         return jsonify(
             {
                 "community": slug,
                 "team_id": str(team_id),
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
                 "items": items,
             }
         )
     except Exception as e:
         log_event(rid, "communities.hidden_users.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
+@communities_bp.route("/api/communities/<slug>/teams/<int:team_id>/hidden-posts")
+def community_team_hidden_posts(slug: str, team_id: int):
+    """Posts this team currently hides — curator viewers only. Newest first."""
+    rid = next_request_id()
+    slug = (slug or "").strip().lower()
+    viewer = (request.args.get("viewer") or "").strip().lower()
+    if not _valid_slug(slug) or team_id <= 0:
+        return api_error_code("community_invalid", 400)
+    if not viewer:
+        return api_error_code("missing_viewer", 400)
+    paging, err = _parse_hidden_list_paging()
+    if err is not None:
+        return err
+    offset, limit = paging
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            if not _viewer_is_team_curator(cur, slug, team_id, viewer):
+                return api_error_code("forbidden", 403)
+            cur.execute(
+                """
+                SELECT h.target_txhash, p.title
+                FROM curation_hidden_posts h
+                LEFT JOIN posts p ON LOWER(p.txhash)=LOWER(h.target_txhash)
+                WHERE h.community=%s AND h.team_id=%s
+                ORDER BY h.updated_height DESC, h.target_txhash
+                LIMIT %s OFFSET %s
+                """,
+                (slug, team_id, limit + 1, offset),
+            )
+            rows = cur.fetchall() or []
+        has_more = len(rows) > limit
+        items = [
+            {
+                "post_id": str(row[0]).lower(),
+                "title": row[1] if isinstance(row[1], str) and row[1].strip() else None,
+            }
+            for row in rows[:limit]
+        ]
+        log_event(
+            rid,
+            "[community] teams.hidden_posts",
+            community=slug,
+            team_id=team_id,
+            viewer=viewer[:12],
+            offset=offset,
+            limit=limit,
+            count=len(items),
+            has_more=has_more,
+        )
+        return jsonify(
+            {
+                "community": slug,
+                "team_id": str(team_id),
+                "offset": offset,
+                "limit": limit,
+                "has_more": has_more,
+                "items": items,
+            }
+        )
+    except Exception as e:
+        log_event(rid, "communities.hidden_posts.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
 
 

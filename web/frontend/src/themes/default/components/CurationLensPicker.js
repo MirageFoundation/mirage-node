@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
 import { useCurationPreference } from '../../../logic/useCurationPreference';
+import { useViewerCuratorMembership } from '../../../logic/useViewerCuratorMembership';
 import {
     CURATION_MODE,
     LENS,
     formatSubscriberCount,
-    teamIdWithMostSubscribers,
 } from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -92,6 +92,12 @@ const Meta = styled.span`
     white-space: nowrap;
 `;
 
+const Status = styled.span`
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.62rem;
+    font-weight: 500;
+`;
+
 const ManageLink = styled(Link)`
     display: inline-flex;
     align-items: center;
@@ -114,18 +120,16 @@ const ManageLink = styled(Link)`
     }
 `;
 
-function pickAuthoritativeSelection(detail, mostSubsTeamId) {
-    if (!detail) {
-        return mostSubsTeamId ? `${LENS.TEAM}:${mostSubsTeamId}` : LENS.RAW;
-    }
+function pickAuthoritativeSelection(detail) {
+    if (!detail) return LENS.DEFAULT;
     if (!detail.curated) return LENS.RAW;
     if (Number(detail.stored_mode) === CURATION_MODE.RAW) return LENS.RAW;
-    if (Number(detail.effective_mode) === CURATION_MODE.PINNED && Number(detail.effective_team_id) > 0) {
+    if (Number(detail.stored_mode) === CURATION_MODE.PINNED
+        && Number(detail.effective_mode) === CURATION_MODE.PINNED
+        && Number(detail.effective_team_id) > 0) {
         return `${LENS.TEAM}:${Number(detail.effective_team_id)}`;
     }
-    // No explicit pin — use the team with the most subscribers.
-    if (mostSubsTeamId) return `${LENS.TEAM}:${mostSubsTeamId}`;
-    return LENS.RAW;
+    return LENS.DEFAULT;
 }
 
 function sortTeamsBySubscribers(teams) {
@@ -141,13 +145,13 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     const viewerAddr = viewer && viewer !== 'guest' ? String(viewer).toLowerCase() : '';
     const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr);
     const { teams, loading: teamsLoading } = useCurationTeams(community, { viewer: viewerAddr });
-    // Side effect only: toast when a stored pinned team is gone. Lens changes are local.
-    useCurationPreference(community, detail);
+    const { isCurator, teamId: curatorTeamId } = useViewerCuratorMembership(community);
+    const { selectLens, pending, pendingStatus, error } = useCurationPreference(community, detail);
     const liveTeams = useMemo(() => teams.filter((team) => !team.deleted), [teams]);
     const rankedTeams = useMemo(() => sortTeamsBySubscribers(liveTeams), [liveTeams]);
-    const mostSubsTeamId = useMemo(() => teamIdWithMostSubscribers(liveTeams), [liveTeams]);
     const curated = Boolean(detail?.curated);
-    const authoritativeSelection = pickAuthoritativeSelection(detail, mostSubsTeamId);
+    const authoritativeSelection = pickAuthoritativeSelection(detail);
+    const joined = Boolean(viewerAddr && detail?.viewer_joined);
     // Uncurated communities have only one meaningful lens.
     const selected = (!detailLoading && detail && !curated)
         ? LENS.RAW
@@ -174,15 +178,29 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
         const selection = event.target.value;
         const [lens, rawTeamId] = selection.split(':');
         const teamId = rawTeamId ? Number(rawTeamId) : null;
-        console.debug('[lens] view selection (local only)', { community, lens, teamId });
         setOptimisticSelection(selection);
+        if (!joined) {
+            console.debug('[lens] view selection (local preview)', { community, lens, teamId });
+            return;
+        }
+        console.debug('[lens] persist selection', { community, lens, teamId });
+        selectLens(lens, teamId).catch((err) => {
+            console.error('[lens] selection failed', { community, lens, teamId, error: String(err?.message || err) });
+            setOptimisticSelection(null);
+        });
     };
 
     const teamsPath = `/c/${encodeURIComponent(community)}/teams`;
+    const managePath = isCurator && curatorTeamId
+        ? `${teamsPath}/${curatorTeamId}`
+        : teamsPath;
+    const manageLabel = isCurator ? 'Open Curation' : 'Curator teams →';
     const loading = detailLoading || teamsLoading;
     // Wait for detail before collapsing to Uncensored — curated communities
     // would otherwise flash the fixed label while the request is in flight.
     const uncensoredOnly = Boolean(detail) && !detailLoading && !curated;
+    const defaultTeamName = String(detail?.default_team?.name || '').trim();
+    const defaultLabel = defaultTeamName ? `Default (${defaultTeamName})` : 'Default';
 
     return (
         <Wrap aria-label="Community lens">
@@ -193,9 +211,10 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                 <Select
                     value={selected}
                     onChange={change}
-                    disabled={loading}
+                    disabled={pending || loading}
                     aria-label="Curation lens"
                 >
+                    <option value={LENS.DEFAULT}>{defaultLabel}</option>
                     <option value={LENS.RAW}>Uncensored</option>
                     {rankedTeams.length > 0 && (
                         <option disabled value="__sep__">────────</option>
@@ -208,7 +227,8 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                 </Select>
             )}
             <Meta>
-                <ManageLink to={teamsPath}>Curator teams →</ManageLink>
+                {(pendingStatus || error) && <Status>{pendingStatus || error}</Status>}
+                <ManageLink to={managePath}>{manageLabel}</ManageLink>
             </Meta>
         </Wrap>
     );

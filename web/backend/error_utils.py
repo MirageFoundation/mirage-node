@@ -73,6 +73,8 @@ ERRORS = {
     "missing_viewer": "viewer is required",
     "missing_post_id": "post_id is required",
     "missing_author": "author is required",
+    "invalid_offset": "offset must be a non-negative integer",
+    "invalid_limit": "limit must be an integer from 1 to 50",
     "internal_error": "internal server error",
     "indexer_unavailable": "indexer DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",

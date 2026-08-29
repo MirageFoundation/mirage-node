@@ -17,6 +17,10 @@ export const LENS = Object.freeze({
 export const MAX_CURATION_TEAM_NAME_LENGTH = 30;
 export const MAX_CURATION_TEAM_DESCRIPTION_LENGTH = 4000;
 
+/** Team-page hidden lists: first page 10, then batches of 50. */
+export const HIDDEN_LIST_INITIAL = 10;
+export const HIDDEN_LIST_MORE = 50;
+
 /** Unicode code-point length — matches Go utf8.RuneCountInString. */
 export function runeLength(value) {
     return [...String(value ?? '')].length;

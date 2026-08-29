@@ -138,6 +138,7 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/communities/<slug>/teams/<int:team_id>/invitations": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/moderation": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/hidden-users": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/hidden-posts": PUBLIC,
     "/api/creator/earnings": PUBLIC,
     "/api/core/post": ENVELOPE,
     "/api/core/report": ENVELOPE,

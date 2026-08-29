@@ -100,9 +100,18 @@ const Card = styled.section`
 const CardActions = styled.div`
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 0.4rem;
     flex-wrap: wrap;
     margin-top: 0.15rem;
+
+    @media (max-width: 600px) {
+        flex-direction: column;
+        align-items: stretch;
+        & > * {
+            width: 100%;
+        }
+    }
 `;
 
 const TeamLink = styled(Link)`
@@ -561,13 +570,6 @@ export default function CurationTeamsView({ createOnly = false }) {
                                 >
                                     Open your team
                                 </Button>
-                                <Button
-                                    to={`/c/${encodeURIComponent(routeCommunity || previewSlug)}/teams/${ownTeam.team_id}#hidden-users`}
-                                    size="xs"
-                                    variant="subtle"
-                                >
-                                    Hidden users
-                                </Button>
                             </CardActions>
                         )}
                     </Card>
@@ -596,21 +598,12 @@ export default function CurationTeamsView({ createOnly = false }) {
                 <HeaderActions>
                     {liveCount > 0 && (
                         alreadyCurator && ownTeam ? (
-                            <>
-                                <Button
-                                    to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}`}
-                                    size="xs"
-                                >
-                                    Open your team
-                                </Button>
-                                <Button
-                                    to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}#hidden-users`}
-                                    size="xs"
-                                    variant="subtle"
-                                >
-                                    Hidden users
-                                </Button>
-                            </>
+                            <Button
+                                to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}`}
+                                size="xs"
+                            >
+                                Open your team
+                            </Button>
                         ) : (
                             <Button to={createPath} size="xs">Create team</Button>
                         )

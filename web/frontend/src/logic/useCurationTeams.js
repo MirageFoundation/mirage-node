@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import Api from '../utils/api';
-import { requireCommunitySlug, requireTeamId } from '../utils/curation';
+import {
+    HIDDEN_LIST_INITIAL,
+    HIDDEN_LIST_MORE,
+    requireCommunitySlug,
+    requireTeamId,
+} from '../utils/curation';
 
 function validateTeam(team) {
     if (!team || typeof team !== 'object') throw new Error('Invalid curator team response');
@@ -124,32 +129,55 @@ export function useCurationTeam(community, teamId, viewer = '') {
     return { team, loading, error, refresh };
 }
 
-export function useHiddenCurationUsers(community, teamId, { viewer = '', enabled = false } = {}) {
+function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled = false } = {}) {
     const slug = enabled ? requireCommunitySlug(community) : '';
     const id = enabled ? requireTeamId(teamId) : 0;
     const viewerAddr = String(viewer || '').toLowerCase();
-    const [users, setUsers] = useState([]);
+    const pathSuffix = kind === 'posts' ? 'hidden-posts' : 'hidden-users';
+    const [items, setItems] = useState([]);
+    const [hasMore, setHasMore] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState('');
 
-    const refresh = useCallback(async () => {
+    const fetchPage = useCallback(async ({ offset, limit, append }) => {
         if (!enabled || !slug || !id || !viewerAddr || viewerAddr === 'guest') {
-            setUsers([]);
+            setItems([]);
+            setHasMore(false);
             setLoading(false);
+            setLoadingMore(false);
             setError('');
             return [];
         }
-        setLoading(true);
+        if (append) setLoadingMore(true);
+        else setLoading(true);
         setError('');
         try {
             const data = await Api.get(
-                `communities/${encodeURIComponent(slug)}/teams/${id}/hidden-users`,
-                { viewer: viewerAddr, _cb: Date.now() },
+                `communities/${encodeURIComponent(slug)}/teams/${id}/${pathSuffix}`,
+                {
+                    viewer: viewerAddr,
+                    offset,
+                    limit,
+                    _cb: Date.now(),
+                },
             );
-            if (!data || !Array.isArray(data.items)) {
-                throw new Error('Invalid hidden users response');
+            if (!data || !Array.isArray(data.items) || typeof data.has_more !== 'boolean') {
+                throw new Error(`Invalid ${pathSuffix} response`);
             }
             const next = data.items.map((item) => {
+                if (kind === 'posts') {
+                    if (typeof item?.post_id !== 'string' || !item.post_id.trim()) {
+                        throw new Error('Hidden post is missing post_id');
+                    }
+                    if (item.title != null && typeof item.title !== 'string') {
+                        throw new Error('Invalid hidden post title');
+                    }
+                    return {
+                        postId: item.post_id.trim().toLowerCase(),
+                        title: item.title?.trim() || null,
+                    };
+                }
                 if (typeof item?.address !== 'string' || !item.address.trim()) {
                     throw new Error('Hidden user is missing address');
                 }
@@ -161,24 +189,53 @@ export function useHiddenCurationUsers(community, teamId, { viewer = '', enabled
                     username: item.username || null,
                 };
             });
-            setUsers(next);
-            console.debug('[curation] hidden users loaded', { community: slug, teamId: id, count: next.length });
+            setItems((prev) => (append ? [...prev, ...next] : next));
+            setHasMore(data.has_more);
+            console.debug(`[curation] ${pathSuffix} loaded`, {
+                community: slug,
+                teamId: id,
+                offset,
+                limit,
+                count: next.length,
+                hasMore: data.has_more,
+                append,
+            });
             return next;
         } catch (err) {
             const message = String(err?.message || err);
-            setUsers([]);
+            if (!append) setItems([]);
             setError(message);
-            console.error('[curation] hidden users failed', { community: slug, teamId: id, error: message });
+            console.error(`[curation] ${pathSuffix} failed`, {
+                community: slug,
+                teamId: id,
+                error: message,
+            });
             throw err;
         } finally {
-            setLoading(false);
+            if (append) setLoadingMore(false);
+            else setLoading(false);
         }
-    }, [enabled, id, slug, viewerAddr]);
+    }, [enabled, id, kind, pathSuffix, slug, viewerAddr]);
+
+    const refresh = useCallback(async () => (
+        fetchPage({ offset: 0, limit: HIDDEN_LIST_INITIAL, append: false })
+    ), [fetchPage]);
+
+    const loadMore = useCallback(async () => {
+        if (!hasMore || loadingMore || loading) return [];
+        return fetchPage({
+            offset: items.length,
+            limit: HIDDEN_LIST_MORE,
+            append: true,
+        });
+    }, [fetchPage, hasMore, items.length, loading, loadingMore]);
 
     useEffect(() => {
         if (!enabled) {
-            setUsers([]);
+            setItems([]);
+            setHasMore(false);
             setLoading(false);
+            setLoadingMore(false);
             setError('');
             return undefined;
         }
@@ -191,5 +248,39 @@ export function useHiddenCurationUsers(community, teamId, { viewer = '', enabled
         return () => window.removeEventListener('curationUpdated', onUpdate);
     }, [enabled, refresh, slug]);
 
-    return { users, loading, error, refresh };
+    return {
+        items,
+        hasMore,
+        loading,
+        loadingMore,
+        error,
+        refresh,
+        loadMore,
+    };
+}
+
+export function useHiddenCurationUsers(community, teamId, options) {
+    const state = useHiddenCurationPage('users', community, teamId, options);
+    return {
+        users: state.items,
+        hasMore: state.hasMore,
+        loading: state.loading,
+        loadingMore: state.loadingMore,
+        error: state.error,
+        refresh: state.refresh,
+        loadMore: state.loadMore,
+    };
+}
+
+export function useHiddenCurationPosts(community, teamId, options) {
+    const state = useHiddenCurationPage('posts', community, teamId, options);
+    return {
+        posts: state.items,
+        hasMore: state.hasMore,
+        loading: state.loading,
+        loadingMore: state.loadingMore,
+        error: state.error,
+        refresh: state.refresh,
+        loadMore: state.loadMore,
+    };
 }
