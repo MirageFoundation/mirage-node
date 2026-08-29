@@ -88,6 +88,14 @@ const Card = styled.section`
     line-height: 1.45;
 `;
 
+const FormSection = styled.section`
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.45;
+`;
+
 const CardActions = styled.div`
     display: flex;
     align-items: center;
@@ -391,7 +399,7 @@ export default function CurationTeamsView() {
     }[createPhase];
 
     const createForm = (
-        <Card id="create">
+        <FormSection id="create">
             <Meta>
                 You&apos;ll lead this team and define how this community is curated for users who choose it.
             </Meta>
@@ -449,7 +457,7 @@ export default function CurationTeamsView() {
                     )}
                 </CardActions>
             </Form>
-        </Card>
+        </FormSection>
     );
 
     return (
