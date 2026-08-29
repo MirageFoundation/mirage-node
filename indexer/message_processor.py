@@ -200,6 +200,8 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSetCurationUserHidden": MsgSetCurationUserHidden,
     "/mirage.core.v1.MsgSetCurationThreadLocked": MsgSetCurationThreadLocked,
     "/mirage.core.v1.MsgSetCurationSubscriberOnly": MsgSetCurationSubscriberOnly,
+    "/mirage.core.v1.MsgSetCurationTag": MsgSetCurationTag,
+    "/mirage.core.v1.MsgSetCurationPostTag": MsgSetCurationPostTag,
     "/mirage.core.v1.MsgClaimCreatorRewards": MsgClaimCreatorRewards,
     # SendTokens is relayed like any other user message and the handler spends a
     # daily quota unit for it (deductRelayGasFee in module.go), so the quota
@@ -364,6 +366,8 @@ class MessageProcessor:
             "/mirage.core.v1.MsgSetCurationUserHidden",
             "/mirage.core.v1.MsgSetCurationThreadLocked",
             "/mirage.core.v1.MsgSetCurationSubscriberOnly",
+            "/mirage.core.v1.MsgSetCurationTag",
+            "/mirage.core.v1.MsgSetCurationPostTag",
         ):
             # Curation state is projected from the block's events in
             # process_curation_events(), which carries the committed final state

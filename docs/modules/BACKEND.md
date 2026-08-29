@@ -540,6 +540,8 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/leave_community` | MsgLeaveCommunity |
 | `POST /api/core/create_curation_team` | MsgCreateCurationTeam |
 | `POST /api/core/set_curation_preference` | MsgSetCurationPreference |
+| `POST /api/core/set_curation_tag` | MsgSetCurationTag |
+| `POST /api/core/set_curation_post_tag` | MsgSetCurationPostTag |
 | `POST /api/core/invite_curator` | MsgInviteCurator |
 | `POST /api/core/accept_curator_invite` | MsgAcceptCuratorInvite |
 | `POST /api/core/block_post` | MsgBlockPost |

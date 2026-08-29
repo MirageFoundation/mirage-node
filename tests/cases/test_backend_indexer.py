@@ -949,6 +949,41 @@ def test_indexer_hardening(backend: str):
     except RuntimeError:
         _pass("indexer_hardening.post_tag_event_fails_hard")
 
+    # ── Every relayable message must be one this indexer build knows ─────
+    #
+    # A message the chain relays but process_core_message has no branch for
+    # falls through to the unhandled_message_type error, which tells an
+    # operator to upgrade the indexer and replay the height, and skips the
+    # relay-quota refresh so a paid user's remaining quota goes stale. That
+    # is exactly what happened to the two v1.39 tag messages: the curation
+    # projection runs off block events so the data still landed, and nothing
+    # else noticed. Deriving the expected set from relay_messages.go means
+    # the next relayable message cannot be added without teaching the indexer.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    relay_go = os.path.join(repo_root, "blockchain", "app", "relay_messages.go")
+    processor_py = os.path.join(repo_root, "indexer", "message_processor.py")
+    if not (os.path.exists(relay_go) and os.path.exists(processor_py)):
+        _skip("indexer_hardening.relay_types_known", "chain or indexer source not in this image")
+    else:
+        with open(relay_go, encoding="utf-8") as fh:
+            relay_src = fh.read()
+        prototypes = relay_src[relay_src.index("relayMessagePrototypes") :]
+        relayable = set(re.findall(r"&coretypes\.(Msg[A-Za-z]+)\{\}", prototypes))
+        with open(processor_py, encoding="utf-8") as fh:
+            processor_src = fh.read()
+        unknown = sorted(
+            name for name in relayable if f'"/mirage.core.v1.{name}"' not in processor_src
+        )
+        if not relayable:
+            _fail("indexer_hardening.relay_types_known", "could not parse relay_messages.go")
+        elif unknown:
+            _fail(
+                "indexer_hardening.relay_types_known",
+                f"{len(unknown)} relayable types the indexer cannot decode: {', '.join(unknown)}",
+            )
+        else:
+            _pass("indexer_hardening.relay_types_known", checked=len(relayable))
+
     # ── H-5: thumbnails are derived offline and deterministically ────────
 
     proc = MessageProcessor(None, None, lambda *a, **k: None, lambda t: "")
