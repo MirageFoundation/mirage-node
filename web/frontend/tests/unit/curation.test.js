@@ -60,34 +60,65 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/selectLens\(lens, teamId\)/);
         expect(pickerSrc).toMatch(/view selection \(local preview\)/);
         expect(pickerSrc).toMatch(/persist selection/);
-        expect(pickerSrc).toMatch(/value=\{LENS\.DEFAULT\}/);
-        expect(pickerSrc).toMatch(/`Default \(\$\{defaultTeamName\}\)`/);
-        expect(pickerSrc).toMatch(/: 'Default'/);
+        expect(pickerSrc).toMatch(/change\(LENS\.DEFAULT\)/);
+        expect(pickerSrc).toMatch(/if \(selection === LENS\.DEFAULT\) return 'Default Curation Team'/);
+        expect(pickerSrc).toMatch(/OptionMeta>Currently \{defaultTeamName\}/);
+        // Rapid switches: only roll back the failed pick, never a newer one.
+        expect(pickerSrc).toMatch(
+            /setOptimisticSelection\(\(current\) => \(current === selection \? null : current\)\)/,
+        );
+        expect(pickerSrc).toMatch(/optimistic confirmed by detail/);
     });
 
-    it('shows Uncensored only when a community has no curator teams', () => {
+    it('drops stale community/team refreshes so rapid lens switches keep the label', () => {
+        const detailSrc = readFileSync(
+            join(frontendSrc, 'logic/useCommunityDetail.js'),
+            'utf8',
+        );
+        const teamsSrc = readFileSync(
+            join(frontendSrc, 'logic/useCurationTeams.js'),
+            'utf8',
+        );
+        expect(detailSrc).toMatch(/requestSeq/);
+        expect(detailSrc).toMatch(/detail stale response dropped/);
+        expect(detailSrc).toMatch(/background = false/);
+        expect(teamsSrc).toMatch(/requestSeq/);
+        expect(teamsSrc).toMatch(/teams stale response dropped/);
+        expect(teamsSrc).toMatch(/refresh\(\{ background: true \}\)/);
+    });
+
+    it('keeps lens selection and team actions in one dropdown', () => {
         const pickerSrc = readFileSync(
             join(frontendSrc, 'themes/default/components/CurationLensPicker.js'),
             'utf8',
         );
-        expect(pickerSrc).toMatch(/uncensoredOnly/);
-        expect(pickerSrc).toMatch(/FixedLens/);
         expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
         expect(pickerSrc).toMatch(/LENS\.DEFAULT/);
         expect(pickerSrc).not.toMatch(/Node default/);
         expect(pickerSrc).toMatch(/formatSubscriberCount/);
-        expect(pickerSrc).toMatch(/__sep__/);
+        expect(pickerSrc).toMatch(/__team_action__/);
+        expect(pickerSrc).toMatch(/Create new…/);
+        expect(pickerSrc).toMatch(/Manage my team…/);
+        expect(pickerSrc).toMatch(/teams\/new/);
+        expect(pickerSrc).toMatch(/PickerButton/);
+        expect(pickerSrc).toMatch(/height: var\(--community-header-control-height, 28px\)/);
+        expect(pickerSrc).toMatch(/font-size: var\(--community-header-control-font-size, 0\.68rem\)/);
+        expect(pickerSrc).toMatch(/role="listbox"/);
+        expect(pickerSrc).toMatch(/onChange\?\.\(lens, rawTeamId \? Number\(rawTeamId\) : null, activeTeam\)/);
+        expect(pickerSrc).not.toMatch(/styled\.select/);
         expect(pickerSrc).toMatch(/>Uncensored</);
         // LIVE_DEFAULT stays Default — do not present the most-subscribed team as selected.
         expect(pickerSrc).not.toMatch(/teamIdWithMostSubscribers/);
         expect(pickerSrc).not.toMatch(/No explicit pin/);
-        // Fixed "Uncensored" already means no teams — no redundant Uncurated chip.
-        expect(pickerSrc).not.toMatch(/'Uncurated'/);
-        expect(pickerSrc).not.toMatch(/"Uncurated"/);
         expect(pickerSrc).toMatch(/useViewerCuratorMembership/);
-        expect(pickerSrc).toMatch(/Open Curation/);
-        expect(pickerSrc).toMatch(/Curator teams →/);
-        expect(pickerSrc).toMatch(/manageLabel = isCurator \? 'Open Curation'/);
+        expect(pickerSrc).not.toMatch(/ManageLink/);
+        expect(pickerSrc).not.toMatch(/Curator teams/);
+    });
+
+    it('redirects the obsolete team listing route to the community', () => {
+        const appSrc = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
+        expect(appSrc).toMatch(/path="\/c\/:topic\/teams"/);
+        expect(appSrc).toMatch(/element=\{<CommunityTeamsRedirect \/>}/);
     });
 
     it('formats subscriber counts as 1 sub / N subs', () => {
@@ -103,14 +134,14 @@ describe('v1.39 curation UI contracts', () => {
 
     it('clamps team fields to chain rune limits', () => {
         expect(MAX_CURATION_TEAM_NAME_LENGTH).toBe(30);
-        expect(MAX_CURATION_TEAM_DESCRIPTION_LENGTH).toBe(4000);
+        expect(MAX_CURATION_TEAM_DESCRIPTION_LENGTH).toBe(800);
         expect(runeLength('café')).toBe(4);
         expect(sliceRunes('abcdefghij', 5)).toBe('abcde');
         expect(sliceRunes('a'.repeat(50), MAX_CURATION_TEAM_NAME_LENGTH).length).toBe(30);
-        expect(runeLength(sliceRunes('x'.repeat(5000), MAX_CURATION_TEAM_DESCRIPTION_LENGTH))).toBe(4000);
+        expect(runeLength(sliceRunes('x'.repeat(5000), MAX_CURATION_TEAM_DESCRIPTION_LENGTH))).toBe(800);
     });
 
-    it('passes return paths through Sign in and Subscribe on the teams page', () => {
+    it('passes return paths through Sign in and Subscribe on the team creation page', () => {
         const teams = readFileSync(
             join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
             'utf8',
@@ -154,13 +185,31 @@ describe('v1.39 curation UI contracts', () => {
         expect(main).toMatch(/CommunityLensBar/);
         expect(main).toMatch(/FeedSortToggle/);
         expect(main).toMatch(/CommunityLensHeading/);
-        expect(main).toMatch(/topicFollowHover \? 'Unfollow' : 'Following'/);
-        expect(main).toMatch(/\[community\] follow toggle/);
+        expect(main).toMatch(/CommunityMembershipPicker/);
+        expect(main).toMatch(/--community-header-control-height: 28px/);
+        expect(main).toMatch(/--community-header-control-font-size: 0\.68rem/);
+        expect(main).toMatch(/border: 1px solid transparent/);
+        expect(main).toMatch(/CurationTeamHeader/);
+        expect(main).toMatch(/activeCurationTeam\.description/);
+        // Long unbroken descriptions must wrap inside the header, not overflow sideways.
+        expect(main).toMatch(/const CurationTeamDescription = styled\.p`[^`]*overflow-wrap: anywhere;/);
+        // The picker already shows the selected team; repeating its name below is noise.
+        expect(main).not.toMatch(/CurationTeamTitle/);
+        expect(main).not.toMatch(/activeCurationTeam\.name/);
+        expect(main).toMatch(/font-size: 0\.62rem/);
+        expect(main).toMatch(/\[lens\] community header updated/);
+        expect(main).toMatch(/\[community\] membership toggle/);
+        // Title is 0.9rem and the controls 0.68rem, so centering their boxes
+        // leaves the text off by ~1.2px. Only baseline alignment lines them up.
+        expect(main).toMatch(/const CommunityLensTopRow = styled\.div`[^`]*align-items: baseline;/);
+        expect(main).toMatch(/const CommunityLensHeading = styled\.div`[^`]*align-items: baseline;/);
+        // The view toggle is icon-only and has no baseline, so its group stays centered.
+        expect(main).toMatch(/const CommunityLensControls = styled\.div`[^`]*align-items: center;/);
         expect(main).toMatch(/const feedTitle = urlTopic === 'all' \? 'All' : null/);
         expect(main).not.toMatch(/else if \(isTopicFeed\) feedTitle = communityLabel/);
     });
 
-    it('drops the separate moderation policy field from team create/edit forms', () => {
+    it('uses the team description as the selected community header description', () => {
         const create = readFileSync(
             join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
             'utf8',
@@ -169,10 +218,16 @@ describe('v1.39 curation UI contracts', () => {
             join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
             'utf8',
         );
+        const curation = readFileSync(join(frontendSrc, 'utils/curation.js'), 'utf8');
         expect(create).not.toMatch(/Moderation policy/);
         expect(create).not.toMatch(/setPolicy/);
-        expect(create).toMatch(/include how you moderate/);
-        expect(create).toMatch(/Describe your curation approach:/);
+        expect(create).toMatch(/Community header description/);
+        expect(create).toMatch(/Shown beneath your team name in the community header/);
+        expect(create).toMatch(/placeholder="Sailboats & Sailors only"/);
+        expect(create).toMatch(/CURATION_TEAM_DESCRIPTION_EXAMPLE/);
+        expect(create).toMatch(/'data-bwignore': 'true'/);
+        expect(curation).toMatch(/dedicated to all things sailboats and sailing/);
+        expect(curation).toMatch(/you might get hidden from our curation team/);
         expect(create).not.toMatch(/About this lens/);
         expect(create).toMatch(/MAX_CURATION_TEAM_NAME_LENGTH/);
         expect(create).toMatch(/MAX_CURATION_TEAM_DESCRIPTION_LENGTH/);
@@ -180,19 +235,30 @@ describe('v1.39 curation UI contracts', () => {
         expect(create).toMatch(/maxLength=\{maxTeamDescriptionLength\}/);
         expect(create).toMatch(/sliceRunes/);
         expect(create).toMatch(/waitForOwnCurationTeam/);
+        expect(create).toMatch(/opening created team/);
+        expect(create).toMatch(/\/teams\/\$\{visibleId\}/);
+        expect(create).toMatch(/← Back to community/);
+        expect(create).not.toMatch(/destination team list ready/);
         expect(create).toMatch(/pollTxStatus/);
         expect(create).toMatch(/Verifying…/);
-        expect(create).toMatch(/curated feed/);
         expect(create).not.toMatch(/curated lens/);
-        expect(create).toMatch(/No curator team for this community/);
-        expect(create).toMatch(/no curator team yet/);
-        expect(create).not.toMatch(/No curator teams yet/);
+        expect(create).not.toMatch(/No curator team for this community/);
+        expect(create).not.toMatch(/teamState\.teams\.map/);
         expect(detail).not.toMatch(/Team policy/);
         expect(detail).not.toMatch(/setPolicy/);
-        expect(detail).toMatch(/include how you moderate/);
+        expect(detail).toMatch(/Community header description/);
+        expect(detail).toMatch(/CURATION_TEAM_DESCRIPTION_EXAMPLE/);
+        expect(detail).toMatch(/'data-bwignore': 'true'/);
         expect(detail).not.toMatch(/this lens/);
         expect(detail).not.toMatch(/CardTitle>About</);
-        expect(detail).toMatch(/CardTitle>Team settings</);
+        expect(detail).toMatch(/CardTitle>Team profile</);
+        expect(detail).toMatch(/CardTitle>Community defaults</);
+        expect(detail).toMatch(/Subscriber-only posting/);
+        expect(detail).toMatch(/Community tag/);
+        expect(detail).toMatch(/CardTitle>Danger zone</);
+        expect(detail).toMatch(/FieldLabel>Team name</);
+        expect(detail).toMatch(/FieldLabel>Community header description</);
+        expect(detail).toMatch(/← Back to community/);
         expect(detail).toMatch(/isLeader \? \(/);
         expect(detail).toMatch(/MAX_CURATION_TEAM_DESCRIPTION_LENGTH/);
         expect(detail).toMatch(/maxLength=\{maxTeamDescriptionLength\}/);
@@ -211,6 +277,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).toMatch(/Hidden posts/);
         expect(detail).toMatch(/hidden-users/);
         expect(detail).toMatch(/hidden-posts/);
+        expect(detail.indexOf('CardTitle>Danger zone')).toBeGreaterThan(detail.indexOf('Card id="hidden-posts"'));
         expect(detail).toMatch(/useHiddenCurationUsers/);
         expect(detail).toMatch(/useHiddenCurationPosts/);
         expect(detail).toMatch(/moderateCurationUser/);
@@ -234,6 +301,90 @@ describe('v1.39 curation UI contracts', () => {
         );
         expect(curationUtils).toMatch(/HIDDEN_LIST_INITIAL = 10/);
         expect(curationUtils).toMatch(/HIDDEN_LIST_MORE = 50/);
+    });
+
+    it('builds the community header from one shared flat control', () => {
+        const main = readFileSync(
+            join(frontendSrc, 'themes/default/routes/MainView.js'),
+            'utf8',
+        );
+        const picker = readFileSync(
+            join(frontendSrc, 'themes/default/components/CurationLensPicker.js'),
+            'utf8',
+        );
+        const listFeed = readFileSync(
+            join(frontendSrc, 'themes/default/ListFeedView.js'),
+            'utf8',
+        );
+        const control = readFileSync(
+            join(frontendSrc, 'themes/default/components/FeedControlButton.js'),
+            'utf8',
+        );
+
+        // The header controls (membership, lens, "Best", view mode) must be the
+        // same component, or the row drifts back into different sizes/weights.
+        const membership = readFileSync(
+            join(frontendSrc, 'themes/default/components/CommunityMembershipPicker.js'),
+            'utf8',
+        );
+        expect(control).toMatch(/height: 28px/);
+        expect(control).toMatch(/font-size: 0\.68rem/);
+        expect(control).toMatch(/font-weight: 400/);
+        expect(listFeed).toMatch(/import CtrlButton from "\.\/components\/FeedControlButton"/);
+        expect(listFeed).not.toMatch(/const CtrlButton = styled\.button/);
+        expect(picker).toMatch(/styled\(FeedControlButton\)/);
+        expect(picker).not.toMatch(/variant="secondary"/);
+        expect(membership).toMatch(/styled\(FeedControlButton\)/);
+        expect(membership).toMatch(/HiChevronDown/);
+        expect(membership).toMatch(/actionLabel = joined \? 'Leave' : 'Join'/);
+        // Membership sits on the right, immediately left of the sort control.
+        expect(main).toMatch(
+            /CommunityMembershipPicker[\s\S]*FeedSortToggle[\s\S]*FeedViewToggle/,
+        );
+
+        // Default stays a fixed label; pinned teams keep their full name.
+        expect(picker).not.toMatch(/max-width: 14rem/);
+        expect(picker).toMatch(/return 'Default Curation Team'/);
+        expect(picker).toMatch(/return team\.name;/);
+    });
+
+    it('deletes a team through an in-app dialog and leaves the page', () => {
+        const detail = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
+            'utf8',
+        );
+        const curationUtils = readFileSync(
+            join(frontendSrc, 'utils/curation.js'),
+            'utf8',
+        );
+        expect(detail).not.toMatch(/window\.confirm/);
+        expect(detail).toMatch(/<ConfirmDialog/);
+        expect(detail).toMatch(/confirmLabel="Delete team"/);
+        // Once the tx lands the team is gone, so the page must not stay open.
+        expect(detail).toMatch(/navigate\(`\/c\/\$\{encodeURIComponent\(community\)\}`\)/);
+        // The sidebar's curator highlight only clears on a refresh issued after
+        // the indexer has dropped the team.
+        expect(curationUtils).toMatch(/export async function waitForCurationTeamGone/);
+        expect(detail).toMatch(/waitForCurationTeamGone\(community, Number\(teamId\), \{ viewer \}\)/);
+        expect(detail).toMatch(/\.then\(\(\) => invalidateCurationReads\(community\)\)/);
+    });
+
+    it('keeps a saved team profile on screen until the API serves it', () => {
+        const detail = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
+            'utf8',
+        );
+        const curationUtils = readFileSync(
+            join(frontendSrc, 'utils/curation.js'),
+            'utf8',
+        );
+        expect(curationUtils).toMatch(/export async function waitForCurationTeamProfile/);
+        // The form must not reseed from a read that predates the save.
+        expect(detail).toMatch(/savedProfileRef/);
+        expect(detail).toMatch(/if \(team\.name !== saved\.name \|\| team\.description !== saved\.description\) return;/);
+        expect(detail).toMatch(/waitForCurationTeamProfile/);
+        expect(detail).toMatch(/pollTxStatus/);
+        expect(detail).toMatch(/'Verifying…'/);
     });
 
     it('puts Curate + admin delete on a separate ModMenuChip shield menu', () => {
@@ -268,12 +419,13 @@ describe('v1.39 curation UI contracts', () => {
 
         expect(postMenu).toMatch(/export function ModMenuChip/);
         expect(postMenu).toMatch(/Moderation menu/);
-        expect(postMenu).toMatch(/Mark post deleted/);
+        expect(postMenu).toMatch(/Delete network wide/);
+        expect(postMenu).toMatch(/isAdminVisible && curateVisible && <MenuDivider/);
         expect(postMenu).toMatch(/CurateMenuItems/);
         expect(postMenu).not.toMatch(/MenuHeader>Admin</);
         expect(postMenu).not.toMatch(/renderHeader/);
         // ⋯ menu must not own curate / admin-delete anymore.
-        expect(postMenu).not.toMatch(/isAdminVisible && \(\s*\n\s*<MenuItemBtn[^>]*Mark post deleted/s);
+        expect(postMenu).not.toMatch(/isAdminVisible && \(\s*\n\s*<MenuItemBtn[^>]*Delete network wide/s);
         for (const src of [cardView, viewPost, listFeed]) {
             expect(src).toMatch(/ModMenuChip/);
             expect(src).not.toMatch(/CurateMenuItems/);
@@ -288,9 +440,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/modState\.userHidden/);
         expect(actions).toMatch(/modState\.threadLocked/);
         expect(actions).toMatch(/Hide post/);
-        expect(actions).toMatch(/Show post/);
+        expect(actions).toMatch(/Restore post/);
         expect(actions).toMatch(/Hide user/);
-        expect(actions).toMatch(/Show user/);
+        expect(actions).toMatch(/Restore user/);
         expect(actions).toMatch(/Lock thread/);
         expect(actions).toMatch(/Unlock thread/);
         // Toggle: only one of each pair is pushed per state branch.
@@ -299,7 +451,98 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/if \(modState\.threadLocked\)/);
         expect(membership).toMatch(/viewer_team_ids/);
         expect(membership).toMatch(/isCurator/);
+        expect(membership).toMatch(/export function useViewerCuratorCommunities/);
+        expect(membership).toMatch(/curators\/\$\{encodeURIComponent\(viewer\)\}\/communities/);
         expect(curateItems).toMatch(/active/);
+        const sidebar = readFileSync(
+            join(frontendSrc, 'themes/default/components/Sidebar.js'),
+            'utf8',
+        );
+        expect(sidebar).toMatch(/useViewerCuratorCommunities/);
+        expect(sidebar).toMatch(/\$curated/);
+        expect(sidebar).toMatch(/voteUp/);
+        expect(sidebar).toMatch(/orderedTopics/);
+        expect(sidebar).toMatch(/HiUserGroup/);
+        expect(sidebar).not.toMatch(/HiHashtag/);
+        const createTeams = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
+            'utf8',
+        );
+        const teamDetail = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
+            'utf8',
+        );
+        expect(createTeams).toMatch(/min-height: 16rem/);
+        expect(teamDetail).toMatch(/min-height: 16rem/);
+        expect(teamDetail).toMatch(/Restore/);
+        expect(teamDetail).not.toMatch(/Showing…/);
+    });
+
+    it('signs both tag messages with the field numbers the chain reads', () => {
+        const handler = readFileSync(join(frontendSrc, 'utils/TransactionHandler.js'), 'utf8');
+
+        // These tuples are the browser half of the canon contract: shared
+        // canon.py and the Go ante decorators encode the same tags, and a
+        // single mismatched number makes every signature unverifiable.
+        expect(handler).toMatch(
+            /set_curation_tag: \['MsgSetCurationTag', 'core\/set_curation_tag', \[\['community', 100, 'string'\], \['team_id', 101, 'uint'\], \['tag', 102, 'string'\]\]\]/,
+        );
+        expect(handler).toMatch(
+            /set_curation_post_tag: \['MsgSetCurationPostTag', 'core\/set_curation_post_tag', \[\['community', 100, 'string'\], \['team_id', 101, 'uint'\], \['target', 102, 'string'\], \['tag', 103, 'string'\], \['clear', 104, 'bool'\]\]\]/,
+        );
+        // Both wrappers reject anything outside the shared whitelist before a
+        // transaction is ever built.
+        expect(handler).toMatch(/async setCurationTag\(community, teamId, tag\)/);
+        expect(handler).toMatch(/async setCurationPostTag\(community, teamId, postId, tag, clear = false\)/);
+        expect(handler).toMatch(/if \(!ALLOWED_TAGS\.has\(value\)\) throw new Error\(`invalid tag/);
+
+        const txApi = readFileSync(join(frontendSrc, 'utils/tx.js'), 'utf8');
+        expect(txApi).toMatch(/export async function setCurationTag\(/);
+        expect(txApi).toMatch(/export async function setCurationPostTag\(/);
+    });
+
+    it('stops offering a reply on a thread the current lens has locked', () => {
+        const viewPost = readFileSync(
+            join(frontendSrc, 'themes/default/routes/ViewPostView.js'),
+            'utf8',
+        );
+
+        // The lock is a read filter, so the chain still accepts a reply. The UI
+        // is what has to stop the user from spending PoW and daily quota on a
+        // comment their own lens would hide the moment it lands.
+        expect(viewPost).toMatch(/const threadLocked = !!root\?\.thread_locked;/);
+        expect(viewPost).toMatch(/threadLocked \? <LockedNote/);
+        expect(viewPost).toMatch(/thread locked</);
+        // A composer already open when the lock lands must close, but editing
+        // your own existing post is not a new reply and stays allowed.
+        expect(viewPost).toMatch(/if \(threadLocked && !isEdit\) return <div><\/div>;/);
+        expect(viewPost).toMatch(/if \(!isMobile \|\| threadLocked\) return null;/);
+    });
+
+    it('gives the owner a community tag control and every curator a per-post override', () => {
+        const teamDetail = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
+            'utf8',
+        );
+        const actions = readFileSync(join(frontendSrc, 'logic/usePostCurateActions.js'), 'utf8');
+        const postMenu = readFileSync(join(frontendSrc, 'themes/default/components/PostMenu.js'), 'utf8');
+
+        // Community tag lives on the owner-only settings page, next to the
+        // other team-wide switch, and reuses the composer's tag vocabulary.
+        expect(teamDetail).toMatch(/Community tag/);
+        expect(teamDetail).toMatch(/tx\.setCurationTag\(community, Number\(teamId\), e\.target\.value\)/);
+        expect(teamDetail).toMatch(/TAG_OPTIONS/);
+
+        // Per-post override is one select, not one row per tag, and keeps
+        // "no override" distinct from "untagged".
+        expect(actions).toMatch(/setCurationPostTag/);
+        expect(actions).toMatch(/const INHERIT_TAG = '__inherit__'/);
+        expect(actions).toMatch(/No override/);
+        expect(actions).toMatch(/Untagged/);
+        expect(actions).toMatch(/postTag: typeof data\.post_tag === 'string' \? data\.post_tag : null/);
+        expect(actions).toMatch(/modState\.postTag === null \? INHERIT_TAG : modState\.postTag/);
+        expect(postMenu).toMatch(/item\.type === 'select'/);
+        expect(postMenu).toMatch(/MenuSelect/);
     });
 });
 

@@ -18,13 +18,18 @@ export default function CurateMenuItems({ post, onDone, renderItem, active = fal
 
     return (
         <>
-            {items.map((item) => renderItem({
+            {items.map((item) => renderItem(typeof item.run !== 'function' ? item : {
                 ...item,
                 onClick: (event) => {
                     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
                     if (event && typeof event.preventDefault === 'function') event.preventDefault();
+                    console.debug('[curation] curate menu item', { key: item.key });
                     item.run();
-                    if (typeof onDone === 'function') onDone();
+                    // Close after this click finishes so a unmount mid-click cannot
+                    // retarget onto Back / Home underneath the menu.
+                    if (typeof onDone === 'function') {
+                        window.setTimeout(() => onDone(), 0);
+                    }
                 },
             }))}
         </>

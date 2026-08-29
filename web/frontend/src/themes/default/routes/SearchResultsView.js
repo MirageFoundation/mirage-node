@@ -506,11 +506,8 @@ const RowActions = styled.div`
 `;
 
 /**
- * Follow / Following button used on topic + user result rows. Mirrors
- * the FollowsView affordance:
- *  - Not followed → `primary` filled "Follow" pill.
- *  - Followed     → `subtle` tinted "Following" pill that flips to a
- *                   danger "Unfollow" state on hover / focus.
+ * Membership/follow button used on community + user result rows. Mirrors
+ * the FollowsView affordance.
  * `!important` on the hover swap survives flatMode's !important overrides
  * in the shared Button component (same trick as FollowsView).
  */
@@ -542,6 +539,16 @@ function FollowingLabel({ status }) {
         <>
             <span data-follow-label="default">Following</span>
             <span data-follow-label="hover">Unfollow</span>
+        </>
+    );
+}
+
+function JoinedLabel({ status }) {
+    if (status) return status;
+    return (
+        <>
+            <span data-follow-label="default">Joined</span>
+            <span data-follow-label="hover">Leave</span>
         </>
     );
 }
@@ -706,7 +713,7 @@ export default function SearchResultsView({ state }) {
             }
             const t = String(topic || "").trim();
             if (!t) return;
-            if (!requireAccount('follow communities')) return;
+            if (!requireAccount('join communities')) return;
             if (!viewerAddressLower) return;
             const lower = t.toLowerCase();
             if (isFollowTopicPending(lower)) return;
@@ -725,7 +732,7 @@ export default function SearchResultsView({ state }) {
                 }
             } catch (err) {
                 alert(
-                    `Error ${wasFollowing ? "unfollowing" : "following"} community: ${err?.message || err
+                    `Error ${wasFollowing ? "leaving" : "joining"} community: ${err?.message || err
                     }`
                 );
             }
@@ -1186,7 +1193,7 @@ export default function SearchResultsView({ state }) {
                                                 handleTopicFollowToggle(e, topicName)
                                             }
                                         >
-                                            <FollowingLabel status={status} />
+                                            <JoinedLabel status={status} />
                                         </FollowingButton>
                                     ) : (
                                         <Button
@@ -1199,7 +1206,7 @@ export default function SearchResultsView({ state }) {
                                                 handleTopicFollowToggle(e, topicName)
                                             }
                                         >
-                                            {status || "Follow"}
+                                            {status || "Join"}
                                         </Button>
                                     )}
                                 </RowActions>

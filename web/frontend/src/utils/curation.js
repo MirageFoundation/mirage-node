@@ -15,7 +15,10 @@ export const LENS = Object.freeze({
 
 /** Match chain DefaultParams MaxCurationTeamNameLength / DescriptionLength. */
 export const MAX_CURATION_TEAM_NAME_LENGTH = 30;
-export const MAX_CURATION_TEAM_DESCRIPTION_LENGTH = 4000;
+export const MAX_CURATION_TEAM_DESCRIPTION_LENGTH = 800;
+export const CURATION_TEAM_DESCRIPTION_EXAMPLE = `This community is dedicated to all things sailboats and sailing. Whether you're a seasoned sailor, a boat enthusiast, or a curious newbie, this place welcomes you.
+
+If you post anything unrelated to sailboats, you might get hidden from our curation team.`;
 
 /** Team-page hidden lists: first page 10, then batches of 50. */
 export const HIDDEN_LIST_INITIAL = 10;
@@ -136,6 +139,100 @@ export function invalidateCurationReads(community = '') {
         window.dispatchEvent(new Event('mirageRefreshFeed'));
         console.debug('[lens] invalidated curation reads', { community: slug || null });
     } catch (_) { /* noop */ }
+}
+
+/**
+ * Poll the community teams list until a deleted team is gone from it.
+ * The sidebar's curator highlight and the lens picker refresh on
+ * invalidateCurationReads, which is only worth firing once the indexer has
+ * actually dropped the team — fire it earlier and the refresh re-reads the
+ * team that was just deleted, leaving the row highlighted until a reload.
+ */
+export async function waitForCurationTeamGone(community, teamId, options = {}) {
+    const slug = requireCommunitySlug(community);
+    const id = requireTeamId(teamId);
+
+    const {
+        viewer = '',
+        interval = 1500,
+        maxAttempts = 10,
+        timeoutMs = 5000,
+        sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    } = options;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const params = { include_deleted: false, _cb: Date.now() };
+            if (viewer) params.viewer = String(viewer).trim().toLowerCase();
+            const data = await Api.get(
+                `communities/${encodeURIComponent(slug)}/teams`,
+                params,
+                { timeoutMs },
+            );
+            const items = Array.isArray(data?.items) ? data.items : [];
+            if (!items.some((team) => Number(team?.team_id) === id && !team?.deleted)) {
+                console.debug('[curation] team deletion indexed', { community: slug, teamId: id, attempt });
+                return true;
+            }
+            console.debug('[curation] team deletion not indexed yet', { community: slug, teamId: id, attempt });
+        } catch (err) {
+            console.warn('[curation] team deletion poll failed', {
+                community: slug,
+                teamId: id,
+                attempt,
+                error: String(err?.message || err),
+            });
+        }
+        if (attempt < maxAttempts) await sleep(interval);
+    }
+    return false;
+}
+
+/**
+ * Poll one team until the API serves the profile that was just saved.
+ * Used after set_curation_team_profile: a read that beats the indexer still
+ * carries the old name and description, and reseeding the form from it puts the
+ * previous text back under the user seconds after they saved.
+ */
+export async function waitForCurationTeamProfile(community, teamId, name, description, options = {}) {
+    const slug = requireCommunitySlug(community);
+    const id = requireTeamId(teamId);
+    const wantName = String(name ?? '');
+    const wantDescription = String(description ?? '');
+
+    const {
+        viewer = '',
+        interval = 1500,
+        maxAttempts = 10,
+        timeoutMs = 5000,
+        sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    } = options;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const params = { _cb: Date.now() };
+            if (viewer) params.viewer = String(viewer).trim().toLowerCase();
+            const data = await Api.get(
+                `communities/${encodeURIComponent(slug)}/teams/${id}`,
+                params,
+                { timeoutMs },
+            );
+            if (String(data?.name ?? '') === wantName && String(data?.description ?? '') === wantDescription) {
+                console.debug('[curation] team profile visible', { community: slug, teamId: id, attempt });
+                return data;
+            }
+            console.debug('[curation] team profile not indexed yet', { community: slug, teamId: id, attempt });
+        } catch (err) {
+            console.warn('[curation] team profile poll failed', {
+                community: slug,
+                teamId: id,
+                attempt,
+                error: String(err?.message || err),
+            });
+        }
+        if (attempt < maxAttempts) await sleep(interval);
+    }
+    return null;
 }
 
 /**

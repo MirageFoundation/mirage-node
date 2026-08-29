@@ -139,6 +139,11 @@ function TopicToCommunityRedirect() {
     return <Navigate to={`/c/${topic || ''}`} replace />;
 }
 
+function CommunityTeamsRedirect() {
+    const { topic } = useParams();
+    return <Navigate to={`/c/${encodeURIComponent(topic || '')}`} replace />;
+}
+
 // Component to track and restore the last route
 function RouteTracker({ children }) {
     const location = useLocation();
@@ -216,9 +221,12 @@ function RouteTracker({ children }) {
         const path = pathname === '/' ? '/home' : pathname;
         const full = `${path}${search}`;
 
+        // /c/ is the canonical community feed (v1.39+). /t/ remains so a
+        // stale last_feed_route from before the redirect still restores.
         const isFeedRoute =
             path === '/home' ||
             path === '/following' ||
+            path.startsWith('/c/') ||
             path.startsWith('/t/');
 
         if (!isFeedRoute) return;
@@ -1140,7 +1148,7 @@ class App extends Component {
                                             />
                                             <Route
                                                 path="/c/:topic/teams/new"
-                                                element={<CurationTeamsView createOnly />}
+                                                element={<CurationTeamsView />}
                                             />
                                             <Route
                                                 path="/c/:topic/teams/:teamId"
@@ -1148,7 +1156,7 @@ class App extends Component {
                                             />
                                             <Route
                                                 path="/c/:topic/teams"
-                                                element={<CurationTeamsView />}
+                                                element={<CommunityTeamsRedirect />}
                                             />
                                             <Route
                                                 path="/c/:topic"
@@ -1176,7 +1184,7 @@ class App extends Component {
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
-                                            <Route path="/curator-teams/new" element={<CurationTeamsView createOnly />} />
+                                            <Route path="/curator-teams/new" element={<CurationTeamsView />} />
                                             <Route path="/communities" element={<DiscoverView state={this.state} />} />
                                             <Route path="/topics" element={<Navigate to="/communities" replace />} />
                                             <Route path="/stats" element={<StatsView />} />

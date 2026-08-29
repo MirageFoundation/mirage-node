@@ -141,11 +141,177 @@ def _test_curation_visibility() -> None:
         )
 
 
+class _TagCursor:
+    """Answers just the two queries resolve_effective_tags issues.
+
+    default_tag is the community's blanket tag; overrides maps post id to the
+    curator's decision, where a present '' is deliberately different from an
+    absent key.
+    """
+
+    def __init__(self, default_tag: str, overrides: dict[str, str], team_id: int = 7):
+        self._default_tag = default_tag
+        self._overrides = overrides
+        self._team_id = team_id
+        self._result = None
+
+    def execute(self, sql, params=()):
+        flat = " ".join(str(sql).split())
+        if "FROM curation_teams" in flat:
+            self._result = (self._team_id, "mirage1owner", "Team", "", False, 1, 10, 1, self._default_tag)
+        elif "FROM curation_post_tags" in flat:
+            post_id = params[2]
+            self._result = (self._overrides[post_id],) if post_id in self._overrides else None
+        else:
+            raise AssertionError(f"unexpected query: {flat}")
+
+    def fetchone(self):
+        return self._result
+
+
+def _test_effective_tag_precedence() -> None:
+    """Curator override beats the community tag, which beats the author's."""
+    backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    from curation import resolve_effective_tags
+
+    def effective(default_tag, overrides, author_tag, post_id="a" * 64):
+        posts = [{"post_id": post_id, "topic": "test", "tag": author_tag, "lens": {"effective_team_id": 7}}]
+        resolve_effective_tags(_TagCursor(default_tag, overrides), posts)
+        return posts[0]["tag"]
+
+    post = "a" * 64
+    cases = [
+        # (default_tag, overrides, author_tag, expected, why)
+        ("", {}, "adult", "adult", "author tag survives when nobody overrides"),
+        ("gore", {}, "", "gore", "community tag applies to an untagged post"),
+        ("gore", {}, "adult", "gore", "community tag beats the author"),
+        ("gore", {post: "death"}, "adult", "death", "curator override beats both"),
+        ("gore", {post: ""}, "adult", "", "an empty override means deliberately untagged"),
+        ("", {post: "adult"}, "", "adult", "override applies with no community tag"),
+    ]
+    bad = [
+        (default_tag, overrides, author_tag, expected, effective(default_tag, overrides, author_tag), why)
+        for default_tag, overrides, author_tag, expected, why in cases
+        if effective(default_tag, overrides, author_tag) != expected
+    ]
+    if bad:
+        _fail("backend_hardening.effective_tag_precedence", f"mismatches: {bad}")
+    else:
+        _pass("backend_hardening.effective_tag_precedence", cases=len(cases))
+
+
+def _test_visible_comment_recount() -> None:
+    """The thread header must count only comments the response actually returns.
+
+    count_descendants runs on the raw tree, before the lens drops anything, so
+    a thread locked partway through advertised replies it then refused to show
+    ("Comments (2)" over an empty tree). _build_thread recounts after filtering;
+    this pins both halves of that: unchanged when nothing is hidden, and equal
+    to the visible node count when something is.
+    """
+    source = (
+        Path(__file__).resolve().parents[2] / "web" / "backend" / "routes" / "public.py"
+    ).read_text(encoding="utf-8")
+    if "def recount_visible" not in source:
+        _fail("backend_hardening.visible_comment_recount", "recount_visible missing from _build_thread")
+        return
+    if source.index("def retain_visible") > source.index("def recount_visible"):
+        _fail("backend_hardening.visible_comment_recount", "recount runs before the lens filter prunes")
+        return
+
+    def recount_visible(nodes) -> int:
+        total = 0
+        for node in nodes:
+            kids = node.get("children") or []
+            below = recount_visible(kids)
+            if kids:
+                node["comments"] = below
+            total += 1 + below
+        return total
+
+    def tree():
+        return [
+            {"post_id": "a", "children": [{"post_id": "a1", "children": []}]},
+            {"post_id": "b", "children": []},
+            {"post_id": "truncated", "children": [], "comments": 7},
+        ]
+
+    problems = []
+    full = tree()
+    if recount_visible(full) != 4:
+        problems.append(f"unfiltered count {recount_visible(tree())} != 4")
+    if full[2]["comments"] != 7:
+        problems.append("truncated leaf count was overwritten")
+
+    # Two comments hidden: the header must fall to what is really rendered.
+    pruned = [node for node in tree() if node["post_id"] != "a"]
+    visible = recount_visible(pruned)
+    rendered = len(pruned) + sum(len(n.get("children") or []) for n in pruned)
+    if visible != rendered or visible != 2:
+        problems.append(f"filtered count {visible} != rendered {rendered}")
+
+    if problems:
+        _fail("backend_hardening.visible_comment_recount", "; ".join(problems))
+    else:
+        _pass("backend_hardening.visible_comment_recount")
+
+
+def _test_thread_lock_is_read_only() -> None:
+    """The lock filters a lens; it must never gate a write.
+
+    Every other curation control (hidden posts, hidden users, subscriber_only)
+    is a read-path filter, and raw stays reachable, so a curator cannot take a
+    thread away from the chain. If someone later makes MsgPost or the relay
+    consult the lock, that is a deliberate consensus/product change and this
+    test should be updated with it rather than quietly deleted.
+    """
+    repo = Path(__file__).resolve().parents[2]
+    problems = []
+
+    keeper = (repo / "blockchain" / "x" / "core" / "keeper" / "team.go").read_text(encoding="utf-8")
+    if "KeyThreadLock" not in keeper:
+        problems.append("thread lock key no longer written by the keeper")
+
+    post_route = (repo / "web" / "backend" / "routes" / "core.py").read_text(encoding="utf-8")
+    if "curation_locks" in post_route:
+        problems.append("core.py consults curation_locks; lock became a write gate")
+
+    curation = (repo / "web" / "backend" / "curation.py").read_text(encoding="utf-8")
+    if "def thread_locked_for_lens" not in curation:
+        problems.append("thread_locked_for_lens missing; the client cannot tell the user")
+
+    public = (repo / "web" / "backend" / "routes" / "public.py").read_text(encoding="utf-8")
+    if '"thread_locked"' not in public:
+        problems.append("get_comments does not report thread_locked")
+
+    view = (repo / "web" / "frontend" / "src" / "themes" / "default" / "routes" / "ViewPostView.js").read_text(
+        encoding="utf-8"
+    )
+    for needle, why in (
+        ("root?.thread_locked", "view never reads the lock"),
+        ("threadLocked ? <LockedNote", "reply button still offered on a locked thread"),
+        ("if (threadLocked && !isEdit) return", "composer not suppressed on a locked thread"),
+        ("!isMobile || threadLocked", "mobile reply overlay not suppressed"),
+    ):
+        if needle not in view:
+            problems.append(why)
+
+    if problems:
+        _fail("backend_hardening.thread_lock_read_only", "; ".join(problems))
+    else:
+        _pass("backend_hardening.thread_lock_read_only")
+
+
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
     _test_topic_matcher()
     _test_curation_visibility()
+    _test_effective_tag_precedence()
+    _test_visible_comment_recount()
+    _test_thread_lock_is_read_only()
 
     if not _check_local_docker():
         _skip("backend_hardening.container_probes", "requires local docker")

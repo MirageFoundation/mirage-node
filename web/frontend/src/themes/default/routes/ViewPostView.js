@@ -873,8 +873,8 @@ const MetaSeparator = styled.span`
 /**
  * Inline collapse/expand toggle shown next to the comment timestamp.
  * Rendered as a plain text chunk (no box, no button chrome) so it reads
- * as quiet metadata in the same rhythm as author / time / tag. Lifts
- * to `text` on hover.
+ * as quiet metadata in the same rhythm as community / author / time.
+ * Lifts to `text` on hover.
  */
 const CollapseToggle = styled.button`
     appearance: none;
@@ -911,7 +911,8 @@ const CollapseToggle = styled.button`
     }
 `;
 
-// Mobile root post meta - two rows: author+menu, then topic+time
+// Mobile root post meta - two rows: community+author+menu, then time/tag.
+// Same leading order as the feed card: [community] · @author · time.
 const MobileRootMeta = styled.div`
     display: none;
     @media (max-width: 600px) {
@@ -1573,6 +1574,20 @@ const MetaRow = styled.div`
 const MetaSeparatorAction = styled.span`
     flex: 1 1 auto;
     min-width: 0;
+`;
+/**
+ * Sits where the reply button would be when the current lens has the thread
+ * locked. It reads as metadata rather than an error because the lock is a
+ * curation choice, not a failure, and switching to the raw lens lifts it.
+ */
+const LockedNote = styled.span`
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    font-size: 0.75rem;
+    line-height: 1;
+    flex-shrink: 0;
 `;
 /**
  * Inline bullet separator used between tightly-clustered action items
@@ -2431,7 +2446,7 @@ function ViewPostView({
                                 handleTopicFollowToggle(post.topic);
                             }}>
                                 <HiOutlineHashtag />
-                                <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
+                                <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
                             </MenuItem>}
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2460,6 +2475,9 @@ function ViewPostView({
             </MenuDropdown>, document.body)}
         </MenuContainer>;
     };
+    // The lock belongs to the thread under the current lens, so it applies to
+    // every post in the view, not just the root the backend reports it on.
+    const threadLocked = !!root?.thread_locked;
     const renderActionBar = post => {
         const publicKeyStr = String(state.publicKey || '').trim();
         const hasValidAccount = publicKeyStr && publicKeyStr !== 'guest';
@@ -2477,14 +2495,21 @@ function ViewPostView({
         return <MetaRow>
             <VoteSection inline state={state} post={post} updatePost={updatePost} />
             <DotSep aria-hidden="true">·</DotSep>
-            <ActionButton onClick={() => toggleReply(post.post_id)}>
+            {threadLocked ? <LockedNote title="A curator locked this thread. Switch to the uncensored lens to see and add replies.">
+                <Icon aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V11a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3v3H9V6a3 3 0 0 1 3-3z"></path>
+                    </svg>
+                </Icon>
+                <span>thread locked</span>
+            </LockedNote> : <ActionButton onClick={() => toggleReply(post.post_id)}>
                 <Icon aria-hidden="true">
                     <svg viewBox="0 0 24 24">
                         <path d="M4 4h16v12H5.17L4 17.17V4zm0-2a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4z"></path>
                     </svg>
                 </Icon>
                 <span>reply</span>
-            </ActionButton>
+            </ActionButton>}
             <MetaSeparatorAction />
             {(() => {
                 const isOwnPostRow = post && state && post.user_id === state.publicKey;
@@ -2594,6 +2619,9 @@ function ViewPostView({
     const displayReplyBox = (post, forMobileOverlay = false) => {
         if (!state.posts[post.post_id]?.replyOpen) return <div></div>;
         const isEdit = state.posts[post.post_id]?.replyMode === 'edit';
+        // A composer left open from before the lock landed must not stay usable.
+        // Editing your own existing post is not a new reply, so it survives.
+        if (threadLocked && !isEdit) return <div></div>;
 
         // On mobile, don't render inline reply (use overlay instead) - except for edits
         if (isMobile && !isEdit && !forMobileOverlay) return <div></div>;
@@ -2963,7 +2991,7 @@ function ViewPostView({
 
     // Find post with open reply (for mobile overlay) - exclude edit mode
     const mobileReplyPost = (() => {
-        if (!isMobile) return null;
+        if (!isMobile || threadLocked) return null;
         const allPosts = [...annotated];
         for (const p of allPosts) {
             if (state.posts[p.post_id]?.replyOpen && state.posts[p.post_id]?.replyMode !== 'edit') {
@@ -3093,7 +3121,7 @@ function ViewPostView({
                                                 }}
                                                 disabled={isTopicInProgress}
                                             >
-                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Unfollow' : 'Following') : 'Follow'}
+                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Leave' : 'Joined') : 'Join'}
                                             </TopicFollowButton>}
                                         </TopicHeroTopRow>
 
@@ -3129,7 +3157,7 @@ function ViewPostView({
                                                 }}
                                                 disabled={isTopicInProgress}
                                             >
-                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Unfollow ${communityLabel(displayTopic)}` : `Following ${communityLabel(displayTopic)}`) : `Follow ${communityLabel(displayTopic)}`}
+                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Leave ${communityLabel(displayTopic)}` : `Joined ${communityLabel(displayTopic)}`) : `Join ${communityLabel(displayTopic)}`}
                                             </TopicFollowButton>}
                                         </TopicAction>
                                     </TopicHeroCard>
@@ -3154,15 +3182,17 @@ function ViewPostView({
                                                 {/* Mobile root post meta - two rows */}
                                                 {isRoot && <MobileRootMeta>
                                                     <MobileRootMetaTop>
+                                                        {(() => {
+                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
+                                                            return topicLabel ? <>
+                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                            </> : null;
+                                                        })()}
                                                         {renderAuthorLink(post)}
                                                         {renderPostMenu(post)}
                                                     </MobileRootMetaTop>
                                                     <MobileRootMetaBottom>
-                                                        {(() => {
-                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                            return topicLabel ? <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink> : null;
-                                                        })()}
-                                                        <MetaSeparator>·</MetaSeparator>
                                                         <span>{formatElapsed(post.timestamp)} ago</span>
                                                         {(() => {
                                                             const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
@@ -3226,19 +3256,21 @@ function ViewPostView({
                                                                 alt=""
                                                             />;
                                                         })()}
+                                                        {/* Root posts match the feed card order:
+                                                         * [community] · @author · time. Comments
+                                                         * have no community chip (inherited). */}
+                                                        {isRoot && (() => {
+                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
+                                                            return topicLabel ? <>
+                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                            </> : null;
+                                                        })()}
                                                         {renderAuthorLink(post)}
                                                         <MetaSeparator>·</MetaSeparator>
                                                         <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                                             {formatElapsed(post.timestamp)} ago
                                                         </Tooltip>
-                                                        {/* Only show topic for root posts - comments inherit from root */}
-                                                        {isRoot && (() => {
-                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                            return topicLabel ? <>
-                                                                <MetaSeparator>·</MetaSeparator>
-                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
-                                                            </> : null;
-                                                        })()}
                                                         {(() => {
                                                             const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                             return tagLabel ? <>

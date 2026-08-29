@@ -146,10 +146,7 @@ def check_params() -> None:
         if free_relays == 0 and sub_relays == relay_limit and 1 <= admin_relays <= 10000:
             ok(f"daily relay caps free=0 subscriber={sub_relays} admin={admin_relays}")
         else:
-            fail(
-                f"daily relay caps unexpected: free={free_relays} "
-                f"subscriber={sub_relays} admin={admin_relays}"
-            )
+            fail(f"daily relay caps unexpected: free={free_relays} " f"subscriber={sub_relays} admin={admin_relays}")
     else:
         fail(f"tier count={len(tiers)}")
     retired = {
@@ -166,8 +163,8 @@ def check_params() -> None:
         desc_limit = int(params["max_curation_team_description_length"])
     except (KeyError, TypeError, ValueError):
         desc_limit = 0
-    if desc_limit == 4000:
-        ok("max_curation_team_description_length=4000")
+    if desc_limit == 800:
+        ok("max_curation_team_description_length=800")
     else:
         fail(f"max_curation_team_description_length={params.get('max_curation_team_description_length')!r}")
 
@@ -242,6 +239,49 @@ def check_open_community_contract() -> None:
         ok("community detail has no ownership or metadata fields")
 
 
+def check_curation_tag_schema() -> None:
+    """The tag schema has to exist on a real deploy, not just in a migration file.
+
+    Without the column and the table the backend's tag precedence silently
+    degrades to the author's own tag, which is exactly the failure the feature
+    exists to prevent, and nothing else would surface it.
+    """
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        fail("INDEXER_DB_URL missing from deployed environment")
+        return
+    import psycopg
+
+    with psycopg.connect(db_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name='curation_teams' AND column_name='tag'"
+            )
+            has_column = cursor.fetchone() is not None
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name='curation_post_tags' ORDER BY column_name"
+            )
+            tag_columns = {str(row[0]) for row in cursor.fetchall()}
+    if has_column:
+        ok("curation_teams.tag present")
+    else:
+        fail("curation_teams.tag missing")
+    expected = {"community", "team_id", "target_txhash", "tag", "actor", "updated_height"}
+    if expected.issubset(tag_columns):
+        ok("curation_post_tags present")
+    else:
+        fail(f"curation_post_tags missing columns: {sorted(expected - tag_columns)}")
+
+    for path in ("/api/core/set_curation_tag", "/api/core/set_curation_post_tag"):
+        status = http_status(f"{BACKEND}{path}")
+        if status == 404:
+            fail(f"{path} is not registered")
+        else:
+            ok(f"{path} registered (status={status})")
+
+
 def comet_height() -> int:
     return int(http_json(f"{RPC}/status")["result"]["sync_info"]["latest_block_height"])
 
@@ -288,6 +328,7 @@ def main() -> int:
         check_params_reach_backend,
         check_gone_routes,
         check_open_community_contract,
+        check_curation_tag_schema,
         check_progress,
     )
     for check in checks:

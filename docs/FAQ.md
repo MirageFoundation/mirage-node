@@ -236,6 +236,12 @@ downvoted, suppressed, and ignored. If someone wants maximum visibility and enga
 are encouraged to post in the right community and use the right tags, because the crowd will
 punish off-community or mislabeled content.
 
+Curators are the second layer. A curator team leader can put one tag on an entire community,
+so an adult community is tagged adult whether or not each poster remembers to do it, and any
+curator on the team can correct the tag on a single post. Your own filters still decide what
+happens next: a tag only tells your settings what the content is, it never forces anything
+into or out of your feed.
+
 ### What are the default safety settings for new users?
 
 On first use, you are asked whether you want sensitive content filtered out or shown. By
@@ -421,11 +427,17 @@ changes your feed without creating a rule for everyone else.
 Then settings alone are not enough, because settings can only filter the tag the system
 sees.
 
-Block the post or the user. Downvote mislabeled posts so they drop in the feed. If a
-community keeps attracting untagged adult content, leave it or block it.
+If the community has a curator team, a curator can fix the tag on that post, or the team
+leader can tag the whole community so nothing in it arrives untagged. Beyond that, block the
+post or the user, and downvote mislabeled posts so they drop in the feed. If a community
+keeps attracting untagged adult content, leave it or block it.
 
-Mirage does not appoint a global tagger. The model is uploader tags, user settings, votes,
-and personal blocks.
+Mirage does not appoint a global tagger. A curator's reach stops at their own community, and
+a per-post correction only applies to people viewing through that curator's lens. The one
+exception is the community tag, which is a property of the community itself and follows its
+posts everywhere, including the uncensored lens, because a tag describes content rather than
+hiding it. The model is uploader tags, community curators, user settings, votes, and personal
+blocks.
 
 ### Are adult-content filters perfect?
 
@@ -846,9 +858,12 @@ break them.
 ### What are curator teams and lenses?
 
 A curator team is an optional group of up to ten paid users who maintain one view of a
-community. Its leader can invite curators, and each invitee must accept before joining. Team
-curators can hide posts or users from that team's view and lock threads. Those actions never
-erase the underlying content or change another team's view.
+community. Its leader can invite curators, and each invitee must accept before joining.
+Creating a team, or accepting an invite to one, automatically joins you to that community
+(you do not have to join first). Team curators can hide posts or users from that team's view
+and lock threads. Those actions never erase the underlying content or change another team's
+view. Hiding is only for that team's lens; the post is still on the network, and anyone can
+pick Uncensored or another team.
 
 You choose the lens you want: the node default, a specific team, or Uncensored. The node
 default is the live team with the most paid subscribers, with older teams winning ties.

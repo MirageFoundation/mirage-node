@@ -145,6 +145,20 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 				w.writeUvarint(101, u64(fields, "team_id"))
 				writeCanonBool(w, 102, boolean(fields, "enabled"))
 			}
+		case "MsgSetCurationTag":
+			fill = func(w *canonWriter) {
+				w.writeString(100, str(fields, "community"))
+				w.writeUvarint(101, u64(fields, "team_id"))
+				w.writeString(102, str(fields, "tag"))
+			}
+		case "MsgSetCurationPostTag":
+			fill = func(w *canonWriter) {
+				w.writeString(100, str(fields, "community"))
+				w.writeUvarint(101, u64(fields, "team_id"))
+				w.writeString(102, str(fields, "target"))
+				w.writeString(103, str(fields, "tag"))
+				writeCanonBool(w, 104, boolean(fields, "clear"))
+			}
 		default:
 			t.Fatalf("vector for unknown message %q — add the Go canon layout here", vec.Msg)
 		}

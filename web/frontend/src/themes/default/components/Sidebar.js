@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation } from 'react-router-dom';
 import {
@@ -6,8 +6,8 @@ import {
     HiOutlineHome,
     HiHeart,
     HiOutlineHeart,
-    HiHashtag,
-    HiOutlineHashtag,
+    HiUserGroup,
+    HiOutlineUserGroup,
     HiPlusCircle,
     HiOutlinePlusCircle,
     HiMagnifyingGlass,
@@ -21,6 +21,8 @@ import { fetchFollowedTopics, loadSubscriptions } from '../../../utils/Subscript
 import { fetchFollowedUsers, loadFollowedAuthors } from '../../../utils/FollowUsers';
 import { resolveUsernames } from '../../../utils/UsernameCache';
 import { communityLabel, communityPath } from '../../../utils/community';
+import { useViewerCuratorCommunities } from '../../../logic/useViewerCuratorMembership';
+import { requireThemeColor } from '../../../utils/themeColor';
 
 /**
  * Desktop sidebar rail for the default theme.
@@ -28,8 +30,8 @@ import { communityLabel, communityPath } from '../../../utils/community';
  * Hidden below 1000px via CSS (the shell also collapses the column).
  *
  * Structure:
- *   - Primary nav (Home, Following, Topics, Create post)
- *   - Topics you follow (collapsible)
+ *   - Primary nav (Home, Following, Communities, Create post)
+ *   - Communities you joined (collapsible)
  *   - Users you follow (collapsible)
  */
 
@@ -178,14 +180,28 @@ const TopicLink = styled(Link)`
     padding: 0.32rem 0.6rem;
     border-radius: 6px;
     font-size: 0.68rem;
-    color: ${({ theme }) => theme.colors.sidebarItemText};
+    font-weight: ${({ $curated }) => ($curated ? 600 : 500)};
+    color: ${({ theme, $curated }) => (
+        $curated
+            ? requireThemeColor(theme, 'voteUp')
+            : requireThemeColor(theme, 'sidebarItemText')
+    )};
     text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 
     &:hover {
-        background: ${({ theme }) => theme.colors.hoverBg};
+        background: ${({ theme, $curated }) => (
+        $curated
+            ? requireThemeColor(theme, 'voteUpBg')
+            : requireThemeColor(theme, 'hoverBg')
+    )};
+        color: ${({ theme, $curated }) => (
+        $curated
+            ? requireThemeColor(theme, 'voteUpHover')
+            : requireThemeColor(theme, 'sidebarItemText')
+    )};
         text-decoration: none;
     }
 `;
@@ -239,7 +255,7 @@ const ToggleMore = styled.button`
 const icons = {
     home: { outline: HiOutlineHome, filled: HiHome },
     following: { outline: HiOutlineHeart, filled: HiHeart },
-    topics: { outline: HiOutlineHashtag, filled: HiHashtag },
+    topics: { outline: HiOutlineUserGroup, filled: HiUserGroup },
     create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
     search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
     faq: { outline: HiOutlineQuestionMarkCircle, filled: HiQuestionMarkCircle },
@@ -276,6 +292,30 @@ function Sidebar({ state }) {
     const [topics, setTopics] = useState(() => loadSubscriptions(viewerAddress));
     const [people, setPeople] = useState(() => loadFollowedAuthors(viewerAddress));
     const [usernamesMap, setUsernamesMap] = useState({});
+    const { communities: curatedCommunities } = useViewerCuratorCommunities();
+    const curatedSet = useMemo(
+        () => new Set(curatedCommunities.map((slug) => String(slug).toLowerCase())),
+        [curatedCommunities],
+    );
+    // Curated communities first (including ones you curate but haven't joined),
+    // then the rest of the joined list in its existing order.
+    const orderedTopics = useMemo(() => {
+        const seen = new Set();
+        const out = [];
+        for (const slug of curatedCommunities) {
+            const key = String(slug || '').trim().toLowerCase();
+            if (!key || key === 'all' || key === 'home' || seen.has(key)) continue;
+            seen.add(key);
+            out.push(key);
+        }
+        for (const topic of topics) {
+            const key = String(topic || '').trim().toLowerCase();
+            if (!key || key === 'all' || key === 'home' || seen.has(key)) continue;
+            seen.add(key);
+            out.push(key);
+        }
+        return out;
+    }, [curatedCommunities, topics]);
 
     const [topicsLimit, setTopicsLimit] = useState(() => {
         const v = Storage.load('sidebar_topics_limit', 10);
@@ -374,7 +414,7 @@ function Sidebar({ state }) {
         return () => { alive = false; };
     }, [people]);
 
-    const topicsToShow = showAllTopics ? topics : topics.slice(0, topicsLimit);
+    const topicsToShow = showAllTopics ? orderedTopics : orderedTopics.slice(0, topicsLimit);
     const usersToShow = showAllUsers ? people : people.slice(0, peopleLimit);
 
     const renderUserLabel = (addr) => {
@@ -425,17 +465,25 @@ function Sidebar({ state }) {
                         {topicsOpen && (
                             <div>
                                 {topicsToShow.length === 0 ? (
-                                    <EmptyRow>None followed</EmptyRow>
+                                    <EmptyRow>None joined</EmptyRow>
                                 ) : (
-                                    topicsToShow.map((topic) => (
-                                        <TopicLink key={topic} to={communityPath(topic)}>
-                                            {communityLabel(topic)}
-                                        </TopicLink>
-                                    ))
+                                    topicsToShow.map((topic) => {
+                                        const curated = curatedSet.has(String(topic).toLowerCase());
+                                        return (
+                                            <TopicLink
+                                                key={topic}
+                                                to={communityPath(topic)}
+                                                $curated={curated}
+                                                title={curated ? 'You curate this community' : undefined}
+                                            >
+                                                {communityLabel(topic)}
+                                            </TopicLink>
+                                        );
+                                    })
                                 )}
-                                {topics.length > topicsLimit && (
+                                {orderedTopics.length > topicsLimit && (
                                     <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
-                                        {showAllTopics ? 'Show less' : `+${topics.length - topicsLimit} more`}
+                                        {showAllTopics ? 'Show less' : `+${orderedTopics.length - topicsLimit} more`}
                                         <ChevronIcon expanded={showAllTopics} />
                                     </ToggleMore>
                                 )}

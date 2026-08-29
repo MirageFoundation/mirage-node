@@ -84,7 +84,7 @@ def get_default_team(cur, community: str) -> dict[str, Any] | None:
     cur.execute(
         """
         SELECT team_id, owner, name, description, subscriber_only,
-               subscriber_count, created_height, created_order
+               subscriber_count, created_height, created_order, tag
         FROM curation_teams
         WHERE community=%s AND deleted_height IS NULL
         ORDER BY subscriber_count DESC, created_order ASC, team_id ASC
@@ -104,6 +104,7 @@ def get_default_team(cur, community: str) -> dict[str, Any] | None:
         "subscriber_count": int(row[5]),
         "created_height": int(row[6]),
         "created_order": int(row[7]),
+        "tag": str(row[8] or ""),
     }
 
 
@@ -202,6 +203,89 @@ def resolve_lens(
         result["effective_team_id"],
     )
     return result
+
+
+def resolve_effective_tags(
+    cur,
+    posts: list[dict],
+    *,
+    viewer: str | None = None,
+    requested_lens: str = "effective",
+    requested_team_id: int | None = None,
+) -> None:
+    """Rewrite each post's ``tag`` to the one this viewer's lens actually shows.
+
+    Precedence is the lens team's per-post override, then the community's
+    blanket tag, then the author's own tag. The community tag is deliberately
+    not lens-scoped: it is a property of the community rather than of any one
+    curator's view, so it is read from the default team and applies on the raw
+    lens too. A per-post override of ``""`` is a curator asserting the post
+    carries no tag, which is why an existing row wins even when it is empty.
+
+    Each post needs a ``topic`` (community slug) and a ``post_id``. When
+    filter_posts has already stamped ``post["lens"]`` that team is reused;
+    otherwise the lens is resolved here. Always run this before any
+    allowed-tags filtering, which must see the effective value.
+    """
+    if not posts:
+        return
+    address = str(viewer or "").strip().lower()
+    default_teams: dict[str, dict[str, Any] | None] = {}
+    lens_teams: dict[str, int | None] = {}
+    for post in posts:
+        community = str(post.get("topic") or "").strip().lower()
+        post_id = str(post.get("post_id") or "").strip().lower()
+        if not community or not post_id:
+            continue
+        if community not in default_teams:
+            default_teams[community] = get_default_team(cur, community)
+        default_team = default_teams[community]
+
+        stamped = (post.get("lens") or {}).get("effective_team_id")
+        if stamped is not None:
+            team_id = int(stamped)
+        else:
+            if community not in lens_teams:
+                lens_teams[community] = resolve_lens(
+                    cur,
+                    viewer=address,
+                    community=community,
+                    requested_lens=requested_lens,
+                    requested_team_id=requested_team_id,
+                )["effective_team_id"]
+            team_id = lens_teams[community]
+        # The raw lens has no team of its own, so per-post overrides fall back
+        # to the default team's, which is where the community tag comes from.
+        if team_id is None:
+            if not default_team:
+                continue
+            team_id = default_team["team_id"]
+
+        cur.execute(
+            """
+            SELECT tag FROM curation_post_tags
+            WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
+            """,
+            (community, int(team_id), post_id),
+        )
+        row = cur.fetchone()
+        community_tag = default_team["tag"] if default_team else ""
+        if row is not None:
+            effective = str(row[0] or "")
+        elif community_tag:
+            effective = community_tag
+        else:
+            continue
+        if effective != post.get("tag", ""):
+            log.debug(
+                "[tag] override post=%s community=%s team=%s author_tag=%s effective=%s",
+                post_id[:12],
+                community,
+                team_id,
+                post.get("tag", ""),
+                effective,
+            )
+        post["tag"] = effective
 
 
 def filter_posts(
@@ -371,3 +455,25 @@ def filter_posts(
                 }
             )
     return visible, tombstones
+
+
+def thread_locked_for_lens(cur, community: str, root_id: str, team_id: int | None) -> bool:
+    """Report whether this lens's team has locked the thread rooted at ``root_id``.
+
+    A lock is per team, so the raw lens (``team_id`` None) is never locked and
+    two teams can disagree. This is only ever used to tell the client not to
+    offer a reply it would immediately hide: the lock is a read filter, so a
+    comment written anyway is still valid on chain and still visible on raw.
+    """
+    slug = str(community or "").strip().lower()
+    root = str(root_id or "").strip().lower()
+    if not slug or not root or team_id is None:
+        return False
+    cur.execute(
+        """
+        SELECT 1 FROM curation_locks
+        WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+        """,
+        (slug, int(team_id), root),
+    )
+    return cur.fetchone() is not None

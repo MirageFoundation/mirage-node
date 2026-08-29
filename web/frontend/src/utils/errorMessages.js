@@ -55,6 +55,9 @@ const ERROR_MAP = {
     invalid_input: "That request wasn't valid. Please try again.",
     invalid_input_type: "That request wasn't valid. Please try again.",
     invalid_base64: "That request wasn't valid. Please try again.",
+    invalid_limit: "That request wasn't valid. Please try again.",
+    invalid_offset: "That request wasn't valid. Please try again.",
+    missing_author: "An author is required.",
 
     // PoW
     insufficient_pow_precheck: "Proof-of-work is insufficient. Please try again.",
@@ -142,7 +145,7 @@ const ERROR_MAP = {
     user_already_blocked: "You already blocked this user.",
     topic_already_blocked: "You already blocked this community.",
     user_already_followed: "You already follow this user.",
-    topic_already_followed: "You already follow this community.",
+    topic_already_followed: "You already joined this community.",
     user_must_be_mirage1: "User must be a valid mirage1 address.",
     block_post_in_progress: "Block post request already in progress.",
     unblock_post_in_progress: "Unblock post request already in progress.",
@@ -152,8 +155,8 @@ const ERROR_MAP = {
     unblock_topic_in_progress: "Unblock community request already in progress.",
     follow_user_in_progress: "Follow user request already in progress.",
     unfollow_user_in_progress: "Unfollow user request already in progress.",
-    follow_topic_in_progress: "Follow community request already in progress.",
-    unfollow_topic_in_progress: "Unfollow community request already in progress.",
+    follow_topic_in_progress: "Join community request already in progress.",
+    unfollow_topic_in_progress: "Leave community request already in progress.",
     vote_already_pending: "Vote already pending.",
     delete_in_progress: "Delete account request already in progress.",
 
@@ -172,8 +175,9 @@ const ERROR_MAP = {
 
     // Subscription
     not_subscriber: "This action requires an active subscription or an admin account.",
-    must_join_community: "Follow this community first.",
     already_curator: "You already curate a team in this community.",
+    leave_blocked_by_curation: "You curate a team here. Leave the curator team first, then you can leave the community.",
+    not_joined: "You are not a member of this community.",
     invalid_level: "Invalid subscription level.",
     invalid_period_count: "Choose between 1 and 12 subscription periods.",
     insufficient_balance: "Insufficient balance to complete this transaction.",

@@ -29,6 +29,8 @@ const CURATION_TX_SPECS = Object.freeze({
     set_curation_user_hidden: ['MsgSetCurationUserHidden', 'core/set_curation_user_hidden', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string'], ['hidden', 103, 'bool']]],
     set_curation_thread_locked: ['MsgSetCurationThreadLocked', 'core/set_curation_thread_locked', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['root_hash', 102, 'string'], ['locked', 103, 'bool']]],
     set_curation_subscriber_only: ['MsgSetCurationSubscriberOnly', 'core/set_curation_subscriber_only', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['enabled', 102, 'bool']]],
+    set_curation_tag: ['MsgSetCurationTag', 'core/set_curation_tag', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['tag', 102, 'string']]],
+    set_curation_post_tag: ['MsgSetCurationPostTag', 'core/set_curation_post_tag', [['community', 100, 'string'], ['team_id', 101, 'uint'], ['target', 102, 'string'], ['tag', 103, 'string'], ['clear', 104, 'bool']]],
     claim_creator_rewards: ['MsgClaimCreatorRewards', 'core/claim_creator_rewards', [['epoch_ids', 100, 'repeated_uint']]],
 });
 
@@ -1197,6 +1199,34 @@ class TransactionHandler {
             return this._enqueueCuration('set_curation_subscriber_only', {
                 community: slug, team_id: id, enabled: Boolean(enabled),
             }, slug, id);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    async setCurationTag(community, teamId, tag) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const value = String(tag || '').trim().toLowerCase();
+            if (!ALLOWED_TAGS.has(value)) throw new Error(`invalid tag: ${value}`);
+            return this._enqueueCuration('set_curation_tag', {
+                community: slug, team_id: id, tag: value,
+            }, slug, id);
+        } catch (e) { return this._failFromException(e); }
+    }
+
+    // clear drops this team's opinion so the community tag applies again. It is
+    // not the same as tag '', which records the post as deliberately untagged.
+    async setCurationPostTag(community, teamId, postId, tag, clear = false) {
+        try {
+            const slug = requireCommunitySlug(community);
+            const id = requireTeamId(teamId);
+            const target = String(postId || '').trim().toLowerCase();
+            if (!target) throw new Error('post id is required');
+            const value = clear ? '' : String(tag || '').trim().toLowerCase();
+            if (!clear && !ALLOWED_TAGS.has(value)) throw new Error(`invalid tag: ${value}`);
+            return this._enqueueCuration('set_curation_post_tag', {
+                community: slug, team_id: id, target, tag: value, clear: Boolean(clear),
+            }, slug, id, target);
         } catch (e) { return this._failFromException(e); }
     }
 

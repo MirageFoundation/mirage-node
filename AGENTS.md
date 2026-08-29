@@ -21,6 +21,7 @@
 - Finish the queued changes first; deploy once at the end, or when the user explicitly says `deploy`.
 - Do not ask “deploy now?” between items. Do not auto-deploy after every small fix.
 - When the queue is clear and a local deploy is needed to verify, either wait for an explicit `deploy` or do one deploy after the batch — never one deploy per message.
+- **Frontend-only local sync is not a deploy and is always immediate.** After UI-only changes, rebuild and copy the static frontend into the running local Docker container so the user can refresh and test it, even when more work is queued. Do not restart the container, backend, indexer, or node for a UI sync.
 
 ### SERVERS
 

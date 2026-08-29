@@ -413,6 +413,25 @@ func (am AppModule) SetCurationPostHidden(ctx context.Context, req *types.MsgSet
 	return &types.MsgSetCurationPostHiddenResponse{}, nil
 }
 
+func (am AppModule) SetCurationPostTag(ctx context.Context, req *types.MsgSetCurationPostTag) (*types.MsgSetCurationPostTagResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
+	if err != nil {
+		return nil, err
+	}
+	tag := normalizeTag(req.GetTag())
+	if req.GetClear() && tag != "" {
+		return nil, fmt.Errorf("clear cannot be combined with a tag")
+	}
+	if err := validateTag(tag); err != nil {
+		return nil, err
+	}
+	if err := am.k.SetCurationPostTag(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.ToLower(req.GetTarget()), tag, actor, req.GetClear()); err != nil {
+		return nil, err
+	}
+	return &types.MsgSetCurationPostTagResponse{}, nil
+}
+
 func (am AppModule) SetCurationUserHidden(ctx context.Context, req *types.MsgSetCurationUserHidden) (*types.MsgSetCurationUserHiddenResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
@@ -465,6 +484,29 @@ func (am AppModule) SetCurationSubscriberOnly(ctx context.Context, req *types.Ms
 		sdk.NewAttribute("actor", actor),
 	))
 	return &types.MsgSetCurationSubscriberOnlyResponse{}, nil
+}
+
+func (am AppModule) SetCurationTag(ctx context.Context, req *types.MsgSetCurationTag) (*types.MsgSetCurationTagResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	slug := strings.TrimSpace(req.GetCommunity())
+	actor, err := am.envelopeOwner(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := am.consumeQuota(sdkCtx, actor); err != nil {
+		return nil, err
+	}
+	if _, err := am.k.RequireTeamOwner(sdkCtx, actor, slug, req.GetTeamId()); err != nil {
+		return nil, err
+	}
+	tag := normalizeTag(req.GetTag())
+	if err := validateTag(tag); err != nil {
+		return nil, err
+	}
+	if err := am.k.SetCurationTeamTag(sdkCtx, slug, req.GetTeamId(), tag); err != nil {
+		return nil, err
+	}
+	return &types.MsgSetCurationTagResponse{}, nil
 }
 
 type envelopeMsg interface {

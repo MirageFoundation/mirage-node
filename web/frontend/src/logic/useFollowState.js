@@ -9,7 +9,7 @@ import { useTxStatus } from './useTxStatus';
  * All blockchain operations should follow the same pattern:
  * - Use global state tracking that persists across page navigation
  * - Display queue position using formatStatusForPosition()
- * - Show action-specific text (e.g., "Following..." vs "Unfollowing...")
+ * - Show action-specific text
  */
 export function usePendingFollows() {
     const [pendingFollows, setPendingFollows] = useState({});
@@ -69,7 +69,7 @@ export function usePendingFollows() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'unfollow' ? 'Unfollowing...' : 'Following...';
+        return info.action === 'unfollow' ? 'Leaving...' : 'Joining...';
     }, [getInfo, formatStatusForPosition]);
 
     const formatUserStatus = useCallback((user) => {

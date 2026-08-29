@@ -906,6 +906,26 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if err != nil {
 				return ctx, err
 			}
+		case *coretypes.MsgSetCurationTag:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationTag", buildCanonV139("MsgSetCurationTag", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Tag)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPostTag:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgSetCurationPostTag", buildCanonV139("MsgSetCurationPostTag", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				w.writeString(103, m.Tag)
+				writeCanonBool(w, 104, m.Clear)
+			}), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
 		case *coretypes.MsgClaimCreatorRewards:
 			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgClaimCreatorRewards", buildCanonV139("MsgClaimCreatorRewards", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
 				for _, id := range m.EpochIds {

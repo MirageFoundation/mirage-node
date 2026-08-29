@@ -21,6 +21,7 @@ import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } fro
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
 import CurationLensPicker from "../components/CurationLensPicker";
+import CommunityMembershipPicker from "../components/CommunityMembershipPicker";
 import AccountStatusNotices from "../components/AccountStatusNotices";
 
 // Mobile header branding for home/following feeds
@@ -772,7 +773,7 @@ const CommunityLensBar = styled.div`
     width: 100%;
     margin: 0;
     padding: 0.55rem 1rem 0.45rem;
-    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'borderStrong')};
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
 
     @media (max-width: 600px) {
@@ -782,28 +783,44 @@ const CommunityLensBar = styled.div`
 
 const CommunityLensTopRow = styled.div`
     display: flex;
-    align-items: center;
+    /* Baseline, not center: the title is 0.9rem and the controls are 0.68rem,
+       so centering their boxes leaves the text sitting ~1.2px apart. */
+    align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem;
     min-width: 0;
+    /* Closes the header band off from the team description under it. */
+    padding-bottom: ${({ $divided }) => ($divided ? '0.4rem' : '0')};
+    border-bottom: 1px solid ${({ $divided, theme }) => ($divided ? requireThemeColor(theme, 'border') : 'transparent')};
 `;
 
 const CommunityLensHeading = styled.div`
+    /* Matches FeedControlButton so the title, membership, lens, sort and view
+       controls all sit on one 28px baseline. */
+    --community-header-control-height: 28px;
+    --community-header-control-font-size: 0.68rem;
+    --community-header-title-font-size: 0.9rem;
     display: flex;
-    align-items: center;
-    gap: 0.55rem;
+    align-items: baseline;
+    gap: 0.3rem;
     min-width: 0;
     flex: 1 1 auto;
 `;
 
 const CommunityLensTitle = styled.h1`
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    height: var(--community-header-control-height);
     margin: 0;
     padding: 0;
+    /* Match button border thickness so the content box is identical. */
+    border: 1px solid transparent;
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
-    font-size: 1.05rem;
+    font-size: var(--community-header-title-font-size);
     font-weight: 700;
     letter-spacing: -0.01em;
-    line-height: 1.2;
+    line-height: 1;
     min-width: 0;
     max-width: 14rem;
     overflow: hidden;
@@ -812,6 +829,29 @@ const CommunityLensTitle = styled.h1`
     flex: 0 1 auto;
 `;
 
+const CurationTeamHeader = styled.div`
+    display: grid;
+    max-width: 52rem;
+    min-width: 0;
+`;
+
+const CurationTeamDescription = styled.p`
+    margin: 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.62rem;
+    line-height: 1.35;
+    white-space: pre-line;
+    /* Long unbroken strings (no spaces) still need an explicit break point. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
+`;
+
+/**
+ * Stays centered while the row above is baseline-aligned: the view toggle is
+ * icon-only, so it has no baseline to align to and would hang off the row.
+ * The group as a whole still contributes the sort label's baseline upward.
+ */
 const CommunityLensControls = styled.div`
     display: flex;
     align-items: center;
@@ -858,7 +898,7 @@ const EmptyHomeBody = styled.div`
 const EmptyHomeMessage = () => <EmptyHomeCard role="region" aria-label="Empty home feed">
     <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
     <EmptyHomeBody>
-        Follow a few communities to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/communities">communities</InlineLink> to get started.
+        Join a few communities to personalize your feed. If this node is new, be the first to post. Browse <InlineLink to="/communities">communities</InlineLink> to get started.
     </EmptyHomeBody>
 </EmptyHomeCard>;
 
@@ -873,6 +913,7 @@ const MainView = ({
 }) => {
     const theme = useTheme();
     const showHero = theme.caps.showHeroCards;
+    const [curationHeader, setCurationHeader] = useState({ community: '', team: null });
     const {
         urlTopic,
         currentTopicRef,
@@ -923,9 +964,15 @@ const MainView = ({
         setTopic,
         routeTopic
     });
-    const handleLensChange = useCallback((lens, teamId) => {
+    const handleLensChange = useCallback((lens, teamId, team) => {
         setFeedLens({ lens, teamId });
-    }, [setFeedLens]);
+        setCurationHeader({ community: urlTopic, team });
+        console.debug('[lens] community header updated', {
+            community: urlTopic,
+            teamId: team?.team_id || null,
+        });
+    }, [setFeedLens, urlTopic]);
+    const activeCurationTeam = curationHeader.community === urlTopic ? curationHeader.team : null;
     // Open browsing: guests may read the feed too. Content-rendering branches use
     // canBrowse; logged-in-only chrome (heroes, banners) keeps using isLoggedIn.
     // Until the node config has loaded we don't yet know if open browsing is on,
@@ -989,7 +1036,7 @@ const MainView = ({
                             setStableOrder(s => s.slice());
                         } catch (_) {/* noop */ }
                     }}>
-                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'unfollow' : 'follow'}
+                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'leave' : 'join'}
                     </HeaderInlineLink>
                     )
                 </PostHeaderText>
@@ -1096,7 +1143,7 @@ const MainView = ({
         // Full-width main column + shell header (no left sidebar; old Reddit style)
         const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : communityLabel(urlTopic);
         const noPostsMessage = urlTopic === 'following'
-            ? 'No posts available. Follow users or communities to populate this feed.'
+            ? 'No posts available. Follow users or join communities to populate this feed.'
             : 'No posts available';
         return <ContentGrid>
             <Helmet>
@@ -1125,7 +1172,7 @@ const MainView = ({
                                             {!isMobile && <option value="compact">Compact</option>}
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
-                                        <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" minWidth="5.5rem" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
+                                        <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
                                             const topicName = urlTopic;
                                             if (!topicName) return;
                                             const key = topicKeyLower;
@@ -1146,35 +1193,39 @@ const MainView = ({
                                                 invalidateTopicsCache();
                                             } catch (_) {/* noop */ }
                                         }}>
-                                            {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Unfollow' : 'Following' : 'Follow'}
+                                            {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Leave' : 'Joined' : 'Join'}
                                         </Button>
                                     </HomeFeedModeInline>
                                 </TopicHeroHeader>
                                 <TopicHeroDescription>
-                                    Community feed for {communityLabel(urlTopic)}. Follow this community to stay up to date with the latest posts, discussions, and updates from users actively contributing here.
+                                    Community feed for {communityLabel(urlTopic)}. Join this community to stay up to date with the latest posts, discussions, and updates from users actively contributing here.
                                 </TopicHeroDescription>
                             </TopicHeroCard>}
 
                             {isCurrentTopic && !isUrlTopicBlocked && (
                                 <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
-                                    <CommunityLensTopRow>
+                                    <CommunityLensTopRow $divided={Boolean(activeCurationTeam?.description)}>
                                         <CommunityLensHeading>
                                             <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
+                                            <CurationLensPicker
+                                                community={urlTopic}
+                                                viewer={viewerAddress}
+                                                onChange={handleLensChange}
+                                            />
+                                        </CommunityLensHeading>
+                                        <CommunityLensControls>
                                             {isLoggedIn && (
-                                                <Button
-                                                    variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'}
-                                                    size="xs"
-                                                    minWidth="5.5rem"
-                                                    onMouseEnter={() => setTopicFollowHover(true)}
-                                                    onMouseLeave={() => setTopicFollowHover(false)}
-                                                    disabled={isTopicInProgress}
-                                                    onClick={async () => {
+                                                <CommunityMembershipPicker
+                                                    joined={isTopicFollowing}
+                                                    pending={isTopicInProgress}
+                                                    statusLabel={formatTopicStatus(topicKeyLower)}
+                                                    onToggle={async () => {
                                                         const topicName = urlTopic;
                                                         if (!topicName) return;
                                                         const key = topicKeyLower;
                                                         if (!key) return;
                                                         if (isTopicPending(key)) return;
-                                                        console.debug('[community] follow toggle', {
+                                                        console.debug('[community] membership toggle', {
                                                             community: key,
                                                             following: isTopicFollowing,
                                                         });
@@ -1192,31 +1243,24 @@ const MainView = ({
                                                             }
                                                             invalidateTopicsCache();
                                                         } catch (err) {
-                                                            console.error('[community] follow toggle failed', {
+                                                            console.error('[community] membership toggle failed', {
                                                                 community: key,
                                                                 error: String(err?.message || err),
                                                             });
+                                                            throw err;
                                                         }
                                                     }}
-                                                >
-                                                    {isTopicInProgress
-                                                        ? formatTopicStatus(topicKeyLower)
-                                                        : isTopicFollowing
-                                                            ? (topicFollowHover ? 'Unfollow' : 'Following')
-                                                            : 'Follow'}
-                                                </Button>
+                                                />
                                             )}
-                                        </CommunityLensHeading>
-                                        <CommunityLensControls>
                                             <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
                                             <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
                                         </CommunityLensControls>
                                     </CommunityLensTopRow>
-                                    <CurationLensPicker
-                                        community={urlTopic}
-                                        viewer={viewerAddress}
-                                        onChange={handleLensChange}
-                                    />
+                                    {activeCurationTeam?.description && (
+                                        <CurationTeamHeader>
+                                            <CurationTeamDescription>{activeCurationTeam.description}</CurationTeamDescription>
+                                        </CurationTeamHeader>
+                                    )}
                                 </CommunityLensBar>
                             )}
 
@@ -1355,7 +1399,7 @@ const MainView = ({
                                 aria-label="Welcome to Mirage"
                                 title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
                                 description={urlTopic === 'following'
-                                    ? 'Sign in to unlock your following feed and keep up with the users and communities you care about.'
+                                    ? 'Sign in to unlock your personalized feed and keep up with the users and communities you care about.'
                                     : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
                                 stats={welcomeStats && welcomeStats.userCount > 0 ? [
                                     { label: 'Users', value: `${welcomeStatsStale ? '~' : ''}${welcomeStats.userCount.toLocaleString()}` },

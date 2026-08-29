@@ -44,6 +44,7 @@ const (
 	PfxHiddenPost           = "chp|"
 	PfxHiddenUser           = "chu|"
 	PfxThreadLock           = "chl|"
+	PfxCurationPostTag      = "cpt|"
 	PfxCurationPrune        = "ctp|"
 	PfxCurationPruneNext    = "ctpnext"
 	PfxPostMeta             = "pm|"
@@ -309,6 +310,14 @@ func KeyThreadLock(slug string, teamID uint64, rootHash []byte) []byte {
 
 func KeyThreadLockPrefix(slug string, teamID uint64) []byte {
 	return concat([]byte(PfxThreadLock), lp([]byte(slug)), u64(teamID))
+}
+
+func KeyCurationPostTag(slug string, teamID uint64, hash []byte) []byte {
+	return concat([]byte(PfxCurationPostTag), lp([]byte(slug)), u64(teamID), hash)
+}
+
+func KeyCurationPostTagPrefix(slug string, teamID uint64) []byte {
+	return concat([]byte(PfxCurationPostTag), lp([]byte(slug)), u64(teamID))
 }
 
 func KeyCurationPrune(seq uint64, slug string, teamID uint64) []byte {

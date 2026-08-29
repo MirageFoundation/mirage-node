@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
 import { useCurationPreference } from '../../../logic/useCurationPreference';
@@ -11,113 +11,122 @@ import {
     formatSubscriberCount,
 } from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
+import FeedControlButton from './FeedControlButton';
 
 const Wrap = styled.div`
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.35rem;
     min-width: 0;
-    width: 100%;
-    flex-wrap: wrap;
+    flex: 0 1 auto;
 `;
 
-const Label = styled.span`
+const PickerRoot = styled.div`
+    position: relative;
+    min-width: 0;
+`;
+
+const PickerButton = styled(FeedControlButton)`
+    box-sizing: border-box;
+    height: var(--community-header-control-height, 28px);
+    justify-content: space-between;
+    gap: 0.35rem;
+    /* No cap: team names are capped at 30 chars on chain, so the selected team
+       shows in full instead of being cut to an ellipsis. */
+    max-width: 100%;
+    font-size: var(--community-header-control-font-size, 0.68rem);
+`;
+
+const PickerLabel = styled.span`
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+`;
+
+const Chevron = styled.span`
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: ${({ $open }) => ($open ? 'rotate(225deg)' : 'rotate(45deg)')};
+    transition: transform 0.15s ease;
+`;
+
+const Menu = styled.div`
+    position: absolute;
+    z-index: 100;
+    top: calc(100% + 0.35rem);
+    left: 0;
+    box-sizing: border-box;
+    width: max-content;
+    min-width: 13rem;
+    max-width: min(20rem, calc(100vw - 2rem));
+    padding: 0.3rem;
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+    border-radius: 10px;
+    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+`;
+
+const Option = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border: 0;
+    border-radius: 7px;
+    background: ${({ $selected, theme }) => ($selected
+        ? requireThemeColor(theme, 'accent')
+        : 'transparent')};
+    color: ${({ $action, theme }) => requireThemeColor(theme, $action ? 'link' : 'text')};
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: ${({ $selected }) => ($selected ? 600 : 500)};
+    line-height: 1.2;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+        outline: none;
+        background: ${({ theme }) => requireThemeColor(theme, 'accentHover')};
+    }
+`;
+
+const OptionCopy = styled.span`
+    display: grid;
+    gap: 0.15rem;
+    min-width: 0;
+`;
+
+const OptionMeta = styled.span`
+    overflow: hidden;
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.62rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    line-height: 1;
-    text-transform: uppercase;
-    white-space: nowrap;
-`;
-
-const Select = styled.select`
-    height: 30px;
-    max-width: 18rem;
-    min-width: 7.5rem;
-    padding: 0 1.75rem 0 0.65rem;
-    border-radius: 999px;
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    background-color: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-        linear-gradient(135deg, currentColor 50%, transparent 50%);
-    background-position: calc(100% - 12px) calc(50% - 2px), calc(100% - 7px) calc(50% - 2px);
-    background-size: 5px 5px, 5px 5px;
-    background-repeat: no-repeat;
-    color: ${({ theme }) => requireThemeColor(theme, 'feedCtrlText')};
-    font: inherit;
-    font-size: 0.68rem;
     font-weight: 500;
-    line-height: 1;
-    cursor: pointer;
-    appearance: none;
-
-    &:hover:not(:disabled) {
-        background-color: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
-    }
-
-    &:disabled {
-        opacity: 0.55;
-        cursor: wait;
-    }
-
-    &:focus-visible {
-        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
-        outline-offset: 2px;
-    }
-`;
-
-const FixedLens = styled.span`
-    display: inline-flex;
-    align-items: center;
-    height: 30px;
-    padding: 0 0.7rem;
-    border-radius: 999px;
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    color: ${({ theme }) => requireThemeColor(theme, 'feedCtrlText')};
-    font-size: 0.7rem;
-    font-weight: 600;
-    line-height: 1;
+    text-overflow: ellipsis;
     white-space: nowrap;
 `;
 
-const Meta = styled.span`
-    display: inline-flex;
-    align-items: center;
-    gap: 0.55rem;
-    min-width: 0;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.65rem;
-    white-space: nowrap;
+const Check = styled.span`
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    font-size: 0.72rem;
+`;
+
+const Divider = styled.div`
+    height: 1px;
+    margin: 0.3rem 0.25rem;
+    background: ${({ theme }) => requireThemeColor(theme, 'border')};
 `;
 
 const Status = styled.span`
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.62rem;
     font-weight: 500;
-`;
-
-const ManageLink = styled(Link)`
-    display: inline-flex;
-    align-items: center;
-    height: 30px;
-    padding: 0 0.65rem;
-    border-radius: 999px;
-    color: ${({ theme }) => requireThemeColor(theme, 'link')};
-    font-size: 0.68rem;
-    font-weight: 600;
-    text-decoration: none;
-    white-space: nowrap;
-
-    &:hover {
-        background: ${({ theme }) => requireThemeColor(theme, 'feedCtrlHoverBg')};
-    }
-
-    &:focus-visible {
-        outline: 2px solid ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
-        outline-offset: 2px;
-    }
 `;
 
 function pickAuthoritativeSelection(detail) {
@@ -140,7 +149,23 @@ function sortTeamsBySubscribers(teams) {
     });
 }
 
+// Default stays a fixed label — the concrete default team name belongs in the
+// menu meta ("Currently …"), not on the trigger. Pinned teams keep their name.
+function selectionLabel(selection, teams) {
+    if (selection === LENS.DEFAULT) return 'Default Curation Team';
+    if (selection === LENS.RAW) return 'Uncensored';
+    const [lens, rawTeamId] = selection.split(':');
+    if (lens !== LENS.TEAM) throw new Error(`Invalid curation selection: ${selection}`);
+    const teamId = Number(rawTeamId);
+    const team = teams.find((item) => Number(item.team_id) === teamId);
+    if (!team) throw new Error(`Selected curation team is missing: ${teamId}`);
+    return team.name;
+}
+
 export default function CurationLensPicker({ community, viewer, onChange }) {
+    const navigate = useNavigate();
+    const rootRef = useRef(null);
+    const [open, setOpen] = useState(false);
     const [optimisticSelection, setOptimisticSelection] = useState(null);
     const viewerAddr = viewer && viewer !== 'guest' ? String(viewer).toLowerCase() : '';
     const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr);
@@ -156,26 +181,62 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     const selected = (!detailLoading && detail && !curated)
         ? LENS.RAW
         : (optimisticSelection || authoritativeSelection);
+    const activeTeam = useMemo(() => {
+        if (detailLoading || teamsLoading || !detail || !curated || selected === LENS.RAW) return null;
+        const [lens, rawTeamId] = selected.split(':');
+        const teamId = lens === LENS.TEAM
+            ? Number(rawTeamId)
+            : Number(detail.default_team?.team_id);
+        const team = liveTeams.find((item) => Number(item.team_id) === teamId);
+        if (!team) throw new Error(`Active curation team is missing: ${teamId}`);
+        return team;
+    }, [curated, detail, detailLoading, liveTeams, selected, teamsLoading]);
 
     useEffect(() => {
+        setOpen(false);
         setOptimisticSelection(null);
     }, [community]);
 
     useEffect(() => {
+        if (!open) return undefined;
+        const closeOutside = (event) => {
+            if (!rootRef.current?.contains(event.target)) setOpen(false);
+        };
+        document.addEventListener('pointerdown', closeOutside);
+        return () => document.removeEventListener('pointerdown', closeOutside);
+    }, [open]);
+
+    useEffect(() => {
+        // Hold the optimistic label until the indexer confirms the same lens.
+        // Clearing earlier lets a slow/stale detail refresh snap the trigger
+        // back to the previous team while a newer pick is already on chain.
         if (optimisticSelection && optimisticSelection === authoritativeSelection) {
+            console.debug('[lens] optimistic confirmed by detail', {
+                community,
+                selection: optimisticSelection,
+            });
             setOptimisticSelection(null);
         }
-    }, [authoritativeSelection, optimisticSelection]);
+    }, [authoritativeSelection, community, optimisticSelection]);
 
     useEffect(() => {
         if (detailLoading || teamsLoading) return;
         const [lens, rawTeamId] = selected.split(':');
         console.debug('[lens] applying feed lens', { community, lens, teamId: rawTeamId || null, curated });
-        onChange?.(lens, rawTeamId ? Number(rawTeamId) : null);
-    }, [community, curated, detailLoading, onChange, selected, teamsLoading]);
+        onChange?.(lens, rawTeamId ? Number(rawTeamId) : null, activeTeam);
+    }, [activeTeam, community, curated, detailLoading, onChange, selected, teamsLoading]);
 
-    const change = (event) => {
-        const selection = event.target.value;
+    const change = (selection) => {
+        setOpen(false);
+        if (selection === '__team_action__') {
+            const destination = isCurator && curatorTeamId
+                ? `/c/${encodeURIComponent(community)}/teams/${curatorTeamId}`
+                : `/c/${encodeURIComponent(community)}/teams/new`;
+            console.debug('[lens] open team action', { community, destination });
+            navigate(destination);
+            return;
+        }
+        if (selection === selected) return;
         const [lens, rawTeamId] = selection.split(':');
         const teamId = rawTeamId ? Number(rawTeamId) : null;
         setOptimisticSelection(selection);
@@ -186,50 +247,94 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
         console.debug('[lens] persist selection', { community, lens, teamId });
         selectLens(lens, teamId).catch((err) => {
             console.error('[lens] selection failed', { community, lens, teamId, error: String(err?.message || err) });
-            setOptimisticSelection(null);
+            // Only roll back this pick — a newer optimistic choice must stick.
+            setOptimisticSelection((current) => (current === selection ? null : current));
         });
     };
 
-    const teamsPath = `/c/${encodeURIComponent(community)}/teams`;
-    const managePath = isCurator && curatorTeamId
-        ? `${teamsPath}/${curatorTeamId}`
-        : teamsPath;
-    const manageLabel = isCurator ? 'Open Curation' : 'Curator teams →';
-    const loading = detailLoading || teamsLoading;
-    // Wait for detail before collapsing to Uncensored — curated communities
-    // would otherwise flash the fixed label while the request is in flight.
-    const uncensoredOnly = Boolean(detail) && !detailLoading && !curated;
+    // Background detail/team reloads must not flash "Loading…" over a known pick.
+    const loading = (detailLoading && !detail) || (teamsLoading && rankedTeams.length === 0);
     const defaultTeamName = String(detail?.default_team?.name || '').trim();
-    const defaultLabel = defaultTeamName ? `Default (${defaultTeamName})` : 'Default';
+    const teamActionLabel = isCurator ? 'Manage my team…' : 'Create new…';
+    const currentLabel = pendingStatus
+        || (loading ? 'Loading…' : selectionLabel(selected, rankedTeams));
 
     return (
         <Wrap aria-label="Community lens">
-            <Label>Feed lens</Label>
-            {uncensoredOnly ? (
-                <FixedLens aria-label="Curation lens">Uncensored</FixedLens>
-            ) : (
-                <Select
-                    value={selected}
-                    onChange={change}
+            <PickerRoot
+                ref={rootRef}
+                onKeyDown={(event) => {
+                    if (event.key === 'Escape') setOpen(false);
+                    if (event.key === 'ArrowDown') setOpen(true);
+                }}
+            >
+                <PickerButton
+                    type="button"
                     disabled={pending || loading}
                     aria-label="Curation lens"
+                    aria-haspopup="listbox"
+                    aria-expanded={open}
+                    onClick={() => setOpen((value) => !value)}
                 >
-                    <option value={LENS.DEFAULT}>{defaultLabel}</option>
-                    <option value={LENS.RAW}>Uncensored</option>
-                    {rankedTeams.length > 0 && (
-                        <option disabled value="__sep__">────────</option>
-                    )}
-                    {rankedTeams.map((team) => (
-                        <option key={team.team_id} value={`${LENS.TEAM}:${team.team_id}`}>
-                            {team.name} ({formatSubscriberCount(Number(team.subscriber_count))})
-                        </option>
-                    ))}
-                </Select>
-            )}
-            <Meta>
-                {(pendingStatus || error) && <Status>{pendingStatus || error}</Status>}
-                <ManageLink to={managePath}>{manageLabel}</ManageLink>
-            </Meta>
+                    <PickerLabel>{currentLabel}</PickerLabel>
+                    <Chevron $open={open} aria-hidden="true" />
+                </PickerButton>
+                {open && (
+                    <Menu role="listbox" aria-label="Curation lens">
+                        {(!detail || curated) && (
+                            <Option
+                                type="button"
+                                role="option"
+                                aria-selected={selected === LENS.DEFAULT}
+                                $selected={selected === LENS.DEFAULT}
+                                onClick={() => change(LENS.DEFAULT)}
+                            >
+                                <OptionCopy>
+                                    <span>Default</span>
+                                    {defaultTeamName && <OptionMeta>Currently {defaultTeamName}</OptionMeta>}
+                                </OptionCopy>
+                                {selected === LENS.DEFAULT && <Check aria-hidden="true">✓</Check>}
+                            </Option>
+                        )}
+                        <Option
+                            type="button"
+                            role="option"
+                            aria-selected={selected === LENS.RAW}
+                            $selected={selected === LENS.RAW}
+                            onClick={() => change(LENS.RAW)}
+                        >
+                            <span>Uncensored</span>
+                            {selected === LENS.RAW && <Check aria-hidden="true">✓</Check>}
+                        </Option>
+                        {rankedTeams.length > 0 && <Divider />}
+                        {rankedTeams.map((team) => {
+                            const value = `${LENS.TEAM}:${team.team_id}`;
+                            return (
+                                <Option
+                                    key={team.team_id}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={selected === value}
+                                    $selected={selected === value}
+                                    onClick={() => change(value)}
+                                >
+                                    <span>{team.name} ({formatSubscriberCount(Number(team.subscriber_count))})</span>
+                                    {selected === value && <Check aria-hidden="true">✓</Check>}
+                                </Option>
+                            );
+                        })}
+                        <Divider />
+                        <Option
+                            type="button"
+                            $action
+                            onClick={() => change('__team_action__')}
+                        >
+                            <span>{teamActionLabel}</span>
+                        </Option>
+                    </Menu>
+                )}
+            </PickerRoot>
+            {error && <Status>{error}</Status>}
         </Wrap>
     );
 }

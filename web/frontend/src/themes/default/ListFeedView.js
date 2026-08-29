@@ -6,6 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { HiChevronDown } from "react-icons/hi2";
 
 import CardView from "./components/CardView";
+import CtrlButton from "./components/FeedControlButton";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
 import { MoreMenuChip, ModMenuChip, BlockChip } from "./components/PostMenu";
@@ -207,39 +208,6 @@ const ToolbarTitle = styled.h1`
      * 0.75rem side padding). */
     @media (max-width: 600px) {
         padding: 0;
-    }
-`;
-
-const CtrlButton = styled.button`
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    height: 28px;
-    padding: 0 0.5rem;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    color: ${({ theme }) => theme.colors.feedCtrlText};
-    font-family: inherit;
-    font-size: 0.68rem;
-    font-weight: 400;
-    cursor: pointer;
-    outline: none;
-    line-height: 1;
-
-    & > svg {
-        color: ${({ theme }) => theme.colors.feedCtrlText};
-        fill: currentColor;
-    }
-
-    &:hover,
-    &[aria-expanded='true'] {
-        background: ${({ theme }) => theme.colors.feedCtrlHoverBg};
-    }
-
-    &:focus-visible {
-        outline: 2px solid ${({ theme }) => theme.colors.focusBlue};
-        outline-offset: 2px;
     }
 `;
 
@@ -1082,8 +1050,24 @@ function CompactRow({ post, state, updatePost }) {
 
     const handleRowClick = useCallback((e) => {
         if (isCompactInteractive(e.target)) return;
-        if (linkTarget && linkTarget !== '#') navigate(linkTarget);
-    }, [navigate, linkTarget]);
+        if (!linkTarget || linkTarget === '#') return;
+        // Same marker CardView sets — Back from the post must return to /c/:community.
+        try {
+            const feedTopic = typeof post?.topic === 'string' && post.topic.trim()
+                ? post.topic.trim().toLowerCase()
+                : null;
+            sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
+                source: 'feed',
+                topic: feedTopic,
+                at: Date.now(),
+            }));
+            sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
+                topic: feedTopic,
+                at: Date.now(),
+            }));
+        } catch (_) { /* noop */ }
+        navigate(linkTarget);
+    }, [navigate, linkTarget, post?.topic]);
 
     const stop = useCallback((e) => { e.stopPropagation(); }, []);
 

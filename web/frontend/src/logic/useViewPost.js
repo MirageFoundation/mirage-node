@@ -272,9 +272,12 @@ export function useViewPost({
 
     const goBackToFeed = () => {
         try {
-            // Prefer browser back when we actually navigated here from a feed (/home, /following, /t/:topic).
-            // This preserves scroll restoration logic in MainView.
+            // Prefer browser back when we actually navigated here from a feed
+            // (/home, /following, /c/:community). Preserves MainView scroll restore.
             if (openedFromFeedInfoRef.current?.opened === true) {
+                console.debug('[ViewPost] back via history (opened from feed)', {
+                    topic: openedFromFeedInfoRef.current?.topic || null,
+                });
                 navigate(-1);
                 return;
             }
@@ -288,25 +291,33 @@ export function useViewPost({
                     }
                 } catch (_) { }
             }
-            const last = Storage.load('last_feed_route', '/home');
-            const fallback = typeof last === 'string' && last.startsWith('/') ? last : '/home';
-            const target = fallback;
+            const last = Storage.load('last_feed_route', '');
+            const postCommunity = String(root?.topic || root?.root_topic || '').trim().toLowerCase();
+            // last_feed_route only started tracking /c/ after v1.39; a stale
+            // "/home" here would strand community readers on the wrong feed.
+            let target = typeof last === 'string' && last.startsWith('/') ? last : '';
+            if (!target || target === '/home' || target === '/') {
+                if (postCommunity) target = `/c/${encodeURIComponent(postCommunity)}`;
+                else target = '/home';
+            }
             const inferTopicIntent = route => {
                 try {
                     if (openedFromFeedInfoRef.current?.topic) return openedFromFeedInfoRef.current.topic;
                     if (route === '/home') return 'home';
                     if (route === '/following') return 'following';
-                    if (!route.startsWith('/t/')) return null;
-                    const withoutPrefix = route.slice(3); // after "/t/"
-                    const segment = withoutPrefix.split('?')[0].split('#')[0].split('/')[0];
-                    const trimmed = String(segment || '').trim();
-                    if (!trimmed) return null;
-                    return decodeURIComponent(trimmed);
+                    if (route.startsWith('/c/') || route.startsWith('/t/')) {
+                        const withoutPrefix = route.slice(3);
+                        const segment = withoutPrefix.split('?')[0].split('#')[0].split('/')[0];
+                        const trimmed = String(segment || '').trim();
+                        if (!trimmed) return null;
+                        return decodeURIComponent(trimmed);
+                    }
+                    return null;
                 } catch (_) {
                     return null;
                 }
             };
-            const intendedTopic = inferTopicIntent(target);
+            const intendedTopic = inferTopicIntent(target) || postCommunity || null;
             try {
                 if (typeof window !== 'undefined' && window.sessionStorage) {
                     if (intendedTopic) {
@@ -317,6 +328,11 @@ export function useViewPost({
                     }
                 }
             } catch (_) { }
+            console.debug('[ViewPost] back via last_feed_route', {
+                target,
+                last: last || null,
+                postCommunity: postCommunity || null,
+            });
             navigate(target, {
                 replace: true
             });
@@ -424,7 +440,7 @@ export function useViewPost({
     const handleTopicFollowToggle = async topic => {
         const t = String(topic || '').trim().toLowerCase();
         if (!t || isTopicPending(t)) return;
-        if (!requireAccount('follow communities')) return;
+        if (!requireAccount('join communities')) return;
         const wasSubscribed = isSubscribedTopic(topic);
         // Optimistic update
         if (wasSubscribed) {
@@ -439,15 +455,15 @@ export function useViewPost({
         try {
             if (wasSubscribed) {
                 await unsubscribe(viewerAddress, topic);
-                updateNotification(`Unfollowed ${communityLabel(t)}`);
+                updateNotification(`Left ${communityLabel(t)}`);
             } else {
                 await subscribe(viewerAddress, topic);
-                updateNotification(`Now following ${communityLabel(t)}`);
+                updateNotification(`Joined ${communityLabel(t)}`);
             }
             invalidateTopicsCache();
             setSubToggleTick(x => x + 1);
         } catch (e) {
-            console.error('[ViewPostView] Topic follow toggle error:', e);
+            console.error('[ViewPostView] Community membership toggle error:', e);
             // Revert on error
             if (wasSubscribed) {
                 setFollowedTopicsSet(prev => new Set([...prev, t]));

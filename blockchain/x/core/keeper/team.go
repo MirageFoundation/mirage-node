@@ -31,8 +31,8 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if !found || !types.CanCurate(core) {
 		return 0, fmt.Errorf("creating a curation team requires an active subscriber or admin")
 	}
-	// Creating a team does not require joining the community first. Invite
-	// accept still does — that path keeps GetPreference checks elsewhere.
+	// Creating a team does not require joining the community first; accept
+	// auto-joins the invitee the same way.
 	if _, occupied, err := k.getU64Key(ctx, types.KeyCurationTeamUser(owner, slug)); err != nil {
 		return 0, err
 	} else if occupied {
@@ -148,11 +148,7 @@ func (k Keeper) InviteCurator(ctx sdk.Context, actor, slug string, teamID uint64
 	if !found || !types.CanCurate(core) {
 		return fmt.Errorf("invitee must be an active subscriber or admin")
 	}
-	if _, joined, err := k.GetPreference(ctx, target, slug); err != nil {
-		return err
-	} else if !joined {
-		return fmt.Errorf("invitee must join the community first")
-	}
+	// Invitee need not be joined yet — AcceptCuratorInvite auto-joins them.
 	if _, occupied, err := k.getU64Key(ctx, types.KeyCurationTeamUser(target, slug)); err != nil {
 		return err
 	} else if occupied {
@@ -425,11 +421,6 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 	if !found || !types.CanCurate(core) {
 		return fmt.Errorf("must be an active subscriber or admin")
 	}
-	if _, joined, err := k.GetPreference(ctx, actor, slug); err != nil {
-		return err
-	} else if !joined {
-		return fmt.Errorf("must join community before accepting an invitation")
-	}
 	if _, occupied, err := k.getU64Key(ctx, types.KeyCurationTeamUser(actor, slug)); err != nil {
 		return err
 	} else if occupied {
@@ -453,6 +444,10 @@ func (k Keeper) AcceptCuratorInvite(ctx sdk.Context, actor, slug string, teamID 
 	}
 	if members >= params.MaxCuratorsPerTeam {
 		return fmt.Errorf("team is full")
+	}
+	// Accepting a curator invite auto-joins the community (same as CreateCurationTeam).
+	if err := k.JoinCommunity(ctx, actor, slug, uint32(tier.MaxJoinedCommunities)); err != nil {
+		return err
 	}
 	order := team.NextMemberOrder
 	if order == 0 {
@@ -612,6 +607,75 @@ func (k Keeper) SetCurationActionHiddenPost(ctx sdk.Context, slug string, teamID
 		sdk.NewAttribute("actor", actor),
 	))
 	return nil
+}
+
+// SetCurationTeamTag sets the blanket community tag carried by every post read
+// through this team. The caller validates the tag against the content-tag
+// whitelist before calling.
+func (k Keeper) SetCurationTeamTag(ctx sdk.Context, slug string, teamID uint64, tag string) error {
+	team, found, err := k.GetCurationTeam(ctx, slug, teamID)
+	if err != nil {
+		return err
+	}
+	if !found || !k.teamLive(team) {
+		return fmt.Errorf("team not found")
+	}
+	team.Tag = tag
+	if err := k.SetCurationTeam(ctx, team); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_tag_changed",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("tag", tag),
+	))
+	return nil
+}
+
+// SetCurationPostTag records this team's tag decision for one post. clear drops
+// the record so the community tag and then the author's own tag apply again;
+// storing an empty tag is the different, deliberate claim that the post carries
+// no tag at all.
+func (k Keeper) SetCurationPostTag(ctx sdk.Context, slug string, teamID uint64, hash, tag, actor string, clear bool) error {
+	h, err := types.HashBytes(hash)
+	if err != nil {
+		return err
+	}
+	key := types.KeyCurationPostTag(slug, teamID, h)
+	if clear {
+		if err := k.storeDelete(ctx, key); err != nil {
+			return err
+		}
+	} else {
+		record := &types.CurationPostTag{Tag: tag, Actor: actor, UpdatedHeight: ctx.BlockHeight()}
+		if err := k.setProto(ctx, key, record); err != nil {
+			return err
+		}
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_post_tag_changed",
+		sdk.NewAttribute("community", slug),
+		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
+		sdk.NewAttribute("target", hash),
+		sdk.NewAttribute("tag", tag),
+		sdk.NewAttribute("cleared", fmt.Sprintf("%t", clear)),
+		sdk.NewAttribute("actor", actor),
+	))
+	return nil
+}
+
+// GetCurationPostTag reports this team's tag decision for a post. The bool
+// distinguishes "no decision" from a decision of "no tag".
+func (k Keeper) GetCurationPostTag(ctx sdk.Context, slug string, teamID uint64, hash string) (*types.CurationPostTag, bool, error) {
+	h, err := types.HashBytes(hash)
+	if err != nil {
+		return nil, false, err
+	}
+	var record types.CurationPostTag
+	found, err := k.getProto(ctx, types.KeyCurationPostTag(slug, teamID, h), &record)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return &record, true, nil
 }
 
 func (k Keeper) SetCurationActionHiddenUser(ctx sdk.Context, slug string, teamID uint64, target, actor string, hidden bool) error {

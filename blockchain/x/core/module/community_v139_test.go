@@ -313,6 +313,129 @@ func TestV139MigrationRecountsPinnedPaidSubscribersAndDropsCommunityState(t *tes
 	require.NoError(t, mk.MigrateV139(ctx))
 }
 
+func TestAcceptCuratorInviteAutoJoins(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(81)
+	invitee := genAddr(82)
+	slug := "auto-join-on-accept"
+	setPaidProfile(t, mk, ctx, leader)
+	setPaidProfile(t, mk, ctx, invitee)
+	joinOpenCommunity(t, mk, ctx, leader, slug)
+
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "AutoJoin", "")
+	require.NoError(t, err)
+	_, joined, err := mk.GetPreference(ctx, invitee, slug)
+	require.NoError(t, err)
+	require.False(t, joined, "invitee starts unjoined")
+
+	require.NoError(t, mk.InviteCurator(ctx, leader, slug, teamID, invitee))
+	acceptCtx := ctx.WithEventManager(sdk.NewEventManager())
+	require.NoError(t, mk.AcceptCuratorInvite(acceptCtx, invitee, slug, teamID))
+	// The indexer projects membership from community_joined, so the auto-join is
+	// only visible to the API if accept emits it.
+	var joinEvent bool
+	for _, ev := range acceptCtx.EventManager().Events() {
+		if ev.Type != "community_joined" {
+			continue
+		}
+		var addr, community string
+		for _, attr := range ev.Attributes {
+			switch attr.Key {
+			case "address":
+				addr = attr.Value
+			case "community":
+				community = attr.Value
+			}
+		}
+		if addr == invitee && community == slug {
+			joinEvent = true
+		}
+	}
+	require.True(t, joinEvent, "accept must emit community_joined for the invitee")
+	_, joined, err = mk.GetPreference(ctx, invitee, slug)
+	require.NoError(t, err)
+	require.True(t, joined, "accept auto-joins the invitee")
+	members, _, err := mk.GetCurationTeamMembersPaginated(
+		ctx,
+		types.KeyCurationTeamMemberPrefix(slug, teamID),
+		nil,
+		10,
+	)
+	require.NoError(t, err)
+	var foundInvitee bool
+	for _, m := range members {
+		if m.GetAddress() == invitee {
+			foundInvitee = true
+			break
+		}
+	}
+	require.True(t, foundInvitee, "invitee must be a team member after accept")
+	t.Logf("[debug] accept auto-join community=%s team_id=%d invitee=%s members=%d", slug, teamID, invitee[:12], len(members))
+}
+
+func TestSetCurationTeamTagStoresOnTeam(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(83)
+	slug := "community-tag"
+	setPaidProfile(t, mk, ctx, leader)
+	joinOpenCommunity(t, mk, ctx, leader, slug)
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Tagged", "")
+	require.NoError(t, err)
+
+	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "", team.GetTag(), "a new team carries no community tag")
+
+	require.NoError(t, mk.SetCurationTeamTag(ctx, slug, teamID, "adult"))
+	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "adult", team.GetTag())
+
+	require.NoError(t, mk.SetCurationTeamTag(ctx, slug, teamID, ""))
+	team, _, err = mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.Equal(t, "", team.GetTag(), "clearing the community tag is allowed")
+	t.Logf("[debug] community tag round-trip community=%s team_id=%d", slug, teamID)
+}
+
+// The empty tag and the absent record are different states, and the whole
+// precedence chain depends on telling them apart.
+func TestSetCurationPostTagDistinguishesEmptyFromCleared(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(84)
+	slug := "post-tag"
+	post := strings.Repeat("ab", 32)
+	setPaidProfile(t, mk, ctx, leader)
+	joinOpenCommunity(t, mk, ctx, leader, slug)
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Tagger", "")
+	require.NoError(t, err)
+
+	_, found, err := mk.GetCurationPostTag(ctx, slug, teamID, post)
+	require.NoError(t, err)
+	require.False(t, found, "no record means the team has no opinion")
+
+	require.NoError(t, mk.SetCurationPostTag(ctx, slug, teamID, post, "gore", leader, false))
+	record, found, err := mk.GetCurationPostTag(ctx, slug, teamID, post)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "gore", record.GetTag())
+	require.Equal(t, leader, record.GetActor())
+
+	require.NoError(t, mk.SetCurationPostTag(ctx, slug, teamID, post, "", leader, false))
+	record, found, err = mk.GetCurationPostTag(ctx, slug, teamID, post)
+	require.NoError(t, err)
+	require.True(t, found, "an empty tag is still a decision")
+	require.Equal(t, "", record.GetTag())
+
+	require.NoError(t, mk.SetCurationPostTag(ctx, slug, teamID, post, "", leader, true))
+	_, found, err = mk.GetCurationPostTag(ctx, slug, teamID, post)
+	require.NoError(t, err)
+	require.False(t, found, "clear removes the team's opinion entirely")
+	t.Logf("[debug] post tag states community=%s team_id=%d post=%s", slug, teamID, post[:12])
+}
+
 func TestAdminCanCreateCurationTeamWithoutEffectivePaid(t *testing.T) {
 	mk, ctx, _ := setupModule(t)
 	admin := genAddr(42)
@@ -353,7 +476,7 @@ func TestCurationTeamDescriptionLimitAndNoPolicy(t *testing.T) {
 	joinOpenCommunity(t, mk, ctx, leader, slug)
 
 	params := mk.GetParams(ctx)
-	require.Equal(t, uint64(4000), params.MaxCurationTeamDescriptionLength)
+	require.Equal(t, uint64(800), params.MaxCurationTeamDescriptionLength)
 	require.NotContains(t, params.String(), "max_curation_team_policy_length")
 
 	over := strings.Repeat("x", int(params.MaxCurationTeamDescriptionLength)+1)

@@ -38,7 +38,12 @@ from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
 from user_last_seen import update_user_last_seen
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
-from curation import filter_posts as _filter_posts_for_lens, resolve_lens as _resolve_curation_lens
+from curation import (
+    filter_posts as _filter_posts_for_lens,
+    resolve_effective_tags as _resolve_effective_tags,
+    resolve_lens as _resolve_curation_lens,
+    thread_locked_for_lens,
+)
 from settings import (
     IGNORE_DELETIONS,
     REGISTRATION_ENABLED,
@@ -1438,7 +1443,6 @@ def _load_following_candidates(
             row,
             blocked_posts,
             blocked_users,
-            allowed_tags,
             seen,
             blocked_topics,
             blocked_topic_prefixes,
@@ -1803,7 +1807,6 @@ def _get_home_feed_newest(
                 row,
                 blocked_posts,
                 blocked_users,
-                allowed_tags,
                 seen,
                 blocked_topics,
                 blocked_topic_prefixes,
@@ -2419,7 +2422,6 @@ def _load_home_candidates(
             row,
             blocked_posts,
             blocked_users,
-            allowed_tags,
             seen,
             blocked_topics,
             blocked_topic_prefixes,
@@ -2454,7 +2456,6 @@ def _load_home_candidates(
                 row,
                 blocked_posts,
                 blocked_users,
-                allowed_tags,
                 seen,
                 blocked_topics,
                 blocked_topic_prefixes,
@@ -2497,7 +2498,6 @@ def _load_home_candidates(
                 row,
                 blocked_posts,
                 blocked_users,
-                allowed_tags,
                 seen,
                 blocked_topics,
                 blocked_topic_prefixes,
@@ -2528,7 +2528,6 @@ def _load_home_candidates(
             row,
             blocked_posts,
             blocked_users,
-            allowed_tags,
             seen,
             blocked_topics,
             blocked_topic_prefixes,
@@ -2548,7 +2547,6 @@ def _row_to_post(
     row,
     blocked_posts,
     blocked_users,
-    allowed_tags,
     seen,
     blocked_topics: set[str] | None = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
@@ -2634,8 +2632,9 @@ def _row_to_post(
     topic_lower = (topic or "").strip().lower()
     if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
         return None
-    if not is_own and not _is_tag_allowed(tag, allowed_tags):
-        return None
+    # The author's tag is not filtered here: a curator override or the community
+    # tag can raise or clear it, and neither is known until the lens is
+    # resolved. Callers drop on the effective tag after _resolve_effective_tags.
 
     # Parse media JSON array
     try:
@@ -4278,13 +4277,6 @@ def _build_bootstrap_view(
             )
         if resp.get("posts"):
             _enrich_media_meta(cur, resp["posts"])
-            resp["posts"] = _filter_posts_by_allowed_tags(
-                resp["posts"],
-                allowed_tags,
-                rid=rid,
-                context=f"bootstrap.view.feed.{feed_name}",
-                viewer=addr,
-            )
             resp["posts"], _ = _filter_posts_for_lens(
                 cur,
                 resp["posts"],
@@ -4292,6 +4284,14 @@ def _build_bootstrap_view(
                 requested_lens=lens,
                 requested_team_id=team_id,
                 scope=scope,
+            )
+            _resolve_effective_tags(cur, resp["posts"])
+            resp["posts"] = _filter_posts_by_allowed_tags(
+                resp["posts"],
+                allowed_tags,
+                rid=rid,
+                context=f"bootstrap.view.feed.{feed_name}",
+                viewer=addr,
             )
             _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
         resp.pop("_timings", None)
@@ -5173,6 +5173,14 @@ def search():
                 requested_team_id=team_id,
                 scope=scope,
             )
+            _resolve_effective_tags(cur, result["posts"])
+            result["posts"] = _filter_posts_by_allowed_tags(
+                result["posts"],
+                allowed_tags,
+                rid=next_request_id(),
+                context="search.posts",
+                viewer=viewer,
+            )
         conn.close()
         return jsonify(result)
     except Exception as e:
@@ -5200,14 +5208,13 @@ def _format_search_posts(
         txhash = (r[0] or "").lower()
         owner = (r[1] or "").lower()
         topic = (r[3] or "").strip().lower() if len(r) > 3 else ""
-        tag = (r[8] or "").strip().lower() if len(r) > 8 else ""
         is_own = viewer_lower and owner == viewer_lower
         if not is_own and (txhash in blocked_posts or owner in blocked_users):
             continue
         if not is_own and _topic_is_blocked(topic, blocked_topics or set(), blocked_topic_prefixes or tuple()):
             continue
-        if tag and tag not in allowed_tags and not is_own:
-            continue
+        # Tags are filtered by the caller once the lens has resolved the
+        # effective tag; the author's own tag is not the final answer.
         filtered.append(r)
 
     if not filtered:
@@ -5514,13 +5521,6 @@ def get_posts():
                 enrich_ms = round((time.monotonic() - _t) * 1000, 2)
 
                 _t = time.monotonic()
-                resp["posts"] = _filter_posts_by_allowed_tags(
-                    resp["posts"],
-                    allowed_tags,
-                    rid=rid,
-                    context=f"get_posts.feed.{feed or 'unknown'}",
-                    viewer=address,
-                )
                 resp["posts"], _ = _filter_posts_for_lens(
                     cur,
                     resp["posts"],
@@ -5528,6 +5528,14 @@ def get_posts():
                     requested_lens=lens,
                     requested_team_id=team_id,
                     scope=scope,
+                )
+                _resolve_effective_tags(cur, resp["posts"])
+                resp["posts"] = _filter_posts_by_allowed_tags(
+                    resp["posts"],
+                    allowed_tags,
+                    rid=rid,
+                    context=f"get_posts.feed.{feed or 'unknown'}",
+                    viewer=address,
                 )
                 filter_ms = round((time.monotonic() - _t) * 1000, 2)
                 _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
@@ -5752,7 +5760,6 @@ def get_posts():
                 row,
                 blocked_posts,
                 blocked_users,
-                allowed_tags,
                 seen,
                 blocked_topics_exact,
                 blocked_topic_prefixes,
@@ -5867,13 +5874,6 @@ def get_posts():
 
         if result:
             _enrich_media_meta(cur, result)
-            result = _filter_posts_by_allowed_tags(
-                result,
-                allowed_tags,
-                rid=rid,
-                context=f"get_posts.topic.{topic or 'all'}",
-                viewer=address,
-            )
             result, _ = _filter_posts_for_lens(
                 cur,
                 result,
@@ -5881,6 +5881,14 @@ def get_posts():
                 requested_lens=lens,
                 requested_team_id=team_id,
                 scope=scope,
+            )
+            _resolve_effective_tags(cur, result)
+            result = _filter_posts_by_allowed_tags(
+                result,
+                allowed_tags,
+                rid=rid,
+                context=f"get_posts.topic.{topic or 'all'}",
+                viewer=address,
             )
             _track_image_impressions(result, rid, context=f"get_posts.topic.{topic or 'all'}")
 
@@ -6001,11 +6009,25 @@ def get_user_posts():
         if comment_root_ids:
             ph = ",".join(["%s"] * len(comment_root_ids))
             cur.execute(
-                f"SELECT LOWER(txhash), COALESCE(tag, '') FROM posts WHERE LOWER(txhash) IN ({ph})",
+                f"SELECT LOWER(txhash), COALESCE(tag, ''), LOWER(COALESCE(community, '')) "
+                f"FROM posts WHERE LOWER(txhash) IN ({ph})",
                 list(comment_root_ids),
             )
-            root_posts = [{"post_id": pid, "tag": _normalize_api_tag(tag or "")} for pid, tag in cur.fetchall()]
+            root_posts = [
+                {"post_id": pid, "tag": _normalize_api_tag(tag or ""), "topic": community}
+                for pid, tag, community in cur.fetchall()
+            ]
             if root_posts:
+                # A comment inherits its root's tag, so the root has to be
+                # resolved through the lens too or an override on the root would
+                # not reach its replies.
+                _resolve_effective_tags(
+                    cur,
+                    root_posts,
+                    viewer=viewer,
+                    requested_lens=lens,
+                    requested_team_id=team_id,
+                )
                 root_tag_map = {p["post_id"]: p.get("tag", "") or "" for p in root_posts}
         post_ids = [r[0].lower() for r in rows]
         vote_totals: Dict[str, int] = {}
@@ -6259,6 +6281,15 @@ def get_user_posts():
             )
         if result:
             _enrich_media_meta(cur, result)
+            result, _ = _filter_posts_for_lens(
+                cur,
+                result,
+                viewer=viewer,
+                requested_lens=lens,
+                requested_team_id=team_id,
+                scope=scope,
+            )
+            _resolve_effective_tags(cur, result)
             result = _filter_user_posts_by_allowed_tags(
                 result,
                 allowed_tags,
@@ -6268,14 +6299,6 @@ def get_user_posts():
                 viewer=viewer,
             )
             _track_image_impressions(result, rid, context=f"get_user_posts.{post_type or 'all'}")
-            result, _ = _filter_posts_for_lens(
-                cur,
-                result,
-                viewer=viewer,
-                requested_lens=lens,
-                requested_team_id=team_id,
-                scope=scope,
-            )
         conn.close()
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
@@ -7193,6 +7216,9 @@ def _build_thread(
         scope=scope,
         direct=True,
     )
+    # Direct thread views stay unfiltered by allowed_tags, but the tag they
+    # report still has to be the effective one so the client blurs correctly.
+    _resolve_effective_tags(cur, visible_posts)
     visible_ids = {post["post_id"] for post in visible_posts}
     if root["post_id"] not in visible_ids:
         tombstone = next((item for item in tombstones if item["post_id"] == root["post_id"]), None)
@@ -7213,6 +7239,38 @@ def _build_thread(
     children = retain_visible(children)
     ancestors = [ancestor for ancestor in ancestors if ancestor["post_id"] in visible_ids]
     _track_image_impressions(thread_posts, rid, context="get_comments")
+
+    # count_descendants ran on the raw tree, before the lens dropped anything, so
+    # the header would advertise comments this response refuses to return. That
+    # is how a locked thread showed "Comments (2)" above an empty tree. Truncated
+    # leaves keep their stored count: those replies were never loaded, so there is
+    # nothing to filter them against and guessing would be worse than the skew.
+    def recount_visible(nodes) -> int:
+        """Return visible loaded descendants, mirroring count_descendants."""
+        total = 0
+        for node in nodes:
+            kids = node.get("children") or []
+            below = recount_visible(kids)
+            # A node with no loaded children may still be a truncated leaf whose
+            # count came from a reply query rather than the tree; leave it alone.
+            if kids:
+                node["comments"] = below
+            total += 1 + below
+        return total
+
+    root["comments"] = recount_visible(children)
+
+    lens_team_id = (root.get("lens") or {}).get("effective_team_id")
+    root["thread_locked"] = thread_locked_for_lens(
+        cur, root.get("topic") or "", root["post_id"], lens_team_id
+    )
+    if root["thread_locked"]:
+        logger.debug(
+            "[lock] thread locked for lens root=%s community=%s team=%s",
+            str(root["post_id"])[:12],
+            root.get("topic"),
+            lens_team_id,
+        )
 
     return {
         "root": root,
@@ -7398,6 +7456,7 @@ def get_comment_context():
             requested_team_id=team_id,
             scope=scope,
         )
+        _resolve_effective_tags(cur, chain)
         conn.close()
         resp = {"context": chain, "comment_id": comment_id}
         return jsonify(_inject_balance(resp, address))

@@ -81,6 +81,75 @@ async function fetchMembership(community, viewer) {
  * Resolve whether the logged-in viewer is a curator for `community`.
  * One membership per community — returns that team's id/name, or null.
  */
+/**
+ * Communities where the logged-in viewer is an accepted curator on a live team.
+ * Used by the sidebar to pin/highlight those rows.
+ */
+export function useViewerCuratorCommunities() {
+    const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
+    const enabled = Boolean(viewer && viewer !== 'guest');
+    const [communities, setCommunities] = useState([]);
+    const [loading, setLoading] = useState(enabled);
+
+    const refresh = useCallback(async () => {
+        if (!enabled) {
+            setCommunities([]);
+            setLoading(false);
+            return [];
+        }
+        setLoading(true);
+        try {
+            const data = await Api.get(
+                `curators/${encodeURIComponent(viewer)}/communities`,
+                { _cb: Date.now() },
+            );
+            if (!data || !Array.isArray(data.communities)) {
+                throw new Error('Invalid curator communities response');
+            }
+            const next = data.communities
+                .map((slug) => String(slug || '').trim().toLowerCase())
+                .filter(Boolean);
+            setCommunities(next);
+            console.debug('[curation] viewer curator communities', {
+                viewer: viewer.slice(0, 12),
+                count: next.length,
+            });
+            return next;
+        } catch (err) {
+            console.error('[curation] curator communities failed', {
+                viewer: viewer.slice(0, 12),
+                error: String(err?.message || err),
+            });
+            setCommunities([]);
+            return [];
+        } finally {
+            setLoading(false);
+        }
+    }, [enabled, viewer]);
+
+    useEffect(() => {
+        if (!enabled) {
+            setCommunities([]);
+            setLoading(false);
+            return undefined;
+        }
+        let cancelled = false;
+        refresh().catch(() => {
+            if (!cancelled) setCommunities([]);
+        });
+        const onUpdate = () => {
+            refresh().catch(() => {});
+        };
+        window.addEventListener('curationUpdated', onUpdate);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('curationUpdated', onUpdate);
+        };
+    }, [enabled, refresh]);
+
+    return { communities, loading, refresh };
+}
+
 export function useViewerCuratorMembership(community) {
     const slug = String(community || '').trim().toLowerCase();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();

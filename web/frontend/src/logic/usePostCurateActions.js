@@ -5,6 +5,7 @@ import {
     HiOutlineLockClosed,
     HiOutlineLockOpen,
     HiOutlineNoSymbol,
+    HiOutlineTag,
     HiOutlineUser,
 } from 'react-icons/hi2';
 import Api from '../utils/api';
@@ -14,6 +15,15 @@ import { formatError } from '../utils/errorMessages';
 import { updateNotification } from '../utils/notifications';
 import { usePendingCuration } from './usePendingCuration';
 import { useViewerCuratorMembership } from './useViewerCuratorMembership';
+import { TAG_OPTIONS } from './useCreatePost';
+
+// Distinct from the '' tag: '' is the curator saying "untagged", this is the
+// curator having no opinion so the community tag and author tag apply again.
+const INHERIT_TAG = '__inherit__';
+const POST_TAG_OPTIONS = [
+    { value: INHERIT_TAG, label: 'No override' },
+    ...TAG_OPTIONS.map(({ value, label }) => ({ value, label: value ? label : 'Untagged' })),
+];
 
 function postCommunity(post) {
     const topic = typeof post?.topic === 'string' ? post.topic.trim() : '';
@@ -74,6 +84,9 @@ export function usePostCurateActions(post, { active = false } = {}) {
                     postHidden: data.post_hidden,
                     userHidden: data.user_hidden,
                     threadLocked: data.thread_locked,
+                    // null means this team has no tag opinion on the post; ''
+                    // means a curator marked it untagged.
+                    postTag: typeof data.post_tag === 'string' ? data.post_tag : null,
                 });
                 setModError('');
             })
@@ -107,6 +120,7 @@ export function usePostCurateActions(post, { active = false } = {}) {
                     postHidden: false,
                     userHidden: false,
                     threadLocked: false,
+                    postTag: null,
                     ...(prev || {}),
                     ...optimistic,
                 }));
@@ -126,13 +140,13 @@ export function usePostCurateActions(post, { active = false } = {}) {
         const out = [];
         if (modState.postHidden) {
             out.push({
-                key: 'show_post',
-                label: status('set_curation_post_hidden', postId, 'Showing…') || 'Show post',
+                key: 'restore_post',
+                label: status('set_curation_post_hidden', postId, 'Restoring…') || 'Restore post',
                 danger: false,
                 disabled: pending('set_curation_post_hidden', postId),
                 icon: <HiOutlineEye />,
                 run: () => run(
-                    'Show post',
+                    'Restore post',
                     () => tx.moderateCurationPost(community, teamId, postId, false),
                     { postHidden: false },
                 ),
@@ -154,13 +168,13 @@ export function usePostCurateActions(post, { active = false } = {}) {
 
         if (modState.userHidden) {
             out.push({
-                key: 'show_user',
-                label: status('set_curation_user_hidden', author, 'Showing…') || 'Show user',
+                key: 'restore_user',
+                label: status('set_curation_user_hidden', author, 'Restoring…') || 'Restore user',
                 danger: false,
                 disabled: !author || pending('set_curation_user_hidden', author),
                 icon: <HiOutlineUser />,
                 run: () => run(
-                    'Show user',
+                    'Restore user',
                     () => tx.moderateCurationUser(community, teamId, author, false),
                     { userHidden: false },
                 ),
@@ -207,6 +221,27 @@ export function usePostCurateActions(post, { active = false } = {}) {
                 ),
             });
         }
+
+        // A select rather than one row per tag: six extra rows would swamp the
+        // menu, and the choices are mutually exclusive anyway.
+        out.push({
+            key: 'post_tag',
+            type: 'select',
+            label: 'Content tag',
+            icon: <HiOutlineTag />,
+            value: modState.postTag === null ? INHERIT_TAG : modState.postTag,
+            options: POST_TAG_OPTIONS,
+            disabled: pending('set_curation_post_tag', postId),
+            status: status('set_curation_post_tag', postId, 'Tagging…'),
+            onSelect: (value) => {
+                const clear = value === INHERIT_TAG;
+                run(
+                    'Tag post',
+                    () => tx.setCurationPostTag(community, teamId, postId, clear ? '' : value, clear),
+                    { postTag: clear ? null : value },
+                );
+            },
+        });
         return out;
     }, [author, community, getInfo, getStatus, isCurator, modState, postId, rootHash, run, teamId]);
 

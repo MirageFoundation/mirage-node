@@ -321,7 +321,7 @@ func DefaultParams() Params {
 		MaxPendingCuratorInvitesPerTeam:     10,
 		MaxPendingCuratorInvitesPerUser:     100,
 		MaxCurationTeamNameLength:           30,
-		MaxCurationTeamDescriptionLength:    4000,
+		MaxCurationTeamDescriptionLength:    800,
 		SubscriptionTransitionsPerBlock:     100,
 		CurationPruneKeysPerBlock:           500,
 		CreatorEpochClosuresPerBlock:        4,

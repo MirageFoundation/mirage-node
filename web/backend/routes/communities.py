@@ -231,6 +231,41 @@ def community_detail(slug: str):
         return api_error_code("indexer_unavailable", 503)
 
 
+@communities_bp.route("/api/curators/<address>/communities")
+def curator_communities(address: str):
+    """Communities where this address is an accepted curator on a live team."""
+    rid = next_request_id()
+    viewer = (address or "").strip().lower()
+    if not re.fullmatch(r"mirage1[0-9a-z]{38}", viewer):
+        return api_error_code("user_must_be_mirage1", 400)
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT m.community
+                FROM curation_team_curators m
+                JOIN curation_teams t
+                  ON t.community=m.community AND t.team_id=m.team_id
+                WHERE LOWER(m.curator)=%s
+                  AND t.deleted_height IS NULL
+                ORDER BY m.community
+                """,
+                (viewer,),
+            )
+            communities = [str(r[0]).lower() for r in (cur.fetchall() or []) if r and r[0]]
+        log_event(
+            rid,
+            "[community] curator_communities",
+            viewer=viewer[:12],
+            count=len(communities),
+        )
+        return jsonify({"communities": communities})
+    except Exception as e:
+        log_event(rid, "communities.curator_communities.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
 @communities_bp.route("/api/communities/<slug>/teams")
 def community_teams(slug: str):
     rid = next_request_id()
@@ -245,7 +280,7 @@ def community_teams(slug: str):
             sql = """
                 SELECT t.team_id, t.owner, t.name, t.description,
                        t.subscriber_only, t.subscriber_count, t.deleted_height,
-                       COUNT(m.curator) AS member_count
+                       COUNT(m.curator) AS member_count, t.tag
                 FROM curation_teams t
                 LEFT JOIN curation_team_curators m
                   ON m.community=t.community AND m.team_id=t.team_id
@@ -289,6 +324,7 @@ def community_teams(slug: str):
                 "subscriber_count": str(r[5]),
                 "deleted": r[6] is not None,
                 "member_count": int(r[7]),
+                "tag": str(r[8] or ""),
             }
             for r in rows
         ]
@@ -317,7 +353,7 @@ def community_team_detail(slug: str, team_id: int):
             cur.execute(
                 """
                 SELECT owner, name, description, subscriber_only,
-                       subscriber_count, created_height, created_order, deleted_height
+                       subscriber_count, created_height, created_order, deleted_height, tag
                 FROM curation_teams
                 WHERE community=%s AND team_id=%s
                 """,
@@ -359,6 +395,7 @@ def community_team_detail(slug: str, team_id: int):
                 "created_height": int(row[5]),
                 "created_order": str(row[6]),
                 "deleted": row[7] is not None,
+                "tag": str(row[8] or ""),
                 "members": members,
             }
         )
@@ -472,11 +509,20 @@ def community_team_moderation(slug: str, team_id: int):
                     EXISTS(
                         SELECT 1 FROM curation_locks
                         WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+                    ),
+                    (
+                        SELECT tag FROM curation_post_tags
+                        WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
                     )
                 """,
-                (slug, team_id, post_id, slug, team_id, author, slug, team_id, root),
+                (
+                    slug, team_id, post_id,
+                    slug, team_id, author,
+                    slug, team_id, root,
+                    slug, team_id, post_id,
+                ),
             )
-            post_hidden, user_hidden, thread_locked = cur.fetchone()
+            post_hidden, user_hidden, thread_locked, post_tag = cur.fetchone()
         log_event(
             rid,
             "[community] teams.moderation",
@@ -487,6 +533,7 @@ def community_team_moderation(slug: str, team_id: int):
             post_hidden=bool(post_hidden),
             user_hidden=bool(user_hidden),
             thread_locked=bool(thread_locked),
+            post_tag=post_tag,
         )
         return jsonify(
             {
@@ -498,6 +545,9 @@ def community_team_moderation(slug: str, team_id: int):
                 "post_hidden": bool(post_hidden),
                 "user_hidden": bool(user_hidden),
                 "thread_locked": bool(thread_locked),
+                # null means this team has no opinion; "" means the curator
+                # explicitly marked the post untagged.
+                "post_tag": post_tag,
             }
         )
     except Exception as e:

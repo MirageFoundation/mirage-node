@@ -819,6 +819,24 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			}); err != nil {
 				return ctx, err
 			}
+		case *coretypes.MsgSetCurationTag:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationTag", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Tag)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgSetCurationPostTag:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgSetCurationPostTag", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, m.TeamId)
+				w.writeString(102, m.Target)
+				w.writeString(103, m.Tag)
+				writeCanonBool(w, 104, m.Clear)
+			}); err != nil {
+				return ctx, err
+			}
 		case *coretypes.MsgClaimCreatorRewards:
 			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgClaimCreatorRewards", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
 				for _, id := range m.EpochIds {

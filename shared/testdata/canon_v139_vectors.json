@@ -198,6 +198,57 @@
                 "enabled": false
             },
             "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e537562736372696265724f6e6c79000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036600"
+        },
+        {
+            "msg": "MsgSetCurationTag",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "tag": "adult"
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366056164756c74"
+        },
+        {
+            "msg": "MsgSetCurationTag",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "tag": ""
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965036600"
+        },
+        {
+            "msg": "MsgSetCurationPostTag",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "abc123",
+                "tag": "gore",
+                "clear": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f7374546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f6779650366066162633132336704676f72656800"
+        },
+        {
+            "msg": "MsgSetCurationPostTag",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "abc123",
+                "tag": "",
+                "clear": false
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f7374546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660661626331323367006800"
+        },
+        {
+            "msg": "MsgSetCurationPostTag",
+            "fields": {
+                "community": "technology",
+                "team_id": 3,
+                "target": "abc123",
+                "tag": "",
+                "clear": true
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f7374546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660661626331323367006801"
         }
     ]
 }

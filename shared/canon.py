@@ -782,6 +782,24 @@ def canon_base_set_curation_subscriber_only(pubkey, last_block_hash, difficulty,
     return bytes(out)
 
 
+def canon_base_set_curation_tag(pubkey, last_block_hash, difficulty, timestamp, community, team_id, tag, nonce=0):
+    out = _canon_envelope("MsgSetCurationTag", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, tag)
+    return bytes(out)
+
+
+def canon_base_set_curation_post_tag(pubkey, last_block_hash, difficulty, timestamp, community, team_id, target, tag, clear, nonce=0):
+    out = _canon_envelope("MsgSetCurationPostTag", pubkey, last_block_hash, difficulty, timestamp, nonce)
+    out += _enc_str(100, community)
+    out += _enc_u64(101, int(team_id))
+    out += _enc_str(102, target)
+    out += _enc_str(103, tag)
+    out += _enc_u64(104, 1 if clear else 0)
+    return bytes(out)
+
+
 def canon_base_claim_creator_rewards(pubkey, last_block_hash, difficulty, timestamp, epoch_ids, nonce=0):
     out = _canon_envelope("MsgClaimCreatorRewards", pubkey, last_block_hash, difficulty, timestamp, nonce)
     for eid in epoch_ids:

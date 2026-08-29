@@ -263,6 +263,16 @@ function FollowingLabel({ status }) {
     );
 }
 
+function JoinedLabel({ status }) {
+    if (status) return status;
+    return (
+        <>
+            <span data-follow-label="default">Joined</span>
+            <span data-follow-label="hover">Leave</span>
+        </>
+    );
+}
+
 /* ----- Empty / loading / error states (mirrors InboxView `StateBlock`). ----- */
 
 const StateBlock = styled.div`
@@ -450,9 +460,9 @@ export default function FollowsView({ state }) {
                     <StateIcon>
                         <HiHashtag />
                     </StateIcon>
-                    <StateTitle>Not following any communities</StateTitle>
+                    <StateTitle>No joined communities</StateTitle>
                     <StateMessage>
-                        Communities you follow will appear here. Pin communities you want to see more of in your feed.
+                        Communities you join will appear here. Pin communities you want to see more of in your feed.
                     </StateMessage>
                 </StateBlock>
             )}
@@ -492,7 +502,7 @@ export default function FollowsView({ state }) {
                                             handleUnfollowTopic(e, topic);
                                         }}
                                     >
-                                        <FollowingLabel status={status} />
+                                        <JoinedLabel status={status} />
                                     </FollowingButton>
                                 </RowActions>
                             </Row>

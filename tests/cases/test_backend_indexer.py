@@ -749,6 +749,28 @@ class _StubEditDB:
         return _record
 
 
+class _StubCurationDB:
+    """Records the SQL process_curation_events issues, without a database."""
+
+    def __init__(self):
+        self.statements: list[tuple[str, tuple]] = []
+
+    def _connect(self):
+        return self
+
+    def cursor(self):
+        return self
+
+    def execute(self, sql, params=()):
+        self.statements.append((" ".join(str(sql).split()), tuple(params)))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
 def _edit_msg_bytes(pubkey: bytes, override: str) -> bytes:
     from shared.datatypes import MsgEdit
 
@@ -818,6 +840,114 @@ def test_indexer_hardening(backend: str):
         _pass("indexer_hardening.sanitize_wh_bounds")
     else:
         _fail("indexer_hardening.sanitize_wh_bounds", "bounds check wrong")
+
+    # ── Membership must be projected from events, not just from messages ─
+    #
+    # Accepting a curator invite auto-joins the community, and the gov curator /
+    # preference messages execute at EndBlock. None of those arrive as a
+    # MsgJoinCommunity, so a member-message-only projection leaves the chain
+    # saying "joined" while the API says otherwise.
+
+    membership_db = _StubCurationDB()
+    membership_proc = MessageProcessor(membership_db, None, lambda *a, **k: None, lambda t: "")
+    membership_proc.process_curation_events(
+        [
+            {
+                "type": "community_joined",
+                "attributes": [
+                    {"key": "address", "value": "mirage1joiner"},
+                    {"key": "community", "value": "photography"},
+                ],
+            },
+            {
+                "type": "community_left",
+                "attributes": [
+                    {"key": "address", "value": "mirage1leaver"},
+                    {"key": "community", "value": "photography"},
+                ],
+            },
+        ],
+        4242,
+    )
+    joined_sql = [s for s, p in membership_db.statements if "INSERT INTO community_curation_preferences" in s]
+    left_sql = [s for s, p in membership_db.statements if "DELETE FROM community_curation_preferences" in s]
+    joined_params = [p for s, p in membership_db.statements if "INSERT INTO community_curation_preferences" in s]
+    if len(joined_sql) == 1 and len(left_sql) == 1 and joined_params[0] == ("mirage1joiner", "photography", 4242):
+        _pass("indexer_hardening.membership_from_events", statements=len(membership_db.statements))
+    else:
+        _fail(
+            "indexer_hardening.membership_from_events",
+            f"joined={len(joined_sql)} left={len(left_sql)} statements={membership_db.statements}",
+        )
+
+    missing_addr = _StubCurationDB()
+    try:
+        MessageProcessor(missing_addr, None, lambda *a, **k: None, lambda t: "").process_curation_events(
+            [{"type": "community_joined", "attributes": [{"key": "community", "value": "photography"}]}],
+            4243,
+        )
+        _fail("indexer_hardening.membership_event_fails_hard", "community_joined without address was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.membership_event_fails_hard")
+
+    # ── A curator's empty tag is a decision; only `cleared` removes the row ──
+    #
+    # If the projection treated tag='' as "no override" the whole precedence
+    # chain would collapse: the community tag would leak back onto a post a
+    # curator deliberately marked untagged.
+
+    def _post_tag_event(tag: str, cleared: bool) -> dict:
+        return {
+            "type": "curation_post_tag_changed",
+            "attributes": [
+                {"key": "community", "value": "photography"},
+                {"key": "team_id", "value": "3"},
+                {"key": "target", "value": "abc123"},
+                {"key": "tag", "value": tag},
+                {"key": "cleared", "value": "true" if cleared else "false"},
+                {"key": "actor", "value": "mirage1curator"},
+            ],
+        }
+
+    tag_db = _StubCurationDB()
+    MessageProcessor(tag_db, None, lambda *a, **k: None, lambda t: "").process_curation_events(
+        [_post_tag_event("gore", False), _post_tag_event("", False), _post_tag_event("", True)],
+        4244,
+    )
+    inserts = [p for s, p in tag_db.statements if "INSERT INTO curation_post_tags" in s]
+    deletes = [p for s, p in tag_db.statements if "DELETE FROM curation_post_tags" in s]
+    if (
+        len(inserts) == 2
+        and len(deletes) == 1
+        and inserts[0] == ("photography", 3, "abc123", "gore", "mirage1curator", 4244)
+        and inserts[1] == ("photography", 3, "abc123", "", "mirage1curator", 4244)
+        and deletes[0] == ("photography", 3, "abc123")
+    ):
+        _pass("indexer_hardening.post_tag_projection", inserts=len(inserts), deletes=len(deletes))
+    else:
+        _fail(
+            "indexer_hardening.post_tag_projection",
+            f"inserts={inserts} deletes={deletes}",
+        )
+
+    missing_cleared = _StubCurationDB()
+    try:
+        MessageProcessor(missing_cleared, None, lambda *a, **k: None, lambda t: "").process_curation_events(
+            [
+                {
+                    "type": "curation_post_tag_changed",
+                    "attributes": [
+                        {"key": "community", "value": "photography"},
+                        {"key": "team_id", "value": "3"},
+                        {"key": "target", "value": "abc123"},
+                    ],
+                }
+            ],
+            4245,
+        )
+        _fail("indexer_hardening.post_tag_event_fails_hard", "event without cleared was accepted")
+    except RuntimeError:
+        _pass("indexer_hardening.post_tag_event_fails_hard")
 
     # ── H-5: thumbnails are derived offline and deterministically ────────
 

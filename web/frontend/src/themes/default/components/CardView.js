@@ -773,8 +773,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleCardClick = useCallback((e) => {
         if (isInteractiveTarget(e.target)) return;
-        if (linkTarget && linkTarget !== '#') navigate(linkTarget);
-    }, [navigate, linkTarget]);
+        if (!linkTarget || linkTarget === '#') return;
+        // Match <a href="/p/…"> so ViewPost's Back can history-pop to this feed
+        // (including /c/:community). Programmatic navigate alone never set the marker.
+        try {
+            const feedTopic = topic && String(topic).trim() ? String(topic).trim().toLowerCase() : null;
+            sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
+                source: 'feed',
+                topic: feedTopic,
+                at: Date.now(),
+            }));
+            sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
+                topic: feedTopic,
+                at: Date.now(),
+            }));
+        } catch (_) { /* noop */ }
+        navigate(linkTarget);
+    }, [navigate, linkTarget, topic]);
 
     /**
      * Share handler ported from bluemoon: on mobile devices attempt the
@@ -897,7 +912,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const handleFollowTopic = useCallback(async () => {
         closeAllMenus();
         if (!topic) return;
-        if (!requireAccount('follow communities')) return;
+        if (!requireAccount('join communities')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {
@@ -1261,7 +1276,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     setFollowOpen((v) => !v);
                                 }}
                             >
-                                {followingUser || followingTopic ? 'Following' : 'Follow'}
+                                {followingUser ? 'Following' : followingTopic ? 'Joined' : 'Follow'}
                             </FollowButton>
                             {followOpen && (
                                 <Menu role="menu" aria-label="Follow options" $align="right">
@@ -1274,7 +1289,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onClick={handleFollowTopic}
                                     >
                                         <HiOutlineHashtag />
-                                        <span>{followingTopic ? `Unfollow ${communityLabel(topic)}` : `Follow ${communityLabel(topic)}`}</span>
+                                        <span>{followingTopic ? `Leave ${communityLabel(topic)}` : `Join ${communityLabel(topic)}`}</span>
                                     </MenuItemBtn>
                                     <MenuItemBtn
                                         type="button"
@@ -1345,7 +1360,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleFollowTopic}>
                                             <HiOutlineHashtag />
-                                            <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
+                                            <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleGiveAward}>
                                             <HiOutlineSparkles />

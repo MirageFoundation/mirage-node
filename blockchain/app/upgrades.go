@@ -2472,6 +2472,13 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 				sdkCtx.Logger().Info("v1.39.0: set max_curation_team_name_length", "value", 30)
 			}
+			if params.MaxCurationTeamDescriptionLength != 800 {
+				params.MaxCurationTeamDescriptionLength = 800
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, fmt.Errorf("v1.39.0: set max_curation_team_description_length: %w", err)
+				}
+				sdkCtx.Logger().Info("v1.39.0: set max_curation_team_description_length", "value", 800)
+			}
 			if err := app.CoreKeeper.EnsureCurationTeamFoundersSubscribed(sdkCtx); err != nil {
 				return nil, fmt.Errorf("v1.39.0: founder subscriber pins: %w", err)
 			}

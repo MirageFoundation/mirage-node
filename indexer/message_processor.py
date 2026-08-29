@@ -52,6 +52,8 @@ from shared.datatypes import (
     MsgSetCurationUserHidden,
     MsgSetCurationThreadLocked,
     MsgSetCurationSubscriberOnly,
+    MsgSetCurationTag,
+    MsgSetCurationPostTag,
     MsgClaimCreatorRewards,
     MsgBlockCommunity,
     MsgUnblockCommunity,
@@ -2218,14 +2220,15 @@ class MessageProcessor:
                     """
                     INSERT INTO curation_teams(
                         community, team_id, owner, name, normalized_name, description,
-                        subscriber_only, subscriber_count, created_height, created_order, deleted_height
-                    ) VALUES(%s,%s,%s,%s,LOWER(TRIM(%s)),%s,%s,%s,%s,%s,NULLIF(%s,0))
+                        subscriber_only, tag, subscriber_count, created_height, created_order, deleted_height
+                    ) VALUES(%s,%s,%s,%s,LOWER(TRIM(%s)),%s,%s,%s,%s,%s,%s,NULLIF(%s,0))
                     ON CONFLICT (community, team_id) DO UPDATE SET
                         owner=EXCLUDED.owner,
                         name=EXCLUDED.name,
                         normalized_name=EXCLUDED.normalized_name,
                         description=EXCLUDED.description,
                         subscriber_only=EXCLUDED.subscriber_only,
+                        tag=EXCLUDED.tag,
                         subscriber_count=EXCLUDED.subscriber_count,
                         created_height=EXCLUDED.created_height,
                         created_order=EXCLUDED.created_order,
@@ -2239,6 +2242,7 @@ class MessageProcessor:
                         team["name"],
                         team["description"],
                         team["subscriber_only"],
+                        team["tag"],
                         team["subscriber_count"],
                         team["created_height"],
                         team["created_order"],
@@ -2301,6 +2305,7 @@ class MessageProcessor:
             "curator_left",
             "curator_removed",
             "curation_subscriber_only_changed",
+            "curation_tag_changed",
         }
         touched: set[tuple[str, int]] = set()
         for event_type, attrs in self.decode_events(events):
@@ -2374,6 +2379,43 @@ class MessageProcessor:
                                     raise RuntimeError(f"{event_type} has no pending invitation row")
                 continue
 
+            # Membership also changes without a MsgJoin/LeaveCommunity: accepting a
+            # curator invite auto-joins, and the gov curator/preference messages
+            # execute at EndBlock. Those paths only surface as these events.
+            if event_type in ("community_joined", "community_left"):
+                owner = str(attrs.get("address", "")).strip().lower()
+                if not owner or not community:
+                    raise RuntimeError(f"{event_type} event missing address/community at height {height}")
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        if event_type == "community_joined":
+                            cur.execute(
+                                """
+                                INSERT INTO community_curation_preferences(
+                                    owner, community, mode, pinned_team_id, updated_height
+                                ) VALUES(%s,%s,0,NULL,%s)
+                                ON CONFLICT(owner, community) DO UPDATE SET
+                                    updated_height=EXCLUDED.updated_height
+                                """,
+                                (owner, community, int(height)),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                DELETE FROM community_curation_preferences
+                                WHERE LOWER(owner)=LOWER(%s) AND community=%s
+                                """,
+                                (owner, community),
+                            )
+                logger.info(
+                    "[curation] %s owner=%s community=%s height=%s",
+                    event_type,
+                    owner,
+                    community,
+                    height,
+                )
+                continue
+
             if event_type == "community_preference_changed":
                 owner = str(attrs.get("owner", "")).strip().lower()
                 if not owner or not community or "new_mode" not in attrs or "new_team_id" not in attrs:
@@ -2428,6 +2470,41 @@ class MessageProcessor:
                             cur.execute(
                                 f"DELETE FROM {table} WHERE community=%s AND team_id=%s AND {column}=%s",
                                 (community, team_id, target),
+                            )
+                continue
+
+            if event_type == "curation_post_tag_changed":
+                if not community or raw_team_id is None or "target" not in attrs or "cleared" not in attrs:
+                    raise RuntimeError("curation_post_tag_changed event missing final state")
+                team_id = int(raw_team_id)
+                target = str(attrs["target"]).strip().lower()
+                cleared = str(attrs["cleared"]).lower() == "true"
+                # An empty tag is a decision, not an absence, so only `cleared`
+                # removes the row.
+                tag = str(attrs.get("tag", ""))
+                actor = str(attrs.get("actor", "")).strip().lower()
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        if cleared:
+                            cur.execute(
+                                "DELETE FROM curation_post_tags "
+                                "WHERE community=%s AND team_id=%s AND target_txhash=%s",
+                                (community, team_id, target),
+                            )
+                        else:
+                            if not actor:
+                                raise RuntimeError("curation_post_tag_changed event missing actor")
+                            cur.execute(
+                                """
+                                INSERT INTO curation_post_tags(
+                                    community, team_id, target_txhash, tag, actor, updated_height
+                                ) VALUES(%s,%s,%s,%s,%s,%s)
+                                ON CONFLICT(community, team_id, target_txhash) DO UPDATE SET
+                                    tag=EXCLUDED.tag,
+                                    actor=EXCLUDED.actor,
+                                    updated_height=EXCLUDED.updated_height
+                                """,
+                                (community, team_id, target, tag, actor, int(height)),
                             )
                 continue
 

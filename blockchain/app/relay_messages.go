@@ -52,6 +52,8 @@ func relayMessagePrototypes() []sdk.Msg {
 		&coretypes.MsgSetCurationUserHidden{},
 		&coretypes.MsgSetCurationThreadLocked{},
 		&coretypes.MsgSetCurationSubscriberOnly{},
+		&coretypes.MsgSetCurationTag{},
+		&coretypes.MsgSetCurationPostTag{},
 		&coretypes.MsgClaimCreatorRewards{},
 	}
 }

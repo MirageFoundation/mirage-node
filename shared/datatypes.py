@@ -743,6 +743,18 @@ def _build_pool():
         ("team_id", 101, UINT64, False),
         ("enabled", 102, BOOL, False),
     ])
+    add_msg_fields("MsgSetCurationTag", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("tag", 102, STRING, False),
+    ])
+    add_msg_fields("MsgSetCurationPostTag", [
+        ("community", 100, STRING, False),
+        ("team_id", 101, UINT64, False),
+        ("target", 102, STRING, False),
+        ("tag", 103, STRING, False),
+        ("clear", 104, BOOL, False),
+    ])
     claim = file_proto.message_type.add()
     claim.name = "MsgClaimCreatorRewards"
     add_envelope(claim)
@@ -787,6 +799,13 @@ def _build_pool():
     add_f(curation_team, "created_order", 11, UINT64)
     add_f(curation_team, "next_member_order", 12, UINT64)
     add_f(curation_team, "deleted_height", 13, INT64)
+    add_f(curation_team, "tag", 14, STRING)
+
+    curation_post_tag = file_proto.message_type.add()
+    curation_post_tag.name = "CurationPostTag"
+    add_f(curation_post_tag, "tag", 1, STRING)
+    add_f(curation_post_tag, "actor", 2, STRING)
+    add_f(curation_post_tag, "updated_height", 3, INT64)
 
     curation_member = file_proto.message_type.add()
     curation_member.name = "CurationTeamMember"
@@ -1064,8 +1083,11 @@ MsgSetCurationPostHidden = _get_message_class("mirage.core.v1.MsgSetCurationPost
 MsgSetCurationUserHidden = _get_message_class("mirage.core.v1.MsgSetCurationUserHidden")
 MsgSetCurationThreadLocked = _get_message_class("mirage.core.v1.MsgSetCurationThreadLocked")
 MsgSetCurationSubscriberOnly = _get_message_class("mirage.core.v1.MsgSetCurationSubscriberOnly")
+MsgSetCurationTag = _get_message_class("mirage.core.v1.MsgSetCurationTag")
+MsgSetCurationPostTag = _get_message_class("mirage.core.v1.MsgSetCurationPostTag")
 MsgClaimCreatorRewards = _get_message_class("mirage.core.v1.MsgClaimCreatorRewards")
 CurationTeam = _get_message_class("mirage.core.v1.CurationTeam")
+CurationPostTag = _get_message_class("mirage.core.v1.CurationPostTag")
 CurationTeamMember = _get_message_class("mirage.core.v1.CurationTeamMember")
 CommunityPreference = _get_message_class("mirage.core.v1.CommunityPreference")
 QueryCurationTeamRequest = _get_message_class("mirage.core.v1.QueryCurationTeamRequest")

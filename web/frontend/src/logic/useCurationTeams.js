@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Api from '../utils/api';
 import {
     HIDDEN_LIST_INITIAL,
@@ -24,43 +24,64 @@ export function useCurationTeams(community, { includeDeleted = false, viewer = '
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const requestSeq = useRef(0);
 
-    const refresh = useCallback(async () => {
+    const refresh = useCallback(async ({ background = false } = {}) => {
         if (!enabled) {
             setTeams([]);
             setLoading(false);
             return [];
         }
-        setLoading(true);
-        setError('');
+        const seq = ++requestSeq.current;
+        if (!background) {
+            setLoading(true);
+            setError('');
+        }
         try {
-            const params = { include_deleted: includeDeleted };
+            const params = { include_deleted: includeDeleted, _cb: Date.now() };
             if (viewer) params.viewer = String(viewer).toLowerCase();
             const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, params);
             if (!data || !Array.isArray(data.items)) throw new Error('Invalid curator teams response');
             const next = data.items.map(validateTeam);
+            if (seq !== requestSeq.current) {
+                console.debug('[curation] teams stale response dropped', {
+                    community: slug,
+                    seq,
+                    current: requestSeq.current,
+                });
+                return null;
+            }
             setTeams(next);
-            console.debug('[curation] teams loaded', { community: slug, count: next.length });
+            console.debug('[curation] teams loaded', { community: slug, count: next.length, background });
             return next;
         } catch (err) {
+            if (seq !== requestSeq.current) return null;
             const message = String(err?.message || err);
             setError(message);
             console.error('[curation] teams failed', { community: slug, error: message });
             throw err;
         } finally {
-            setLoading(false);
+            if (seq === requestSeq.current && !background) {
+                setLoading(false);
+            }
         }
     }, [enabled, includeDeleted, slug, viewer]);
 
     useEffect(() => {
         if (!enabled) return undefined;
+        requestSeq.current += 1;
         refresh().catch(() => {});
         const onUpdate = (event) => {
             const changed = String(event?.detail?.community || '').toLowerCase();
-            if (!changed || changed === slug) refresh().catch(() => {});
+            if (!changed || changed === slug) {
+                refresh({ background: true }).catch(() => {});
+            }
         };
         window.addEventListener('curationUpdated', onUpdate);
-        return () => window.removeEventListener('curationUpdated', onUpdate);
+        return () => {
+            requestSeq.current += 1;
+            window.removeEventListener('curationUpdated', onUpdate);
+        };
     }, [enabled, refresh, slug]);
 
     return { teams, loading, error, refresh };

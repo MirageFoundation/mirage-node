@@ -290,6 +290,16 @@ export async function setCurationSubscriberOnly(community, teamId, enabled) {
     return h.setCurationSubscriberOnly(community, teamId, enabled);
 }
 
+export async function setCurationTag(community, teamId, tag) {
+    const h = await getHandler();
+    return h.setCurationTag(community, teamId, tag);
+}
+
+export async function setCurationPostTag(community, teamId, postId, tag, clear) {
+    const h = await getHandler();
+    return h.setCurationPostTag(community, teamId, postId, tag, clear);
+}
+
 export async function setCurationPreference(community, mode, pinnedTeamId) {
     const h = await getHandler();
     return h.setCurationPreference(community, mode, pinnedTeamId);

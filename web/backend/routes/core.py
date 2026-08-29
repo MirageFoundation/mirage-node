@@ -80,6 +80,8 @@ from shared.datatypes import (
     MsgSetCurationUserHidden,
     MsgSetCurationThreadLocked,
     MsgSetCurationSubscriberOnly,
+    MsgSetCurationTag,
+    MsgSetCurationPostTag,
     MsgClaimCreatorRewards,
 )
 
@@ -501,10 +503,15 @@ def _classify_exception(err_str: str):
         return get_message("envelope_expired"), 400
     if "requires an active subscriber" in low or "requires an active subscriber or admin" in low:
         return get_message("not_subscriber"), 400
-    if "must join community" in low:
-        return get_message("must_join_community"), 400
     if "already a curator in this community" in low:
         return get_message("already_curator"), 400
+    # Both arrive as "failed to execute message" 500s, so without these they
+    # collapse into the generic "transaction rejected" below and the user is
+    # told nothing about what to do next.
+    if "while curating a team" in low:
+        return get_message("leave_blocked_by_curation"), 400
+    if "not joined:" in low:
+        return get_message("not_joined"), 400
     # Chain simulation / broadcast rejections (HTTP 400 from chain = client error)
     if "simulate_gas http 400" in low:
         return "transaction rejected", 400
@@ -4477,6 +4484,13 @@ def _curation_team_route(path, log_name, type_url, msg_cls, fields):
                 msg.locked = bool(data.get("locked"))
             if "enabled" in fields:
                 msg.enabled = bool(data.get("enabled"))
+            if "clear" in fields:
+                msg.clear = bool(data.get("clear"))
+            if "tag" in fields:
+                tag = _normalize_tag(str(data.get("tag", "") or ""))
+                if tag not in ALLOWED_TAGS:
+                    return api_error_code("invalid_tag", 400)
+                msg.tag = tag
             if "root_hash" in fields:
                 msg.root_hash = str(data.get("root_hash", "") or "").strip().lower()
             return _broadcast_core_msg(rid, log_name, type_url, msg, 64, env["user_addr"])
@@ -4578,6 +4592,20 @@ _curation_team_route(
     "/mirage.core.v1.MsgSetCurationSubscriberOnly",
     MsgSetCurationSubscriberOnly,
     {"community", "team_id", "enabled"},
+)
+_curation_team_route(
+    "/api/core/set_curation_tag",
+    "set_curation_tag",
+    "/mirage.core.v1.MsgSetCurationTag",
+    MsgSetCurationTag,
+    {"community", "team_id", "tag"},
+)
+_curation_team_route(
+    "/api/core/set_curation_post_tag",
+    "set_curation_post_tag",
+    "/mirage.core.v1.MsgSetCurationPostTag",
+    MsgSetCurationPostTag,
+    {"community", "team_id", "target", "tag", "clear"},
 )
 
 

@@ -62,6 +62,18 @@ message CurationTeam {
   uint64 created_order = 11;
   uint64 next_member_order = 12;
   int64 deleted_height = 13;
+  // Blanket content tag for the whole community. Empty means the team sets none.
+  string tag = 14;
+}
+
+// CurationPostTag is a curator's tag decision for one post under one team.
+// Stored as a message so the value is never empty: an empty tag field means
+// "this curator says the post carries no tag", which is distinct from having
+// no record at all, which means "this team has no opinion".
+message CurationPostTag {
+  string tag = 1;
+  string actor = 2;
+  int64 updated_height = 3;
 }
 
 message CurationTeamMember {

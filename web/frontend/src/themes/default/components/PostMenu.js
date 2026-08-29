@@ -132,6 +132,39 @@ const MenuItemBtn = styled.button`
     }
 `;
 
+const MenuDivider = styled.div`
+    height: 1px;
+    margin: 0.25rem 0.55rem;
+    background: ${({ theme }) => theme.colors.border};
+`;
+
+/** Matches MenuItemBtn's rhythm so a select row sits flush with the buttons. */
+const MenuSelectRow = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 8px 14px;
+    color: ${({ theme }) => theme.colors.sidebarItemText};
+    font-size: 0.7rem;
+    line-height: 1;
+
+    svg { flex-shrink: 0; }
+`;
+
+const MenuSelect = styled.select`
+    flex: 1;
+    min-width: 0;
+    padding: 3px 4px;
+    border-radius: 6px;
+    border: 1px solid ${({ theme }) => theme.colors.border};
+    background: ${({ theme }) => theme.colors.inputBackground};
+    color: inherit;
+    font-family: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+`;
+
 // 3-dot button — identical rhythm to CardView's `MoreButton`. The svg is
 // set to `display: block` to prevent inline-baseline offset (without it
 // the glyph sits 1–2px above the optical center of the 28px pill).
@@ -363,7 +396,7 @@ export function MoreMenuChip({
     const handleFollowTopic = useCallback(async e => {
         stop(e); setOpen(false);
         if (!topic) return;
-        if (!requireAccount('follow communities')) return;
+        if (!requireAccount('join communities')) return;
         const next = !followingTopic;
         setTopicFollowOverride(next);
         try {
@@ -473,7 +506,7 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleFollowTopic}>
                                     <HiOutlineHashtag />
-                                    <span>{followingTopic ? 'Unfollow community' : 'Follow community'}</span>
+                                    <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleGiveAward}>
                                     <HiOutlineSparkles />
@@ -591,7 +624,7 @@ export function ModMenuChip({
         }
         setDeleteDialogOpen(false);
         setDeletePending(false);
-        console.debug('[mod] mark post deleted', { postId: String(postId).slice(0, 12) });
+        console.debug('[mod] delete post network wide', { postId: String(postId).slice(0, 12) });
     }, [postId, updatePost]);
 
     const cancelMarkDeleted = useCallback(() => {
@@ -618,15 +651,35 @@ export function ModMenuChip({
                         {isAdminVisible && (
                             <MenuItemBtn type="button" $danger onClick={handleMarkDeleted}>
                                 <HiOutlineShieldExclamation />
-                                <span>Mark post deleted</span>
+                                <span>Delete network wide</span>
                             </MenuItemBtn>
                         )}
+                        {isAdminVisible && curateVisible && <MenuDivider />}
                         {curateVisible && (
                             <CurateMenuItems
                                 post={post}
                                 active={open}
                                 onDone={close}
-                                renderItem={(item) => (
+                                renderItem={(item) => (item.type === 'select' ? (
+                                    <MenuSelectRow key={item.key}>
+                                        {item.icon}
+                                        <MenuSelect
+                                            aria-label={item.label}
+                                            value={item.value}
+                                            disabled={item.disabled}
+                                            onClick={(e) => e.stopPropagation()}
+                                            onChange={(e) => {
+                                                e.stopPropagation();
+                                                item.onSelect(e.target.value);
+                                                close();
+                                            }}
+                                        >
+                                            {item.options.map((opt) => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                        </MenuSelect>
+                                    </MenuSelectRow>
+                                ) : (
                                     <MenuItemBtn
                                         key={item.key}
                                         type="button"
@@ -637,7 +690,7 @@ export function ModMenuChip({
                                         {item.icon}
                                         <span>{item.label}</span>
                                     </MenuItemBtn>
-                                )}
+                                ))}
                             />
                         )}
                     </Menu>
@@ -645,9 +698,9 @@ export function ModMenuChip({
             </PopoverRoot>
             <ConfirmDialog
                 open={deleteDialogOpen}
-                title="Mark post as deleted?"
+                title="Delete this post network wide?"
                 message="This will permanently remove this post from every feed. This action cannot be undone."
-                confirmLabel="Delete post"
+                confirmLabel="Delete network wide"
                 confirmVariant="danger"
                 pending={deletePending}
                 onConfirm={confirmMarkDeleted}
