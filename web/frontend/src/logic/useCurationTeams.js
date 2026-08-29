@@ -123,3 +123,73 @@ export function useCurationTeam(community, teamId, viewer = '') {
 
     return { team, loading, error, refresh };
 }
+
+export function useHiddenCurationUsers(community, teamId, { viewer = '', enabled = false } = {}) {
+    const slug = enabled ? requireCommunitySlug(community) : '';
+    const id = enabled ? requireTeamId(teamId) : 0;
+    const viewerAddr = String(viewer || '').toLowerCase();
+    const [users, setUsers] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const refresh = useCallback(async () => {
+        if (!enabled || !slug || !id || !viewerAddr || viewerAddr === 'guest') {
+            setUsers([]);
+            setLoading(false);
+            setError('');
+            return [];
+        }
+        setLoading(true);
+        setError('');
+        try {
+            const data = await Api.get(
+                `communities/${encodeURIComponent(slug)}/teams/${id}/hidden-users`,
+                { viewer: viewerAddr, _cb: Date.now() },
+            );
+            if (!data || !Array.isArray(data.items)) {
+                throw new Error('Invalid hidden users response');
+            }
+            const next = data.items.map((item) => {
+                if (typeof item?.address !== 'string' || !item.address.trim()) {
+                    throw new Error('Hidden user is missing address');
+                }
+                if (item.username != null && typeof item.username !== 'string') {
+                    throw new Error('Invalid hidden user username');
+                }
+                return {
+                    address: item.address.trim().toLowerCase(),
+                    username: item.username || null,
+                };
+            });
+            setUsers(next);
+            console.debug('[curation] hidden users loaded', { community: slug, teamId: id, count: next.length });
+            return next;
+        } catch (err) {
+            const message = String(err?.message || err);
+            setUsers([]);
+            setError(message);
+            console.error('[curation] hidden users failed', { community: slug, teamId: id, error: message });
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    }, [enabled, id, slug, viewerAddr]);
+
+    useEffect(() => {
+        if (!enabled) {
+            setUsers([]);
+            setLoading(false);
+            setError('');
+            return undefined;
+        }
+        refresh().catch(() => {});
+        const onUpdate = (event) => {
+            const changed = String(event?.detail?.community || '').toLowerCase();
+            if (!changed || changed === slug) refresh().catch(() => {});
+        };
+        window.addEventListener('curationUpdated', onUpdate);
+        return () => window.removeEventListener('curationUpdated', onUpdate);
+    }, [enabled, refresh, slug]);
+
+    return { users, loading, error, refresh };
+}

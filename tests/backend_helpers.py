@@ -60,6 +60,7 @@ from shared.canon import (
     canon_base_create_curation_team as _canon_base_create_curation_team_raw,
     canon_base_set_curation_preference as _canon_base_set_curation_preference_raw,
     canon_base_set_curation_post_hidden as _canon_base_set_curation_post_hidden_raw,
+    canon_base_set_curation_user_hidden as _canon_base_set_curation_user_hidden_raw,
     canon_base_set_curation_team_profile as _canon_base_set_curation_team_profile_raw,
 )
 
@@ -1312,6 +1313,45 @@ def _do_set_curation_post_hidden(
     }
     payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/set_curation_post_hidden", payload)
+    return resp or {}
+
+
+def _do_set_curation_user_hidden(
+    backend: str,
+    wallet,
+    community: str,
+    team_id: int,
+    target: str,
+    hidden: bool = True,
+    skip_pow: bool = False,
+) -> dict:
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    slug = (community or "").strip().lower()
+    base = _canon_base_set_curation_user_hidden_raw(
+        pub, _lb_bytes(lb), d, ts, slug, team_id, target, hidden, nonce
+    )
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "community": slug,
+        "team_id": int(team_id),
+        "target": target,
+        "hidden": bool(hidden),
+    }
+    payload["pow"] = int(proof)
+    _, resp = _post(f"{backend}/api/core/set_curation_user_hidden", payload)
     return resp or {}
 
 

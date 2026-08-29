@@ -132,15 +132,6 @@ const MenuItemBtn = styled.button`
     }
 `;
 
-const MenuHeader = styled.div`
-    padding: 10px 14px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1;
-    color: ${({ theme }) => theme.colors.menuHeaderText};
-    white-space: nowrap;
-`;
-
 // 3-dot button — identical rhythm to CardView's `MoreButton`. The svg is
 // set to `display: block` to prevent inline-baseline offset (without it
 // the glyph sits 1–2px above the optical center of the 28px pill).
@@ -625,19 +616,16 @@ export function ModMenuChip({
                 {open && (
                     <Menu role="menu" aria-label="Moderation menu" $align={align}>
                         {isAdminVisible && (
-                            <>
-                                <MenuHeader>Admin</MenuHeader>
-                                <MenuItemBtn type="button" $danger onClick={handleMarkDeleted}>
-                                    <HiOutlineShieldExclamation />
-                                    <span>Mark post deleted</span>
-                                </MenuItemBtn>
-                            </>
+                            <MenuItemBtn type="button" $danger onClick={handleMarkDeleted}>
+                                <HiOutlineShieldExclamation />
+                                <span>Mark post deleted</span>
+                            </MenuItemBtn>
                         )}
                         {curateVisible && (
                             <CurateMenuItems
                                 post={post}
+                                active={open}
                                 onDone={close}
-                                renderHeader={(label) => <MenuHeader>{label}</MenuHeader>}
                                 renderItem={(item) => (
                                     <MenuItemBtn
                                         key={item.key}

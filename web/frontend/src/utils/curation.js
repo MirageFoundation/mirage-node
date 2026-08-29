@@ -13,6 +13,23 @@ export const LENS = Object.freeze({
     RAW: 'raw',
 });
 
+/** Match chain DefaultParams MaxCurationTeamNameLength / DescriptionLength. */
+export const MAX_CURATION_TEAM_NAME_LENGTH = 30;
+export const MAX_CURATION_TEAM_DESCRIPTION_LENGTH = 4000;
+
+/** Unicode code-point length — matches Go utf8.RuneCountInString. */
+export function runeLength(value) {
+    return [...String(value ?? '')].length;
+}
+
+export function sliceRunes(value, max) {
+    const limit = Number(max);
+    if (!Number.isSafeInteger(limit) || limit < 0) {
+        throw new Error(`invalid rune slice max: ${max}`);
+    }
+    return [...String(value ?? '')].slice(0, limit).join('');
+}
+
 const VALID_LENSES = new Set(Object.values(LENS));
 
 export function requireCommunitySlug(value) {

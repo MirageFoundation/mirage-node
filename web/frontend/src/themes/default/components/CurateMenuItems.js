@@ -1,34 +1,23 @@
-import styled from 'styled-components';
 import { usePostCurateActions } from '../../../logic/usePostCurateActions';
-import { requireThemeColor } from '../../../utils/themeColor';
-
-const DefaultHeader = styled.div`
-    padding: 10px 14px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    line-height: 1;
-    color: ${({ theme }) => requireThemeColor(theme, 'menuHeaderText')};
-    white-space: nowrap;
-`;
 
 /**
- * Shared Curate section for the post Mod (shield) menu.
+ * Curate action rows for the post Mod (shield) menu.
  *
- * Callers supply `renderItem(item)` so ModMenuChip can keep its own menu
- * row components. Optional `renderHeader`.
+ * Pass `active` when the menu is open so hide/show state is loaded then.
+ * Callers supply `renderItem(item)`. No section headers.
  */
-export default function CurateMenuItems({ post, onDone, renderItem, renderHeader }) {
-    const { visible, items, teamName } = usePostCurateActions(post);
+export default function CurateMenuItems({ post, onDone, renderItem, active = false }) {
+    const { visible, items, loading, modError } = usePostCurateActions(post, { active });
     if (!visible || typeof renderItem !== 'function') return null;
-
-    const headerLabel = teamName ? `Curate · ${teamName}` : 'Curate';
-    const header = typeof renderHeader === 'function'
-        ? renderHeader(headerLabel)
-        : <DefaultHeader>{headerLabel}</DefaultHeader>;
+    if (!active) return null;
+    if (loading && items.length === 0) return null;
+    if (modError && items.length === 0) {
+        console.error('[curation] curate menu blocked by mod state error', { error: modError });
+        return null;
+    }
 
     return (
         <>
-            {header}
             {items.map((item) => renderItem({
                 ...item,
                 onClick: (event) => {

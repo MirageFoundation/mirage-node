@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Helmet } from 'react-helmet-async';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
 import * as tx from '../../../utils/tx';
 import { communityLabel } from '../../../utils/community';
 import { formatError } from '../../../utils/errorMessages';
-import { formatSubscriberCount } from '../../../utils/curation';
+import {
+    MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
+    MAX_CURATION_TEAM_NAME_LENGTH,
+    formatSubscriberCount,
+    runeLength,
+    sliceRunes,
+} from '../../../utils/curation';
 import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
-import { useCurationTeam } from '../../../logic/useCurationTeams';
+import { useCurationTeam, useHiddenCurationUsers } from '../../../logic/useCurationTeams';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
-import { getMaxUsernameSize } from '../../../utils/chainParams';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -87,6 +92,7 @@ const Body = styled.p`margin: 0; font-size: 0.75rem; line-height: 1.45;`;
 
 export default function CurationTeamView() {
     const { topic: community, teamId } = useParams();
+    const location = useLocation();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const { team, loading, error: loadError } = useCurationTeam(community, teamId, viewer);
     const { getInfo, getStatus } = usePendingCuration();
@@ -102,9 +108,13 @@ export default function CurationTeamView() {
     );
     const isLeader = !team?.deleted && team?.owner === viewer;
     const isCurator = useMemo(
-        () => !team?.deleted && members.some((member) => member.address === viewer),
+        () => !team?.deleted && members.some((member) => String(member.address || '').toLowerCase() === viewer),
         [members, team?.deleted, viewer],
     );
+    const hiddenUsers = useHiddenCurationUsers(community, teamId, {
+        viewer,
+        enabled: isCurator,
+    });
     const myInvitation = invitations.find((invite) => invite.address === viewer);
 
     useEffect(() => {
@@ -112,6 +122,15 @@ export default function CurationTeamView() {
         setName(team.name);
         setDescription(team.description);
     }, [team]);
+
+    useEffect(() => {
+        if (!isCurator || location.hash !== '#hidden-users') return undefined;
+        const el = document.getElementById('hidden-users');
+        if (!el) return undefined;
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        console.debug('[curation] scrolled to hidden users', { community, teamId });
+        return undefined;
+    }, [community, isCurator, location.hash, teamId]);
 
     const run = async (operation) => {
         setError('');
@@ -121,7 +140,8 @@ export default function CurationTeamView() {
     };
     const pendingFor = (action, target = '') => getInfo(action, community, Number(teamId), target);
     const statusFor = (action, target, fallback) => getStatus(action, community, Number(teamId), target, fallback);
-    const maxTeamNameLength = getMaxUsernameSize() ?? 30;
+    const maxTeamNameLength = MAX_CURATION_TEAM_NAME_LENGTH;
+    const maxTeamDescriptionLength = MAX_CURATION_TEAM_DESCRIPTION_LENGTH;
     const saveProfile = (event) => {
         event.preventDefault();
         const trimmedName = name.trim();
@@ -129,11 +149,19 @@ export default function CurationTeamView() {
             setError('Team name is required.');
             return undefined;
         }
-        if (trimmedName.length > maxTeamNameLength) {
+        if (runeLength(trimmedName) > maxTeamNameLength) {
             setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
             console.error('[curation] update team name too long', {
-                length: trimmedName.length,
+                length: runeLength(trimmedName),
                 max: maxTeamNameLength,
+            });
+            return undefined;
+        }
+        if (runeLength(description) > maxTeamDescriptionLength) {
+            setError(`Description too long. Maximum ${maxTeamDescriptionLength} characters.`);
+            console.error('[curation] update team description too long', {
+                length: runeLength(description),
+                max: maxTeamDescriptionLength,
             });
             return undefined;
         }
@@ -193,17 +221,20 @@ export default function CurationTeamView() {
                     <Form onSubmit={saveProfile}>
                         <Input
                             value={name}
-                            onChange={(event) => setName(event.target.value.slice(0, maxTeamNameLength))}
+                            onChange={(event) => setName(sliceRunes(event.target.value, maxTeamNameLength))}
                             placeholder={team.name || 'e.g. Signal Desk'}
                             aria-label="Team name"
                             maxLength={maxTeamNameLength}
                         />
+                        <Meta>{runeLength(name)} / {maxTeamNameLength} characters</Meta>
                         <Textarea
                             value={description}
-                            onChange={(event) => setDescription(event.target.value)}
+                            onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
                             placeholder={team.description || 'Describe your curation approach — include how you moderate'}
                             aria-label="Describe your curation approach"
+                            maxLength={maxTeamDescriptionLength}
                         />
+                        <Meta>{runeLength(description)} / {maxTeamDescriptionLength} characters</Meta>
                         <Button type="submit" size="xs" disabled={!!pendingFor('set_curation_team_profile')}>
                             {statusFor('set_curation_team_profile', '', 'Saving…') || 'Save team profile'}
                         </Button>
@@ -287,6 +318,38 @@ export default function CurationTeamView() {
                 {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
             </Button>}
         </Card>
+
+        {isCurator && (
+            <Card id="hidden-users">
+                <CardTitle>Hidden users ({hiddenUsers.users.length})</CardTitle>
+                <Meta>Hidden from this team&apos;s feed.</Meta>
+                {hiddenUsers.loading && hiddenUsers.users.length === 0 && <Meta>Loading hidden users…</Meta>}
+                {hiddenUsers.error && <ErrorText>{hiddenUsers.error}</ErrorText>}
+                {!hiddenUsers.loading && !hiddenUsers.error && hiddenUsers.users.length === 0 && (
+                    <Meta>No hidden users.</Meta>
+                )}
+                {hiddenUsers.users.map((user) => (
+                    <Row key={user.address}>
+                        <span title={user.address}>
+                            {formatUserLabel(user.username, user.address)}
+                        </span>
+                        <Button
+                            size="xs"
+                            variant="subtle"
+                            disabled={!!pendingFor('set_curation_user_hidden', user.address)}
+                            onClick={() => run(() => tx.moderateCurationUser(
+                                community,
+                                Number(teamId),
+                                user.address,
+                                false,
+                            ))}
+                        >
+                            {statusFor('set_curation_user_hidden', user.address, 'Showing…') || 'Show'}
+                        </Button>
+                    </Row>
+                ))}
+            </Card>
+        )}
 
         {error && <ErrorText>{error}</ErrorText>}
     </Page>;

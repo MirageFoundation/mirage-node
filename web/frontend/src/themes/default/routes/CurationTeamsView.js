@@ -7,14 +7,20 @@ import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
 import * as tx from '../../../utils/tx';
 import { communityLabel, sanitizeCommunitySlug, isValidCommunitySlug } from '../../../utils/community';
-import { formatSubscriberCount, waitForOwnCurationTeam } from '../../../utils/curation';
+import {
+    MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
+    MAX_CURATION_TEAM_NAME_LENGTH,
+    formatSubscriberCount,
+    runeLength,
+    sliceRunes,
+    waitForOwnCurationTeam,
+} from '../../../utils/curation';
 import { formatError } from '../../../utils/errorMessages';
 import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
 import { useCurationTeams } from '../../../logic/useCurationTeams';
 import { useCommunityDetail } from '../../../logic/useCommunityDetail';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { canCurate } from '../../../logic/useSubscription';
-import { getMaxUsernameSize } from '../../../utils/chainParams';
 import Button from '../components/Button';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -318,7 +324,8 @@ export default function CurationTeamsView({ createOnly = false }) {
         return () => { cancelled = true; };
     }, [createOnly, viewer]);
 
-    const maxTeamNameLength = getMaxUsernameSize() ?? 30;
+    const maxTeamNameLength = MAX_CURATION_TEAM_NAME_LENGTH;
+    const maxTeamDescriptionLength = MAX_CURATION_TEAM_DESCRIPTION_LENGTH;
 
     const submit = async (event) => {
         event.preventDefault();
@@ -336,11 +343,19 @@ export default function CurationTeamsView({ createOnly = false }) {
             setError('Team name is required.');
             return;
         }
-        if (trimmedName.length > maxTeamNameLength) {
+        if (runeLength(trimmedName) > maxTeamNameLength) {
             setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
             console.error('[curation] create team name too long', {
-                length: trimmedName.length,
+                length: runeLength(trimmedName),
                 max: maxTeamNameLength,
+            });
+            return;
+        }
+        if (runeLength(description) > maxTeamDescriptionLength) {
+            setError(`Description too long. Maximum ${maxTeamDescriptionLength} characters.`);
+            console.error('[curation] create team description too long', {
+                length: runeLength(description),
+                max: maxTeamDescriptionLength,
             });
             return;
         }
@@ -348,8 +363,10 @@ export default function CurationTeamsView({ createOnly = false }) {
         setCreateStatus('creating');
         console.debug('[curation] create team form', {
             community: nextSlug,
-            nameLength: trimmedName.length,
+            nameLength: runeLength(trimmedName),
+            descriptionLength: runeLength(description),
             maxNameLength: maxTeamNameLength,
+            maxDescriptionLength: maxTeamDescriptionLength,
             joined: communityState.detail?.viewer_joined === true,
         });
         try {
@@ -457,25 +474,27 @@ export default function CurationTeamsView({ createOnly = false }) {
                     <Input
                         aria-label="Team name"
                         value={name}
-                        onChange={(event) => setName(event.target.value.slice(0, maxTeamNameLength))}
+                        onChange={(event) => setName(sliceRunes(event.target.value, maxTeamNameLength))}
                         placeholder="e.g. Signal Desk"
                         maxLength={maxTeamNameLength}
                         required
                         disabled={createBusy}
                     />
-                    <FieldHint>Up to {maxTeamNameLength} characters.</FieldHint>
+                    <FieldHint>{runeLength(name)} / {maxTeamNameLength} characters</FieldHint>
                 </Field>
                 <Field>
                     <FieldLabel>Describe your curation approach:</FieldLabel>
                     <Textarea
                         aria-label="Describe your curation approach"
                         value={description}
-                        onChange={(event) => setDescription(event.target.value)}
+                        onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
                         placeholder="What users will see when they pick this team."
+                        maxLength={maxTeamDescriptionLength}
                         disabled={createBusy}
                     />
                     <FieldHint>
-                        Help users understand what they&apos;ll see and include how you moderate spam, adult content, and brigading.
+                        {runeLength(description)} / {maxTeamDescriptionLength} characters. Help users understand what
+                        they&apos;ll see and include how you moderate spam, adult content, and brigading.
                     </FieldHint>
                 </Field>
                 {error && <ErrorText>{error}</ErrorText>}
@@ -542,6 +561,13 @@ export default function CurationTeamsView({ createOnly = false }) {
                                 >
                                     Open your team
                                 </Button>
+                                <Button
+                                    to={`/c/${encodeURIComponent(routeCommunity || previewSlug)}/teams/${ownTeam.team_id}#hidden-users`}
+                                    size="xs"
+                                    variant="subtle"
+                                >
+                                    Hidden users
+                                </Button>
                             </CardActions>
                         )}
                     </Card>
@@ -561,21 +587,30 @@ export default function CurationTeamsView({ createOnly = false }) {
             <HeaderRow>
                 <TitleBlock>
                     <Title>Curator teams</Title>
-                    <Subline>
-                        {label ? <Slug title={label}>{label}</Slug> : null}
-                        {label ? <span aria-hidden="true">·</span> : null}
-                        <span>{liveCount === 1 ? '1 live team' : `${liveCount} live teams`}</span>
-                    </Subline>
+                    {label ? (
+                        <Subline>
+                            <Slug title={label}>{label}</Slug>
+                        </Subline>
+                    ) : null}
                 </TitleBlock>
                 <HeaderActions>
                     {liveCount > 0 && (
                         alreadyCurator && ownTeam ? (
-                            <Button
-                                to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}`}
-                                size="xs"
-                            >
-                                Open your team
-                            </Button>
+                            <>
+                                <Button
+                                    to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}`}
+                                    size="xs"
+                                >
+                                    Open your team
+                                </Button>
+                                <Button
+                                    to={`/c/${encodeURIComponent(routeCommunity)}/teams/${ownTeam.team_id}#hidden-users`}
+                                    size="xs"
+                                    variant="subtle"
+                                >
+                                    Hidden users
+                                </Button>
+                            </>
                         ) : (
                             <Button to={createPath} size="xs">Create team</Button>
                         )

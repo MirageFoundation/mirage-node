@@ -71,6 +71,8 @@ ERRORS = {
     "invalid_curated": "curated must be true or false",
     "curation_team_not_found": "curator team not found",
     "missing_viewer": "viewer is required",
+    "missing_post_id": "post_id is required",
+    "missing_author": "author is required",
     "internal_error": "internal server error",
     "indexer_unavailable": "indexer DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",

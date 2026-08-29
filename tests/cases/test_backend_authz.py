@@ -136,6 +136,8 @@ ROUTE_POLICY: Dict[str, str] = {
     # Query/PendingCuratorInvitations, so gating the convenience route is theater.
     "/api/communities/<slug>/teams/<int:team_id>": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/invitations": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/moderation": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/hidden-users": PUBLIC,
     "/api/creator/earnings": PUBLIC,
     "/api/core/post": ENVELOPE,
     "/api/core/report": ENVELOPE,

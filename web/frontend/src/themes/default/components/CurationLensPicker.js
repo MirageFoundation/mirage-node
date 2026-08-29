@@ -92,21 +92,6 @@ const Meta = styled.span`
     white-space: nowrap;
 `;
 
-const Status = styled.span`
-    display: inline-flex;
-    align-items: center;
-    height: 22px;
-    padding: 0 0.45rem;
-    border-radius: 999px;
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(0, 0, 0, 0.03)'
-        : 'rgba(255, 255, 255, 0.04)'};
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    font-size: 0.62rem;
-    font-weight: 500;
-`;
-
 const ManageLink = styled(Link)`
     display: inline-flex;
     align-items: center;
@@ -223,10 +208,6 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
                 </Select>
             )}
             <Meta>
-                {/* Fixed Uncensored already means no curator lens — skip the empty-state chip. */}
-                {!detailLoading && curated && (
-                    <Status>{`${detail.live_team_count} live teams`}</Status>
-                )}
                 <ManageLink to={teamsPath}>Curator teams →</ManageLink>
             </Meta>
         </Wrap>

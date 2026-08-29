@@ -185,9 +185,7 @@ def community_detail(slug: str):
             "legacy_archive_count": int(legacy_count or 0),
             "viewer_joined": resolved.get("stored_mode") is not None,
             "stored_mode": resolved.get("stored_mode"),
-            "stored_team_id": (
-                str(resolved["stored_team_id"]) if resolved.get("stored_team_id") is not None else None
-            ),
+            "stored_team_id": (str(resolved["stored_team_id"]) if resolved.get("stored_team_id") is not None else None),
             "effective_mode": int(resolved["effective_mode"]),
             "effective_team_id": (
                 str(resolved["effective_team_id"]) if resolved["effective_team_id"] is not None else None
@@ -265,12 +263,14 @@ def community_teams(slug: str):
             }
             for r in rows
         ]
-        return jsonify({
-            "items": items,
-            "viewer_team_ids": viewer_team_ids,
-            "next_cursor": None,
-            "has_more": False,
-        })
+        return jsonify(
+            {
+                "items": items,
+                "viewer_team_ids": viewer_team_ids,
+                "next_cursor": None,
+                "has_more": False,
+            }
+        )
     except Exception as e:
         log_event(rid, "communities.teams.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
@@ -394,6 +394,146 @@ def community_team_invitations(slug: str, team_id: int):
         return jsonify({"items": invitations})
     except Exception as e:
         log_event(rid, "communities.invitations.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
+@communities_bp.route("/api/communities/<slug>/teams/<int:team_id>/moderation")
+def community_team_moderation(slug: str, team_id: int):
+    """Return this team's hide/lock state for one post — curator viewers only."""
+    rid = next_request_id()
+    slug = (slug or "").strip().lower()
+    viewer = (request.args.get("viewer") or "").strip().lower()
+    post_id = (request.args.get("post_id") or "").strip().lower()
+    author = (request.args.get("author") or "").strip().lower()
+    root = (request.args.get("root") or "").strip().lower()
+    if not _valid_slug(slug) or team_id <= 0:
+        return api_error_code("community_invalid", 400)
+    if not viewer:
+        return api_error_code("missing_viewer", 400)
+    if not post_id:
+        return api_error_code("missing_post_id", 400)
+    if not author:
+        return api_error_code("missing_author", 400)
+    if not root:
+        root = post_id
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 1 FROM curation_team_curators
+                WHERE community=%s AND team_id=%s AND LOWER(curator)=%s
+                LIMIT 1
+                """,
+                (slug, team_id, viewer),
+            )
+            if not cur.fetchone():
+                return api_error_code("forbidden", 403)
+            cur.execute(
+                """
+                SELECT
+                    EXISTS(
+                        SELECT 1 FROM curation_hidden_posts
+                        WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
+                    ),
+                    EXISTS(
+                        SELECT 1 FROM curation_hidden_users
+                        WHERE community=%s AND team_id=%s AND LOWER(target_user)=%s
+                    ),
+                    EXISTS(
+                        SELECT 1 FROM curation_locks
+                        WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+                    )
+                """,
+                (slug, team_id, post_id, slug, team_id, author, slug, team_id, root),
+            )
+            post_hidden, user_hidden, thread_locked = cur.fetchone()
+        log_event(
+            rid,
+            "[community] teams.moderation",
+            community=slug,
+            team_id=team_id,
+            viewer=viewer[:12],
+            post_id=post_id[:12],
+            post_hidden=bool(post_hidden),
+            user_hidden=bool(user_hidden),
+            thread_locked=bool(thread_locked),
+        )
+        return jsonify(
+            {
+                "community": slug,
+                "team_id": str(team_id),
+                "post_id": post_id,
+                "author": author,
+                "root": root,
+                "post_hidden": bool(post_hidden),
+                "user_hidden": bool(user_hidden),
+                "thread_locked": bool(thread_locked),
+            }
+        )
+    except Exception as e:
+        log_event(rid, "communities.moderation.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
+@communities_bp.route("/api/communities/<slug>/teams/<int:team_id>/hidden-users")
+def community_team_hidden_users(slug: str, team_id: int):
+    """Users this team currently hides — curator viewers only."""
+    rid = next_request_id()
+    slug = (slug or "").strip().lower()
+    viewer = (request.args.get("viewer") or "").strip().lower()
+    if not _valid_slug(slug) or team_id <= 0:
+        return api_error_code("community_invalid", 400)
+    if not viewer:
+        return api_error_code("missing_viewer", 400)
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 1 FROM curation_team_curators
+                WHERE community=%s AND team_id=%s AND LOWER(curator)=%s
+                LIMIT 1
+                """,
+                (slug, team_id, viewer),
+            )
+            if not cur.fetchone():
+                return api_error_code("forbidden", 403)
+            cur.execute(
+                """
+                SELECT h.target_user, p.username
+                FROM curation_hidden_users h
+                LEFT JOIN profiles p ON LOWER(p.owner)=LOWER(h.target_user)
+                WHERE h.community=%s AND h.team_id=%s
+                ORDER BY h.updated_height DESC, h.target_user
+                LIMIT 200
+                """,
+                (slug, team_id),
+            )
+            items = [
+                {
+                    "address": str(row[0]).lower(),
+                    "username": row[1] or None,
+                }
+                for row in cur.fetchall()
+            ]
+        log_event(
+            rid,
+            "[community] teams.hidden_users",
+            community=slug,
+            team_id=team_id,
+            viewer=viewer[:12],
+            count=len(items),
+        )
+        return jsonify(
+            {
+                "community": slug,
+                "team_id": str(team_id),
+                "items": items,
+            }
+        )
+    except Exception as e:
+        log_event(rid, "communities.hidden_users.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
 
 

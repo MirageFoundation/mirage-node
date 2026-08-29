@@ -19,6 +19,7 @@ from tests.backend_helpers import (
     _do_post,
     _do_set_curation_post_hidden,
     _do_set_curation_preference,
+    _do_set_curation_user_hidden,
     _wait_curation_team,
     _wait_indexed,
     _wait_tx_status,
@@ -251,5 +252,55 @@ def test_curation_backend(backend: str) -> None:
             f"ids={sorted(_feed_ids(last_raw_feed))[:8]} err={(last_raw_feed or {}).get('error')}"
         )
         _fail("curation.backend_raw_lens_shows_post", f"post missing from raw lens ({post_tx})")
+
+    hidden_list_url = f"{backend}/api/communities/{slug}/teams/{team_id}/hidden-users"
+    code, missing = _get(hidden_list_url)
+    if code == 400 and isinstance(missing, dict) and missing.get("error_code") == "missing_viewer":
+        _pass("curation.backend_hidden_users_requires_viewer")
+    else:
+        _fail("curation.backend_hidden_users_requires_viewer", f"code={code} body={missing}")
+
+    free_addr = str(free.address()).lower()
+    code, forbidden = _get(hidden_list_url, {"viewer": free_addr})
+    if code == 403 and isinstance(forbidden, dict) and forbidden.get("error_code") == "forbidden":
+        _pass("curation.backend_hidden_users_curator_only")
+    else:
+        _fail("curation.backend_hidden_users_curator_only", f"code={code} body={forbidden}")
+
+    hide_user = _do_set_curation_user_hidden(
+        backend, sub, slug, team_id, free_addr, hidden=True, skip_pow=True
+    )
+    hide_user_tx = _tx_ok(hide_user)
+    if not hide_user_tx:
+        _fail("curation.backend_hide_user", f"resp={hide_user}")
+        return
+    if not _wait_tx_status(
+        backend, hide_user_tx, expect_type="set_curation_user_hidden", require_details=False
+    ):
+        _fail("curation.backend_hide_user_indexed", f"tx={hide_user_tx}")
+        return
+    _pass("curation.backend_hide_user")
+
+    listed = False
+    last_list_code = 0
+    last_list_body: dict | None = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        last_list_code, last_list_body = _get(hidden_list_url, {"viewer": sub_addr})
+        addresses = {
+            str(item.get("address") or "").lower()
+            for item in ((last_list_body or {}).get("items") or [])
+        }
+        listed = last_list_code == 200 and free_addr in addresses
+        if listed:
+            break
+        time.sleep(0.5)
+    if listed:
+        _pass("curation.backend_hidden_users_lists_target")
+    else:
+        _fail(
+            "curation.backend_hidden_users_lists_target",
+            f"code={last_list_code} body={last_list_body}",
+        )
 
     _debug(f"curation.backend done community={slug} team_id={team_id}")

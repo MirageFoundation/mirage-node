@@ -4,11 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
     LENS,
+    MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
+    MAX_CURATION_TEAM_NAME_LENGTH,
     curationPendingKey,
     formatSubscriberCount,
     lensCacheKey,
     lensQuery,
     normalizeLens,
+    runeLength,
+    sliceRunes,
     teamIdWithMostSubscribers,
     waitForOwnCurationTeam,
 } from '../../src/utils/curation.js';
@@ -87,6 +91,15 @@ describe('v1.39 curation UI contracts', () => {
         ])).toBe(1);
     });
 
+    it('clamps team fields to chain rune limits', () => {
+        expect(MAX_CURATION_TEAM_NAME_LENGTH).toBe(30);
+        expect(MAX_CURATION_TEAM_DESCRIPTION_LENGTH).toBe(4000);
+        expect(runeLength('café')).toBe(4);
+        expect(sliceRunes('abcdefghij', 5)).toBe('abcde');
+        expect(sliceRunes('a'.repeat(50), MAX_CURATION_TEAM_NAME_LENGTH).length).toBe(30);
+        expect(runeLength(sliceRunes('x'.repeat(5000), MAX_CURATION_TEAM_DESCRIPTION_LENGTH))).toBe(4000);
+    });
+
     it('passes return paths through Sign in and Subscribe on the teams page', () => {
         const teams = readFileSync(
             join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
@@ -94,6 +107,8 @@ describe('v1.39 curation UI contracts', () => {
         );
         expect(teams).toMatch(/withReturnTo\('\/login'/);
         expect(teams).toMatch(/withReturnTo\('\/subscription'/);
+        expect(teams).toMatch(/#hidden-users/);
+        expect(teams).toMatch(/Hidden users/);
     });
 
     it('treats admins as eligible to create curator teams without effective_paid', () => {
@@ -145,8 +160,11 @@ describe('v1.39 curation UI contracts', () => {
         expect(create).toMatch(/include how you moderate/);
         expect(create).toMatch(/Describe your curation approach:/);
         expect(create).not.toMatch(/About this lens/);
-        expect(create).toMatch(/getMaxUsernameSize\(\) \?\? 30/);
+        expect(create).toMatch(/MAX_CURATION_TEAM_NAME_LENGTH/);
+        expect(create).toMatch(/MAX_CURATION_TEAM_DESCRIPTION_LENGTH/);
         expect(create).toMatch(/maxLength=\{maxTeamNameLength\}/);
+        expect(create).toMatch(/maxLength=\{maxTeamDescriptionLength\}/);
+        expect(create).toMatch(/sliceRunes/);
         expect(create).toMatch(/waitForOwnCurationTeam/);
         expect(create).toMatch(/pollTxStatus/);
         expect(create).toMatch(/Verifying…/);
@@ -162,18 +180,29 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).not.toMatch(/CardTitle>About</);
         expect(detail).toMatch(/CardTitle>Team settings</);
         expect(detail).toMatch(/isLeader \? \(/);
-        expect(detail).toMatch(/maxLength=\{maxTeamNameLength\}/);
+        expect(detail).toMatch(/MAX_CURATION_TEAM_DESCRIPTION_LENGTH/);
+        expect(detail).toMatch(/maxLength=\{maxTeamDescriptionLength\}/);
         expect(detail).toMatch(/resolveUserIdentity/);
         expect(detail).toMatch(/Username or mirage1/);
         expect(detail).toMatch(/formatUserLabel/);
         expect(detail).toMatch(/formatSubscriberCount/);
         expect(detail).not.toMatch(/Node default/);
         expect(detail).not.toMatch(/placeholder="mirage1…"/);
-        // Moderation lives on each post's ⋯ menu, not on the team page.
+        // Hide/lock still live on the post shield, not a team-page target form.
         expect(detail).not.toMatch(/Moderation tools/);
         expect(detail).not.toMatch(/moderationTarget/);
         expect(detail).not.toMatch(/Hide post/);
         expect(detail).not.toMatch(/Lock thread/);
+        expect(detail).toMatch(/Hidden users/);
+        expect(detail).toMatch(/hidden-users/);
+        expect(detail).toMatch(/useHiddenCurationUsers/);
+        expect(detail).toMatch(/moderateCurationUser/);
+        const teamsHook = readFileSync(
+            join(frontendSrc, 'logic/useCurationTeams.js'),
+            'utf8',
+        );
+        expect(teamsHook).toMatch(/export function useHiddenCurationUsers/);
+        expect(teamsHook).toMatch(/\/hidden-users/);
     });
 
     it('puts Curate + admin delete on a separate ModMenuChip shield menu', () => {
@@ -210,25 +239,36 @@ describe('v1.39 curation UI contracts', () => {
         expect(postMenu).toMatch(/Moderation menu/);
         expect(postMenu).toMatch(/Mark post deleted/);
         expect(postMenu).toMatch(/CurateMenuItems/);
+        expect(postMenu).not.toMatch(/MenuHeader>Admin</);
+        expect(postMenu).not.toMatch(/renderHeader/);
         // ⋯ menu must not own curate / admin-delete anymore.
         expect(postMenu).not.toMatch(/isAdminVisible && \(\s*\n\s*<MenuItemBtn[^>]*Mark post deleted/s);
         for (const src of [cardView, viewPost, listFeed]) {
             expect(src).toMatch(/ModMenuChip/);
             expect(src).not.toMatch(/CurateMenuItems/);
         }
-        expect(curateItems).toMatch(/Curate · /);
+        expect(curateItems).not.toMatch(/Curate · /);
         expect(curateItems).toMatch(/usePostCurateActions/);
         expect(actions).toMatch(/moderateCurationPost/);
         expect(actions).toMatch(/moderateCurationUser/);
         expect(actions).toMatch(/setCurationThreadLocked/);
+        expect(actions).toMatch(/\/moderation/);
+        expect(actions).toMatch(/modState\.postHidden/);
+        expect(actions).toMatch(/modState\.userHidden/);
+        expect(actions).toMatch(/modState\.threadLocked/);
         expect(actions).toMatch(/Hide post/);
         expect(actions).toMatch(/Show post/);
         expect(actions).toMatch(/Hide user/);
         expect(actions).toMatch(/Show user/);
         expect(actions).toMatch(/Lock thread/);
         expect(actions).toMatch(/Unlock thread/);
+        // Toggle: only one of each pair is pushed per state branch.
+        expect(actions).toMatch(/if \(modState\.postHidden\)/);
+        expect(actions).toMatch(/if \(modState\.userHidden\)/);
+        expect(actions).toMatch(/if \(modState\.threadLocked\)/);
         expect(membership).toMatch(/viewer_team_ids/);
         expect(membership).toMatch(/isCurator/);
+        expect(curateItems).toMatch(/active/);
     });
 });
 
@@ -238,7 +278,7 @@ describe('waitForOwnCurationTeam', () => {
     });
 
     it('returns the team once the owner+name appear in the list', async () => {
-        const sleep = vi.fn(async () => {});
+        const sleep = vi.fn(async () => { });
         const get = vi.spyOn(Api, 'get')
             .mockResolvedValueOnce({ items: [] })
             .mockResolvedValueOnce({
@@ -263,7 +303,7 @@ describe('waitForOwnCurationTeam', () => {
     });
 
     it('returns null when the team never appears within the budget', async () => {
-        const sleep = vi.fn(async () => {});
+        const sleep = vi.fn(async () => { });
         vi.spyOn(Api, 'get').mockResolvedValue({ items: [] });
 
         const found = await waitForOwnCurationTeam('tech', 'mirage1viewer', 'Signal Desk', {
