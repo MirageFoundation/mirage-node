@@ -282,6 +282,57 @@ def check_curation_tag_schema() -> None:
             ok(f"{path} registered (status={status})")
 
 
+def check_legacy_history_reachable() -> None:
+    """The pre-upgrade history must survive the upgrade in the scope the UI uses.
+
+    Every post made before v1.39 is protocol 0, and the web client only ever
+    requests scope=current. If current scope drops protocol-0 posts the entire
+    archive silently disappears with no navigation path to it, and every other
+    check here still passes because the rows are present in the database.
+    """
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        fail("INDEXER_DB_URL missing from deployed environment")
+        return
+    import psycopg
+
+    with psycopg.connect(db_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM posts WHERE protocol_version = 0 AND NOT deleted")
+            legacy_rows = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM posts WHERE protocol_version = 0 AND NOT deleted "
+                "AND target IS NOT NULL AND target <> '' AND (community IS NULL OR community = '')"
+            )
+            orphan_comments = int(cursor.fetchone()[0])
+
+    if not legacy_rows:
+        ok("no legacy posts on this chain")
+        return
+
+    # A chain with history must not serve an empty default feed.
+    feed = http_json(f"{BACKEND}/api/get_posts?scope=current&limit=5")
+    served = feed.get("posts") if isinstance(feed, dict) else None
+    if not served:
+        fail(f"{legacy_rows} legacy posts exist but scope=current returns an empty feed")
+    else:
+        ok(f"scope=current serves posts with {legacy_rows} legacy rows present")
+
+    # The count is over every eligible root, so if current scope were still
+    # protocol-gated the pool would collapse to the handful of new posts.
+    total = feed.get("total") if isinstance(feed, dict) else 0
+    if not isinstance(total, int) or total < 1:
+        fail(f"scope=current reports no eligible posts (total={total!r})")
+    else:
+        ok(f"scope=current candidate pool is {total} posts")
+
+    # The backfill is what puts legacy comments back into community feeds.
+    if orphan_comments > legacy_rows // 100:
+        fail(f"{orphan_comments} legacy comments still have no community (backfill did not run)")
+    else:
+        ok(f"legacy comment community backfill applied ({orphan_comments} unresolved)")
+
+
 def comet_height() -> int:
     return int(http_json(f"{RPC}/status")["result"]["sync_info"]["latest_block_height"])
 
@@ -329,6 +380,7 @@ def main() -> int:
         check_gone_routes,
         check_open_community_contract,
         check_curation_tag_schema,
+        check_legacy_history_reachable,
         check_progress,
     )
     for check in checks:

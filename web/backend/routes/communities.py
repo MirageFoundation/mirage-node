@@ -90,10 +90,12 @@ def list_communities():
             cur.execute(
                 """
                 WITH candidates AS (
+                    -- Every protocol, not just 1: the pre-upgrade archive is served
+                    -- in the default scope, so a community with only old posts is a
+                    -- real community and has to be discoverable like any other.
                     SELECT LOWER(TRIM(community)) AS community
                     FROM posts
-                    WHERE protocol_version=1
-                      AND COALESCE(target,'')=''
+                    WHERE COALESCE(target,'')=''
                       AND community IS NOT NULL
                       AND community<>''
                     UNION
@@ -114,7 +116,6 @@ def list_communities():
                       ON t.community=c.community AND t.deleted_height IS NULL
                     LEFT JOIN posts p
                       ON LOWER(p.community)=c.community
-                     AND p.protocol_version=1
                      AND COALESCE(p.target,'')=''
                      AND p.deleted=FALSE
                     WHERE (%s='' OR c.community LIKE %s)
@@ -194,7 +195,7 @@ def community_detail(slug: str):
             cur.execute(
                 """
                 SELECT
-                    COUNT(*) FILTER (WHERE protocol_version=1 AND deleted=FALSE),
+                    COUNT(*) FILTER (WHERE deleted=FALSE),
                     COUNT(*) FILTER (WHERE protocol_version=0)
                 FROM posts
                 WHERE LOWER(community)=%s AND COALESCE(target,'')=''

@@ -1038,7 +1038,11 @@ class DatabaseManager:
                     VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
-                      community=EXCLUDED.community,
+                      -- A comment's MsgPost carries no community of its own, so a
+                      -- replay would blank the one denormalized from its root and
+                      -- drop the comment back out of every community feed. Same
+                      -- reason root_community/root_post_id are coalesced below.
+                      community=COALESCE(NULLIF(EXCLUDED.community, ''), posts.community),
                       title=EXCLUDED.title,
                       content=EXCLUDED.content,
                       target=EXCLUDED.target,

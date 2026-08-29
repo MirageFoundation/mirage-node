@@ -127,6 +127,8 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/core/set_curation_user_hidden": ENVELOPE,
     "/api/core/set_curation_thread_locked": ENVELOPE,
     "/api/core/set_curation_subscriber_only": ENVELOPE,
+    "/api/core/set_curation_tag": ENVELOPE,
+    "/api/core/set_curation_post_tag": ENVELOPE,
     "/api/core/claim_creator_rewards": ENVELOPE,
     "/api/communities": PUBLIC,
     "/api/communities/<slug>": PUBLIC,
@@ -137,6 +139,8 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/communities/<slug>/teams/<int:team_id>": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/invitations": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/moderation": PUBLIC,
+    # Same rows as CurationTeamMembers, keyed by curator instead of by team.
+    "/api/curators/<address>/communities": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/hidden-users": PUBLIC,
     "/api/communities/<slug>/teams/<int:team_id>/hidden-posts": PUBLIC,
     "/api/creator/earnings": PUBLIC,

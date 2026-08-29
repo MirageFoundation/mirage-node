@@ -270,7 +270,15 @@ def _test_thread_lock_is_read_only() -> None:
     repo = Path(__file__).resolve().parents[2]
     problems = []
 
-    keeper = (repo / "blockchain" / "x" / "core" / "keeper" / "team.go").read_text(encoding="utf-8")
+    # The deployed image ships the backend and tests but not blockchain/ or the
+    # frontend source, so this can only assert what is actually present.
+    keeper_path = repo / "blockchain" / "x" / "core" / "keeper" / "team.go"
+    view_path = repo / "web" / "frontend" / "src" / "themes" / "default" / "routes" / "ViewPostView.js"
+    if not (keeper_path.exists() and view_path.exists()):
+        _skip("backend_hardening.thread_lock_read_only", "chain or frontend source not in this image")
+        return
+
+    keeper = keeper_path.read_text(encoding="utf-8")
     if "KeyThreadLock" not in keeper:
         problems.append("thread lock key no longer written by the keeper")
 
@@ -286,9 +294,7 @@ def _test_thread_lock_is_read_only() -> None:
     if '"thread_locked"' not in public:
         problems.append("get_comments does not report thread_locked")
 
-    view = (repo / "web" / "frontend" / "src" / "themes" / "default" / "routes" / "ViewPostView.js").read_text(
-        encoding="utf-8"
-    )
+    view = view_path.read_text(encoding="utf-8")
     for needle, why in (
         ("root?.thread_locked", "view never reads the lock"),
         ("threadLocked ? <LockedNote", "reply button still offered on a locked thread"),
@@ -304,6 +310,52 @@ def _test_thread_lock_is_read_only() -> None:
         _pass("backend_hardening.thread_lock_read_only")
 
 
+def _test_legacy_posts_reach_current_scope() -> None:
+    """Pre-upgrade posts must be visible in the scope the UI actually requests.
+
+    v1.39 gated current scope on protocol_version == 1 while the web client only
+    ever sends scope=current, so every protocol-0 post — the entire pre-upgrade
+    history — became unreachable with no navigation path to it. They are shown on
+    the raw lens instead: the chain recorded no post_sequence or subscriber flag
+    for them, so no team rule can be evaluated and fabricating the inputs would
+    make thread locks and subscriber-only lenses behave arbitrarily on old
+    threads.
+    """
+    source = (
+        Path(__file__).resolve().parents[2] / "web" / "backend" / "curation.py"
+    ).read_text(encoding="utf-8")
+    problems = []
+    if 'if meta["protocol_version"] != wanted_protocol' in source:
+        problems.append("current scope still drops every protocol-0 post")
+    if "wanted_protocol" in source:
+        problems.append("wanted_protocol gate still present")
+    if 'if meta["protocol_version"] == 0:' not in source:
+        problems.append("no protocol-0 branch in filter_posts")
+    # Legacy scope must stay the protocol-0 archive, not become a union.
+    if 'if meta["protocol_version"] != 0:' not in source:
+        problems.append("legacy scope no longer restricted to protocol 0")
+    # The integrity guards on real protocol-1 posts must survive untouched.
+    for needle in (
+        "protocol-1 post is missing required curation metadata",
+        "protocol-1 post is missing community",
+    ):
+        if needle not in source:
+            problems.append(f"integrity guard removed: {needle}")
+
+    # The community a legacy comment was posted in has to survive a reindex, or
+    # the backfill silently reverts and the comments drop out of feeds again.
+    db_source = (
+        Path(__file__).resolve().parents[2] / "indexer" / "database.py"
+    ).read_text(encoding="utf-8")
+    if "community=COALESCE(NULLIF(EXCLUDED.community, ''), posts.community)" not in db_source:
+        problems.append("posts upsert blanks community on replay")
+
+    if problems:
+        _fail("backend_hardening.legacy_posts_visible", "; ".join(problems))
+    else:
+        _pass("backend_hardening.legacy_posts_visible")
+
+
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
@@ -312,6 +364,7 @@ def test_backend_hardening(backend: str):
     _test_effective_tag_precedence()
     _test_visible_comment_recount()
     _test_thread_lock_is_read_only()
+    _test_legacy_posts_reach_current_scope()
 
     if not _check_local_docker():
         _skip("backend_hardening.container_probes", "requires local docker")

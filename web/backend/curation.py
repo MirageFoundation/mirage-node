@@ -330,16 +330,32 @@ def filter_posts(
     if set(metadata) != set(ids):
         raise RuntimeError("post metadata query did not return every serialized post")
 
-    wanted_protocol = 1 if scope == "current" else 0
     lenses: dict[str, dict[str, Any]] = {}
     visible: list[dict] = []
     tombstones: list[dict] = []
     address = str(viewer or "").strip().lower()
     for post, post_id in zip(posts, ids):
         meta = metadata[post_id]
-        if meta["protocol_version"] != wanted_protocol:
-            continue
         if scope == "legacy":
+            # The legacy scope is the protocol-0 archive and nothing else.
+            if meta["protocol_version"] != 0:
+                continue
+            visible.append(post)
+            continue
+        # Protocol-0 posts predate curation entirely: the chain never recorded a
+        # post_sequence or a subscriber flag for them, so no team rule can be
+        # evaluated against them and inventing the inputs would only make thread
+        # locks and subscriber-only lenses behave arbitrarily on old threads.
+        # They are shown, on the raw lens, and stay subject to the personal
+        # blocks and content-tag filters their callers apply afterwards. Before
+        # v1.39 they were dropped from every scope the UI could actually
+        # request, which hid the entire pre-upgrade history.
+        if meta["protocol_version"] == 0:
+            post["lens"] = {
+                "requested": requested_lens,
+                "effective_mode": MODE_RAW,
+                "effective_team_id": None,
+            }
             visible.append(post)
             continue
         if meta["post_sequence"] is None or meta["was_subscriber_at_creation"] is None:

@@ -502,6 +502,12 @@ class MessageProcessor:
             # Comment: resolve root via the current posts table (may walk parents once
             # for legacy data, but is O(1) for new chains with populated root_* fields).
             root_topic, root_post_id = self.db.get_root_topic_for_post(target)
+            # A comment's MsgPost carries no community of its own; it lives in the
+            # one its root was posted in. Without this the column stays empty and
+            # the comment falls out of community feeds and the tag precedence
+            # rules, both of which key off it.
+            if not topic.strip() and root_topic:
+                topic = root_topic
 
         self.db.upsert_post(
             txhash,
