@@ -46,13 +46,12 @@ Rewrite `default`'s `ChangeUsernameView` with a Settings-style header, centered 
 ## What shipped
 
 - **Header:** Settings-style `HeaderRow` with "Edit Username" title + `border` divider.
-- **Content:** Centered `PageWrapper` (max-width 28 rem) with title "Change your username" and description "This is how people will find you on Mirage."
-- **Input:** Composer-style `InputRow` — `bg` background, `10px` radius, `borderStrong` on hover/focus, `0.12s` transition. Inline `Anon-` prefix for free-tier users.
+- **Content:** Centered `PageWrapper` (max-width 28 rem) with title "Change your username" and description "This is how users will find you on Mirage."
+- **Input:** Composer-style `InputRow` — `bg` background, `10px` radius, `borderStrong` on hover/focus, `0.12s` transition.
 - **Labels left-aligned:** "New username" label and "Letters, numbers, and hyphens only." helper text are left-aligned within the centered panel.
 - **Error state:** `AuthErrorMessage` for submit errors.
 - **Submit:** Gradient `PrimaryButton` with status text (Checking / Preparing / Submitting / Verifying).
 - **Success:** Themed panel with `voteUp` check icon, monospace handle display, redirect subtext.
-- **Warning:** Amber-tinted `WarningPanel` with upgrade link for free-tier users.
 - **No oldreddit/bluemoon imports.**
 - **Build passes:** `CI=true npm run build` clean.
 

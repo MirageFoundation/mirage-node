@@ -679,7 +679,7 @@ export default function AdminStatsDashboard() {
                             title="Visitors"
                             note={trackedSince}
                         >
-                            People who hit the site <strong>without signing in</strong> (logged-out browsers and
+                            Users who hit the site <strong>without signing in</strong> (logged-out browsers and
                             crawlers). Counted from Mirage page activity, per node.
                         </MetricTile>
                     </TileGrid>
@@ -826,7 +826,7 @@ export default function AdminStatsDashboard() {
                     {(windowEndsBeforeTracking || windowStartsBeforeTracking) && (
                         <Warn>
                             {windowEndsBeforeTracking
-                                ? "This cohort signed up entirely before tracking began, so \"active later\" only counts people who posted or commented — returning lurkers are invisible. Treat these rates as a floor (real retention is higher)."
+                                ? "This cohort signed up entirely before tracking began, so \"active later\" only counts users who posted or commented — returning lurkers are invisible. Treat these rates as a floor (real retention is higher)."
                                 : `Part of this cohort signed up before tracking began${trackingSinceLabel ? ` (${trackingSinceLabel})` : ""}; for those users only posting/commenting counts as active, so the rates are a conservative floor.`}
                         </Warn>
                     )}

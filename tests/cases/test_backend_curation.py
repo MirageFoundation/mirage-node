@@ -872,6 +872,23 @@ def test_curation_thread_lock_windows(backend: str) -> None:
             f"ids={sorted(i[:12] for i in ids)} thread_locked={(body.get('root') or {}).get('thread_locked')}",
         )
 
+    ok, ids, body = _wait_thread_ids(
+        backend,
+        root,
+        address=owner_addr,
+        lens="default",
+        team_id=None,
+        expect_present={open_reply},
+        expect_absent={locked_reply},
+    )
+    if ok and (body.get("root") or {}).get("thread_locked") is True:
+        _pass("curation_lock.locked_reply_hidden_on_default_lens")
+    else:
+        _fail(
+            "curation_lock.locked_reply_hidden_on_default_lens",
+            f"ids={sorted(i[:12] for i in ids)} thread_locked={(body.get('root') or {}).get('thread_locked')}",
+        )
+
     # Re-locking must not move the cut-off forward: that would republish every
     # reply written since the thread was originally locked.
     if not set_locked("lock_again", True):

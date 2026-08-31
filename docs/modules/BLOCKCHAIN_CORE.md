@@ -368,7 +368,7 @@ The tier system serves multiple purposes:
 
 | Level | Name | Monthly Fee | Key Features |
 |-------|------|-------------|--------------|
-| 0 | Free | 0 | PoW required, limited content length, "Anon-" username prefix |
+| 0 | Free | 0 | PoW required, limited content length |
 | 1 | Subscriber | Governance parameter | No PoW within daily quota, custom profile, curator-team eligibility |
 | 100+ | Admin | N/A | Governance-assigned, special privileges |
 

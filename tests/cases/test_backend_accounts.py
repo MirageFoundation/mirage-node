@@ -163,11 +163,8 @@ def test_account(backend: str):
         _fail("account.set_username succeeds", str(e))
         return
 
-    # The chain prefixes free-tier (level 0) usernames with "Anon-"
-    user_level = int((us or {}).get("user_level", 0))
-    expected_uname = f"Anon-{test_uname}" if user_level == 0 else test_uname
-
     # 2.4 get_address_from_username resolves (poll up to 10s)
+    expected_uname = test_uname
     resolved = None
     for _ in range(10):
         time.sleep(1)

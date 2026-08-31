@@ -108,14 +108,14 @@ const SectionDivider = styled.div`
 `;
 
 const SettingRow = styled.div`
-    display: flex;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
     align-items: flex-start;
-    justify-content: space-between;
     gap: 1rem;
     padding: 0.55rem 1rem;
 
     @media (max-width: 600px) {
-        flex-direction: column;
+        grid-template-columns: minmax(0, 1fr);
         gap: 0.4rem;
         padding: 0.5rem 0;
     }
@@ -507,7 +507,7 @@ function OptionModal({ title, options, value, onChange, onClose }) {
         <ModalPanel onClick={e => e.stopPropagation()}>
             <ModalHeader>
                 <ModalTitle>{title}</ModalTitle>
-                <ModalClose onClick={onClose}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></ModalClose>
+                <ModalClose onClick={onClose} aria-label="Close" title="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg></ModalClose>
             </ModalHeader>
             <div>
                 {options.map(opt => <ModalOption
@@ -995,7 +995,7 @@ export default function SettingsView({ state }) {
                                                         commitModeSwitch('password', secPassword);
                                                     }
                                                 }}>
-                                                    {secBusy ? 'Encrypting...' : 'Set Password'}
+                                                    {secBusy ? 'Encrypting…' : 'Set password'}
                                                 </SmallButton>
                                             </InlinePasswordRow>
                                             {secError && <SecurityError>{secError}</SecurityError>}
@@ -1053,7 +1053,7 @@ export default function SettingsView({ state }) {
                                 <SettingControl>
                                     {!seedRevealed ? <>
                                         <RevealButton disabled={seedRevealBusy} onClick={requestSeedReveal}>
-                                            {seedRevealBusy ? 'Verifying...' : 'Reveal Recovery Phrase'}
+                                            {seedRevealBusy ? 'Verifying…' : 'Reveal recovery phrase'}
                                         </RevealButton>
                                         <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
                                         {seedRevealPrompt === 'password' && <div>
@@ -1069,7 +1069,7 @@ export default function SettingsView({ state }) {
                                                     }
                                                 }} />
                                                 <SmallButton disabled={seedRevealBusy || !seedRevealPassword.trim()} onClick={confirmSeedReveal}>
-                                                    {seedRevealBusy ? 'Checking...' : 'Reveal'}
+                                                    {seedRevealBusy ? 'Checking…' : 'Reveal'}
                                                 </SmallButton>
                                                 <GhostButton disabled={seedRevealBusy} onClick={cancelSeedReveal}>Cancel</GhostButton>
                                             </InlinePasswordRow>
@@ -1127,9 +1127,9 @@ export default function SettingsView({ state }) {
                                                 e.preventDefault();
                                                 handleDeleteAccount();
                                             }
-                                        }} placeholder="Type DELETE to confirm" disabled={deleteBusy} />
+                                        }} placeholder="Type DELETE to confirm" aria-label="Delete account confirmation" disabled={deleteBusy} />
                                         <DangerButton disabled={!deleteConfirmReady || deleteBusy} onClick={handleDeleteAccount}>
-                                            {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
+                                            {deleteStatus || (deleteBusy ? 'Deleting…' : 'Delete account')}
                                         </DangerButton>
                                     </DangerRow>
                                     {deleteError && <SecurityError>{deleteError}</SecurityError>}
@@ -1144,7 +1144,7 @@ export default function SettingsView({ state }) {
         </ModernPostFeed>
 
         {openModal === 'mode' && <OptionModal
-            title="Theme Mode"
+            title="Theme mode"
             options={modeOptions}
             value={themeMode}
             onChange={v => handleThemeModeChange({ target: { value: v } })}
@@ -1152,7 +1152,7 @@ export default function SettingsView({ state }) {
         />}
 
         {openModal === 'collapse' && <OptionModal
-            title="Auto-collapse Threshold"
+            title="Auto-collapse threshold"
             options={collapseOptions}
             value={Number.isFinite(collapseThreshold) ? String(collapseThreshold) : '-5'}
             onChange={v => handleCollapseThresholdChange({ target: { value: v } })}
@@ -1160,7 +1160,7 @@ export default function SettingsView({ state }) {
         />}
 
         {openModal === 'sidebarTopics' && <OptionModal
-            title="Sidebar communities"
+            title="Sidebar communities shown"
             options={limitOptions}
             value={String(sidebarTopicsLimit)}
             onChange={v => handleSidebarTopicsLimitChange({ target: { value: v } })}
@@ -1168,7 +1168,7 @@ export default function SettingsView({ state }) {
         />}
 
         {openModal === 'sidebarPeople' && <OptionModal
-            title="Sidebar Users Limit"
+            title="Sidebar users shown"
             options={limitOptions}
             value={String(sidebarPeopleLimit)}
             onChange={v => handleSidebarPeopleLimitChange({ target: { value: v } })}

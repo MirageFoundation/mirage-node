@@ -8,7 +8,7 @@ import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCac
 export const shortenAddress = addr => {
   if (!addr) return '';
   if (addr.length <= 24) return addr;
-  return `${addr.slice(0, 14)}...${addr.slice(-8)}`;
+  return `${addr.slice(0, 14)}…${addr.slice(-8)}`;
 };
 export function useBlocks({
   state

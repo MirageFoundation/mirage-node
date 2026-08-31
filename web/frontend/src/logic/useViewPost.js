@@ -432,11 +432,11 @@ export function useViewPost({
                     next.delete(author);
                     return next;
                 });
-                updateNotification(`Unfollowed user ${author.slice(0, 12)}...`);
+                updateNotification(`Unfollowed user ${author.slice(0, 12)}…`);
             } else {
                 await followAuthor(viewerAddress, author);
                 setFollowedAuthorsSet(prev => new Set([...prev, author]));
-                updateNotification(`Now following user ${author.slice(0, 12)}...`);
+                updateNotification(`Now following user ${author.slice(0, 12)}…`);
             }
             invalidateFollowCache();
             setSubToggleTick(x => x + 1);
@@ -2234,7 +2234,7 @@ export function useViewPost({
 
         const viewerAddress = Storage.load("publicKey", "");
         (async () => {
-            if (!keepContent) {
+            if (!keepContent && lens === LENS.EFFECTIVE) {
                 try {
                     const stashed = await peekBootstrapStashAfterBootstrap(
                         'bootstrap_view',
@@ -2535,21 +2535,9 @@ export function useViewPost({
     // Flatten comments: root is level 0; replies increment level
     const flattenedComments = React.useMemo(() => {
         if (!root || !root.post_id) return [];
-        const mergeChildren = (node, baseChildren) => {
-            const fromState = (state.posts && state.posts[node.post_id] && state.posts[node.post_id].children) || [];
-            const map = new Map();
-            if (Array.isArray(baseChildren)) {
-                for (const c of baseChildren) {
-                    if (c && c.post_id) map.set(c.post_id, c);
-                }
-            }
-            if (Array.isArray(fromState)) {
-                for (const c of fromState) {
-                    if (c && c.post_id) map.set(c.post_id, c);
-                }
-            }
-            const arr = Array.from(map.values());
-            return sortComments(arr, viewerAddress);
+        const sortVisibleChildren = (baseChildren) => {
+            const visible = Array.isArray(baseChildren) ? baseChildren : [];
+            return sortComments(visible, viewerAddress);
         };
         const walk = (nodes, level, out) => {
             if (!Array.isArray(nodes)) return;
@@ -2558,7 +2546,7 @@ export function useViewPost({
                     ...n,
                     level
                 });
-                const next = mergeChildren(n, n.children);
+                const next = sortVisibleChildren(n.children);
                 if (next && next.length) walk(next, level + 1, out);
             });
         };
@@ -2572,7 +2560,7 @@ export function useViewPost({
                 nextLevel++;
             });
             out.push({ ...root, level: nextLevel });
-            const focusedChildren = mergeChildren(root, children);
+            const focusedChildren = sortVisibleChildren(children);
             if (focusedChildren.length) walk(focusedChildren, nextLevel + 1, out);
             return out;
         }
@@ -2582,10 +2570,10 @@ export function useViewPost({
             ...root,
             level: 0
         }];
-        const base = mergeChildren(root, children);
+        const base = sortVisibleChildren(children);
         walk(base, 1, out);
         return out;
-    }, [root, children, state.posts, viewerAddress, isViewingComment, visibleAncestors]);
+    }, [root, children, viewerAddress, isViewingComment, visibleAncestors]);
 
     // Compute visibility/collapsed per comment using ancestor stack
     const annotated = React.useMemo(() => {

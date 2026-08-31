@@ -12,33 +12,14 @@ export function useChangeUsername({
     const location = useLocation();
     const currentUsername = state?.username || Storage.load('username', '');
     const publicKey = state?.publicKey || Storage.load('publicKey', '');
-    const [usernameInput, setUsernameInput] = useState("");
+    const [usernameInput, setUsernameInput] = useState(() => currentUsername);
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
     const [statusStartTime, setStatusStartTime] = useState(null);
     const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
-    const [userLevel, setUserLevel] = useState(null);
     const [success, setSuccess] = useState(false);
-    useEffect(() => {
-        const fetchUserStatus = async () => {
-            try {
-                const data = await Api.get('get_user_status', {
-                    address: publicKey,
-                    _cb: Date.now()
-                });
-                if (data) {
-                    setUserLevel(parseInt(data.user_level || 0));
-                }
-            } catch (e) {
-                console.error('Failed to fetch user status:', e);
-            }
-        };
-        if (publicKey) {
-            fetchUserStatus();
-        }
-    }, [publicKey]);
 
     // Update elapsed time every 100ms when a status is active
     useEffect(() => {
@@ -84,13 +65,11 @@ export function useChangeUsername({
         event.preventDefault();
         if (Date.now() < cooldownUntil) return;
         if (!publicKey) return;
-        const inputPart = (usernameInput || "").trim();
-        if (!inputPart) {
+        const newUsername = (usernameInput || "").trim();
+        if (!newUsername) {
             setSubmitError("Username cannot be empty");
             return;
         }
-        const isFreeUser = userLevel !== null && userLevel < 1;
-        const newUsername = isFreeUser ? "Anon-" + inputPart : inputPart;
 
         // Use defaults if params not cached yet
         const minSize = getMinUsernameSize() ?? 5;
@@ -101,10 +80,6 @@ export function useChangeUsername({
         }
         if (newUsername.length > maxSize) {
             setSubmitError(`Username too long. Maximum ${maxSize} characters allowed.`);
-            return;
-        }
-        if (userLevel === null) {
-            setSubmitError("Loading account information...");
             return;
         }
         if (newUsername === currentUsername) {
@@ -204,7 +179,6 @@ export function useChangeUsername({
             setStatusStartTime(null);
         }
     };
-    const canChangeName = userLevel !== null && userLevel >= 1;
     return {
         location,
         currentUsername,
@@ -215,9 +189,7 @@ export function useChangeUsername({
         submitError,
         setSubmitError,
         cooldownUntil,
-        userLevel,
         success,
         handleSubmit,
-        canChangeName
     };
 }

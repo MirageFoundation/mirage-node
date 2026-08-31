@@ -21,8 +21,9 @@ import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } fro
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
 import CurationLensPicker from "../components/CurationLensPicker";
-import CommunityMembershipPicker from "../components/CommunityMembershipPicker";
+import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import AccountStatusNotices from "../components/AccountStatusNotices";
+import { usePendingBlocks } from "../../../logic/usePendingBlocks";
 
 // Mobile header branding for home/following feeds
 
@@ -490,6 +491,8 @@ const HomeFeedModeInline = styled.div`
     font-size: 0.7rem;
 `;
 const HomeFeedModeSelect = styled.select`
+    box-sizing: border-box;
+    height: var(--community-header-control-height, 28px);
     font-size: 0.65rem;
     padding: 0.15rem 0.35rem;
     border-radius: 6px;
@@ -795,8 +798,8 @@ const CommunityLensTopRow = styled.div`
 `;
 
 const CommunityLensHeading = styled.div`
-    /* Matches FeedControlButton so the title, membership, lens, sort and view
-       controls all sit on one 28px baseline. */
+    /* Matches FeedControlButton so the title and right-side controls sit on
+       one 28px baseline. */
     --community-header-control-height: 28px;
     --community-header-control-font-size: 0.68rem;
     --community-header-title-font-size: 0.9rem;
@@ -915,6 +918,10 @@ const MainView = ({
     const showHero = theme.caps.showHeroCards;
     const [curationHeader, setCurationHeader] = useState({ community: '', team: null });
     const {
+        isTopicPending: isBlockTopicPending,
+        formatTopicStatus: formatBlockTopicStatus,
+    } = usePendingBlocks();
+    const {
         urlTopic,
         currentTopicRef,
         error,
@@ -938,8 +945,6 @@ const MainView = ({
         viewerAddress,
         followedTopicsSet,
         setFollowedTopicsSet,
-        topicFollowHover,
-        setTopicFollowHover,
         isTopicPending,
         formatTopicStatus,
         forceHardRefreshRef,
@@ -1036,7 +1041,7 @@ const MainView = ({
                             setStableOrder(s => s.slice());
                         } catch (_) {/* noop */ }
                     }}>
-                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'leave' : 'join'}
+                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'Leave' : 'Join'}
                     </HeaderInlineLink>
                     )
                 </PostHeaderText>
@@ -1172,7 +1177,11 @@ const MainView = ({
                                             {!isMobile && <option value="compact">Compact</option>}
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
-                                        <Button variant={isTopicFollowing && topicFollowHover ? 'primaryDanger' : isTopicFollowing ? 'subtle' : 'primary'} size="xs" onMouseEnter={() => setTopicFollowHover(true)} onMouseLeave={() => setTopicFollowHover(false)} disabled={isTopicInProgress} onClick={async () => {
+                                        <CommunityMembershipButton
+                                            joined={isTopicFollowing}
+                                            pending={isTopicInProgress}
+                                            statusLabel={formatTopicStatus(topicKeyLower)}
+                                            onToggle={async () => {
                                             const topicName = urlTopic;
                                             if (!topicName) return;
                                             const key = topicKeyLower;
@@ -1192,9 +1201,8 @@ const MainView = ({
                                                 }
                                                 invalidateTopicsCache();
                                             } catch (_) {/* noop */ }
-                                        }}>
-                                            {isTopicInProgress ? formatTopicStatus(topicKeyLower) : isTopicFollowing ? topicFollowHover ? 'Leave' : 'Joined' : 'Join'}
-                                        </Button>
+                                        }}
+                                        />
                                     </HomeFeedModeInline>
                                 </TopicHeroHeader>
                                 <TopicHeroDescription>
@@ -1207,15 +1215,10 @@ const MainView = ({
                                     <CommunityLensTopRow $divided={Boolean(activeCurationTeam?.description)}>
                                         <CommunityLensHeading>
                                             <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
-                                            <CurationLensPicker
-                                                community={urlTopic}
-                                                viewer={viewerAddress}
-                                                onChange={handleLensChange}
-                                            />
                                         </CommunityLensHeading>
                                         <CommunityLensControls>
                                             {isLoggedIn && (
-                                                <CommunityMembershipPicker
+                                                <CommunityMembershipButton
                                                     joined={isTopicFollowing}
                                                     pending={isTopicInProgress}
                                                     statusLabel={formatTopicStatus(topicKeyLower)}
@@ -1252,6 +1255,11 @@ const MainView = ({
                                                     }}
                                                 />
                                             )}
+                                            <CurationLensPicker
+                                                community={urlTopic}
+                                                viewer={viewerAddress}
+                                                onChange={handleLensChange}
+                                            />
                                             <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
                                             <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
                                         </CommunityLensControls>
@@ -1364,11 +1372,12 @@ const MainView = ({
                                         variant="danger"
                                         size="md"
                                         minWidth="5.5rem"
+                                        disabled={isBlockTopicPending(routeTopicLower)}
                                         onClick={async () => {
                                             try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
                                         }}
                                     >
-                                        Unblock {communityLabel(urlTopic)}
+                                        {formatBlockTopicStatus(routeTopicLower) || `Unblock ${communityLabel(urlTopic)}`}
                                     </Button>
                                 </BlockedTopicActions>
                             </BlockedTopicState>}
@@ -1431,7 +1440,7 @@ const MainView = ({
                                 // Only the All feed still uses ListFeedView's toolbar title row.
                                 const showFeedToolbar = urlTopic === 'all';
                                 const feedTitle = urlTopic === 'all' ? 'All' : null;
-                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} />;
+                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} showPostLens={false} />;
                             })()}
 
                             {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (

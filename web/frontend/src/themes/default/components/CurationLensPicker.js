@@ -24,6 +24,8 @@ const Wrap = styled.div`
 
 const PickerRoot = styled.div`
     position: relative;
+    display: inline-flex;
+    align-items: center;
     min-width: 0;
 `;
 
@@ -37,10 +39,10 @@ const PickerButton = styled(FeedControlButton)`
     max-width: 100%;
     font-size: var(--community-header-control-font-size, 0.68rem);
     ${({ $compact }) => $compact ? `
-        height: auto;
-        padding: 0 0.2rem;
-        font-size: inherit;
-        font-weight: 500;
+        height: var(--community-header-control-height, 28px);
+        padding: 0 0.55rem;
+        font-size: var(--community-header-control-font-size, 0.68rem);
+        font-weight: 600;
         max-width: 9rem;
     ` : ''}
 `;
@@ -149,6 +151,15 @@ function pickAuthoritativeSelection(detail) {
     return LENS.DEFAULT;
 }
 
+function pickRequestedSelection(hintLens) {
+    const requested = hintLens?.requested;
+    if (requested === LENS.RAW || requested === LENS.DEFAULT) return requested;
+    if (requested === LENS.TEAM && Number(hintLens.effective_team_id) > 0) {
+        return `${LENS.TEAM}:${Number(hintLens.effective_team_id)}`;
+    }
+    return null;
+}
+
 function sortTeamsBySubscribers(teams) {
     return [...teams].sort((a, b) => {
         const countDiff = Number(b.subscriber_count) - Number(a.subscriber_count);
@@ -195,11 +206,12 @@ export default function CurationLensPicker({
     const rankedTeams = useMemo(() => sortTeamsBySubscribers(liveTeams), [liveTeams]);
     const curated = Boolean(detail?.curated);
     const authoritativeSelection = pickAuthoritativeSelection(detail);
+    const requestedSelection = applyOnLoad ? null : pickRequestedSelection(hintLens);
     const joined = Boolean(viewerAddr && detail?.viewer_joined);
     // Uncurated communities have only one meaningful lens.
     const selected = (!detailLoading && detail && !curated)
         ? LENS.RAW
-        : (optimisticSelection || authoritativeSelection);
+        : (optimisticSelection || requestedSelection || authoritativeSelection);
     const activeTeam = useMemo(() => {
         if (detailLoading || teamsLoading || !detail || !curated || selected === LENS.RAW) return null;
         const [lens, rawTeamId] = selected.split(':');
@@ -240,14 +252,17 @@ export default function CurationLensPicker({
         // Hold the optimistic label until the indexer confirms the same lens.
         // Clearing earlier lets a slow/stale detail refresh snap the trigger
         // back to the previous team while a newer pick is already on chain.
-        if (optimisticSelection && optimisticSelection === authoritativeSelection) {
+        if (
+            optimisticSelection
+            && (optimisticSelection === authoritativeSelection || optimisticSelection === requestedSelection)
+        ) {
             console.debug('[lens] optimistic confirmed by detail', {
                 community,
                 selection: optimisticSelection,
             });
             setOptimisticSelection(null);
         }
-    }, [authoritativeSelection, community, optimisticSelection]);
+    }, [authoritativeSelection, community, optimisticSelection, requestedSelection]);
 
     useEffect(() => {
         // Community header syncs the feed when stored preference loads.

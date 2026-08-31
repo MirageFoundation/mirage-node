@@ -367,7 +367,7 @@ func TestTierLimitsJoinCommunityFreeLowerThanSubscriber(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestSetUsernameFreeTierForcesAnonPrefix(t *testing.T) {
+func TestSetUsernameFreeTierKeepsRequestedName(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 	setProfileLevel(t, mk, ctx, owner, 0)
@@ -384,27 +384,7 @@ func TestSetUsernameFreeTierForcesAnonPrefix(t *testing.T) {
 	require.True(t, found)
 	var core types.ProfileCore
 	require.NoError(t, json.Unmarshal(bz, &core))
-	require.Contains(t, core.Username, "Anon-", "free tier must have Anon- prefix")
-}
-
-func TestSetUsernameSubscriberCanRemoveAnon(t *testing.T) {
-	mk, ctx, am := setupModule(t)
-	pub, owner := testPubkeyOwner()
-	setProfileLevel(t, mk, ctx, owner, int32(types.LevelSubscriber))
-
-	_, err := am.SetUsername(ctx, &types.MsgSetUsername{
-		Authority:      "not-gov",
-		EnvelopePubkey: pub,
-		Target:         owner,
-		Username:       "coolname",
-	})
-	require.NoError(t, err)
-
-	bz, found, _ := mk.GetProfileCore(ctx, owner)
-	require.True(t, found)
-	var core types.ProfileCore
-	require.NoError(t, json.Unmarshal(bz, &core))
-	require.Equal(t, "coolname", core.Username, "subscriber can set custom username")
+	require.Equal(t, "coolname", core.Username)
 }
 
 func TestSetUsernameRejectsLeadingHyphen(t *testing.T) {
@@ -416,7 +396,6 @@ func TestSetUsernameRejectsLeadingHyphen(t *testing.T) {
 		{"subscriber", int32(types.LevelSubscriber), "-coolname"},
 		{"subscriber_double_hyphen", int32(types.LevelSubscriber), "--coolname"},
 		{"free", int32(types.LevelFree), "-coolname"},
-		{"free_behind_anon_prefix", int32(types.LevelFree), "Anon--coolname"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -567,7 +546,6 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	require.Equal(t, 1.0, free.VoteWeight)
 	require.Equal(t, uint64(0), free.MaxCurationMemberships)
 	require.Equal(t, uint64(0), free.MaxDailyRelays)
-	require.False(t, free.CanRemoveAnon)
 	require.False(t, free.CanHaveBiography)
 	require.False(t, free.CanHaveAvatar)
 	require.False(t, free.CanHaveBanner)
@@ -586,7 +564,6 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	require.Equal(t, 1.33, sub.VoteWeight)
 	require.Equal(t, uint64(10), sub.MaxCurationMemberships)
 	require.Equal(t, uint64(250), sub.MaxDailyRelays)
-	require.True(t, sub.CanRemoveAnon)
 	require.True(t, sub.CanHaveBiography)
 	require.True(t, sub.CanHaveAvatar)
 	require.True(t, sub.CanHaveBanner)

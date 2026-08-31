@@ -862,7 +862,7 @@ export default function SubscriptionView({ state }) {
             if (pendingLabel || (isUpgrading && isTargetTier)) {
                 return (
                     <PlanCTA type="button" $intent="disabled" disabled>
-                        {pendingLabel || 'Processing...'}
+                        {pendingLabel || 'Processing…'}
                     </PlanCTA>
                 );
             }
@@ -1056,7 +1056,7 @@ export default function SubscriptionView({ state }) {
                                         $disabled={isUpgrading}
                                         onClick={handleCancelAutoRenew}
                                         title={isUpgrading
-                                            ? 'Processing subscription change...'
+                                            ? 'Processing subscription change…'
                                             : autoRenew
                                                 ? 'Click to cancel auto-renewal'
                                                 : 'Click to re-enable auto-renewal'}

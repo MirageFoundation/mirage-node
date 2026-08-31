@@ -559,7 +559,7 @@ export function useProfile({
     const shortenAddress = addr => {
         if (!addr) return '';
         if (addr.length <= 24) return addr;
-        return `${addr.slice(0, 14)}...${addr.slice(-8)}`;
+        return `${addr.slice(0, 14)}…${addr.slice(-8)}`;
     };
     const formatRegistrationDate = ts => {
         const num = Number(ts);
@@ -621,7 +621,7 @@ export function useProfile({
         if (!text) return '';
         const trimmed = String(text).trim();
         if (trimmed.length <= maxLen) return trimmed;
-        return `${trimmed.slice(0, maxLen - 3)}...`;
+        return `${trimmed.slice(0, maxLen - 1)}…`;
     };
     const buildMetaLine = post => {
         const parts = [];
@@ -700,14 +700,14 @@ export function useProfile({
         } catch (_) { }
         navigate(getPostUrl(post));
     };
-    const usernameDisplay = profileUsername || (isOwnProfile ? username : '') || '(loading...)';
-    const balanceDisplay = profileAddress ? balance === null ? '(loading...)' : `${formatMirage(balance)} MIRAGE` : '(address required)';
-    const reserveDisplay = profileAddress ? reserveFunds === null ? '(loading...)' : `${formatMirage(reserveFunds)} MIRAGE` : '(address required)';
+    const usernameDisplay = profileUsername || (isOwnProfile ? username : '') || '(loading…)';
+    const balanceDisplay = profileAddress ? balance === null ? '(loading…)' : `${formatMirage(balance)} MIRAGE` : '(address required)';
+    const reserveDisplay = profileAddress ? reserveFunds === null ? '(loading…)' : `${formatMirage(reserveFunds)} MIRAGE` : '(address required)';
     const registeredDisplay = formatRegistrationDate(profileRegisteredAt);
     const canEditProfile = isOwnProfile && Boolean(address);
     const donatePending = isSendPending(profileAddress);
     const donateStatus = formatSendStatus(profileAddress);
-    const profileTitle = profileUsername ? `@${profileUsername}` : profileAddress ? `${profileAddress.slice(0, 10)}...` : 'Profile';
+    const profileTitle = profileUsername ? `@${profileUsername}` : profileAddress ? `${profileAddress.slice(0, 10)}…` : 'Profile';
     const canHaveBiography = userLevel > 0;
     const BIO_MAX = 512;
     const handleBioSave = async () => {

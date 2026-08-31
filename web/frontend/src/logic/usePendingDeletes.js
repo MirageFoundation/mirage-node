@@ -46,7 +46,7 @@ export function usePendingDeletes() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return 'Deleting...';
+        return 'Deleting…';
     }, [getInfo, formatStatusForPosition]);
 
     return {

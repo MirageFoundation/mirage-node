@@ -9,7 +9,14 @@ import Api from './api';
 import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 import { generateEnvelopeNonce, buildCanonical, encStr, uvarint64 } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
-import { curationPendingKey, invalidateCurationReads, requireCommunitySlug, requireTeamId } from './curation';
+import {
+    curationPendingKey,
+    invalidateCurationReads,
+    requireCommunitySlug,
+    requireCurationTeamDescription,
+    requireCurationTeamName,
+    requireTeamId,
+} from './curation';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "adult", "gore", "violence", "death"]);
 
@@ -1052,12 +1059,12 @@ class TransactionHandler {
     async createCuratorTeam(community, name, description = '') {
         try {
             const slug = requireCommunitySlug(community);
-            const teamName = String(name || '').trim();
-            if (!teamName) throw new Error('team name is required');
+            const teamName = requireCurationTeamName(name);
+            const teamDescription = requireCurationTeamDescription(description);
             return this._enqueueCuration('create_curation_team', {
                 community: slug,
                 name: teamName,
-                description: String(description),
+                description: teamDescription,
             }, slug);
         } catch (e) { return this._failFromException(e); }
     }
@@ -1066,11 +1073,11 @@ class TransactionHandler {
         try {
             const slug = requireCommunitySlug(community);
             const id = requireTeamId(teamId);
-            const teamName = String(name || '').trim();
-            if (!teamName) throw new Error('team name is required');
+            const teamName = requireCurationTeamName(name);
+            const teamDescription = requireCurationTeamDescription(description);
             return this._enqueueCuration('set_curation_team_profile', {
                 community: slug, team_id: id, name: teamName,
-                description: String(description),
+                description: teamDescription,
             }, slug, id);
         } catch (e) { return this._failFromException(e); }
     }
@@ -2629,7 +2636,7 @@ class TransactionHandler {
             for (let attempt = 0; attempt <= MAX_POW_RETRIES; attempt++) {
                 if (attempt > 0) {
                     // Re-fetch params and rebuild transaction for retry
-                    updateNotification(`PoW stale — retrying (${attempt}/${MAX_POW_RETRIES})...`);
+                    updateNotification(`PoW stale — retrying (${attempt}/${MAX_POW_RETRIES})…`);
                     await new Promise(r => setTimeout(r, POW_RETRY_DELAY_MS));
 
                     if (userLevelNow === 0) {

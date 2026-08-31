@@ -28,7 +28,7 @@ message TierConfig {
 
   // bool fields
   reserved 15; // was can_be_agent
-  bool can_remove_anon = 16;
+  reserved 16; // was can_remove_anon
   bool can_have_biography = 17;
   bool can_have_avatar = 18;
   bool can_have_banner = 19;

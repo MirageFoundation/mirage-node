@@ -865,7 +865,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
         return (
             <ContentGrid>
                 <Helmet>
-                    <title>Create Post | Mirage</title>
+                    <title>Create post | Mirage</title>
                 </Helmet>
                 <FeedRailRow $feedViewMode="card">
                     <FeedCol>
@@ -1135,11 +1135,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
 
     const submitLabel = isSubmitting
         ? submitStatus === 'verifying'
-            ? 'Verifying...'
+            ? 'Verifying…'
             : submitStatus === 'submitting'
-                ? 'Submitting...'
+                ? 'Submitting…'
                 : 'Processing'
-        : isEditMode ? 'Save Edit' : 'Post';
+        : isEditMode ? 'Save edit' : 'Post';
 
     const titleValid = useMemo(() => {
         const len = getByteLength(titleValue || '');
@@ -1388,7 +1388,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     return (
         <ContentGrid>
             <Helmet>
-                <title>{isEditMode ? 'Edit Post' : 'Create Post'} | Mirage</title>
+                <title>{isEditMode ? 'Edit post' : 'Create post'} | Mirage</title>
             </Helmet>
             <FeedRailRow $feedViewMode="card">
                 <FeedCol>
@@ -1667,7 +1667,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                         <MediaSlidePlaceholder>
                                                             <MediaSpinnerRing aria-hidden="true" />
                                                             <span>
-                                                                Uploading{uploadProgress !== null ? ` ${Math.round(uploadProgress)}%` : '...'}
+                                                                Uploading{uploadProgress !== null ? ` ${Math.round(uploadProgress)}%` : '…'}
                                                             </span>
                                                         </MediaSlidePlaceholder>
                                                     )}
@@ -1748,7 +1748,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                                     )}
                                                     {isUploading && attachedMedia.length > 0 && (
                                                         <UploadingBadge>
-                                                            Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}
+                                                            Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '…'}
                                                             <Button
                                                                 variant="danger"
                                                                 size="xs"

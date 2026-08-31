@@ -402,7 +402,7 @@ export default function GifPicker({ onSelect, disabled = false, renderTrigger })
                         <SearchInput
                             ref={searchInputRef}
                             type="text"
-                            placeholder="Search GIFs..."
+                            placeholder="Search GIFs…"
                             value={searchQuery}
                             onChange={handleSearchChange}
                         />
@@ -410,7 +410,7 @@ export default function GifPicker({ onSelect, disabled = false, renderTrigger })
                     </SearchHeader>
                     <GifGrid>
                         {loading ? (
-                            <LoadingText style={{ gridColumn: '1 / -1' }}>Loading...</LoadingText>
+                            <LoadingText style={{ gridColumn: '1 / -1' }}>Loading…</LoadingText>
                         ) : gifs.length === 0 ? (
                             <LoadingText style={{ gridColumn: '1 / -1' }}>No GIFs found</LoadingText>
                         ) : (

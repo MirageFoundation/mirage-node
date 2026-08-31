@@ -171,7 +171,7 @@ else, ask in the [Mirage Portal on Telegram](https://t.me/+5SILWcCke8tmODlh).
 - **Anonymous-by-Default**: Identities are cryptographic keys, not real-world profiles.
 
 ### Pro Tier (Token Powered)
-- **Custom Usernames**: Claim a unique handle without the `Anon-` prefix from the free tier.
+- **Profile extras**: Biography, avatar, and banner on your profile.
 - **Priority Access**: Skip the Proof-of-Work and get guaranteed transaction inclusion.
 - **Moderation Tooling**: Create filters others can subscribe to.
 

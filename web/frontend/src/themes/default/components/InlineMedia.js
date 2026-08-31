@@ -530,7 +530,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
                             background: 'rgba(0,0,0,0.7)', color: '#fff', zIndex: 10,
                             fontSize: '0.9rem', pointerEvents: 'none'
                         }}>
-                            {loadFailed ? 'Video failed to load' : 'Video is still processing...'}
+                            {loadFailed ? 'Video failed to load' : 'Video is still processing…'}
                         </div>
                     )}
                     <video

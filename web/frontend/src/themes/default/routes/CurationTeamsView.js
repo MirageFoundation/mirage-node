@@ -11,6 +11,8 @@ import {
     MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
     MAX_CURATION_TEAM_NAME_LENGTH,
     invalidateCurationReads,
+    requireCurationTeamDescription,
+    requireCurationTeamName,
     runeLength,
     sliceRunes,
     waitForOwnCurationTeam,
@@ -289,19 +291,15 @@ export default function CurationTeamsView() {
             setError('Team name is required.');
             return;
         }
-        if (runeLength(trimmedName) > maxTeamNameLength) {
-            setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
-            console.error('[curation] create team name too long', {
-                length: runeLength(trimmedName),
-                max: maxTeamNameLength,
-            });
-            return;
-        }
-        if (runeLength(description) > maxTeamDescriptionLength) {
-            setError(`Description too long. Maximum ${maxTeamDescriptionLength} characters.`);
-            console.error('[curation] create team description too long', {
-                length: runeLength(description),
-                max: maxTeamDescriptionLength,
+        try {
+            requireCurationTeamName(trimmedName, maxTeamNameLength);
+            requireCurationTeamDescription(description, maxTeamDescriptionLength);
+        } catch (validationError) {
+            setError(validationError.message);
+            console.error('[curation] create team profile validation failed', {
+                error: validationError.message,
+                nameLength: runeLength(trimmedName),
+                descriptionLength: runeLength(description),
             });
             return;
         }
@@ -456,7 +454,7 @@ export default function CurationTeamsView() {
                         value={description}
                         onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
                         placeholder={CURATION_TEAM_DESCRIPTION_EXAMPLE}
-                        maxLength={maxTeamDescriptionLength}
+                        maxLength={maxTeamDescriptionLength * 2}
                         disabled={createBusy}
                     />
                     <FieldHint>

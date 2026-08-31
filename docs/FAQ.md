@@ -509,22 +509,17 @@ speech becomes private. A node is still a website in a real jurisdiction.
 Depending on the operator and local law, IP addresses and access logs may be retained, just
 like on any other site. If that matters to you, choose a node you trust or run your own.
 
-### Why do some names have an Anon prefix? Can I reserve a username?
+### Can I reserve a username?
 
-Yes.
+Usernames are first-come-first-served. Anyone can claim any unclaimed name that meets the
+length and character rules, including short names. There is no paid reservation and no
+prefix that fences off clean names for subscribers.
 
-In the basic tier you can pick a username immediately, but it will include an Anon prefix.
-That keeps onboarding friction low while preventing the early land grab problem where a few
-users squat every valuable name. If you want a clean custom username, you can reserve one
-through a subscription or by holding MIRAGE.
+Some older free accounts still have an Anon prefix because the network used to require it.
+Those names stay until the owner changes them.
 
-Reserved names are recognized across all nodes. A node does not own your username, and
+Usernames are recognized across all nodes. A node does not own your username, and
 switching nodes does not make you start over.
-
-The point is balance. Mirage wants new users to join quickly without a payment wall, but it
-also needs to prevent a few early users or bots from grabbing every obvious name forever.
-The Anon prefix keeps free onboarding open while making clean names a scarce network
-resource.
 
 ### Do I need a crypto wallet to use Mirage?
 
@@ -1296,9 +1291,9 @@ Free is the default. It lets you browse, post, comment, vote, follow communities
 users, and block content. Free users use browser proof of work for transactions. Free
 accounts cannot lead or join curator teams.
 
-Subscriber is the convenience tier. It removes proof of work delays, removes the Anon prefix
-from usernames, increases limits, unlocks profile features like biography, avatar, and
-banner, and lets paid users lead or join curator teams (up to ten memberships).
+Subscriber is the convenience tier. It removes proof of work delays, increases limits,
+unlocks profile features like biography, avatar, and banner, and lets paid users lead or
+join curator teams (up to ten memberships).
 
 Admin accounts keep the high limits, skip proof of work with a higher daily message cap, give awards without burning MIRAGE, and can lead or join up to one thousand curator teams even without an active paid subscription.
 

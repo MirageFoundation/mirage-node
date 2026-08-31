@@ -48,6 +48,16 @@ func ValidateCurationTeamName(name string, maxLen uint64) error {
 	return nil
 }
 
+func ValidateCurationTeamDescription(description string, maxLen uint64) error {
+	if description != "" && description != strings.TrimSpace(description) {
+		return fmt.Errorf("team description must not have surrounding whitespace")
+	}
+	if uint64(utf8.RuneCountInString(description)) > maxLen {
+		return fmt.Errorf("description exceeds max_curation_team_description_length")
+	}
+	return nil
+}
+
 func NormalizeTeamNameKey(name string) string {
 	return strings.ToLower(name)
 }

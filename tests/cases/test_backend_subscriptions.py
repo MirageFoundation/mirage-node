@@ -525,7 +525,6 @@ def test_tier_config_api(backend: str):
         _fail("tierapi.free_vote_weight_1.0", f"got={free.get('vote_weight')}")
 
     for flag in [
-        "can_remove_anon",
         "can_have_biography",
         "can_have_avatar",
         "can_have_banner",
@@ -535,6 +534,11 @@ def test_tier_config_api(backend: str):
             _pass(f"tierapi.free_{flag}_false")
         else:
             _fail(f"tierapi.free_{flag}_false", f"got={free.get(flag)}")
+
+    if not free.get("can_remove_anon", False):
+        _pass("tierapi.free_can_remove_anon_absent_or_false")
+    else:
+        _fail("tierapi.free_can_remove_anon_absent_or_false", f"got={free.get('can_remove_anon')}")
 
     # Subscriber tier (index 1)
     sub = tiers[1]
@@ -582,7 +586,12 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.sub_can_be_agent_absent_or_false", f"got={sub.get('can_be_agent')}")
 
-    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
+    if not sub.get("can_remove_anon", False):
+        _pass("tierapi.sub_can_remove_anon_absent_or_false")
+    else:
+        _fail("tierapi.sub_can_remove_anon_absent_or_false", f"got={sub.get('can_remove_anon')}")
+
+    for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         if sub.get(flag, False):
             _pass(f"tierapi.sub_{flag}_true")
         else:

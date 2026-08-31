@@ -1,11 +1,11 @@
 import { communityLabel, communityPath } from '../../../utils/community';
-import { LENS } from '../../../utils/curation';
+import { LENS, normalizeLens } from '../../../utils/curation';
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
 import Button from "../components/Button.js";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import LoggedOutPromptCard from "../components/LoggedOutPromptCard.js";
 import VoteSection from "../components/VoteSection.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
@@ -33,6 +33,7 @@ import UserAvatar from "../components/UserAvatar.js";
 import ContentTagBadge, { ThreadLockMark } from "../components/ContentTagBadge";
 import { BlockChip } from "../components/PostMenu";
 import { PostLensPicker } from "../components/CurationLensPicker";
+import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -156,6 +157,8 @@ const COMMENT_CURVE_RADIUS_PX = 10;
 const COMMENT_CURVE_RADIUS_PX_MOBILE = 9;
 const COMMENT_CONTENT_GAP_PX = 8;
 const COMMENT_CONTENT_GAP_PX_MOBILE = 6;
+const MIN_CONTINUE_THREAD_LEVEL = 4;
+const CONTINUE_THREAD_PAD_Y_REM = 0.2;
 /* Padding-top values for collapsed / expanded comment cards (and their
  * mobile counterparts), expressed in `rem` so the avatar-center math
  * below tracks the actual root font-size. The default theme bumps
@@ -552,7 +555,7 @@ const ContinueThreadLink = styled(Link)`
         return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX)}px`;
     }};
         width: ${COMMENT_INDENT_PX - COMMENT_AVATAR_SIZE_PX / 2}px;
-        height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED};
+        height: calc(${CONTINUE_THREAD_PAD_Y_REM}rem + ${COMMENT_META_ROW_HALF_PX}px);
         border-left: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom: ${COMMENT_RAIL_WIDTH_PX}px solid ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
         border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX}px;
@@ -565,7 +568,7 @@ const ContinueThreadLink = styled(Link)`
     padding: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
         const leftPad = commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + 6;
-        return `${COMMENT_PAD_TOP_EXPANDED_REM}rem 1rem ${COMMENT_PAD_TOP_EXPANDED_REM}rem ${leftPad}px`;
+        return `${CONTINUE_THREAD_PAD_Y_REM}rem 1rem ${CONTINUE_THREAD_PAD_Y_REM}rem ${leftPad}px`;
     }};
 
     &:hover {
@@ -597,13 +600,13 @@ const ContinueThreadLink = styled(Link)`
         return `${commentRailXPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE)}px`;
     }};
             width: ${COMMENT_INDENT_PX_MOBILE - COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px;
-            height: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE};
+            height: calc(${CONTINUE_THREAD_PAD_Y_REM}rem + ${COMMENT_META_ROW_HALF_PX}px);
             border-bottom-left-radius: ${COMMENT_CURVE_RADIUS_PX_MOBILE}px;
         }
         padding: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
         const leftPad = commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + 5;
-        return `${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem 0.85rem ${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem ${leftPad}px`;
+        return `${CONTINUE_THREAD_PAD_Y_REM}rem 0.85rem ${CONTINUE_THREAD_PAD_Y_REM}rem ${leftPad}px`;
     }};
     }
 `;
@@ -648,6 +651,12 @@ const TopicHeroTopRow = styled.div`
         justify-content: space-between;
     }
 `;
+const TopicHeroMobileActions = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    margin-left: auto;
+`;
 const TopicHeroBackSection = styled.div`
     display: flex;
     align-items: center;
@@ -660,49 +669,12 @@ const TopicHeroBackSection = styled.div`
 const TopicAction = styled.div`
     display: flex;
     align-items: center;
+    gap: 0.2rem;
     flex-shrink: 0;
     
     @media (max-width: 600px) {
         display: none;
     }
-`;
-
-/**
- * Follow topic button in the post-details header. Matches
- * `CardView::FollowButton` 1:1 so the same visual language is used
- * across feed cards and the post-details top bar. Solid blue when not
- * following; transparent with `followBtnBorder` outline when already
- * following; hovers to `followBtnBgHover`. No brand-kit `Button` here —
- * we want the same pill rhythm as the feed.
- */
-const TopicFollowButton = styled.button`
-    appearance: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 12px;
-    border-radius: 9999px;
-    font-size: 0.58rem;
-    font-weight: 700;
-    font-family: inherit;
-    line-height: 1;
-    cursor: pointer;
-    border: 1.5px solid
-        ${({ $active, theme }) =>
-        $active ? theme.colors.followBtnBorder : theme.colors.followBtnBg};
-    background: ${({ $active, theme }) =>
-        $active ? 'transparent' : theme.colors.followBtnBg};
-    color: ${({ $active, theme }) =>
-        $active ? theme.colors.text : '#FFFFFF'};
-    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-
-    &:hover:not(:disabled) {
-        background: ${({ $active, theme }) =>
-        $active ? 'transparent' : theme.colors.followBtnBgHover};
-        border-color: ${({ $active, theme }) =>
-        $active ? theme.colors.followBtnBorderHover : theme.colors.followBtnBgHover};
-    }
-    &:disabled { opacity: 0.6; cursor: default; }
 `;
 
 /**
@@ -843,6 +815,13 @@ const MetaInfoRowLeft = styled.div`
         font-weight: 400;
     }
 `;
+const MetaInfoRowRight = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: auto;
+    flex: 0 0 auto;
+`;
 /**
  * Bullet separator between metadata items. Matches `CardView::HeaderDot`.
  */
@@ -912,8 +891,7 @@ const MobileRootMeta = styled.div`
 const MobileRootMetaTop = styled.div`
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
+    gap: 0.3rem;
     font-size: 0.62rem;
     font-weight: 500;
     line-height: 1.2;
@@ -921,6 +899,20 @@ const MobileRootMetaTop = styled.div`
         font-size: inherit;
         line-height: inherit;
     }
+`;
+const MobileRootMetaPrimary = styled.div`
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.3rem;
+    min-width: 0;
+    flex: 1 1 auto;
+`;
+const MobileRootMetaMenu = styled.div`
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+    flex: 0 0 auto;
 `;
 const MobileRootMetaBottom = styled.div`
     display: flex;
@@ -1686,7 +1678,11 @@ function ViewPostView({
     state,
     updatePost
 }) {
-    const [threadLens, setThreadLens] = useState({ lens: LENS.EFFECTIVE, teamId: null });
+    const [searchParams, setSearchParams] = useSearchParams();
+    const threadLens = React.useMemo(
+        () => normalizeLens(searchParams.get('lens') || LENS.EFFECTIVE, searchParams.get('team_id')),
+        [searchParams],
+    );
     const {
         root,
         setRoot,
@@ -1732,8 +1728,6 @@ function ViewPostView({
         isMobile,
         goBackToFeed,
         viewerAddress,
-        topicFollowHover,
-        setTopicFollowHover,
         isTopicPending,
         isUserPending,
         formatTopicStatus,
@@ -1822,13 +1816,14 @@ function ViewPostView({
     });
 
     const handleThreadLensChange = useCallback((nextLens, nextTeamId) => {
-        const teamId = nextTeamId || null;
-        setThreadLens((prev) => {
-            if (prev.lens === nextLens && prev.teamId === teamId) return prev;
-            console.debug('[ViewPostView] thread lens', { lens: nextLens, teamId });
-            return { lens: nextLens, teamId };
-        });
-    }, []);
+        const next = normalizeLens(nextLens, nextTeamId);
+        const params = new URLSearchParams(searchParams);
+        params.set('lens', next.lens);
+        if (next.teamId) params.set('team_id', String(next.teamId));
+        else params.delete('team_id');
+        console.debug('[ViewPostView] thread lens', next);
+        setSearchParams(params, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     // Inline block/report popover lives on BlockChip (same slot as the
     // feed). 3-dot overflow clamping below still applies to this page's
@@ -2005,7 +2000,6 @@ function ViewPostView({
                                     size="md"
                                     minWidth="5.5rem"
                                     disabled={unblockBusy}
-                                    loading={unblockBusy}
                                     onClick={handleUnblockBlockedPost}
                                 >
                                     {unblockBusy ? (unblockPostStatus || 'Processing') : 'Unblock post'}
@@ -2055,7 +2049,7 @@ function ViewPostView({
     }
     const shortenAddress = address => {
         if (!address) return "";
-        return `${address.substring(0, 10)}...${address.substring(address.length - 4)}`;
+        return `${address.substring(0, 10)}…${address.substring(address.length - 4)}`;
     };
     const renderAuthorLink = currentPost => {
         if (!currentPost) return null;
@@ -2392,12 +2386,12 @@ function ViewPostView({
                                 {isFollowingThisAuthor ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
                                 <span>{isUserPending(authorAddr) ? formatUserStatus(authorAddr) : isFollowingThisAuthor ? 'Unfollow user' : 'Follow user'}</span>
                             </MenuItem>
-                            {isRootPost && post?.topic && <MenuItem onClick={() => {
+                            {isRootPost && post?.topic && <MenuItem disabled={isTopicPending(topicLower)} onClick={() => {
                                 setOpenMenuId(null);
                                 handleTopicFollowToggle(post.topic);
                             }}>
                                 <HiOutlineHashtag />
-                                <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
+                                <span>{isTopicPending(topicLower) ? formatTopicStatus(topicLower) : followingTopic ? 'Leave community' : 'Join community'}</span>
                             </MenuItem>}
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2437,6 +2431,15 @@ function ViewPostView({
                 })()}
             </MenuDropdown>, document.body)}
         </MenuContainer>;
+    };
+    const renderHeaderLensPicker = topicLabel => {
+        if (!topicLabel) return null;
+        return <PostLensPicker
+            community={topicLabel}
+            viewer={viewerAddress}
+            hintLens={mergedRoot?.lens || root?.lens}
+            onChange={handleThreadLensChange}
+        />;
     };
     // The lock belongs to the thread under the current lens, so it applies to
     // every post in the view, not just the root the backend reports it on.
@@ -2488,6 +2491,7 @@ function ViewPostView({
                         onClick={() => handleShare(post)}
                         $success={shareCopied}
                         title={shareCopied ? 'Link copied!' : 'Share'}
+                        aria-label={shareCopied ? 'Link copied' : 'Share post'}
                         aria-live="polite"
                     >
                         <Icon aria-hidden="true">
@@ -2501,7 +2505,7 @@ function ViewPostView({
                                 </svg>
                             )}
                         </Icon>
-                        <span className="share-text">{shareCopied ? 'Link copied' : 'share'}</span>
+                        <span className="share-text">{shareCopied ? 'Link copied' : 'Share'}</span>
                     </ActionButton>
                 );
             })()}
@@ -2612,7 +2616,7 @@ function ViewPostView({
                                     color: '#888',
                                     marginBottom: '0.25rem'
                                 }}>
-                                    Uploading {replyUploadProgress[post.post_id] !== undefined ? `${Math.round(replyUploadProgress[post.post_id])}%` : '...'}
+                                    Uploading {replyUploadProgress[post.post_id] !== undefined ? `${Math.round(replyUploadProgress[post.post_id])}%` : '…'}
                                 </span>
                                 <Button variant="danger" size="xs" tabIndex={-1} onClick={() => {
                                     try {
@@ -2840,7 +2844,7 @@ function ViewPostView({
                         </div>
                         <StyledSubmitButtonContainer>
                             <Button type="submit" size="sm" disabled={isBusy || !!replyIsUploading[post.post_id]} loading={isBusy}>
-                                {isBusy ? replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting...' : replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying...' : 'Processing' : isEdit ? 'Save Edit' : replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'}
+                                {isBusy ? replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting…' : replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying…' : 'Processing' : isEdit ? 'Save edit' : replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'}
                             </Button>
                             <Button data-default-cancel type="button" variant="ghost" size="sm" onClick={() => closeReply(post.post_id)} disabled={isBusy}>Cancel</Button>
                         </StyledSubmitButtonContainer>
@@ -2897,7 +2901,7 @@ function ViewPostView({
     const renderMobileReplyOverlay = () => {
         if (!isMobile || !mobileReplyPost) return null;
         const post = mobileReplyPost;
-        const authorDisplay = post.username || (post.author ? `${post.author.substring(0, 8)}...` : 'Unknown');
+        const authorDisplay = post.username || (post.author ? `${post.author.substring(0, 8)}…` : 'Unknown');
         return ReactDOM.createPortal(<MobileReplyOverlay ref={mobileReplyOverlayRef}>
             <MobileReplyHeader>
                 <MobileReplyBackButton onClick={() => closeReply(post.post_id)}>
@@ -3001,20 +3005,15 @@ function ViewPostView({
                                                 </svg>
                                                 Back
                                             </BackButton>
-                                            {hasValidAccount && <TopicFollowButton
-                                                type="button"
-                                                $active={isTopicFollowing}
-                                                onMouseEnter={() => setTopicFollowHover(true)}
-                                                onMouseLeave={() => setTopicFollowHover(false)}
-                                                onClick={() => {
-                                                    if (!isTopicInProgress && displayTopic) {
-                                                        handleTopicFollowToggle(displayTopic);
-                                                    }
-                                                }}
-                                                disabled={isTopicInProgress}
-                                            >
-                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? 'Leave' : 'Joined') : 'Join'}
-                                            </TopicFollowButton>}
+                                            <TopicHeroMobileActions>
+                                                {hasValidAccount && <CommunityMembershipButton
+                                                    joined={isTopicFollowing}
+                                                    pending={isTopicInProgress}
+                                                    statusLabel={formatTopicStatus(topicLower)}
+                                                    onToggle={() => handleTopicFollowToggle(displayTopic)}
+                                                />}
+                                                {renderHeaderLensPicker(displayTopic)}
+                                            </TopicHeroMobileActions>
                                         </TopicHeroTopRow>
 
                                         {/* Desktop: Back section */}
@@ -3037,20 +3036,14 @@ function ViewPostView({
 
                                         {/* Desktop: Follow button */}
                                         <TopicAction>
-                                            {hasValidAccount && <TopicFollowButton
-                                                type="button"
-                                                $active={isTopicFollowing}
-                                                onMouseEnter={() => setTopicFollowHover(true)}
-                                                onMouseLeave={() => setTopicFollowHover(false)}
-                                                onClick={() => {
-                                                    if (!isTopicInProgress && displayTopic) {
-                                                        handleTopicFollowToggle(displayTopic);
-                                                    }
-                                                }}
-                                                disabled={isTopicInProgress}
-                                            >
-                                                {isTopicInProgress ? formatTopicStatus(topicLower) : isTopicFollowing ? (topicFollowHover ? `Leave ${communityLabel(displayTopic)}` : `Joined ${communityLabel(displayTopic)}`) : `Join ${communityLabel(displayTopic)}`}
-                                            </TopicFollowButton>}
+                                            {hasValidAccount && <CommunityMembershipButton
+                                                joined={isTopicFollowing}
+                                                pending={isTopicInProgress}
+                                                statusLabel={formatTopicStatus(topicLower)}
+                                                communityLabel={communityLabel(displayTopic)}
+                                                onToggle={() => handleTopicFollowToggle(displayTopic)}
+                                            />}
+                                            {renderHeaderLensPicker(displayTopic)}
                                         </TopicAction>
                                     </TopicHeroCard>
                                 </TopicHeroWrapper>;
@@ -3079,21 +3072,19 @@ function ViewPostView({
                                                 {/* Mobile root post meta - two rows */}
                                                 {isRoot && <MobileRootMeta>
                                                     <MobileRootMetaTop>
-                                                        {(() => {
-                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                            return topicLabel ? <>
-                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
-                                                                <PostLensPicker
-                                                                    community={topicLabel}
-                                                                    viewer={viewerAddress}
-                                                                    hintLens={post.lens || mergedRoot?.lens || root?.lens}
-                                                                    onChange={handleThreadLensChange}
-                                                                />
-                                                                <MetaSeparator>·</MetaSeparator>
-                                                            </> : null;
-                                                        })()}
-                                                        {renderAuthorLink(post)}
-                                                        {renderPostMenu(post)}
+                                                        <MobileRootMetaPrimary>
+                                                            {(() => {
+                                                                const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
+                                                                return topicLabel ? <>
+                                                                    <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                    <MetaSeparator>·</MetaSeparator>
+                                                                </> : null;
+                                                            })()}
+                                                            {renderAuthorLink(post)}
+                                                        </MobileRootMetaPrimary>
+                                                        <MobileRootMetaMenu>
+                                                            {renderPostMenu(post)}
+                                                        </MobileRootMetaMenu>
                                                     </MobileRootMetaTop>
                                                     <MobileRootMetaBottom>
                                                         <span>{timeLabel}</span>
@@ -3164,12 +3155,6 @@ function ViewPostView({
                                                             const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                                                             return topicLabel ? <>
                                                                 <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
-                                                                <PostLensPicker
-                                                                    community={topicLabel}
-                                                                    viewer={viewerAddress}
-                                                                    hintLens={post.lens || mergedRoot?.lens || root?.lens}
-                                                                    onChange={handleThreadLensChange}
-                                                                />
                                                                 <MetaSeparator>·</MetaSeparator>
                                                             </> : null;
                                                         })()}
@@ -3219,7 +3204,9 @@ function ViewPostView({
                                                             </CollapseToggle>
                                                         </>}
                                                     </MetaInfoRowLeft>
-                                                    {renderPostMenu(post)}
+                                                    <MetaInfoRowRight>
+                                                        {renderPostMenu(post)}
+                                                    </MetaInfoRowRight>
                                                 </DesktopMetaInfoRow>
 
                                                 {/* Title for root post */}
@@ -3341,6 +3328,9 @@ function ViewPostView({
                                             if (isCollapsed) return null;
                                             // Don't show for context comments (parent chain in focused view)
                                             if (post.isContextComment) return null;
+                                            // Keep shallow conversations inline; deep-link only once
+                                            // indentation has reached the thread-depth cutoff.
+                                            if (displayLevel < MIN_CONTINUE_THREAD_LEVEL) return null;
                                             // Don't show if this IS the focused comment (we're already viewing its thread)
                                             if (focusedCommentId && String(post.post_id).toLowerCase() === String(focusedCommentId).toLowerCase()) return null;
                                             // Don't show if no replies

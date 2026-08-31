@@ -279,12 +279,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         if (modState.postHidden) {
             out.push({
                 key: 'restore_post',
-                label: status('set_curation_post_hidden', postId, 'Restoring…') || 'Restore post',
+                label: status('set_curation_post_hidden', postId, 'Unbanning…') || 'Unban post',
                 danger: false,
                 disabled: pending('set_curation_post_hidden', postId),
                 icon: <HiOutlineEye />,
                 run: () => run(
-                    'Restore post',
+                    'Unban post',
                     () => tx.moderateCurationPost(community, teamId, postId, false),
                     { postHidden: false },
                 ),
@@ -292,12 +292,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         } else {
             out.push({
                 key: 'hide_post',
-                label: status('set_curation_post_hidden', postId, 'Hiding…') || 'Hide post',
+                label: status('set_curation_post_hidden', postId, 'Banning…') || 'Ban post',
                 danger: true,
                 disabled: pending('set_curation_post_hidden', postId),
                 icon: <HiOutlineEyeSlash />,
                 run: () => run(
-                    'Hide post',
+                    'Ban post',
                     () => tx.moderateCurationPost(community, teamId, postId, true),
                     { postHidden: true },
                 ),
@@ -307,12 +307,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         if (modState.userHidden) {
             out.push({
                 key: 'restore_user',
-                label: status('set_curation_user_hidden', author, 'Restoring…') || 'Restore user',
+                label: status('set_curation_user_hidden', author, 'Unbanning…') || 'Unban user',
                 danger: false,
                 disabled: !author || pending('set_curation_user_hidden', author),
                 icon: <HiOutlineUser />,
                 run: () => run(
-                    'Restore user',
+                    'Unban user',
                     () => tx.moderateCurationUser(community, teamId, author, false),
                     { userHidden: false },
                 ),
@@ -320,12 +320,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         } else {
             out.push({
                 key: 'hide_user',
-                label: status('set_curation_user_hidden', author, 'Hiding…') || 'Hide user',
+                label: status('set_curation_user_hidden', author, 'Banning…') || 'Ban user',
                 danger: true,
                 disabled: !author || pending('set_curation_user_hidden', author),
                 icon: <HiOutlineNoSymbol />,
                 run: () => run(
-                    'Hide user',
+                    'Ban user',
                     () => tx.moderateCurationUser(community, teamId, author, true),
                     { userHidden: true },
                 ),

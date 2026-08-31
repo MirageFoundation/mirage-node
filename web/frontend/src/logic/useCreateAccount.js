@@ -224,7 +224,7 @@ export function useCreateAccount({
         if (!publicKey || !seedPhrase) return;
         const base = (usernameInput || "").trim();
         if (!base) return;
-        const usernameFinal = `Anon-${base}`;
+        const usernameFinal = base;
 
         // Validate username length (use defaults if params not cached yet)
         const minSize = getMinUsernameSize() ?? 5;
@@ -318,7 +318,7 @@ export function useCreateAccount({
 
             // Transaction broadcast succeeded (code=0 from BROADCAST_MODE_SYNC).
             // Commit vault now (plaintext default), then welcome via in-memory handoff.
-            const finalUsername = `Anon-${base}`;
+            const finalUsername = base;
             try {
                 Storage.remove('username_pending');
             } catch (_) { }

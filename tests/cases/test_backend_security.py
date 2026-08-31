@@ -837,7 +837,7 @@ def test_validation(backend: str):
         except Exception as e:
             _fail(f"validation.username_{label}_rejected", str(e))
 
-    # 11.7 Free username prefix — verify Anon- prefix is applied to free tier
+    # 11.7 Free username is stored exactly as requested (no Anon- prefix)
     if reg_enabled:
         test_uname = f"prefix-{_rand_str(6)}"
         try:
@@ -845,18 +845,18 @@ def test_validation(backend: str):
             txh = str(resp.get("tx_hash", "")).lower()
             if txh:
                 resolved = _wait_username(backend, free_addr, timeout=15.0)
-                if resolved and resolved.startswith("Anon-"):
-                    _pass("validation.free_username_anon_prefix", username=resolved)
+                if resolved == test_uname:
+                    _pass("validation.free_username_exact", username=resolved)
                 elif resolved:
-                    _pass("validation.free_username_set", username=resolved)
+                    _fail("validation.free_username_exact", f"got={resolved} expected={test_uname}")
                 else:
                     _pass("validation.free_username submitted (indexer may lag)")
             else:
-                _pass("validation.free_username_anon_prefix (set_username failed)")
+                _fail("validation.free_username_exact", f"resp={resp}")
         except Exception as e:
-            _fail("validation.free_username_anon_prefix", str(e))
+            _fail("validation.free_username_exact", str(e))
     else:
-        _pass("validation.free_username_anon_prefix skipped (registration disabled)")
+        _pass("validation.free_username_exact skipped (registration disabled)")
 
     # ------ Content tag validation ------
 

@@ -275,7 +275,7 @@ const FLAG_LABELS = {
     adult: 'Adult'
 };
 
-export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled }) => {
+export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled, 'aria-label': ariaLabel = 'Community' }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchValue, setSearchValue] = useState('');
     const [followedTopics, setFollowedTopics] = useState([]);
@@ -660,6 +660,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                     onClick={() => !disabled && setIsOpen(true)}
                     onKeyDown={handleKeyDown}
                     disabled={disabled}
+                    aria-label={ariaLabel}
+                    aria-haspopup="listbox"
+                    aria-expanded={false}
                 >
                     <ButtonContent>
                         {value ? (
@@ -688,13 +691,16 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                         autoCorrect="off"
                         autoCapitalize="off"
                         spellCheck={false}
+                        aria-label={ariaLabel}
+                        aria-haspopup="listbox"
+                        aria-expanded={true}
                     />
                     <Dropdown>
                         <ResultsContainer ref={dropdownRef}>
                             {isLoading ? (
-                                <EmptyState>Loading communities...</EmptyState>
+                                <EmptyState>Loading communities…</EmptyState>
                             ) : isSearching && showSearchResults && searchResults.length === 0 ? (
-                                <EmptyState>Searching communities...</EmptyState>
+                                <EmptyState>Searching communities…</EmptyState>
                             ) : (
                                 <>
                                     {filteredFollowed.length > 0 && (

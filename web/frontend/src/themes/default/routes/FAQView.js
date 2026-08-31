@@ -548,7 +548,7 @@ export default function FAQView() {
                                                 type="search"
                                                 value={query}
                                                 onChange={event => setQuery(event.target.value)}
-                                                placeholder="Try subscriptions, nodes, privacy..."
+                                                placeholder="Try subscriptions, nodes, privacy…"
                                             />
                                             <SearchHint>
                                                 {hasQuery

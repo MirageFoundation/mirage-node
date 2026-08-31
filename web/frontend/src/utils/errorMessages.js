@@ -110,7 +110,7 @@ const ERROR_MAP = {
     epoch_ids_required: "At least one epoch is required.",
     too_many_epoch_ids: "You can claim at most 30 epochs at a time.",
     epoch_ids_not_increasing: "Epochs must be listed in increasing order.",
-    topic_retired: "This page still used a topic. Refresh to load the community instead.",
+    topic_retired: "This page still used an outdated community link. Refresh to load the community instead.",
     curation_action_pending: "That curator action is already pending.",
 
     // Media

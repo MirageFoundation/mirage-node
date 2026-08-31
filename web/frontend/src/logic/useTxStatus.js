@@ -62,7 +62,7 @@ export function useTxStatus() {
         }
 
         if (status.status === 'submitting') {
-            return 'Submitting...';
+            return 'Submitting…';
         }
 
         return 'Processing';

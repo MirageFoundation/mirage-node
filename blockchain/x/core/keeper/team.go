@@ -3,7 +3,6 @@ package keeper
 import (
 	"encoding/binary"
 	"fmt"
-	"unicode/utf8"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
@@ -21,8 +20,8 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
 		return 0, err
 	}
-	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
-		return 0, fmt.Errorf("description exceeds max_curation_team_description_length")
+	if err := types.ValidateCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength); err != nil {
+		return 0, err
 	}
 	core, found, err := k.loadProfile(ctx, owner)
 	if err != nil {
@@ -293,8 +292,8 @@ func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, t
 	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
 		return err
 	}
-	if uint64(utf8.RuneCountInString(description)) > params.MaxCurationTeamDescriptionLength {
-		return fmt.Errorf("description exceeds max_curation_team_description_length")
+	if err := types.ValidateCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength); err != nil {
+		return err
 	}
 	oldNorm := types.NormalizeTeamNameKey(team.Name)
 	newNorm := types.NormalizeTeamNameKey(name)

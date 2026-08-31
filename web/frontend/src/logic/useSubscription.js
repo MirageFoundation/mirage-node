@@ -61,7 +61,6 @@ export const buildTierConfig = chainTiers => {
         const maxCommunities = num('max_joined_communities');
         const maxUsers = num('max_followed_users');
         const maxDailyRelays = num('max_daily_relays');
-        const voteWeight = num('vote_weight');
         const followParts = [];
         if (maxCommunities > 0) followParts.push(`${maxCommunities} communities`);
         if (maxUsers > 0) followParts.push(`${maxUsers} users`);
@@ -79,12 +78,10 @@ export const buildTierConfig = chainTiers => {
             }
             features = [
                 `${maxDailyRelays.toLocaleString()} transactions per day without PoW`,
-                "Remove 'Anon-' prefix",
                 'Lead curator teams',
                 maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
                 followParts.length > 0 && `Join or follow up to ${followParts.join(' and ')}`,
                 'Profile biography, avatar & banner',
-                voteWeight > 1 && `${voteWeight}x vote weight`,
             ];
         }
         return {
@@ -461,16 +458,8 @@ export function useSubscription({
         } else {
             details.push('Cannot edit posts after publishing.');
         }
-        if (typeof raw.vote_weight === 'number' && raw.vote_weight > 1) {
-            details.push(`Vote weight: ${raw.vote_weight.toFixed(2)}x.`);
-        }
         if (tier.level >= 1) {
             details.push('Can lead curator teams.');
-        }
-        if (raw.can_remove_anon) {
-            details.push('Can remove anonymous prefix.');
-        } else {
-            details.push('Username has anonymous prefix.');
         }
         if (raw.can_have_biography) {
             details.push('Profile biography available.');

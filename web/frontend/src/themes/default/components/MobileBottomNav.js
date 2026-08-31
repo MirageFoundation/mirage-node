@@ -442,7 +442,7 @@ function MobileBottomNav({ state }) {
                     <NavItemAnchor
                         href="/inbox"
                         $active={isInboxActive}
-                        aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}
+                        aria-label={inboxCount > 0 ? `Inbox, ${inboxCount} unread` : 'Inbox'}
                         aria-current={isInboxActive ? 'page' : undefined}
                         onClick={(e) => {
                             handleNavItemClick();

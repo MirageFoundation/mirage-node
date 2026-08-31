@@ -18,7 +18,9 @@ import {
 import { FeedRailRow, FeedCol } from "../components/FeedLayout.js";
 import { useDiscover } from "../../../logic/useDiscover";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { formatSubscriberCount } from "../../../utils/curation";
 import ContentTagBadge from "../components/ContentTagBadge";
+import CommunityMembershipButton from "../components/CommunityMembershipButton";
 
 /**
  * DiscoverView — `default` Plan 06 sub-plan 07.
@@ -320,13 +322,7 @@ const FootHint = styled.div`
 
 function formatRowMeta(t) {
     if (!t.curated) return `Uncurated · ${t.post_count} posts`;
-    return `Curated · ${t.live_team_count} teams · ${t.post_count} posts · Default: ${t.default_team.name} (${t.default_team.subscriber_count} subscribers)`;
-}
-
-function getToggleLabel({ isJoined, hovering, pending, status }) {
-    if (pending) return status || (isJoined ? 'Leaving…' : 'Joining…');
-    if (isJoined) return hovering ? 'Leave' : 'Joined';
-    return 'Join';
+    return `Curated · ${t.live_team_count} teams · ${t.post_count} posts · Default: ${t.default_team.name} (${formatSubscriberCount(Number(t.default_team.subscriber_count))})`;
 }
 
 export default function DiscoverView({ state }) {
@@ -339,8 +335,6 @@ export default function DiscoverView({ state }) {
         isSearching,
         loading,
         error,
-        hoverTopic,
-        setHoverTopic,
         isTopicPending,
         formatTopicStatus,
         isSubscribedTopic,
@@ -441,7 +435,6 @@ export default function DiscoverView({ state }) {
         const topicLower = t.topic.toLowerCase();
         const isJoined = isSubscribedTopic(t.topic);
         const pending = isTopicPending(topicLower);
-        const hovering = hoverTopic === topicLower;
         const tag = t.dominant_tag ? normalizeTag(t.dominant_tag) : null;
         const meta = formatRowMeta(t);
 
@@ -455,23 +448,12 @@ export default function DiscoverView({ state }) {
                     {meta ? <RowMeta>{meta}</RowMeta> : null}
                 </RowMain>
                 <RowActions>
-                    <Button
-                        variant={isJoined && hovering ? 'primaryDanger' : isJoined ? 'subtle' : 'primary'}
-                        size="sm"
-                        minWidth="5.5rem"
-                        disabled={pending}
-                        loading={pending}
-                        onMouseEnter={() => setHoverTopic(topicLower)}
-                        onMouseLeave={() => setHoverTopic(null)}
-                        onClick={() => handleSubscribeToggle(t.topic)}
-                    >
-                        {getToggleLabel({
-                            isJoined,
-                            hovering,
-                            pending,
-                            status: formatTopicStatus(topicLower),
-                        })}
-                    </Button>
+                    <CommunityMembershipButton
+                        joined={isJoined}
+                        pending={pending}
+                        statusLabel={formatTopicStatus(topicLower)}
+                        onToggle={() => handleSubscribeToggle(t.topic)}
+                    />
                 </RowActions>
             </Row>
         );

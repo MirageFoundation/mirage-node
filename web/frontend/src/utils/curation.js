@@ -18,7 +18,7 @@ export const MAX_CURATION_TEAM_NAME_LENGTH = 30;
 export const MAX_CURATION_TEAM_DESCRIPTION_LENGTH = 800;
 export const CURATION_TEAM_DESCRIPTION_EXAMPLE = `This community is dedicated to all things sailboats and sailing. Whether you're a seasoned sailor, a boat enthusiast, or a curious newbie, this place welcomes you.
 
-If you post anything unrelated to sailboats, you might get hidden from our curation team.`;
+If you post anything unrelated to sailboats, you might get banned from our curation team.`;
 
 /** Team-page hidden lists: first page 10, then batches of 50. */
 export const HIDDEN_LIST_INITIAL = 10;
@@ -37,6 +37,30 @@ export function sliceRunes(value, max) {
     return [...String(value ?? '')].slice(0, limit).join('');
 }
 
+const TEAM_NAME_RE = /^(?:[A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9 _-]*[A-Za-z0-9])$/;
+
+export function requireCurationTeamName(value, max = MAX_CURATION_TEAM_NAME_LENGTH) {
+    const name = String(value ?? '');
+    if (!name) throw new Error('team name is required');
+    if (name !== name.trim()) throw new Error('team name must not have surrounding whitespace');
+    if (runeLength(name) > max) throw new Error(`team name exceeds limit: ${runeLength(name)} > ${max}`);
+    if (!TEAM_NAME_RE.test(name)) {
+        throw new Error('team name must be printable ASCII letters, digits, spaces, hyphens, or underscores');
+    }
+    return name;
+}
+
+export function requireCurationTeamDescription(value, max = MAX_CURATION_TEAM_DESCRIPTION_LENGTH) {
+    const description = String(value ?? '');
+    if (description && description !== description.trim()) {
+        throw new Error('team description must not have surrounding whitespace');
+    }
+    if (runeLength(description) > max) {
+        throw new Error(`description exceeds limit: ${runeLength(description)} > ${max}`);
+    }
+    return description;
+}
+
 const VALID_LENSES = new Set(Object.values(LENS));
 
 export function requireCommunitySlug(value) {
@@ -53,13 +77,13 @@ export function requireTeamId(value) {
     return teamId;
 }
 
-/** Format a subscriber count as `1 sub` or `N subs`. */
+/** Format how many eligible users explicitly pinned a curation team. */
 export function formatSubscriberCount(count) {
     const n = Number(count);
     if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
         throw new Error(`invalid subscriber count: ${count}`);
     }
-    return n === 1 ? '1 sub' : `${n} subs`;
+    return n === 1 ? '1 user pinned' : `${n} users pinned`;
 }
 
 /** Live team with the most subscribers (ties → lowest team_id). */

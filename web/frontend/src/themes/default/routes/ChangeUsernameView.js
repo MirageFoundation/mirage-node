@@ -1,7 +1,6 @@
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import Button from "../components/Button.js";
-import { Link } from "react-router-dom";
 import {
     AuthButtonRow,
     AuthErrorMessage,
@@ -9,7 +8,6 @@ import {
     AuthLabel,
     AuthPanel,
     AuthStack,
-    AuthSubtlePanel,
 } from "../components/AuthPageShell.js";
 import { ContentGrid, ModernPostFeed } from "../Layout";
 import { getMaxInputLength } from "../../../utils/chainParams";
@@ -95,16 +93,6 @@ const InputRow = styled.div`
   }
 `;
 
-const InputPrefix = styled.span`
-  padding: 0.66rem 0 0.66rem 0.78rem;
-  color: ${({ theme }) => theme.colors.subtleText};
-  font-size: 0.8rem;
-  font-weight: 600;
-  line-height: 1.4;
-  user-select: none;
-  white-space: nowrap;
-`;
-
 const InlineInput = styled.input`
   border: none;
   flex: 1;
@@ -116,7 +104,6 @@ const InlineInput = styled.input`
   font-size: 0.8rem;
   line-height: 1.4;
   padding: 0.66rem 0.78rem;
-  padding-left: ${({ $hasPrefix }) => ($hasPrefix ? "0.15rem" : "0.78rem")};
   box-sizing: border-box;
 
   &:focus {
@@ -131,28 +118,6 @@ const InlineInput = styled.input`
     opacity: 0.65;
     cursor: not-allowed;
   }
-`;
-
-const WarningPanel = styled(AuthSubtlePanel)`
-  border-color: #f59e0b;
-  background: ${({ theme }) =>
-        theme.name === "dark" ? "rgba(245, 158, 11, 0.08)" : "rgba(245, 158, 11, 0.06)"};
-
-  a {
-    color: #f59e0b;
-    text-decoration: underline;
-    font-weight: 600;
-
-    &:hover {
-      color: #fbbf24;
-    }
-  }
-`;
-
-const WarningText = styled.div`
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 0.78rem;
-  line-height: 1.5;
 `;
 
 const SuccessIcon = styled.div`
@@ -211,7 +176,6 @@ const PrimaryButton = styled(Button)`
 
 function ChangeUsernameView({ state }) {
     const {
-        currentUsername,
         usernameInput,
         setUsernameInput,
         submitting,
@@ -219,10 +183,8 @@ function ChangeUsernameView({ state }) {
         submitError,
         setSubmitError,
         cooldownUntil,
-        userLevel,
         success,
         handleSubmit,
-        canChangeName,
     } = useChangeUsername({ state });
 
     return (
@@ -240,40 +202,23 @@ function ChangeUsernameView({ state }) {
                     <PageWrapper>
                         <PageTitle>Change your username</PageTitle>
                         <PageDescription>
-                            {canChangeName
-                                ? "This is how users will find you on Mirage."
-                                : "Free tier accounts keep the Anon- prefix."}
+                            This is how users will find you on Mirage.
                         </PageDescription>
 
                         <AuthStack>
                             {!success && (
                                 <>
-                                    {!canChangeName && userLevel !== null && (
-                                        <WarningPanel>
-                                            <WarningText>
-                                                Free tier accounts will always have the &quot;Anon-&quot; prefix.{" "}
-                                                <Link to="/subscription">Upgrade to remove the &quot;Anon-&quot; prefix</Link>.
-                                            </WarningText>
-                                        </WarningPanel>
-                                    )}
-
                                     <AuthPanel as="form" onSubmit={handleSubmit}>
                                         <AuthLabel htmlFor="change-username-input" style={{ textAlign: "left" }}>New username</AuthLabel>
                                         <InputRow $disabled={submitting}>
-                                            {!canChangeName && <InputPrefix>Anon-</InputPrefix>}
                                             <InlineInput
                                                 id="change-username-input"
-                                                placeholder={
-                                                    !canChangeName && currentUsername.startsWith("Anon-")
-                                                        ? currentUsername.slice(5)
-                                                        : currentUsername || "New username"
-                                                }
+                                                placeholder="New username"
                                                 value={usernameInput}
-                                                $hasPrefix={!canChangeName}
                                                 onChange={(e) => {
                                                     const raw = e.target.value;
                                                     const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "").replace(/^-+/, "");
-                                                    const maxLen = getMaxInputLength(!canChangeName);
+                                                    const maxLen = getMaxInputLength();
                                                     setUsernameInput(cleaned.slice(0, maxLen ?? 100));
                                                     setSubmitError("");
                                                 }}
@@ -286,7 +231,7 @@ function ChangeUsernameView({ state }) {
                                                 onPaste={(e) => {
                                                     e.preventDefault();
                                                 }}
-                                                maxLength={getMaxInputLength(!canChangeName) || 100}
+                                                maxLength={getMaxInputLength() || 100}
                                                 disabled={submitting}
                                                 autoComplete="off"
                                                 autoCorrect="off"
@@ -334,7 +279,7 @@ function ChangeUsernameView({ state }) {
                                     <SuccessTitle>Username Changed!</SuccessTitle>
                                     <SuccessText>Your new username is:</SuccessText>
                                     <SuccessHandle>
-                                        {canChangeName ? usernameInput : "Anon-" + usernameInput}
+                                        {usernameInput}
                                     </SuccessHandle>
                                     <SuccessSubtext>Redirecting to profile…</SuccessSubtext>
                                 </AuthPanel>

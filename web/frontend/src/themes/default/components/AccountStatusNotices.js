@@ -4,17 +4,65 @@ import { Link } from 'react-router-dom';
 import Storage from '../../../utils/Storage';
 import { requireThemeColor } from '../../../utils/themeColor';
 
+const NoticeList = styled.div`
+    margin: 0.25rem 1rem;
+
+    @media (max-width: 1000px) {
+        margin: 0.25rem 0.85rem;
+    }
+
+    @media (max-width: 600px) {
+        margin: 0.25rem 0;
+    }
+`;
+
 const Notice = styled.div`
-    padding: 0.65rem 0.8rem;
-    margin: 0.5rem 0;
-    border: 1px solid ${({ theme, $warning }) => $warning
-        ? requireThemeColor(theme, 'buttonDangerBorder')
-        : requireThemeColor(theme, 'border')};
-    border-radius: 8px;
-    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 1rem;
+    align-items: center;
+    padding: 0.55rem 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.72rem;
-    line-height: 1.45;
+    font-weight: 500;
+    line-height: 1.4;
+
+    & + & {
+        border-top: 1px solid ${({ theme }) => requireThemeColor(theme, 'borderSubtle')};
+    }
+
+    @media (max-width: 600px) {
+        grid-template-columns: 1fr;
+        gap: 0.1rem;
+    }
+`;
+
+const NoticeLabel = styled.div`
+    color: ${({ theme, $tone }) => {
+        if ($tone === 'danger') return requireThemeColor(theme, 'voteDown');
+        if ($tone === 'warning') return requireThemeColor(theme, 'inboxHighlightRail');
+        return requireThemeColor(theme, 'text');
+    }};
+    font-weight: ${({ $regular }) => ($regular ? 500 : 600)};
+`;
+
+const NoticeBody = styled.div`
+    min-width: 0;
+
+    strong {
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
+        font-weight: 600;
+    }
+`;
+
+const NoticeLink = styled(Link)`
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    font-weight: 600;
+    text-decoration: none;
+
+    &:hover {
+        color: ${({ theme }) => requireThemeColor(theme, 'linkHover')};
+    }
 `;
 
 function readStatuses() {
@@ -61,15 +109,22 @@ export default function AccountStatusNotices({ showQuota = true, showRenewal = t
     const quota = showQuota ? validateQuota(statuses.quota) : null;
     const renewal = showRenewal ? validateRenewal(statuses.renewal) : null;
     const renewalDays = renewal ? Math.max(0, Math.ceil((renewal.expiry * 1000 - Date.now()) / 86400000)) : 0;
-    if (!quota && !renewal) return null;
-    return <>
-        {quota && <Notice $warning={quota.remaining === 0} role="status">
-            Transactions without PoW today: <strong>{quota.used} / {quota.limit}</strong> used
-            ({quota.remaining} remaining). Resets {new Date(quota.reset_at * 1000).toLocaleString()}.
+    const showRenewalNotice = renewal && renewalDays <= 7;
+    if (!quota && !showRenewalNotice) return null;
+    return <NoticeList>
+        {quota && <Notice role="status">
+            <NoticeLabel $regular $tone={quota.remaining === 0 ? 'danger' : undefined}>Daily no-PoW:</NoticeLabel>
+            <NoticeBody>
+                {quota.used.toLocaleString()} of {quota.limit.toLocaleString()} used
+            </NoticeBody>
         </Notice>}
-        {renewal && <Notice $warning role="alert">
-            Your subscription expires in {renewalDays} day{renewalDays === 1 ? '' : 's'} ({new Date(renewal.expiry * 1000).toLocaleString()}).
-            {' '}<Link to="/subscription">Review renewal</Link>
+        {showRenewalNotice && <Notice role="alert">
+            <NoticeLabel $tone="warning">Subscription renewal:</NoticeLabel>
+            <NoticeBody>
+                Expires in <strong>{renewalDays} day{renewalDays === 1 ? '' : 's'}</strong>
+                {' · '}{new Date(renewal.expiry * 1000).toLocaleString()}
+                {' · '}<NoticeLink to="/subscription">Review renewal</NoticeLink>
+            </NoticeBody>
         </Notice>}
-    </>;
+    </NoticeList>;
 }

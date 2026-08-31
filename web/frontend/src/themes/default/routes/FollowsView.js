@@ -495,7 +495,6 @@ export default function FollowsView({ state }) {
                                         size="sm"
                                         minWidth="5.5rem"
                                         disabled={isPending}
-                                        loading={isPending}
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
@@ -558,7 +557,6 @@ export default function FollowsView({ state }) {
                                         size="sm"
                                         minWidth="5.5rem"
                                         disabled={isPending}
-                                        loading={isPending}
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();

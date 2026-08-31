@@ -81,7 +81,7 @@ const Label = styled.div`
     line-height: 1.3;
     white-space: nowrap;
     flex-shrink: 0;
-    @media (max-width: 1000px) {
+    @media (max-width: 600px) {
         margin-bottom: 0.1rem;
     }
 `;
@@ -94,7 +94,7 @@ const HoverableLabel = styled.div`
     flex-shrink: 0;
     ${tooltipStyles()}
 
-    @media (max-width: 1000px) {
+    @media (max-width: 600px) {
         margin-bottom: 0.1rem;
     }
 `;
@@ -249,6 +249,7 @@ const Mono = styled.span`
     font-size: 0.72rem;
     font-weight: 500;
     font-family: inherit;
+    line-height: 1.3;
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -267,6 +268,27 @@ const SubtleMono = styled(Mono)`
 }) => theme.colors.subtleText};
 `;
 
+const TierDetails = styled.div`
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.2rem 0.5rem;
+    min-width: 0;
+`;
+
+const TierName = styled(Mono)`
+    color: ${({ $color, theme }) => $color || theme.colors.cardBodyText};
+    white-space: nowrap;
+    word-break: normal;
+    overflow-wrap: normal;
+`;
+
+const TierExpiry = styled.span`
+    color: ${({ theme }) => theme.colors.subtleText};
+    font-size: 0.7rem;
+    white-space: nowrap;
+`;
+
 /** Horizontal inset for content on posts/algo tabs — matches `SettingsWrap` row padding. */
 const ProfilePostsTabGutter = styled.div`
     padding: 0 1rem;
@@ -276,39 +298,24 @@ const ProfilePostsTabGutter = styled.div`
     }
 `;
 
-/** No per-row divider. Padding matches `SettingsView::SettingRow` (0.55rem 1rem).
- *  Label column is a FIXED width (110px) so every row's value starts at the
- *  same x coordinate — Username / Address / Tier / Balance / Registered /
- *  Reserve / Biography all line up vertically. The value column takes the
- *  remaining row width via `minmax(0, 1fr)` so long Mono strings (wallet
- *  address, balance, etc.) can shrink/ellipsize without clipping.
- *
- *  Default `gap: 1.5rem` gives a comfortable breathing room on wide desktop.
- *  As the main column narrows (right-aside still visible but shrinking the
- *  main column into intermediate widths where Mono values start to clip), the
- *  `@media (max-width: 1100px)` rule tightens the gap to claw back horizontal
- *  space for the value. A second step at mobile (<1000px) tightens padding.
- *  Row stays a single line in BOTH desktop and mobile (no stack). */
+/** Shared details grid. The label width also matches AccountStatusNotices. */
 const ProfileFieldRow = styled.div`
     display: grid;
-    grid-template-columns: 110px minmax(0, 1fr);
-    gap: 1.5rem;
-    align-items: start;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 1rem;
+    align-items: ${({ $top }) => ($top ? 'start' : 'center')};
     padding: 0.55rem 1rem;
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
 
-    @media (max-width: 1100px) {
-        gap: 0.5rem;
-    }
-
     @media (max-width: 1000px) {
-        gap: 0.5rem;
         padding: 0.5rem 0.85rem;
     }
 
     @media (max-width: 600px) {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.2rem;
         padding: 0.5rem 0;
     }
 `;
@@ -1782,7 +1789,6 @@ function ProfileViewAuthenticated({
                                                     size="sm"
                                                     minWidth="5.5rem"
                                                     disabled={isUnblockPending}
-                                                    loading={isUnblockPending}
                                                     onClick={handleUnblockProfile}
                                                     style={{ height: '32px', borderRadius: '9999px', paddingTop: 0, paddingBottom: 0 }}
                                                 >
@@ -1843,23 +1849,19 @@ function ProfileViewAuthenticated({
                                         <ProfileFieldRow>
                                             <Label>Tier:</Label>
                                             <ProfileFieldValue>
-                                                <span style={{ display: 'flex', alignItems: 'center' }}>
-                                                    <Mono style={userLevel > 0 ? { color: getTierColor(userLevel) } : undefined}>
+                                                <TierDetails>
+                                                    <TierName $color={userLevel > 0 ? getTierColor(userLevel) : undefined}>
                                                         {getTierName(userLevel)}
-                                                    </Mono>
-                                                    {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <span style={{
-                                                        marginLeft: '0.5rem',
-                                                        fontSize: '0.7rem',
-                                                        color: theme.colors.subtleText
-                                                    }}>
+                                                    </TierName>
+                                                    {userLevel > 0 && subscriptionExpiry > 0 && formatSubscriptionExpiry(subscriptionExpiry) && <TierExpiry>
                                                         ({formatSubscriptionExpiry(subscriptionExpiry)})
-                                                    </span>}
-                                                </span>
+                                                    </TierExpiry>}
+                                                </TierDetails>
                                                 {!isOwnProfile && profileAddress && hasValidAccount && (
                                                     <HideOnMobile>
                                                         <GiftMirageBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
                                                             <HiGift aria-hidden="true" />{' '}
-                                                            {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                                            {subFeePending ? (subFeeStatus || 'Gifting…') : 'Gift Subscription'}
                                                         </GiftMirageBtn>
                                                     </HideOnMobile>
                                                 )}
@@ -1916,7 +1918,7 @@ function ProfileViewAuthenticated({
                                                 {!isOwnProfile && profileAddress && hasValidAccount && (
                                                     <GiftMirageBtn type="button" onClick={handleDonate} disabled={donatePending} title="Gift Mirage">
                                                         <HiGift aria-hidden="true" />{' '}
-                                                        {donatePending ? (donateStatus || 'Sending...') : (<>
+                                                        {donatePending ? (donateStatus || 'Sending…') : (<>
                                                             <GiftBtnLabelFull>Gift Mirage</GiftBtnLabelFull>
                                                             <GiftBtnLabelShort>Gift</GiftBtnLabelShort>
                                                         </>)}
@@ -1949,27 +1951,27 @@ function ProfileViewAuthenticated({
                                         </ProfileFieldRow>}
                                         <ProfileFieldRow>
                                             <Label>Registered:</Label>
-                                            <ProfileFieldValuePlain>
+                                            <ProfileFieldValue>
                                                 <Mono title={registeredDisplay}>{profileRegisteredAt ? formatAccountAgeLong(profileRegisteredAt) : registeredDisplay}</Mono>
-                                            </ProfileFieldValuePlain>
+                                            </ProfileFieldValue>
                                         </ProfileFieldRow>
                                         <ProfileFieldRow>
                                             <HoverableLabel tabIndex={0} data-tooltip={`How many users this account follows.`}>
                                                 Following:
                                             </HoverableLabel>
-                                            <ProfileFieldValuePlain>
+                                            <ProfileFieldValue>
                                                 <Mono>{followingCount == null ? '—' : followingCount}</Mono>
-                                            </ProfileFieldValuePlain>
+                                            </ProfileFieldValue>
                                         </ProfileFieldRow>
                                         <ProfileFieldRow>
                                             <HoverableLabel tabIndex={0} data-tooltip={`How many users follow this account.`}>
                                                 Followers:
                                             </HoverableLabel>
-                                            <ProfileFieldValuePlain>
+                                            <ProfileFieldValue>
                                                 <Mono>{followerCount == null ? '—' : followerCount}</Mono>
-                                            </ProfileFieldValuePlain>
+                                            </ProfileFieldValue>
                                         </ProfileFieldRow>
-                                        <ProfileFieldRow>
+                                        <ProfileFieldRow $top>
                                             <Label>Biography:</Label>
                                             <ProfileFieldValuePlain style={{
                                                 width: '100%'
@@ -1979,7 +1981,7 @@ function ProfileViewAuthenticated({
                                                     flexDirection: 'column',
                                                     gap: '0.5rem'
                                                 }}>
-                                                    <BioTextarea value={bioDraft} onChange={e => setBioDraft(e.target.value)} maxLength={BIO_MAX} rows={4} disabled={bioSaving} placeholder="Write a short biography..." autoFocus />
+                                                    <BioTextarea value={bioDraft} onChange={e => setBioDraft(e.target.value)} maxLength={BIO_MAX} rows={4} disabled={bioSaving} placeholder="Write a short biography…" autoFocus />
                                                     <div style={{
                                                         display: 'flex',
                                                         justifyContent: 'space-between',
@@ -2006,7 +2008,7 @@ function ProfileViewAuthenticated({
                                                                 Cancel
                                                             </BioPillButton>
                                                             <BioPillButton type="button" disabled={bioSaving || bioDraft.length > BIO_MAX} onClick={handleBioSave}>
-                                                                {bioSaving ? (bioButtonStatus || 'Saving...') : (bioButtonStatus || 'Save')}
+                                                                {bioSaving ? (bioButtonStatus || 'Saving…') : (bioButtonStatus || 'Save')}
                                                             </BioPillButton>
                                                         </div>
                                                     </div>
@@ -2280,6 +2282,7 @@ function ProfileViewAuthenticated({
                                                 type="button"
                                                 onClick={handleProfileShare}
                                                 title={profileShareCopied ? 'Link copied!' : 'Copy profile link'}
+                                                aria-label={profileShareCopied ? 'Link copied' : 'Copy profile link'}
                                                 aria-live="polite"
                                                 $success={profileShareCopied}
                                             >
@@ -2290,7 +2293,7 @@ function ProfileViewAuthenticated({
                                                 <MobileOnly>
                                                     <AsideShareBtn type="button" onClick={handleGiftSub} disabled={subFeePending} title="Gift Subscription">
                                                         <HiGift aria-hidden="true" />
-                                                        {subFeePending ? (subFeeStatus || 'Gifting...') : 'Gift Sub'}
+                                                        {subFeePending ? (subFeeStatus || 'Gifting…') : 'Gift Subscription'}
                                                     </AsideShareBtn>
                                                 </MobileOnly>
                                             )}
@@ -2317,7 +2320,6 @@ function ProfileViewAuthenticated({
                                                         size="sm"
                                                         minWidth="5.5rem"
                                                         disabled={isUnblockPending}
-                                                        loading={isUnblockPending}
                                                         onClick={handleUnblockProfile}
                                                         style={{ height: '32px', borderRadius: '9999px', paddingTop: 0, paddingBottom: 0 }}
                                                     >

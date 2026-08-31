@@ -17,6 +17,7 @@ import CardView from "../components/CardView.js";
 import { FeedCardSkeletonList, PageHeaderSkeleton } from "../components/Skeleton.js";
 import ShowMoreButton from "../components/ShowMoreButton.js";
 import Button from "../components/Button.js";
+import CommunityMembershipButton from "../components/CommunityMembershipButton.js";
 import {
     ContentGrid,
     ModernPostFeed,
@@ -539,16 +540,6 @@ function FollowingLabel({ status }) {
         <>
             <span data-follow-label="default">Following</span>
             <span data-follow-label="hover">Unfollow</span>
-        </>
-    );
-}
-
-function JoinedLabel({ status }) {
-    if (status) return status;
-    return (
-        <>
-            <span data-follow-label="default">Joined</span>
-            <span data-follow-label="hover">Leave</span>
         </>
     );
 }
@@ -1182,33 +1173,12 @@ export default function SearchResultsView({ state }) {
                                         e.stopPropagation();
                                     }}
                                 >
-                                    {followed ? (
-                                        <FollowingButton
-                                            variant="subtle"
-                                            size="sm"
-                                            minWidth="5.5rem"
-                                            disabled={pending}
-                                            loading={pending}
-                                            onClick={(e) =>
-                                                handleTopicFollowToggle(e, topicName)
-                                            }
-                                        >
-                                            <JoinedLabel status={status} />
-                                        </FollowingButton>
-                                    ) : (
-                                        <Button
-                                            variant="primary"
-                                            size="sm"
-                                            minWidth="5.5rem"
-                                            disabled={pending}
-                                            loading={pending}
-                                            onClick={(e) =>
-                                                handleTopicFollowToggle(e, topicName)
-                                            }
-                                        >
-                                            {status || "Join"}
-                                        </Button>
-                                    )}
+                                    <CommunityMembershipButton
+                                        joined={followed}
+                                        pending={pending}
+                                        statusLabel={status}
+                                        onToggle={() => handleTopicFollowToggle(null, topicName)}
+                                    />
                                 </RowActions>
                             )}
                         </RowItem>
@@ -1284,7 +1254,6 @@ export default function SearchResultsView({ state }) {
                                             size="sm"
                                             minWidth="5.5rem"
                                             disabled={pending}
-                                            loading={pending}
                                             onClick={(e) =>
                                                 handleUserFollowToggle(e, userAddr)
                                             }
@@ -1297,7 +1266,6 @@ export default function SearchResultsView({ state }) {
                                             size="sm"
                                             minWidth="5.5rem"
                                             disabled={pending}
-                                            loading={pending}
                                             onClick={(e) =>
                                                 handleUserFollowToggle(e, userAddr)
                                             }

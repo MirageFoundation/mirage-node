@@ -57,7 +57,7 @@ export function usePendingBlocks() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'unblock' ? 'Unblocking...' : 'Blocking...';
+        return info.action === 'unblock' ? 'Unblocking…' : 'Blocking…';
     }, [getInfo, formatStatusForPosition]);
 
     const formatTopicStatus = useCallback((topic) => formatStatus('topic', topic), [formatStatus]);

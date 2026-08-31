@@ -11,7 +11,6 @@ from tests.common import (
     _rand_str,
 )
 from tests.blockchain_helpers import (
-    DEFAULT_GAS_LIMIT,
     FILL_GAS_LIMIT,
     _build_msg_accept_curator_invite,
     _build_msg_create_curation_team,
@@ -23,6 +22,7 @@ from tests.blockchain_helpers import (
     _build_msg_set_curation_post_tag,
     _build_msg_set_curation_preference,
     _build_msg_set_curation_subscriber_only,
+    _build_msg_set_curation_team_profile,
     _build_msg_set_curation_thread_locked,
     _build_msg_transfer_curation_team,
     _check_deliver_accept,
@@ -36,7 +36,7 @@ import tests.blockchain_helpers as _bh
 
 
 def test_curation_chain(backend: str) -> None:
-    """Paid+joined create, free/unjoined reject, description limit, no policy field."""
+    """Create gates plus team-profile validation at exact and invalid boundaries."""
     fee_payer = _bh._VALIDATOR_ADDR or ""
     free = WALLETS["free"]
     free_addr = str(free.address())
@@ -110,60 +110,80 @@ def test_curation_chain(backend: str) -> None:
     )
     _check_deliver_accept("curation.paid_joined_create_accepted", ccode, dcode, dlog)
 
-    # Description over max_curation_team_description_length is rejected.
+    # Both profile fields are governed rune limits, and policy is retired.
     params = _get_chain_params()
+    max_name = int(params.get("max_curation_team_name_length") or 0)
     max_desc = int(params.get("max_curation_team_description_length") or 0)
-    if max_desc <= 0:
-        _fail("curation.description_limit_param", f"max_desc={max_desc}")
+    if max_name <= 0 or max_desc <= 0:
+        _fail("curation.profile_limit_params", f"max_name={max_name} max_desc={max_desc}")
+        return
+    _pass("curation.profile_limit_params", max_name=max_name, max_desc=max_desc)
+    if "max_curation_team_policy_length" in params:
+        _fail("curation.policy_param_retired", "max_curation_team_policy_length still present")
     else:
-        _pass("curation.description_limit_param", max_desc=max_desc)
-        if "max_curation_team_policy_length" in params:
-            _fail(
-                "curation.policy_param_retired",
-                "max_curation_team_policy_length still present",
-            )
-        else:
-            _pass("curation.policy_param_retired")
+        _pass("curation.policy_param_retired")
 
-        over = "x" * (max_desc + 1)
-        over_slug = f"c{_rand_str(8)}"
-        lb, _, _, _ = _get_pow_params(backend, sub_addr)
-        ts = _now_ms()
-        msg = _build_msg_join_community(sub, lb, 0, ts, over_slug, pow_val=0, nonce=_gen_nonce())
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgJoinCommunity")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            sub_pub,
-            wait_deliver=True,
+    invalid_profiles = (
+        ("blank_name", "   ", ""),
+        ("oversize_name", "n" * (max_name + 1), ""),
+        ("invalid_name_characters", "Bad!", ""),
+        ("blank_description", "BlankDescription", "   "),
+        ("oversize_description", "LongDescription", "x" * (max_desc + 1)),
+    )
+    for label, invalid_name, invalid_description in invalid_profiles:
+        ccode, dcode, dlog = _submit_curation(
+            backend,
+            sub,
+            _build_msg_create_curation_team,
+            "/mirage.core.v1.MsgCreateCurationTeam",
+            f"c{_rand_str(8)}",
+            invalid_name,
+            invalid_description,
         )
-        if ccode != 0 or dcode != 0:
-            # already a curator elsewhere in this slug path; use a fresh subscriber wallet path
-            _debug(f"curation.oversize join unexpected reject: {dlog}")
-        # Second create on a new community by same user after join
-        lb, _, _, _ = _get_pow_params(backend, sub_addr)
-        ts = _now_ms()
-        # leave previous community not required — one team per community only
-        # join new slug if not already (deliver may have failed if already joined)
-        msg = _build_msg_join_community(sub, lb, 0, ts, over_slug, pow_val=0, nonce=_gen_nonce())
-        _submit_tx(
-            [(msg, "/mirage.core.v1.MsgJoinCommunity")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            sub_pub,
-            wait_deliver=True,
+        _check_deliver_reject(f"curation.{label}_rejected", ccode, dcode, dlog)
+
+    boundary_slug = f"c{_rand_str(8)}"
+    exact_name = "N" * max_name
+    exact_description = "🙂" * max_desc
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        sub,
+        _build_msg_create_curation_team,
+        "/mirage.core.v1.MsgCreateCurationTeam",
+        boundary_slug,
+        exact_name,
+        exact_description,
+    )
+    _check_deliver_accept("curation.exact_profile_limits_accepted", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        sub,
+        _build_msg_set_curation_team_profile,
+        "/mirage.core.v1.MsgSetCurationTeamProfile",
+        boundary_slug,
+        1,
+        exact_name,
+        "x" * max_desc,
+    )
+    _check_deliver_accept("curation.exact_update_limits_accepted", ccode, dcode, dlog)
+
+    for label, invalid_name, invalid_description in (
+        ("update_invalid_name", "Bad!", ""),
+        ("update_blank_description", exact_name, "   "),
+        ("update_oversize_description", exact_name, "x" * (max_desc + 1)),
+    ):
+        ccode, dcode, dlog = _submit_curation(
+            backend,
+            sub,
+            _build_msg_set_curation_team_profile,
+            "/mirage.core.v1.MsgSetCurationTeamProfile",
+            boundary_slug,
+            1,
+            invalid_name,
+            invalid_description,
         )
-        lb, _, _, _ = _get_pow_params(backend, sub_addr)
-        ts = _now_ms()
-        msg = _build_msg_create_curation_team(sub, lb, 0, ts, over_slug, "TooLong", over, pow_val=0, nonce=_gen_nonce())
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgCreateCurationTeam")],
-            max(FILL_GAS_LIMIT, DEFAULT_GAS_LIMIT * 2),
-            fee_payer,
-            sub_pub,
-            wait_deliver=True,
-        )
-        _check_deliver_reject("curation.oversize_description_rejected", ccode, dcode, dlog)
+        _check_deliver_reject(f"curation.{label}_rejected", ccode, dcode, dlog)
 
     # Preference pin still works as an explicit on-chain write (UI viewing is local).
     lb, _, _, _ = _get_pow_params(backend, sub_addr)

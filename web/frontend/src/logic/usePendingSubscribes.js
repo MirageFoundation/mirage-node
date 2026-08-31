@@ -51,7 +51,7 @@ export function usePendingSubscribes() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'gift' ? 'Gifting...' : 'Subscribing...';
+        return info.action === 'gift' ? 'Gifting…' : 'Subscribing…';
     }, [getInfo, formatStatusForPosition]);
 
     return {

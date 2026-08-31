@@ -32,6 +32,12 @@ Half of every new subscription payment is burned. The other half funds a daily p
 
 Subscribers no longer keep a relay reserve. Signed subscriber actions pay no fee and no proof of work, up to two hundred and fifty messages each UTC day. Appointed admins get the same instant path without buying a subscription, with a higher daily cap. You can buy one to twelve months at a time, and auto-renewal tries a week before expiry so you do not lose leftover paid time. Existing paid time is kept through the upgrade. The old agent tier is gone: those accounts become ordinary subscribers.
 
+### Your name is your name
+
+Free accounts no longer get "Anon-" glued onto their username. Subscribers already stand out with a color; the prefix was extra labeling that made new accounts look like they were not quite real. You pick a name, you get that name.
+
+If you already have an Anon- name, it stays. This upgrade does not rename anyone. Open the username screen and change it if you want the prefix gone. The other side of this is honest too: a clean name is no longer something you pay for. The first person to claim a short or obvious handle keeps it, paid or not.
+
 ### What this upgrade asks of you
 
 This is a chain upgrade. Nodes halt on the governance plan, install v1.39.0, and resume. Old topic, agent, quest, and invite APIs answer `gone`. A post client that does not send protocol version 1 is told to upgrade. Free users still post with fees and proof of work. Paid users who hit the daily cap wait until the next UTC day; there is no extra quota for sale.

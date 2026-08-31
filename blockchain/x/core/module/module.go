@@ -2011,20 +2011,17 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) (*types.MsgSetUsernameResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	gasStart := sdkCtx.GasMeter().GasConsumed()
-	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
 
 	var owner string
-	var isGov bool
 	if authority == govAuthority {
 		// GOVERNANCE PATH: can set username for any target
 		if err := validateAddress(target); err != nil {
 			return nil, fmt.Errorf("invalid target address: %w", err)
 		}
 		owner = target
-		isGov = true
 	} else {
 		// NODE PATH: envelope_pubkey must derive to TARGET (the user being updated)
 		if len(req.GetEnvelopePubkey()) != 33 {
@@ -2042,20 +2039,16 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 			return nil, fmt.Errorf("envelope_pubkey must derive to target")
 		}
 		owner = target
-		isGov = false
 	}
 
 	username := req.GetUsername()
 	if err := validateSafeText("username", username); err != nil {
 		return nil, err
 	}
-	// Checked on the requested value, before the "Anon-" prefix is applied, so a
-	// free-tier request for "-name" is rejected rather than stored as "Anon--name".
 	if err := types.ValidateUsernameFormat(username); err != nil {
 		return nil, err
 	}
 
-	// Get user's tier to check if they can change name (only need Level and Username)
 	var userLevel int
 	var prevUsername string
 	old, found, err := am.k.GetProfileCore(sdkCtx, owner)
@@ -2069,22 +2062,6 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 		}
 		userLevel = int(prev.Level)
 		prevUsername = prev.Username
-	}
-
-	tierConfig := params.GetTierConfig(userLevel)
-	canRemoveAnon := isGov || (tierConfig != nil && tierConfig.CanRemoveAnon)
-
-	// Username normalization: if user can't remove anon (free tier), force "Anon-" prefix
-	if !canRemoveAnon {
-		for strings.HasPrefix(strings.ToLower(username), "anon-") {
-			username = username[len("anon-"):]
-		}
-		// Re-checked after stripping so "Anon--name" cannot smuggle a leading
-		// hyphen past the check above.
-		if err := types.ValidateUsernameFormat(username); err != nil {
-			return nil, err
-		}
-		username = "Anon-" + username
 	}
 
 	// Release previous username if changing. Discarding this left the old
@@ -2120,9 +2097,9 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	// Log successful username change
 	sdkCtx.Logger().Info(logDelimiter)
 	if prevUsername != "" && prevUsername != username {
-		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username, "can_remove_anon", canRemoveAnon)
+		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username)
 	} else {
-		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username, "can_remove_anon", canRemoveAnon)
+		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username)
 	}
 	sdkCtx.Logger().Info(logDelimiter)
 

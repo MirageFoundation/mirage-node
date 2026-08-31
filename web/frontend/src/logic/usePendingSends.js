@@ -51,7 +51,7 @@ export function usePendingSends() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return 'Sending...';
+        return 'Sending…';
     }, [getInfo, formatStatusForPosition]);
 
     return {

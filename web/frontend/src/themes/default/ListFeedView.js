@@ -1033,7 +1033,7 @@ function CompactThumb({ thumb, to, label, onClick, address, username }) {
     );
 }
 
-function CompactRow({ post, state, updatePost }) {
+function CompactRow({ post, state, updatePost, showPostLens }) {
     const theme = useTheme();
     const navigate = useNavigate();
     const VoteSection = useMemo(
@@ -1157,12 +1157,12 @@ function CompactRow({ post, state, updatePost }) {
                     <CompactTopicLink to={communityPath(topic)} onClick={stop}>
                         {communityLabel(topic)}
                     </CompactTopicLink>
-                    <PostLensPicker
+                    {showPostLens && <PostLensPicker
                         community={topic}
                         viewer={state?.publicKey}
                         hintLens={post.lens}
                         onOpenChange={setLensOpen}
-                    />
+                    />}
                     <CompactHeaderDot>·</CompactHeaderDot>
                     <CompactUserLink
                         to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
@@ -1351,7 +1351,7 @@ function CompactRow({ post, state, updatePost }) {
                 <CompactTextAction type="button" onClick={handleShare}>
                     Share
                 </CompactTextAction>
-                {shareCopied && <CompactShareNote>link copied</CompactShareNote>}
+                {shareCopied && <CompactShareNote>Link copied</CompactShareNote>}
                 {/* Mobile (bottom nav visible) — icon-based comment pill
                  * that mirrors CardView's ActionPill. Share is intentionally
                  * omitted on mobile to keep the compact footer uncluttered. */}
@@ -1401,9 +1401,10 @@ function CompactRow({ post, state, updatePost }) {
 export const MemoCompactRow = memo(CompactRow, (prev, next) => {
     const p = prev.post;
     const n = next.post;
-    if (p === n) return prev.state === next.state;
+    if (p === n) return prev.state === next.state && prev.showPostLens === next.showPostLens;
     return (
         prev.state === next.state &&
+        prev.showPostLens === next.showPostLens &&
         p?.post_id === n?.post_id &&
         p?.title === n?.title &&
         p?.thumbnail === n?.thumbnail &&
@@ -1422,7 +1423,7 @@ export const MemoCompactRow = memo(CompactRow, (prev, next) => {
 
 // ─── Row wrapper (picks card/compact) ──────────────────────────────────────
 
-function FeedRow({ post, state, updatePost, hiding, flashing, viewMode }) {
+function FeedRow({ post, state, updatePost, hiding, flashing, viewMode, showPostLens }) {
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
     if (typeof post.topic !== 'string' || post.topic.trim() === '') return null;
@@ -1431,9 +1432,9 @@ function FeedRow({ post, state, updatePost, hiding, flashing, viewMode }) {
     return (
         <RowSlot $hiding={hiding} $flash={flashing}>
             {viewMode === 'compact' ? (
-                <MemoCompactRow post={post} state={state} updatePost={updatePost} />
+                <MemoCompactRow post={post} state={state} updatePost={updatePost} showPostLens={showPostLens} />
             ) : (
-                <CardView state={state} post={post} updatePost={updatePost} />
+                <CardView state={state} post={post} updatePost={updatePost} showPostLens={showPostLens} />
             )}
         </RowSlot>
     );
@@ -1445,6 +1446,7 @@ const MemoRow = memo(FeedRow, (prev, next) => {
     if (prev.hiding !== next.hiding) return false;
     if (prev.flashing !== next.flashing) return false;
     if (prev.viewMode !== next.viewMode) return false;
+    if (prev.showPostLens !== next.showPostLens) return false;
     if (p === n) return prev.state === next.state;
     return (
         prev.state === next.state &&
@@ -1563,8 +1565,9 @@ export default function ListFeedView({
     onSortChange,
     showSortTabs = false,
     feedTitle = null,
-    // feedNavTopic and sidebar props are intentionally ignored — the new
-    // header no longer renders nav tabs or a sidebar action column.
+    showPostLens = false,
+    // feedNavTopic and sidebar props are intentionally ignored — the header
+    // no longer renders nav tabs or a sidebar action column.
 }) {
     const hidingSet = hidingPostsSet instanceof Set ? hidingPostsSet : new Set();
     const flashingSet = flashingPostsSet instanceof Set ? flashingPostsSet : new Set();
@@ -1720,6 +1723,7 @@ export default function ListFeedView({
                         hiding={hiding}
                         flashing={flashing}
                         viewMode={viewMode}
+                        showPostLens={showPostLens}
                     />
                 );
             })}

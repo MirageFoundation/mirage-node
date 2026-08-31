@@ -468,32 +468,84 @@ func TestAdminCanCreateCurationTeamWithoutEffectivePaid(t *testing.T) {
 	t.Logf("[debug] admin curated team_id=%d without effective_paid subs=%d", teamID, team.SubscriberCount)
 }
 
-func TestCurationTeamDescriptionLimitAndNoPolicy(t *testing.T) {
+func TestCurationTeamProfileValidationAndNoPolicy(t *testing.T) {
 	mk, ctx, _ := setupModule(t)
 	leader := genAddr(41)
+	otherLeader := genAddr(43)
 	slug := "desc-limit"
 	setPaidProfile(t, mk, ctx, leader)
+	setPaidProfile(t, mk, ctx, otherLeader)
 	joinOpenCommunity(t, mk, ctx, leader, slug)
 
 	params := mk.GetParams(ctx)
+	require.Equal(t, uint64(30), params.MaxCurationTeamNameLength)
 	require.Equal(t, uint64(800), params.MaxCurationTeamDescriptionLength)
 	require.NotContains(t, params.String(), "max_curation_team_policy_length")
 
-	over := strings.Repeat("x", int(params.MaxCurationTeamDescriptionLength)+1)
-	_, err := mk.CreateCurationTeam(ctx, leader, slug, "Long", over)
+	invalidNames := []string{
+		"",
+		"   ",
+		" leading",
+		"trailing ",
+		strings.Repeat("n", int(params.MaxCurationTeamNameLength)+1),
+		"bad!",
+		"tëam",
+	}
+	for _, name := range invalidNames {
+		_, err := mk.CreateCurationTeam(ctx, leader, slug, name, "")
+		require.Error(t, err, "name %q must be rejected", name)
+	}
+
+	_, err := mk.CreateCurationTeam(ctx, leader, slug, "Whitespace", "   ")
+	require.ErrorContains(t, err, "surrounding whitespace")
+	_, err = mk.CreateCurationTeam(ctx, leader, slug, "Trailing", "guidance ")
+	require.ErrorContains(t, err, "surrounding whitespace")
+
+	over := strings.Repeat("🙂", int(params.MaxCurationTeamDescriptionLength)+1)
+	_, err = mk.CreateCurationTeam(ctx, leader, slug, "Long", over)
 	require.ErrorContains(t, err, "description exceeds")
 
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Ok", "guidance in description")
+	exactName := strings.Repeat("N", int(params.MaxCurationTeamNameLength))
+	exactDescription := strings.Repeat("🙂", int(params.MaxCurationTeamDescriptionLength))
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, exactName, exactDescription)
 	require.NoError(t, err)
 	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "guidance in description", team.Description)
-	require.NoError(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, "Ok", "updated guidance"))
+	require.Equal(t, exactName, team.Name)
+	require.Equal(t, exactDescription, team.Description)
+
+	_, err = mk.CreateCurationTeam(ctx, otherLeader, slug, strings.ToLower(exactName), "")
+	require.ErrorContains(t, err, "team name already used")
+	otherTeamID, err := mk.CreateCurationTeam(ctx, otherLeader, slug, "Other", "")
+	require.NoError(t, err)
+	require.ErrorContains(
+		t,
+		mk.UpdateCurationTeamProfile(ctx, otherLeader, slug, otherTeamID, strings.ToLower(exactName), ""),
+		"team name already used",
+	)
+
+	require.Error(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, "bad!", "updated guidance"))
+	require.ErrorContains(
+		t,
+		mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, strings.Repeat("x", 801)),
+		"description exceeds",
+	)
+	require.ErrorContains(
+		t,
+		mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, "updated guidance "),
+		"surrounding whitespace",
+	)
 	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Equal(t, "updated guidance", team.Description)
+	require.Equal(t, exactDescription, team.Description, "rejected updates must not mutate the profile")
+
+	require.NoError(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, ""))
+	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Empty(t, team.Description, "description remains optional")
 }
 
 func TestRetiredCommunityOwnershipHandlersReject(t *testing.T) {

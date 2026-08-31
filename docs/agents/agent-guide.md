@@ -1065,7 +1065,6 @@ The backend derives `target` from your pubkey; you cannot set a username for ano
 
 **Notes:**
 
-- If your tier disallows name changes, the chain forces an `Anon-` prefix.
 - Usernames are case-insensitive; uniqueness is enforced on lowercase.
 - `invite_code` and `referrer` are NOT part of canonical bytes (do not include them in the signature).
 
@@ -1298,8 +1297,6 @@ Returns governance parameters including tier limits:
       "max_content_length": 5000,
       "editing_time_mins": 30,
       "vote_weight": 1.0,
-      "can_be_agent": false,
-      "can_remove_anon": false,
       "can_have_biography": false,
       "can_have_avatar": false,
       "can_have_banner": false,

@@ -54,23 +54,13 @@ const HandleField = styled.div`
   }
 `;
 
-const HandlePrefix = styled.span`
-  display: inline-flex;
-  align-items: center;
-  padding: 0 0 0 0.7rem;
-  color: ${({ theme, $active }) => ($active ? theme.colors.text : theme.colors.subtleText)};
-  font-size: 0.75rem;
-  font-weight: 500;
-  user-select: none;
-`;
-
 const HandleInput = styled.input`
   flex: 1;
   min-width: 0;
   border: 0;
   background: transparent;
   color: ${({ theme }) => theme.colors.text};
-  padding: 0.55rem 0.7rem 0.55rem 0;
+  padding: 0.55rem 0.7rem;
   font: inherit;
   font-size: 0.75rem;
   font-weight: 500;
@@ -123,7 +113,7 @@ function CreateAccountView({ state, setCredentials }) {
   const pageTitle = fromRecovery ? "Finish your account" : "Create your account";
   const pageDescription = fromRecovery
     ? "No account exists for that recovery phrase yet. Pick a username to claim it."
-    : "Free accounts are prefixed with Anon- to prevent spam. You can upgrade with MIRAGE later to drop the prefix and unlock premium features.";
+    : "Pick a username to claim it. You can upgrade with MIRAGE later to unlock premium features.";
 
   const continueDisabled =
     submitting
@@ -194,7 +184,6 @@ function CreateAccountView({ state, setCredentials }) {
               <AuthFieldRow>
                 <AuthLabel htmlFor="display-name-entry">Username</AuthLabel>
                 <HandleField>
-                  <HandlePrefix aria-hidden="true" $active={usernameInput.length > 0}>Anon-</HandlePrefix>
                   <HandleInput
                     id="display-name-entry"
                     placeholder="name"
@@ -202,12 +191,12 @@ function CreateAccountView({ state, setCredentials }) {
                     onChange={(event) => {
                       const raw = event.target.value;
                       const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "").replace(/^-+/, "");
-                      const maxLen = getMaxInputLength(true);
+                      const maxLen = getMaxInputLength();
                       setUsernameInput(cleaned.slice(0, maxLen ?? 100));
                       setSubmitError("");
                     }}
                     onPaste={(event) => event.preventDefault()}
-                    maxLength={getMaxInputLength(true) || 100}
+                    maxLength={getMaxInputLength() || 100}
                     name="display-name-entry"
                     autoComplete="off"
                     autoCorrect="off"

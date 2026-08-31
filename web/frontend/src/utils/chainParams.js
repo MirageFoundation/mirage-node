@@ -8,9 +8,6 @@
  * If values aren't cached yet, functions return null and UI should handle accordingly.
  */
 
-export const ANON_PREFIX = 'Anon-';
-export const ANON_PREFIX_LENGTH = ANON_PREFIX.length; // 5
-
 /**
  * Read a numeric field from the chainConfig localStorage blob.
  * Returns null if not cached or not a valid positive integer.
@@ -39,13 +36,7 @@ export const getMaxUsernameSize = () => _readChainParam('max_username_size');
 export const getMinUsernameSize = () => _readChainParam('min_username_size');
 
 /**
- * Get the maximum length for the input field, accounting for the Anon- prefix if needed.
- * @param {boolean} isFreeUser - Whether the user is on free tier (will have Anon- prefix)
+ * Get the maximum length for the username input field.
  * Returns null if chain params not yet cached.
  */
-export const getMaxInputLength = (isFreeUser) => {
-    const maxSize = getMaxUsernameSize();
-    if (maxSize === null) return null;
-    const result = isFreeUser ? maxSize - ANON_PREFIX_LENGTH : maxSize;
-    return Math.max(1, result);
-};
+export const getMaxInputLength = () => getMaxUsernameSize();

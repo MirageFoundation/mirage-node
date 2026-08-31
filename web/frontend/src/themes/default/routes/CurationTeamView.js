@@ -12,6 +12,8 @@ import {
     MAX_CURATION_TEAM_NAME_LENGTH,
     formatSubscriberCount,
     invalidateCurationReads,
+    requireCurationTeamDescription,
+    requireCurationTeamName,
     runeLength,
     sliceRunes,
     waitForCurationTeamGone,
@@ -280,19 +282,15 @@ export default function CurationTeamView() {
             setError('Team name is required.');
             return undefined;
         }
-        if (runeLength(trimmedName) > maxTeamNameLength) {
-            setError(`Team name too long. Maximum ${maxTeamNameLength} characters.`);
-            console.error('[curation] update team name too long', {
-                length: runeLength(trimmedName),
-                max: maxTeamNameLength,
-            });
-            return undefined;
-        }
-        if (runeLength(description) > maxTeamDescriptionLength) {
-            setError(`Description too long. Maximum ${maxTeamDescriptionLength} characters.`);
-            console.error('[curation] update team description too long', {
-                length: runeLength(description),
-                max: maxTeamDescriptionLength,
+        try {
+            requireCurationTeamName(trimmedName, maxTeamNameLength);
+            requireCurationTeamDescription(description, maxTeamDescriptionLength);
+        } catch (validationError) {
+            setError(validationError.message);
+            console.error('[curation] update team profile validation failed', {
+                error: validationError.message,
+                nameLength: runeLength(trimmedName),
+                descriptionLength: runeLength(description),
             });
             return undefined;
         }
@@ -459,7 +457,7 @@ export default function CurationTeamView() {
                                 value={description}
                                 onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
                                 placeholder={CURATION_TEAM_DESCRIPTION_EXAMPLE}
-                                maxLength={maxTeamDescriptionLength}
+                                maxLength={maxTeamDescriptionLength * 2}
                             />
                         </Field>
                         <FormActions>
@@ -586,14 +584,17 @@ export default function CurationTeamView() {
                 </Actions>}
             </Row>)}
             {isLeader && <Form onSubmit={submitInvite}>
-                <Input
-                    aria-label="Username or address to invite"
-                    value={invitee}
-                    onChange={(event) => setInvitee(event.target.value)}
-                    placeholder="Username or mirage1…"
-                    required
-                    disabled={inviteBusy}
-                />
+                <Field>
+                    <FieldLabel>Invite curator</FieldLabel>
+                    <Input
+                        aria-label="Username or address to invite"
+                        value={invitee}
+                        onChange={(event) => setInvitee(event.target.value)}
+                        placeholder="Username or mirage1…"
+                        required
+                        disabled={inviteBusy}
+                    />
+                </Field>
                 <FormActions>
                     <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
                         {inviteBusy ? 'Inviting…' : 'Invite curator'}
@@ -622,12 +623,12 @@ export default function CurationTeamView() {
 
         {isCurator && (
             <Card id="hidden-users">
-                <CardTitle>Hidden users</CardTitle>
-                <Meta>Hidden from this team&apos;s feed. Newest first.</Meta>
-                {hiddenUsers.loading && hiddenUsers.users.length === 0 && <Meta>Loading hidden users…</Meta>}
+                <CardTitle>Banned users</CardTitle>
+                <Meta>Banned from this team&apos;s feed. Newest first.</Meta>
+                {hiddenUsers.loading && hiddenUsers.users.length === 0 && <Meta>Loading banned users…</Meta>}
                 {hiddenUsers.error && <ErrorText>{hiddenUsers.error}</ErrorText>}
                 {!hiddenUsers.loading && !hiddenUsers.error && hiddenUsers.users.length === 0 && (
-                    <Meta>No hidden users.</Meta>
+                    <Meta>No banned users.</Meta>
                 )}
                 {hiddenUsers.users.map((user) => (
                     <Row key={user.address}>
@@ -645,7 +646,7 @@ export default function CurationTeamView() {
                                 false,
                             ))}
                         >
-                            {statusFor('set_curation_user_hidden', user.address, 'Restoring…') || 'Restore'}
+                            {statusFor('set_curation_user_hidden', user.address, 'Unbanning…') || 'Unban'}
                         </Button>
                     </Row>
                 ))}
@@ -673,12 +674,12 @@ export default function CurationTeamView() {
 
         {isCurator && (
             <Card id="hidden-posts">
-                <CardTitle>Hidden posts</CardTitle>
-                <Meta>Hidden from this team&apos;s feed. Newest first.</Meta>
-                {hiddenPosts.loading && hiddenPosts.posts.length === 0 && <Meta>Loading hidden posts…</Meta>}
+                <CardTitle>Banned posts</CardTitle>
+                <Meta>Banned from this team&apos;s feed. Newest first.</Meta>
+                {hiddenPosts.loading && hiddenPosts.posts.length === 0 && <Meta>Loading banned posts…</Meta>}
                 {hiddenPosts.error && <ErrorText>{hiddenPosts.error}</ErrorText>}
                 {!hiddenPosts.loading && !hiddenPosts.error && hiddenPosts.posts.length === 0 && (
-                    <Meta>No hidden posts.</Meta>
+                    <Meta>No banned posts.</Meta>
                 )}
                 {hiddenPosts.posts.map((post) => (
                     <Row key={post.postId}>
@@ -699,7 +700,7 @@ export default function CurationTeamView() {
                                 false,
                             ))}
                         >
-                            {statusFor('set_curation_post_hidden', post.postId, 'Restoring…') || 'Restore'}
+                            {statusFor('set_curation_post_hidden', post.postId, 'Unbanning…') || 'Unban'}
                         </Button>
                     </Row>
                 ))}

@@ -69,7 +69,7 @@ export function usePendingFollows() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'unfollow' ? 'Leaving...' : 'Joining...';
+        return info.action === 'unfollow' ? 'Leaving…' : 'Joining…';
     }, [getInfo, formatStatusForPosition]);
 
     const formatUserStatus = useCallback((user) => {
@@ -77,7 +77,7 @@ export function usePendingFollows() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'unfollow' ? 'Unfollowing...' : 'Following...';
+        return info.action === 'unfollow' ? 'Unfollowing…' : 'Following…';
     }, [getInfo, formatStatusForPosition]);
 
     return {

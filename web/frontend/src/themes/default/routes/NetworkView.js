@@ -163,8 +163,8 @@ const SectionBody = styled.div`
 
 const FieldRow = styled.div`
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    gap: 1.5rem;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 1rem;
     align-items: center;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
@@ -181,6 +181,8 @@ const FieldRow = styled.div`
     }
 
     @media (max-width: 600px) {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.2rem;
         padding: 0.5rem 0;
     }
 `;
@@ -378,8 +380,8 @@ const EmptyNote = styled.div`
 
 const ChartRow = styled.div`
     display: grid;
-    grid-template-columns: 160px minmax(0, 1fr);
-    gap: 1.5rem;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 1rem;
     align-items: start;
     padding: 0.55rem 1rem;
     box-sizing: border-box;
@@ -394,12 +396,9 @@ const ChartRow = styled.div`
         padding: 0.5rem 0.85rem;
     }
 
-    @media (max-width: 700px) {
-        grid-template-columns: 1fr;
-        gap: 0.35rem;
-    }
-
     @media (max-width: 600px) {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.2rem;
         padding: 0.5rem 0;
     }
 `;

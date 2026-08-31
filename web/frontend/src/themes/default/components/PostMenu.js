@@ -28,6 +28,7 @@ import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./Gif
 import CurateMenuItems from "./CurateMenuItems";
 import usePostGifts from "../../../logic/usePostGifts";
 import { usePostCurateActions } from "../../../logic/usePostCurateActions";
+import { usePendingFollows } from "../../../logic/useFollowState";
 import { updateNotification } from "../../../utils/notifications";
 
 /**
@@ -304,8 +305,16 @@ export function MoreMenuChip({
     const [deletePending, setDeletePending] = useState(false);
 
     const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
+    const {
+        isTopicPending,
+        isUserPending,
+        formatTopicStatus,
+        formatUserStatus,
+    } = usePendingFollows();
     const isAdminVisible = isNetworkAdmin(isLoggedIn, isOwnPost);
     const linkTarget = postId ? `/p/${postId}` : '#';
+    const topicFollowPending = isTopicPending(topic);
+    const userFollowPending = isUserPending(authorAddress);
 
     const computedFollowingUser = (() => {
         if (!isLoggedIn || !authorAddress) return false;
@@ -521,13 +530,13 @@ export function MoreMenuChip({
                         )}
                         {isLoggedIn && !isOwnPost && (
                             <>
-                                <MenuItemBtn type="button" onClick={handleFollowUser}>
+                                <MenuItemBtn type="button" disabled={userFollowPending} onClick={handleFollowUser}>
                                     {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
-                                    <span>{followingUser ? 'Unfollow user' : 'Follow user'}</span>
+                                    <span>{formatUserStatus(authorAddress) || (followingUser ? 'Unfollow user' : 'Follow user')}</span>
                                 </MenuItemBtn>
-                                <MenuItemBtn type="button" onClick={handleFollowTopic}>
+                                <MenuItemBtn type="button" disabled={topicFollowPending} onClick={handleFollowTopic}>
                                     <HiOutlineHashtag />
-                                    <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
+                                    <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleGiveAward}>
                                     <HiOutlineSparkles />
@@ -733,7 +742,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     if (!post || !postId) return null;
     if (!isLoggedIn) return null;
     // Curators still need this chip on their own posts; everyone else only
-    // sees it on other people's posts (block / report).
+    // sees it on other users' posts (block / report).
     if (isOwnPost && !curateVisible) return null;
 
     const chipLabel = curateVisible ? 'Curation menu' : 'Block or report';

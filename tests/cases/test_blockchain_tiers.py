@@ -13,63 +13,150 @@ from typing import Optional
 import requests
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _docker_exec, _run_miraged, _INSIDE_CONTAINER,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _docker_exec,
+    _run_miraged,
+    _INSIDE_CONTAINER,
     DEFAULT_BACKEND,
-    get_status, sign_canonical, compute_pow, check_pow_target,
+    get_status,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
     canon_signed_with_pow,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_delete_raw, _canon_base_delete_user_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_follow_user_raw, _canon_base_unfollow_user_raw,
-    _canon_base_follow_topic_raw, _canon_base_unfollow_topic_raw,
-    _canon_base_enable_agent_raw, _canon_base_disable_agent_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_delete_raw,
+    _canon_base_delete_user_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_follow_user_raw,
+    _canon_base_unfollow_user_raw,
+    _canon_base_follow_topic_raw,
+    _canon_base_unfollow_topic_raw,
+    _canon_base_enable_agent_raw,
+    _canon_base_disable_agent_raw,
     _canon_base_set_agents_raw,
-    _canon_base_block_post_raw, _canon_base_unblock_post_raw,
-    _canon_base_block_user_raw, _canon_base_unblock_user_raw,
-    _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
-    _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
-    _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
+    _canon_base_block_post_raw,
+    _canon_base_unblock_post_raw,
+    _canon_base_block_user_raw,
+    _canon_base_unblock_user_raw,
+    _canon_base_block_topic_raw,
+    _canon_base_unblock_topic_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_subscribe_raw,
+    _canon_base_set_auto_renewal_raw,
+    _canon_base_award_raw,
     _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
-    _gen_nonce, _compute_pow_quiet, _pow_digest, _rand_hex,
-    _get_pow_params, _get_chain_params, _get_tier_config, _tier_int,
-    _get_chain_profile, _get_profile_full, _assert_capped_deque,
-    _build_tx_bytes, _simulate_tx_gas, _simulate_tx_bytes_gas,
-    _broadcast_tx_sync, _wait_for_tx_result, _submit_tx, _sign_relay,
-    _build_msg_post, _build_msg_vote, _build_msg_set_username,
-    _build_msg_set_biography, _build_msg_send_tokens,
-    _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _gen_nonce,
+    _compute_pow_quiet,
+    _pow_digest,
+    _rand_hex,
+    _get_pow_params,
+    _get_chain_params,
+    _get_tier_config,
+    _tier_int,
+    _get_chain_profile,
+    _get_profile_full,
+    _assert_capped_deque,
+    _build_tx_bytes,
+    _simulate_tx_gas,
+    _simulate_tx_bytes_gas,
+    _broadcast_tx_sync,
+    _wait_for_tx_result,
+    _submit_tx,
+    _sign_relay,
+    _build_msg_post,
+    _build_msg_vote,
+    _build_msg_set_username,
+    _build_msg_set_biography,
+    _build_msg_send_tokens,
+    _build_msg_delete,
+    _build_msg_delete_user,
+    _build_msg_award,
+    _build_msg_edit,
+    _build_msg_annotate,
+    _build_msg_block_post,
+    _build_msg_block_user,
+    _build_msg_block_topic,
     _build_msg_subscribe,
-    _build_msg_follow_user, _build_msg_unfollow_user,
-    _build_msg_follow_topic, _build_msg_unfollow_topic,
-    _build_msg_enable_agent, _build_msg_disable_agent, _build_msg_set_agents,
-    _build_msg_unblock_post, _build_msg_unblock_user, _build_msg_unblock_topic,
+    _build_msg_follow_user,
+    _build_msg_unfollow_user,
+    _build_msg_follow_topic,
+    _build_msg_unfollow_topic,
+    _build_msg_enable_agent,
+    _build_msg_disable_agent,
+    _build_msg_set_agents,
+    _build_msg_unblock_post,
+    _build_msg_unblock_user,
+    _build_msg_unblock_topic,
     _build_msg_set_auto_renewal,
-    _check_reject, _check_accept, _check_deliver_reject, _check_deliver_accept,
-    _min_gas_price_umirage, _get_grpc_target,
-    DEFAULT_GAS_LIMIT, SUBSCRIBE_GAS_LIMIT, FILL_GAS_LIMIT, FILL_GAS_BUFFER,
-    COMET_RPC_URL, ESTIMATED_CHECKTX_TOTAL,
-    _validate_validator_funds, _required_validator_fee_budget_umirage,
+    _check_reject,
+    _check_accept,
+    _check_deliver_reject,
+    _check_deliver_accept,
+    _min_gas_price_umirage,
+    _get_grpc_target,
+    DEFAULT_GAS_LIMIT,
+    SUBSCRIBE_GAS_LIMIT,
+    FILL_GAS_LIMIT,
+    FILL_GAS_BUFFER,
+    COMET_RPC_URL,
+    ESTIMATED_CHECKTX_TOTAL,
+    _validate_validator_funds,
+    _required_validator_fee_budget_umirage,
     _query_spendable_umirage,
 )
 import tests.blockchain_helpers as _bh
 from shared.datatypes import (
-    MsgAward, MsgBlockPost, MsgBlockTopic, MsgBlockUser,
-    MsgBurnTokens, MsgDelete, MsgDeleteUser, MsgEdit,
-    MsgEnableAgent, MsgFollowTopic, MsgFollowUser,
-    MsgMintTokens, MsgPost, MsgSendTokens, MsgSetAutoRenewal,
-    MsgSetLevel, MsgSetUsername, MsgSetBiography,
-    MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
-    MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgSubscribe, MsgVote, MsgAnnotate,
+    MsgAward,
+    MsgBlockPost,
+    MsgBlockTopic,
+    MsgBlockUser,
+    MsgBurnTokens,
+    MsgDelete,
+    MsgDeleteUser,
+    MsgEdit,
+    MsgEnableAgent,
+    MsgFollowTopic,
+    MsgFollowUser,
+    MsgMintTokens,
+    MsgPost,
+    MsgSendTokens,
+    MsgSetAutoRenewal,
+    MsgSetLevel,
+    MsgSetUsername,
+    MsgSetBiography,
+    MsgUnblockPost,
+    MsgUnblockTopic,
+    MsgUnblockUser,
+    MsgDisableAgent,
+    MsgSetAgents,
+    MsgUnfollowTopic,
+    MsgUnfollowUser,
+    MsgSubscribe,
+    MsgVote,
+    MsgAnnotate,
 )
 
 
@@ -136,7 +223,6 @@ def test_tier_enforcement(backend: str) -> None:
         _check_deliver_reject(f"tier.t{level}_title_over_max", ccode, dcode, dlog)
 
 
-
 def test_subscribe_validation(backend: str) -> None:
     """Test that level 1 is the only subscribable level."""
 
@@ -159,7 +245,6 @@ def test_subscribe_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_reject(f"subscribe.invalid_level_{invalid_level}", ccode, dcode, dlog)
-
 
 
 def test_subscribe_gift_extends_expiry(backend: str) -> None:
@@ -267,9 +352,7 @@ def test_subscribe_gift_extends_expiry(backend: str) -> None:
             break
         time.sleep(2)
 
-    _debug(
-        f"subscribe.gift_extends_expiry.after addr={recipient_addr} exp={after_exp} auto={auto_after}"
-    )
+    _debug(f"subscribe.gift_extends_expiry.after addr={recipient_addr} exp={after_exp} auto={auto_after}")
 
     if after_exp <= before_exp:
         _fail("subscribe.gift_extends_expiry", f"before={before_exp} after={after_exp}")
@@ -301,7 +384,7 @@ def test_subscribe_gift_extends_expiry(backend: str) -> None:
 
 
 def test_tier_features(backend: str) -> None:
-    """Test tier-specific features: can_remove_anon, content limits."""
+    """Test tier-specific features: content limits and profile flags."""
 
     fee_payer = _bh._VALIDATOR_ADDR or ""
 
@@ -377,12 +460,12 @@ def test_tier_features(backend: str) -> None:
     else:
         _fail("tierfeature.can_be_agent_removed", f"t0={can_be_agent_0} t1={can_be_agent_1}")
 
-    can_remove_anon_0 = tier0.get("can_remove_anon", False)
-    can_remove_anon_1 = tier1.get("can_remove_anon", False)
-    if not can_remove_anon_0 and can_remove_anon_1:
-        _pass("tierfeature.can_remove_anon")
+    can_remove_anon_0 = bool(tier0.get("can_remove_anon", False))
+    can_remove_anon_1 = bool(tier1.get("can_remove_anon", False))
+    if not can_remove_anon_0 and not can_remove_anon_1:
+        _pass("tierfeature.can_remove_anon_removed")
     else:
-        _fail("tierfeature.can_remove_anon", f"t0={can_remove_anon_0} t1={can_remove_anon_1}")
+        _fail("tierfeature.can_remove_anon_removed", f"t0={can_remove_anon_0} t1={can_remove_anon_1}")
 
     for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         v0 = tier0.get(flag, False)

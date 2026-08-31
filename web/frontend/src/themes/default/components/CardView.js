@@ -36,6 +36,7 @@ import ContentTagBadge, { ThreadLockMark } from "./ContentTagBadge";
 import { BlockChip } from "./PostMenu";
 import { PostLensPicker } from "./CurationLensPicker";
 import usePostGifts from "../../../logic/usePostGifts";
+import { usePendingFollows } from "../../../logic/useFollowState";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
 
@@ -607,13 +608,19 @@ function isInteractiveTarget(target) {
 
 // ─── Component ─────────────────────────────────────────────────────────────
 
-function CardView({ state, post, updatePost, showContent = false, footer = null }) {
+function CardView({ state, post, updatePost, showContent = false, showPostLens = false, footer = null }) {
     const navigate = useNavigate();
     const theme = useTheme();
     const VoteSection = useMemo(
         () => getThemeFamily(theme.themeId).VoteSection,
         [theme.themeId]
     );
+    const {
+        isTopicPending,
+        isUserPending,
+        formatTopicStatus,
+        formatUserStatus,
+    } = usePendingFollows();
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [followOpen, setFollowOpen] = useState(false);
@@ -697,6 +704,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const topic = typeof safePost.topic === 'string' ? safePost.topic : '';
     const linkTarget = postId ? `/p/${postId}` : '#';
     const authorAddress = safePost.user_id || safePost.author || '';
+    const topicFollowPending = isTopicPending(topic);
+    const userFollowPending = isUserPending(authorAddress);
     const authorDisplay = (() => {
         if (typeof safePost.username === 'string' && safePost.username.trim()) return safePost.username.trim();
         if (typeof authorAddress === 'string' && authorAddress.length > 0) {
@@ -1051,12 +1060,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     <TopicLink to={communityPath(topic)} onClick={stop}>
                         {communityLabel(topic)}
                     </TopicLink>
-                    <PostLensPicker
+                    {showPostLens && <PostLensPicker
                         community={topic}
                         viewer={viewerAddress}
                         hintLens={post.lens}
                         onOpenChange={setLensOpen}
-                    />
+                    />}
                     <HeaderDot>·</HeaderDot>
                     <UserLink
                         to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
@@ -1239,7 +1248,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     setFollowOpen((v) => !v);
                                 }}
                             >
-                                {followingUser ? 'Following' : followingTopic ? 'Joined' : 'Follow'}
+                                {formatUserStatus(authorAddress) || formatTopicStatus(topic) || (followingUser ? 'Following' : followingTopic ? 'Joined' : 'Follow')}
                             </FollowButton>
                             {followOpen && (
                                 <Menu role="menu" aria-label="Follow options" $align="right">
@@ -1249,20 +1258,22 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         role="menuitemradio"
                                         aria-checked={followingTopic}
                                         $active={followingTopic}
+                                        disabled={topicFollowPending}
                                         onClick={handleFollowTopic}
                                     >
                                         <HiOutlineHashtag />
-                                        <span>{followingTopic ? `Leave ${communityLabel(topic)}` : `Join ${communityLabel(topic)}`}</span>
+                                        <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
                                     </MenuItemBtn>
                                     <MenuItemBtn
                                         type="button"
                                         role="menuitemradio"
                                         aria-checked={followingUser}
                                         $active={followingUser}
+                                        disabled={userFollowPending}
                                         onClick={handleFollowUser}
                                     >
                                         {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
-                                        <span>{followingUser ? `Unfollow @${authorDisplay}` : `Follow @${authorDisplay}`}</span>
+                                        <span>{formatUserStatus(authorAddress) || (followingUser ? `Unfollow @${authorDisplay}` : `Follow @${authorDisplay}`)}</span>
                                     </MenuItemBtn>
                                 </Menu>
                             )}
@@ -1315,13 +1326,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 )}
                                 {!isOwnPost && isLoggedIn && (
                                     <>
-                                        <MenuItemBtn type="button" onClick={handleFollowUser}>
+                                        <MenuItemBtn type="button" disabled={userFollowPending} onClick={handleFollowUser}>
                                             {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
-                                            <span>{followingUser ? 'Unfollow user' : 'Follow user'}</span>
+                                            <span>{formatUserStatus(authorAddress) || (followingUser ? 'Unfollow user' : 'Follow user')}</span>
                                         </MenuItemBtn>
-                                        <MenuItemBtn type="button" onClick={handleFollowTopic}>
+                                        <MenuItemBtn type="button" disabled={topicFollowPending} onClick={handleFollowTopic}>
                                             <HiOutlineHashtag />
-                                            <span>{followingTopic ? 'Leave community' : 'Join community'}</span>
+                                            <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleGiveAward}>
                                             <HiOutlineSparkles />
@@ -1475,9 +1486,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 export default memo(CardView, (prev, next) => {
     const p = prev.post;
     const n = next.post;
-    if (p === n) return prev.showContent === next.showContent && prev.state === next.state;
+    if (p === n) {
+        return prev.showContent === next.showContent
+            && prev.showPostLens === next.showPostLens
+            && prev.state === next.state;
+    }
     return (
         prev.showContent === next.showContent &&
+        prev.showPostLens === next.showPostLens &&
         prev.state === next.state &&
         p?.post_id === n?.post_id &&
         p?.title === n?.title &&

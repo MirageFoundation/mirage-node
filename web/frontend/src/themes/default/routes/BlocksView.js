@@ -458,7 +458,6 @@ export default function BlocksView({ state }) {
                                         size="sm"
                                         minWidth="5.5rem"
                                         disabled={isPending}
-                                        loading={isPending}
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
@@ -521,7 +520,6 @@ export default function BlocksView({ state }) {
                                         size="sm"
                                         minWidth="5.5rem"
                                         disabled={isPending}
-                                        loading={isPending}
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
@@ -578,7 +576,6 @@ export default function BlocksView({ state }) {
                                         size="sm"
                                         minWidth="5.5rem"
                                         disabled={isPending}
-                                        loading={isPending}
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();

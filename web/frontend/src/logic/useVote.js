@@ -62,7 +62,7 @@ export function usePendingVotes() {
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return 'Voting...';
+        return 'Voting…';
     }, [getInfo, formatStatusForPosition]);
 
     return { pendingVotes, isPending, getDirection, getInfo, formatVoteStatus };
