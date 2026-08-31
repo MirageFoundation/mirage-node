@@ -74,7 +74,7 @@ from tests.cases.test_blockchain_features import (
     test_send_tokens_raw_log_present,
 )
 from tests.cases.test_blockchain_net_tags import test_net_tags_chain
-from tests.cases.test_blockchain_curation import test_curation_chain
+from tests.cases.test_blockchain_curation import test_curation_chain, test_curation_team_chain
 
 ALL_CATEGORIES = {
     "net_tags_chain": test_net_tags_chain,
@@ -104,32 +104,27 @@ ALL_CATEGORIES = {
     "mandatory_nonce": test_mandatory_nonce,
     "envelope_fields": test_envelope_fields,
     "curation": test_curation_chain,
+    "curation_team": test_curation_team_chain,
 }
 
-STATELESS_CATEGORIES = {
-    "authority",
-    "fee",
-    "c1_gas_payer",
-    "staking",
-    "malicious_inputs",
-    "tier_enforcement",
-    "governance",
-    "subscribe_validation",
-    "relay_sig",
-    "pow",
-    "msg_format",
-    "direct_bank",
-    "biography",
-    "annotate_chain",
-    "envelope_fields",
-    "params_schema",
-    "net_tags_chain",
+# Categories that must run alone. Everything else runs concurrently, each
+# wallet-bound one holding its own wallet set, so an entry here has to name a
+# genuinely shared resource that a private wallet set cannot isolate.
+EXCLUSIVE_CATEGORIES = {
+    "mint_split",  # governance proposal mutates params every category reads
+    "tier_features",  # governance proposal mutates the tier table
 }
 
 # Source probes from the validator key; no suite wallets needed.
 WALLETLESS_CATEGORIES = {
     "params_schema",
 }
+
+# Every category is a release gate. A test that may skip without failing the
+# release is a test nobody relies on, and the answer to that is to delete it,
+# not to leave it in the suite reporting green. Skips are still printed with
+# their reason; they just end the run non-zero.
+RELEASE_GATE_CATEGORIES = frozenset(ALL_CATEGORIES)
 
 
 def _pre_run(backend: str) -> int | None:
@@ -154,8 +149,9 @@ def main() -> int:
     return run_suite(
         "Mirage Blockchain Direct-Submit Test Suite",
         ALL_CATEGORIES,
-        STATELESS_CATEGORIES,
+        EXCLUSIVE_CATEGORIES,
         pre_run_hook=_pre_run,
+        no_skip_categories=RELEASE_GATE_CATEGORIES,
         walletless_categories=WALLETLESS_CATEGORIES,
     )
 

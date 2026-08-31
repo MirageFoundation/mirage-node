@@ -9,11 +9,13 @@ import {
     curationPendingKey,
     formatSubscriberCount,
     lensCacheKey,
+    lensHintLabel,
     lensQuery,
     normalizeLens,
     runeLength,
     sliceRunes,
     teamIdWithMostSubscribers,
+    viewingTeamId,
     waitForOwnCurationTeam,
 } from '../../src/utils/curation.js';
 import { currentCreatorEpoch, normalizeClaimEpochs } from '../../src/logic/useCreatorEarnings.js';
@@ -36,6 +38,15 @@ describe('curation lenses', () => {
         expect(() => normalizeLens('team')).toThrow('team_id');
         expect(() => normalizeLens('raw', 3)).toThrow('only valid');
         expect(lensQuery('default')).toEqual({ lens: 'default', scope: 'current' });
+    });
+
+    it('reads the viewing team from a stamped post.lens', () => {
+        expect(viewingTeamId({ lens: { effective_team_id: 7 } })).toBe(7);
+        expect(viewingTeamId({ lens: { effective_mode: 2, effective_team_id: null } })).toBe(null);
+        expect(viewingTeamId({})).toBe(null);
+        expect(lensHintLabel({ effective_mode: 2 })).toBe('Uncensored');
+        expect(lensHintLabel({ effective_mode: 0, effective_team_id: 3 })).toBe('Default');
+        expect(lensHintLabel({ effective_mode: 1, effective_team_id: 3 })).toBe('Curation');
     });
 
     it('uses the global pending tuple contract', () => {
@@ -61,7 +72,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/view selection \(local preview\)/);
         expect(pickerSrc).toMatch(/persist selection/);
         expect(pickerSrc).toMatch(/change\(LENS\.DEFAULT\)/);
-        expect(pickerSrc).toMatch(/if \(selection === LENS\.DEFAULT\) return 'Default Curation Team'/);
+        expect(pickerSrc).toMatch(/return compact \? 'Default' : 'Default Curation Team'/);
         expect(pickerSrc).toMatch(/OptionMeta>Currently \{defaultTeamName\}/);
         // Rapid switches: only roll back the failed pick, never a newer one.
         expect(pickerSrc).toMatch(
@@ -357,7 +368,7 @@ describe('v1.39 curation UI contracts', () => {
 
         // Default stays a fixed label; pinned teams keep their full name.
         expect(picker).not.toMatch(/max-width: 14rem/);
-        expect(picker).toMatch(/return 'Default Curation Team'/);
+        expect(picker).toMatch(/return compact \? 'Default' : 'Default Curation Team'/);
         expect(picker).toMatch(/return team\.name;/);
     });
 
@@ -400,7 +411,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).toMatch(/'Verifying…'/);
     });
 
-    it('puts Curate + admin delete on a separate ModMenuChip shield menu', () => {
+    it('puts admin delete on the ⋯ menu and curator tools on BlockChip', () => {
         const postMenu = readFileSync(
             join(frontendSrc, 'themes/default/components/PostMenu.js'),
             'utf8',
@@ -430,22 +441,52 @@ describe('v1.39 curation UI contracts', () => {
             'utf8',
         );
 
-        expect(postMenu).toMatch(/export function ModMenuChip/);
-        expect(postMenu).toMatch(/Moderation menu/);
+        expect(postMenu).not.toMatch(/export function ModMenuChip/);
+        expect(postMenu).toMatch(/export function MoreMenuChip/);
+        expect(postMenu).toMatch(/export function BlockChip/);
         expect(postMenu).toMatch(/Delete network wide/);
-        expect(postMenu).toMatch(/isAdminVisible && curateVisible && <MenuDivider/);
+        expect(postMenu).toMatch(/isAdminVisible && \(/);
+        expect(postMenu).toMatch(/curateVisible/);
+        expect(postMenu).toMatch(/Report post/);
+        expect(postMenu).toMatch(/HiOutlineShieldExclamation/);
         expect(postMenu).toMatch(/CurateMenuItems/);
         expect(postMenu).not.toMatch(/MenuHeader>Admin</);
         expect(postMenu).not.toMatch(/renderHeader/);
-        // ⋯ menu must not own curate / admin-delete anymore.
-        expect(postMenu).not.toMatch(/isAdminVisible && \(\s*\n\s*<MenuItemBtn[^>]*Delete network wide/s);
         for (const src of [cardView, viewPost, listFeed]) {
-            expect(src).toMatch(/ModMenuChip/);
-            expect(src).not.toMatch(/CurateMenuItems/);
+            expect(src).not.toMatch(/ModMenuChip/);
         }
+        expect(cardView).toMatch(/Delete network wide/);
+        expect(viewPost).toMatch(/Delete network wide/);
+        expect(listFeed).toMatch(/MoreMenuChip/);
+        expect(cardView).toMatch(/BlockChip/);
+        expect(viewPost).toMatch(/BlockChip/);
+        expect(listFeed).toMatch(/BlockChip/);
         expect(curateItems).not.toMatch(/Curate · /);
         expect(curateItems).toMatch(/usePostCurateActions/);
-        expect(actions).toMatch(/moderateCurationPost/);
+        expect(curateItems).toMatch(/updatePost/);
+        expect(actions).toMatch(/viewingAsCuratorTeam/);
+        expect(actions).toMatch(/viewingTeamId === teamId/);
+        expect(cardView).toMatch(/PostLensPicker/);
+        expect(viewPost).toMatch(/PostLensPicker/);
+        expect(listFeed).toMatch(/PostLensPicker/);
+        expect(viewPost).toMatch(/handleThreadLensChange/);
+        const pickerSrc = readFileSync(
+            join(frontendSrc, 'themes/default/components/CurationLensPicker.js'),
+            'utf8',
+        );
+        expect(pickerSrc).toMatch(/export function PostLensPicker/);
+        expect(pickerSrc).toMatch(/compact/);
+        expect(pickerSrc).toMatch(/lazy/);
+        expect(pickerSrc).toMatch(/applyOnLoad=\{false\}/);
+        expect(pickerSrc).toMatch(/if \(!applyOnLoad\) return;/);
+        expect(pickerSrc).toMatch(/if \(!activated \|\| !detail \|\| detailLoading \|\| teamsLoading\) return;/);
+        expect(pickerSrc).toMatch(/onChange\?\.\(lens, teamId, null\);/);
+        const viewPostLogic = readFileSync(
+            join(frontendSrc, 'logic/useViewPost.js'),
+            'utf8',
+        );
+        expect(viewPostLogic).toMatch(/loadedPostIdRef/);
+        expect(viewPostLogic).toMatch(/lens refetch in place/);
         expect(actions).toMatch(/moderateCurationUser/);
         expect(actions).toMatch(/setCurationThreadLocked/);
         expect(actions).toMatch(/\/moderation/);
@@ -523,13 +564,27 @@ describe('v1.39 curation UI contracts', () => {
         // The lock is a read filter, so the chain still accepts a reply. The UI
         // is what has to stop the user from spending PoW and daily quota on a
         // comment their own lens would hide the moment it lands.
-        expect(viewPost).toMatch(/const threadLocked = !!root\?\.thread_locked;/);
+        expect(viewPost).toMatch(/const threadLocked = stateLock !== undefined \? !!stateLock : !!root\?\.thread_locked;/);
         expect(viewPost).toMatch(/threadLocked \? <LockedNote/);
         expect(viewPost).toMatch(/thread locked</);
+        expect(viewPost).toMatch(/ThreadLockMark/);
         // A composer already open when the lock lands must close, but editing
         // your own existing post is not a new reply and stays allowed.
         expect(viewPost).toMatch(/if \(threadLocked && !isEdit\) return <div><\/div>;/);
         expect(viewPost).toMatch(/if \(!isMobile \|\| threadLocked\) return null;/);
+
+        const cardView = readFileSync(
+            join(frontendSrc, 'themes/default/components/CardView.js'),
+            'utf8',
+        );
+        const listFeed = readFileSync(
+            join(frontendSrc, 'themes/default/ListFeedView.js'),
+            'utf8',
+        );
+        expect(cardView).toMatch(/ThreadLockMark/);
+        expect(cardView).toMatch(/safePost\.thread_locked/);
+        expect(listFeed).toMatch(/ThreadLockMark/);
+        expect(listFeed).toMatch(/post\.thread_locked/);
     });
 
     it('gives the owner a community tag control and every curator a per-post override', () => {
@@ -539,11 +594,14 @@ describe('v1.39 curation UI contracts', () => {
         );
         const actions = readFileSync(join(frontendSrc, 'logic/usePostCurateActions.js'), 'utf8');
         const postMenu = readFileSync(join(frontendSrc, 'themes/default/components/PostMenu.js'), 'utf8');
+        const app = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
 
         // Community tag lives on the owner-only settings page, next to the
         // other team-wide switch, and reuses the composer's tag vocabulary.
         expect(teamDetail).toMatch(/Community tag/);
-        expect(teamDetail).toMatch(/tx\.setCurationTag\(community, Number\(teamId\), e\.target\.value\)/);
+        expect(teamDetail).toMatch(/tx\.setCurationTag\(community, Number\(teamId\), next\)/);
+        expect(teamDetail).toMatch(/optimistic community tag/);
+        expect(teamDetail).toMatch(/community tag reverted/);
         expect(teamDetail).toMatch(/TAG_OPTIONS/);
 
         // Per-post override is one select, not one row per tag, and keeps
@@ -552,10 +610,18 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/const INHERIT_TAG = '__inherit__'/);
         expect(actions).toMatch(/No override/);
         expect(actions).toMatch(/Untagged/);
-        expect(actions).toMatch(/postTag: typeof data\.post_tag === 'string' \? data\.post_tag : null/);
+        expect(actions).toMatch(/fetchedTag = typeof data\.post_tag === 'string' \? data\.post_tag : null/);
         expect(actions).toMatch(/modState\.postTag === null \? INHERIT_TAG : modState\.postTag/);
+        expect(actions).toMatch(/optimistic apply/);
+        expect(actions).toMatch(/optimistic revert/);
+        expect(actions).toMatch(/_optimisticTag/);
+        expect(actions).toMatch(/applyDisplayedLock/);
+        expect(actions).toMatch(/_optimisticLock/);
         expect(postMenu).toMatch(/item\.type === 'select'/);
         expect(postMenu).toMatch(/MenuSelect/);
+        expect(postMenu).toMatch(/updatePost=\{updatePost\}/);
+        expect(app).toMatch(/existing\._optimisticTag !== undefined/);
+        expect(app).toMatch(/existing\._optimisticLock !== undefined/);
     });
 
     it('clears the curator membership cache from module scope, not only while mounted', async () => {

@@ -13,9 +13,18 @@ from tests.common import (
 from tests.blockchain_helpers import (
     DEFAULT_GAS_LIMIT,
     FILL_GAS_LIMIT,
+    _build_msg_accept_curator_invite,
     _build_msg_create_curation_team,
+    _build_msg_delete_curation_team,
+    _build_msg_invite_curator,
     _build_msg_join_community,
+    _build_msg_leave_curation_team,
+    _build_msg_remove_curator,
+    _build_msg_set_curation_post_tag,
     _build_msg_set_curation_preference,
+    _build_msg_set_curation_subscriber_only,
+    _build_msg_set_curation_thread_locked,
+    _build_msg_transfer_curation_team,
     _check_deliver_accept,
     _check_deliver_reject,
     _gen_nonce,
@@ -85,9 +94,7 @@ def test_curation_chain(backend: str) -> None:
     description = "Hide spam; keep adult content; no brigading."
     lb, _, _, _ = _get_pow_params(backend, sub_addr)
     ts = _now_ms()
-    msg = _build_msg_create_curation_team(
-        sub, lb, 0, ts, slug, team_name, description, pow_val=0, nonce=_gen_nonce()
-    )
+    msg = _build_msg_create_curation_team(sub, lb, 0, ts, slug, team_name, description, pow_val=0, nonce=_gen_nonce())
     # MsgCreateCurationTeam must not expose a policy attribute on the wire type.
     if hasattr(msg, "policy"):
         _fail("curation.msg_has_no_policy_field", "MsgCreateCurationTeam still has policy")
@@ -148,9 +155,7 @@ def test_curation_chain(backend: str) -> None:
         )
         lb, _, _, _ = _get_pow_params(backend, sub_addr)
         ts = _now_ms()
-        msg = _build_msg_create_curation_team(
-            sub, lb, 0, ts, over_slug, "TooLong", over, pow_val=0, nonce=_gen_nonce()
-        )
+        msg = _build_msg_create_curation_team(sub, lb, 0, ts, over_slug, "TooLong", over, pow_val=0, nonce=_gen_nonce())
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgCreateCurationTeam")],
             max(FILL_GAS_LIMIT, DEFAULT_GAS_LIMIT * 2),
@@ -174,3 +179,275 @@ def test_curation_chain(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_accept("curation.preference_pin_accepted", ccode, dcode, dlog)
+
+
+def _submit_curation(backend: str, wallet, builder, type_url: str, *args, **kwargs):
+    """Build, sign and deliver one curation message, returning the tx codes.
+
+    Subscribers are relay-exempt, so difficulty and pow stay zero; the point of
+    these checks is the handler's authorization, not the ante.
+    """
+    addr = str(wallet.address())
+    lb, _, _, _ = _get_pow_params(backend, addr)
+    msg = builder(wallet, lb, 0, _now_ms(), *args, pow_val=0, nonce=_gen_nonce(), **kwargs)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, type_url)],
+        FILL_GAS_LIMIT,
+        _bh._VALIDATOR_ADDR or "",
+        wallet.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    return ccode, dcode, dlog
+
+
+def test_curation_team_chain(backend: str) -> None:
+    """Curator roster and moderation authorization at DeliverTx.
+
+    Every message below carries its authorization in the handler rather than the
+    ante, so CheckTx accepts them all and only the delivered result says whether
+    the rule holds.
+    """
+    owner = WALLETS["sub1"]
+    curator = WALLETS["sub2"]
+    outsider = WALLETS["free"]
+    owner_addr = str(owner.address())
+    curator_addr = str(curator.address())
+    outsider_addr = str(outsider.address())
+    slug = f"c{_rand_str(8)}"
+    root_hash = _rand_str(8).encode().hex().ljust(64, "0")
+    post_hash = "ab" * 32
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_create_curation_team,
+        "/mirage.core.v1.MsgCreateCurationTeam",
+        slug,
+        "RosterTeam",
+        "roster rules",
+    )
+    _check_deliver_accept("curation_team.chain_create", ccode, dcode, dlog)
+    team_id = 1
+
+    # Invitations are owner-only, and the invitee is not a member yet.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_invite_curator,
+        "/mirage.core.v1.MsgInviteCurator",
+        slug,
+        team_id,
+        curator_addr,
+    )
+    _check_deliver_reject("curation_team.chain_invite_non_owner_rejected", ccode, dcode, dlog)
+
+    # A free wallet cannot be a curator, so it cannot be invited either.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_invite_curator,
+        "/mirage.core.v1.MsgInviteCurator",
+        slug,
+        team_id,
+        outsider_addr,
+    )
+    _check_deliver_reject("curation_team.chain_invite_free_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_invite_curator,
+        "/mirage.core.v1.MsgInviteCurator",
+        slug,
+        team_id,
+        curator_addr,
+    )
+    _check_deliver_accept("curation_team.chain_invite", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_accept_curator_invite,
+        "/mirage.core.v1.MsgAcceptCuratorInvite",
+        slug,
+        team_id,
+    )
+    _check_deliver_accept("curation_team.chain_accept", ccode, dcode, dlog)
+
+    # Accepting twice must fail: the invitation is consumed.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_accept_curator_invite,
+        "/mirage.core.v1.MsgAcceptCuratorInvite",
+        slug,
+        team_id,
+    )
+    _check_deliver_reject("curation_team.chain_accept_twice_rejected", ccode, dcode, dlog)
+
+    # Owner-only control refused for an accepted curator.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_subscriber_only,
+        "/mirage.core.v1.MsgSetCurationSubscriberOnly",
+        slug,
+        team_id,
+        True,
+    )
+    _check_deliver_reject("curation_team.chain_subscriber_only_non_owner_rejected", ccode, dcode, dlog)
+
+    # Any curator may lock a thread and tag a post.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_thread_locked,
+        "/mirage.core.v1.MsgSetCurationThreadLocked",
+        slug,
+        team_id,
+        root_hash,
+        True,
+    )
+    _check_deliver_accept("curation_team.chain_curator_locks_thread", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_post_tag,
+        "/mirage.core.v1.MsgSetCurationPostTag",
+        slug,
+        team_id,
+        post_hash,
+        "gore",
+        True,
+    )
+    _check_deliver_reject("curation_team.chain_post_tag_clear_with_tag_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_post_tag,
+        "/mirage.core.v1.MsgSetCurationPostTag",
+        slug,
+        team_id,
+        post_hash,
+        "not-a-real-tag",
+        False,
+    )
+    _check_deliver_reject("curation_team.chain_post_tag_unknown_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_post_tag,
+        "/mirage.core.v1.MsgSetCurationPostTag",
+        slug,
+        team_id,
+        post_hash,
+        "gore",
+        False,
+    )
+    _check_deliver_accept("curation_team.chain_curator_sets_post_tag", ccode, dcode, dlog)
+
+    # Roster changes.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_remove_curator,
+        "/mirage.core.v1.MsgRemoveCurator",
+        slug,
+        team_id,
+        owner_addr,
+    )
+    _check_deliver_reject("curation_team.chain_remove_non_owner_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_remove_curator,
+        "/mirage.core.v1.MsgRemoveCurator",
+        slug,
+        team_id,
+        owner_addr,
+    )
+    _check_deliver_reject("curation_team.chain_remove_self_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_transfer_curation_team,
+        "/mirage.core.v1.MsgTransferCurationTeam",
+        slug,
+        team_id,
+        outsider_addr,
+    )
+    _check_deliver_reject("curation_team.chain_transfer_to_ineligible_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_transfer_curation_team,
+        "/mirage.core.v1.MsgTransferCurationTeam",
+        slug,
+        team_id,
+        curator_addr,
+    )
+    _check_deliver_accept("curation_team.chain_transfer", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_leave_curation_team,
+        "/mirage.core.v1.MsgLeaveCurationTeam",
+        slug,
+        team_id,
+    )
+    _check_deliver_reject("curation_team.chain_owner_leave_rejected", ccode, dcode, dlog)
+
+    # The transferred-away old owner is an ordinary curator and may leave.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_leave_curation_team,
+        "/mirage.core.v1.MsgLeaveCurationTeam",
+        slug,
+        team_id,
+    )
+    _check_deliver_accept("curation_team.chain_curator_leaves", ccode, dcode, dlog)
+
+    # The departed curator is still a paid subscriber, so this rejection can
+    # only come from the membership check rather than the ante or eligibility.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        owner,
+        _build_msg_set_curation_thread_locked,
+        "/mirage.core.v1.MsgSetCurationThreadLocked",
+        slug,
+        team_id,
+        root_hash,
+        False,
+    )
+    _check_deliver_reject("curation_team.chain_departed_curator_lock_rejected", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_delete_curation_team,
+        "/mirage.core.v1.MsgDeleteCurationTeam",
+        slug,
+        team_id,
+    )
+    _check_deliver_accept("curation_team.chain_delete", ccode, dcode, dlog)
+
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        curator,
+        _build_msg_set_curation_subscriber_only,
+        "/mirage.core.v1.MsgSetCurationSubscriberOnly",
+        slug,
+        team_id,
+        True,
+    )
+    _check_deliver_reject("curation_team.chain_deleted_team_rejects_control", ccode, dcode, dlog)
+
+    _debug(f"curation_team.chain done community={slug} team_id={team_id}")

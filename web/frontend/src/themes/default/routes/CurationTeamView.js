@@ -209,6 +209,7 @@ export default function CurationTeamView() {
     const [invitee, setInvitee] = useState('');
     const [inviteBusy, setInviteBusy] = useState(false);
     const [error, setError] = useState('');
+    const [optimisticTag, setOptimisticTag] = useState(null);
     const members = useMemo(() => team?.members || [], [team]);
     const invitations = useMemo(
         () => (team?.invitations || []).filter((invitation) => invitation.status === 0),
@@ -243,6 +244,15 @@ export default function CurationTeamView() {
         setName(team.name);
         setDescription(team.description);
     }, [community, team, teamId]);
+
+    useEffect(() => {
+        if (optimisticTag === null || !team) return undefined;
+        if ((team.tag || '') === optimisticTag) {
+            setOptimisticTag(null);
+            console.debug('[curation] community tag caught up', { community, teamId, tag: optimisticTag });
+        }
+        return undefined;
+    }, [community, optimisticTag, team, teamId]);
 
     useEffect(() => {
         if (!isCurator || location.hash !== '#hidden-users') return undefined;
@@ -409,6 +419,7 @@ export default function CurationTeamView() {
     if (loadError || !team) return <Page><ErrorText>{loadError || 'Curator team not found.'}</ErrorText></Page>;
 
     const communityName = communityLabel(community);
+    const displayTag = optimisticTag !== null ? optimisticTag : (team.tag || '');
 
     return <Page>
         <Helmet><title>{team.name} · {communityName} | Mirage</title></Helmet>
@@ -486,9 +497,26 @@ export default function CurationTeamView() {
                             </Meta>
                         </SettingCopy>
                         <Select
-                            value={team.tag || ''}
+                            value={displayTag}
                             disabled={!!pendingFor('set_curation_tag')}
-                            onChange={(e) => run(() => tx.setCurationTag(community, Number(teamId), e.target.value))}
+                            onChange={async (e) => {
+                                const next = e.target.value;
+                                setOptimisticTag(next);
+                                console.debug('[curation] optimistic community tag', {
+                                    community,
+                                    teamId,
+                                    tag: next,
+                                });
+                                const result = await run(() => tx.setCurationTag(community, Number(teamId), next));
+                                if (!result?.success) {
+                                    setOptimisticTag(null);
+                                    console.debug('[curation] community tag reverted', {
+                                        community,
+                                        teamId,
+                                        tag: team.tag || '',
+                                    });
+                                }
+                            }}
                         >
                             {TAG_OPTIONS.map(({ value, label }) => (
                                 <option key={value} value={value}>{value ? label : 'No community tag'}</option>

@@ -272,7 +272,7 @@ function ChangeUsernameView({ state }) {
                                                 $hasPrefix={!canChangeName}
                                                 onChange={(e) => {
                                                     const raw = e.target.value;
-                                                    const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                                                    const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "").replace(/^-+/, "");
                                                     const maxLen = getMaxInputLength(!canChangeName);
                                                     setUsernameInput(cleaned.slice(0, maxLen ?? 100));
                                                     setSubmitError("");
@@ -294,7 +294,7 @@ function ChangeUsernameView({ state }) {
                                                 spellCheck="false"
                                             />
                                         </InputRow>
-                                        <AuthHelperText style={{ textAlign: "left" }}>Letters, numbers, and hyphens only.</AuthHelperText>
+                                        <AuthHelperText style={{ textAlign: "left" }}>Letters, numbers, and hyphens only. Must start with a letter or number.</AuthHelperText>
 
                                         {submitError ? (
                                             <AuthErrorMessage role="alert">{submitError}</AuthErrorMessage>

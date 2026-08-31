@@ -452,6 +452,15 @@ func TestProfileValidateBasicRuneCounts(t *testing.T) {
 	require.Contains(t, p.ValidateBasic(3, 30).Error(), "flair too long")
 }
 
+func TestValidateUsernameFormat(t *testing.T) {
+	for _, ok := range []string{"alice", "Alice-Bob", "0alice", "a-b-c", "Anon-alice"} {
+		require.NoError(t, ValidateUsernameFormat(ok), ok)
+	}
+	for _, bad := range []string{"-alice", "--alice", "-", "alice bob", "alice.bob", "alice@bob"} {
+		require.EqualError(t, ValidateUsernameFormat(bad), "invalid username", bad)
+	}
+}
+
 func TestC1BugCondition(t *testing.T) {
 	// Reproduce the C-1 bug condition: the old code used
 	//   if core.Level <= 0 || int(core.Level) >= len(params.Tiers)

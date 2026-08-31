@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import base64
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -1919,12 +1920,86 @@ def test_runner_accounting(backend: str):
     else:
         _fail("runner.failure_fails_run", f"summary={failing}")
 
-    # Every registered release-gate category must actually exist, otherwise the
-    # gate silently protects nothing.
-    from tests.test_backend import ALL_CATEGORIES, RELEASE_GATE_CATEGORIES
+    # Every category in every suite must be a release gate. A category that can
+    # skip without failing the run is one nobody relies on, and it belongs
+    # deleted rather than parked in the suite printing green. The equality also
+    # catches a gate naming a category that does not exist, which would protect
+    # nothing.
+    import tests.test_backend as backend_suite
+    import tests.test_blockchain as chain_suite
+    import tests.test_extended as extended_suite
 
-    unknown = sorted(RELEASE_GATE_CATEGORIES - set(ALL_CATEGORIES))
-    if not unknown:
-        _pass("runner.gate_categories_registered", count=len(RELEASE_GATE_CATEGORIES))
-    else:
-        _fail("runner.gate_categories_registered", f"unknown gate categories: {unknown}")
+    for suite in (backend_suite, chain_suite, extended_suite):
+        name = suite.__name__.rsplit(".", 1)[-1]
+        categories = set(suite.ALL_CATEGORIES)
+        gates = set(suite.RELEASE_GATE_CATEGORIES)
+        ungated = sorted(categories - gates)
+        unknown = sorted(gates - categories)
+        if ungated or unknown:
+            _fail(
+                f"runner.all_categories_gated.{name}",
+                f"ungated={ungated} unknown={unknown}",
+            )
+        else:
+            _pass(f"runner.all_categories_gated.{name}", count=len(gates))
+
+    # The runner must actually be handed the gate; defining the set and not
+    # passing it to run_suite is how the blockchain suite went ungated.
+    for suite in (backend_suite, chain_suite, extended_suite):
+        name = suite.__name__.rsplit(".", 1)[-1]
+        source = inspect.getsource(suite.main)
+        if "no_skip_categories=RELEASE_GATE_CATEGORIES" in source:
+            _pass(f"runner.gate_passed_to_run_suite.{name}")
+        else:
+            _fail(
+                f"runner.gate_passed_to_run_suite.{name}",
+                "main() does not pass no_skip_categories=RELEASE_GATE_CATEGORIES",
+            )
+
+    # Categories run concurrently by default, so the two sets that opt out of
+    # that have to name real categories and have to reach run_suite. A name that
+    # matches nothing schedules nothing, exactly like an unknown gate.
+    for suite in (backend_suite, chain_suite, extended_suite):
+        name = suite.__name__.rsplit(".", 1)[-1]
+        categories = set(suite.ALL_CATEGORIES)
+        unknown_exclusive = sorted(set(suite.EXCLUSIVE_CATEGORIES) - categories)
+        unknown_walletless = sorted(set(suite.WALLETLESS_CATEGORIES) - categories)
+        if unknown_exclusive or unknown_walletless:
+            _fail(
+                f"runner.dispatch_sets_known.{name}",
+                f"unknown_exclusive={unknown_exclusive} unknown_walletless={unknown_walletless}",
+            )
+        else:
+            _pass(
+                f"runner.dispatch_sets_known.{name}",
+                exclusive=len(suite.EXCLUSIVE_CATEGORIES),
+                walletless=len(suite.WALLETLESS_CATEGORIES),
+            )
+
+        source = inspect.getsource(suite.main)
+        if "EXCLUSIVE_CATEGORIES" in source:
+            _pass(f"runner.exclusive_passed_to_run_suite.{name}")
+        else:
+            _fail(
+                f"runner.exclusive_passed_to_run_suite.{name}",
+                "main() does not pass EXCLUSIVE_CATEGORIES to run_suite",
+            )
+
+        # The old opt-in parallel allowlist. Reintroducing it would be silently
+        # ignored by run_suite, which now takes the exclusive set instead.
+        if hasattr(suite, "STATELESS_CATEGORIES"):
+            _fail(
+                f"runner.no_stateless_allowlist.{name}",
+                "STATELESS_CATEGORIES is obsolete; classify with EXCLUSIVE_CATEGORIES",
+            )
+        else:
+            _pass(f"runner.no_stateless_allowlist.{name}")
+
+    # This category is walletless, so it holds no lease and must not be able to
+    # reach another category's wallets. Silently borrowing set 0 is how a
+    # walletless category would corrupt a concurrent run.
+    try:
+        WALLETS["sub1"]
+        _fail("runner.walletless_has_no_lease", "WALLETS resolved without a wallet lease")
+    except RuntimeError:
+        _pass("runner.walletless_has_no_lease")

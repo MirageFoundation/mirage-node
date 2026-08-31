@@ -77,7 +77,7 @@ def test_indexer_topic_edit(backend: str):
     """
 
     if not _check_local_docker():
-        _skip("topic_edit.reattribution", "not running in local-docker")
+        _fail("topic_edit.reattribution", "local docker required")
         return
 
     author = WALLETS["sub1"]
@@ -424,7 +424,7 @@ LIMIT 1;\\" 2>&1" """,
             else:
                 _fail("indexer.params_alias_contract", f"missing expected keys: {raw}")
     else:
-        _skip("indexer.params_alias_contract", "not running in local-docker")
+        _fail("indexer.params_alias_contract", "local docker required")
 
     # ── Group 4: Recent blocks & difficulty ──────────────────────────────
 
@@ -971,9 +971,7 @@ def test_indexer_hardening(backend: str):
         relayable = set(re.findall(r"&coretypes\.(Msg[A-Za-z]+)\{\}", prototypes))
         with open(processor_py, encoding="utf-8") as fh:
             processor_src = fh.read()
-        unknown = sorted(
-            name for name in relayable if f'"/mirage.core.v1.{name}"' not in processor_src
-        )
+        unknown = sorted(name for name in relayable if f'"/mirage.core.v1.{name}"' not in processor_src)
         if not relayable:
             _fail("indexer_hardening.relay_types_known", "could not parse relay_messages.go")
         elif unknown:
@@ -1978,7 +1976,8 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM posts")
                 cur.execute(
-                    "INSERT INTO posts(txhash, owner, community, comment_count, created_at) " "VALUES('d0','u','tech',0,1)"
+                    "INSERT INTO posts(txhash, owner, community, comment_count, created_at) "
+                    "VALUES('d0','u','tech',0,1)"
                 )
                 for i in range(1, depth):
                     cur.execute(
@@ -2060,13 +2059,14 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
 
 
 def _indexer_hardening_db_checks(backend: str) -> None:
-    """Live indexer DB assertions. Skipped when local docker is unavailable."""
+    """Live indexer DB assertions. These are the only checks that read the real
+    indexer DB, so losing them silently defeats the whole category."""
 
     if not _check_local_docker():
-        _skip("indexer_hardening.checkpoint_has_provenance", "not running in local-docker")
-        _skip("indexer_hardening.net_votes_matches_canonical_votes", "not running in local-docker")
-        _skip("indexer_hardening.block_transaction_rolls_back", "not running in local-docker")
-        _skip("indexer_hardening.corrupt_profile_degrades", "not running in local-docker")
+        _fail("indexer_hardening.checkpoint_has_provenance", "local docker required")
+        _fail("indexer_hardening.net_votes_matches_canonical_votes", "local docker required")
+        _fail("indexer_hardening.block_transaction_rolls_back", "local docker required")
+        _fail("indexer_hardening.corrupt_profile_degrades", "local docker required")
         return
 
     db_name = _get_indexer_db_name()
@@ -2397,7 +2397,7 @@ def test_redgifs_thumbnails(backend: str):
     del backend
 
     if not _check_local_docker():
-        _skip("redgifs.id_extraction", "local docker required")
+        _fail("redgifs.id_extraction", "local docker required")
         return
 
     import sys
@@ -2421,7 +2421,11 @@ def test_redgifs_thumbnails(backend: str):
         ("https://www.redgifs.com/", None),
         ("javascript:alert(1)", None),
     ]
-    bad_ids = [f"{raw} -> {redgifs.extract_gif_id(raw)} (want {want})" for raw, want in id_cases if redgifs.extract_gif_id(raw) != want]
+    bad_ids = [
+        f"{raw} -> {redgifs.extract_gif_id(raw)} (want {want})"
+        for raw, want in id_cases
+        if redgifs.extract_gif_id(raw) != want
+    ]
     if bad_ids:
         _fail("redgifs.id_extraction", "; ".join(bad_ids))
     else:
@@ -2439,7 +2443,11 @@ def test_redgifs_thumbnails(backend: str):
         ("javascript:alert(1)", False),
         ("", False),
     ]
-    bad_urls = [f"{raw} -> {redgifs._is_redgifs_media_url(raw)}" for raw, want in url_cases if redgifs._is_redgifs_media_url(raw) != want]
+    bad_urls = [
+        f"{raw} -> {redgifs._is_redgifs_media_url(raw)}"
+        for raw, want in url_cases
+        if redgifs._is_redgifs_media_url(raw) != want
+    ]
     if bad_urls:
         _fail("redgifs.response_url_allowlist", "; ".join(bad_urls))
     else:
@@ -2497,7 +2505,9 @@ def test_redgifs_thumbnails(backend: str):
 
         _skip_redgifs_post = Indexer._skip_redgifs_post
 
-    rows = [(f"tx{i:03d}", "[]", f"https://www.redgifs.com/watch/gif{i:03d}") for i in range(REDGIFS_BACKFILL_BATCH + 7)]
+    rows = [
+        (f"tx{i:03d}", "[]", f"https://www.redgifs.com/watch/gif{i:03d}") for i in range(REDGIFS_BACKFILL_BATCH + 7)
+    ]
 
     db = _StubDB(rows)
     resolver = _StubResolver(lambda gid: f"https://media.redgifs.com/{gid}-mobile.jpg")
@@ -2518,7 +2528,7 @@ def test_redgifs_thumbnails(backend: str):
     Indexer._backfill_redgifs_thumbnails(stub)
     first_pass = list(resolver.calls)
     Indexer._backfill_redgifs_thumbnails(stub)
-    repeated = sorted(set(first_pass) & set(resolver.calls[len(first_pass):]))
+    repeated = sorted(set(first_pass) & set(resolver.calls[len(first_pass) :]))
     # Each pass spends its whole budget on ids it has not seen, so two passes
     # record two batches and revisit nothing.
     expected_missing = 2 * REDGIFS_BACKFILL_BATCH
@@ -2559,7 +2569,9 @@ def test_redgifs_thumbnails(backend: str):
     unparseable = [(f"bare{i:03d}", "[]", "see redgifs.com for more") for i in range(5)]
     alive = [("live001", "[]", "https://www.redgifs.com/watch/stillhere")]
     db = _StubDB(dead + unparseable + alive)
-    resolver = _StubResolver(lambda gid: "https://media.redgifs.com/StillHere-mobile.jpg" if gid == "stillhere" else None)
+    resolver = _StubResolver(
+        lambda gid: "https://media.redgifs.com/StillHere-mobile.jpg" if gid == "stillhere" else None
+    )
     stub = _Stub(db, resolver)
 
     # Enough passes to clear the dead head of the window, with a hard bound so
@@ -2586,7 +2598,9 @@ def test_redgifs_thumbnails(backend: str):
     mp_path = os.path.join("/opt/mirage", "indexer", "message_processor.py")
     with open(mp_path, "r", encoding="utf-8") as fh:
         mp_src = fh.read()
-    leaked = [tok for tok in ("import redgifs", "from indexer.redgifs", "from . import redgifs", "redgifs.") if tok in mp_src]
+    leaked = [
+        tok for tok in ("import redgifs", "from indexer.redgifs", "from . import redgifs", "redgifs.") if tok in mp_src
+    ]
     if leaked:
         _fail("redgifs.absent_from_message_path", f"message_processor.py references the resolver: {leaked}")
     else:
@@ -2603,7 +2617,7 @@ def test_rumble_embeds(backend: str):
     del backend
 
     if not _check_local_docker():
-        _skip("rumble.canonical_url", "local docker required")
+        _fail("rumble.canonical_url", "local docker required")
         return
 
     import sys
@@ -2627,7 +2641,11 @@ def test_rumble_embeds(backend: str):
         ("javascript:alert(1)", None),
         ("https://rumble.com/v7b3y1w-x.html?url=https://evil.example", "https://rumble.com/v7b3y1w-x.html"),
     ]
-    bad = [f"{raw} -> {rumble.canonical_watch_url(raw)} (want {want})" for raw, want in url_cases if rumble.canonical_watch_url(raw) != want]
+    bad = [
+        f"{raw} -> {rumble.canonical_watch_url(raw)} (want {want})"
+        for raw, want in url_cases
+        if rumble.canonical_watch_url(raw) != want
+    ]
     if bad:
         _fail("rumble.canonical_url", "; ".join(bad))
     else:
@@ -2675,12 +2693,19 @@ def test_rumble_embeds(backend: str):
     # Posts are markdown, so [title](url) is the common shape and a greedy
     # match takes the closing bracket with it.
     content_cases = [
-        ("[Crowder vs Fuentes](https://rumble.com/v79qrke-crowder.html) debate", "https://rumble.com/v79qrke-crowder.html"),
+        (
+            "[Crowder vs Fuentes](https://rumble.com/v79qrke-crowder.html) debate",
+            "https://rumble.com/v79qrke-crowder.html",
+        ),
         ("https://rumble.com/v7am7nc-insomnia.html?e9s=sr", "https://rumble.com/v7am7nc-insomnia.html"),
         ("watch it https://rumble.com/v75gmmg-shorts.html.", "https://rumble.com/v75gmmg-shorts.html"),
         ("nothing here", None),
     ]
-    bad = [f"{txt!r} -> {rumble.find_watch_url([], txt)}" for txt, want in content_cases if rumble.find_watch_url([], txt) != want]
+    bad = [
+        f"{txt!r} -> {rumble.find_watch_url([], txt)}"
+        for txt, want in content_cases
+        if rumble.find_watch_url([], txt) != want
+    ]
     if bad:
         _fail("rumble.finds_url_in_markdown", "; ".join(bad))
     else:
@@ -2745,10 +2770,7 @@ def test_rumble_embeds(backend: str):
         _media_meta_with_embed = staticmethod(Indexer._media_meta_with_embed)
 
     def _rows(n, thumbnail=""):
-        return [
-            (f"tx{i:03d}", "[]", f"https://rumble.com/v{i:03d}aaa-slug.html", "[]", thumbnail)
-            for i in range(n)
-        ]
+        return [(f"tx{i:03d}", "[]", f"https://rumble.com/v{i:03d}aaa-slug.html", "[]", thumbnail) for i in range(n)]
 
     answer = {"embed_id": "v78xa1o", "thumbnail": "https://1a-1791.com/x.jpg"}
 
@@ -2822,7 +2844,11 @@ def test_rumble_embeds(backend: str):
         ([{"w": 320, "h": 180}], [{"w": 320, "h": 180}]),
     ]
     if _sanitize_media_meta_list is not None:
-        bad = [f"{raw} -> {_sanitize_media_meta_list(raw)}" for raw, want in sanitize_cases if _sanitize_media_meta_list(raw) != want]
+        bad = [
+            f"{raw} -> {_sanitize_media_meta_list(raw)}"
+            for raw, want in sanitize_cases
+            if _sanitize_media_meta_list(raw) != want
+        ]
         if bad:
             _fail("rumble.embed_survives_backend_sanitizer", "; ".join(bad))
         else:
@@ -2992,8 +3018,8 @@ def test_tx_index(backend: str):
     # ── 4. Direct DB check: tx_index exists, tx_receipts is gone ──────
 
     if not _check_local_docker():
-        _skip("tx_index.db_table_exists", "not running in local-docker")
-        _skip("tx_index.tx_receipts_dropped", "not running in local-docker")
+        _fail("tx_index.db_table_exists", "local docker required")
+        _fail("tx_index.tx_receipts_dropped", "local docker required")
         return
 
     db_name = _get_indexer_db_name()

@@ -255,8 +255,7 @@ def check_curation_tag_schema() -> None:
     with psycopg.connect(db_url, connect_timeout=10) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name='curation_teams' AND column_name='tag'"
+                "SELECT 1 FROM information_schema.columns " "WHERE table_name='curation_teams' AND column_name='tag'"
             )
             has_column = cursor.fetchone() is not None
             cursor.execute(
@@ -264,6 +263,11 @@ def check_curation_tag_schema() -> None:
                 "WHERE table_name='curation_post_tags' ORDER BY column_name"
             )
             tag_columns = {str(row[0]) for row in cursor.fetchall()}
+            cursor.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name='curation_locks' AND column_name='lock_windows'"
+            )
+            has_lock_windows = cursor.fetchone() is not None
     if has_column:
         ok("curation_teams.tag present")
     else:
@@ -273,6 +277,13 @@ def check_curation_tag_schema() -> None:
         ok("curation_post_tags present")
     else:
         fail(f"curation_post_tags missing columns: {sorted(expected - tag_columns)}")
+    # The chain keeps only the cut-off of the lock that is open now, so without
+    # this column the closed windows have nowhere to live and unlocking a thread
+    # republishes every reply the lock hid.
+    if has_lock_windows:
+        ok("curation_locks.lock_windows present")
+    else:
+        fail("curation_locks.lock_windows missing; unlocking would republish locked replies")
 
     for path in ("/api/core/set_curation_tag", "/api/core/set_curation_post_tag"):
         status = http_status(f"{BACKEND}{path}")

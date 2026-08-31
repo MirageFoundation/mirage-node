@@ -44,6 +44,7 @@ const (
 	PfxHiddenPost           = "chp|"
 	PfxHiddenUser           = "chu|"
 	PfxThreadLock           = "chl|"
+	PfxThreadLockCount      = "chlc|"
 	PfxCurationPostTag      = "cpt|"
 	PfxCurationPrune        = "ctp|"
 	PfxCurationPruneNext    = "ctpnext"
@@ -311,6 +312,24 @@ func KeyThreadLock(slug string, teamID uint64, rootHash []byte) []byte {
 func KeyThreadLockPrefix(slug string, teamID uint64) []byte {
 	return concat([]byte(PfxThreadLock), lp([]byte(slug)), u64(teamID))
 }
+
+// KeyThreadLockCount counts the lock windows this team has ever opened on one
+// thread. It outlives the lock itself, which is why it cannot live in the
+// KeyThreadLock value: that key is deleted on unlock.
+func KeyThreadLockCount(slug string, teamID uint64, rootHash []byte) []byte {
+	return concat([]byte(PfxThreadLockCount), lp([]byte(slug)), u64(teamID), rootHash)
+}
+
+// MaxThreadLockWindows caps how many times one team may lock one thread.
+//
+// The indexer keeps a closed window per lock/unlock cycle so the replies
+// written during each one stay hidden, and that list has to be bounded. It
+// cannot be bounded by dropping the oldest window, which would republish
+// exactly what a curator hid, nor by merging windows, which would hide replies
+// written while the thread was open. So the bound is enforced here instead: the
+// chain refuses to open window 101, and the curator hides individual posts if
+// they need more. Nothing is ever un-hidden or over-hidden to stay under it.
+const MaxThreadLockWindows = 100
 
 func KeyCurationPostTag(slug string, teamID uint64, hash []byte) []byte {
 	return concat([]byte(PfxCurationPostTag), lp([]byte(slug)), u64(teamID), hash)

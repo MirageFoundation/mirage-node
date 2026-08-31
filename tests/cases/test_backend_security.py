@@ -462,9 +462,7 @@ def test_security(backend: str):
             _pass("attack.vote_deleted_post submitted (soft delete allows)")
 
         # 10.9 Comment on deleted post — handled gracefully
-        comment_del = _do_post(
-            backend, sub_wallet, "", "", "Comment on deleted", target=del_post, skip_pow=True
-        )
+        comment_del = _do_post(backend, sub_wallet, "", "", "Comment on deleted", target=del_post, skip_pow=True)
         if not comment_del:
             _pass("attack.comment_deleted_post_handled (rejected)")
         else:
@@ -776,7 +774,7 @@ def test_security(backend: str):
         except Exception as e:
             _fail("attack.mark_inbox_viewed_clears_push_cooldown", str(e))
     else:
-        _skip("attack.mark_inbox_viewed_clears_push_cooldown", "not running in local-docker")
+        _fail("attack.mark_inbox_viewed_clears_push_cooldown", "local docker required")
 
     # 10.22 mark_inbox_viewed with mismatched address/pubkey → rejected
     try:
@@ -825,6 +823,8 @@ def test_validation(backend: str):
         ("user.name", "dot", "invalid username format"),
         ("user@name", "symbol", "invalid username format"),
         ("\U0001f642user", "emoji", "invalid username format"),
+        ("-username", "leading_hyphen", "invalid username format"),
+        ("--username", "leading_double_hyphen", "invalid username format"),
     ]
 
     for uname, label, expected in invalid_usernames:

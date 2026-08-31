@@ -702,35 +702,74 @@ func (k Keeper) SetCurationActionHiddenUser(ctx sdk.Context, slug string, teamID
 	return nil
 }
 
+// SetCurationThreadLocked opens or closes this team's lock on one thread.
+//
+// The chain stores only the cut-off of the window that is currently open, which
+// is all it needs to decide anything. Accumulating the history of past windows
+// is the indexer's job: a thread can be locked and unlocked repeatedly, and the
+// replies written during each locked stretch have to stay hidden after the
+// thread reopens, so the event carries both ends of the window it closes.
+//
+// That list of windows has to be bounded, and it cannot be bounded after the
+// fact without either republishing or over-hiding replies, so the bound is a
+// hard cap here: window MaxThreadLockWindows+1 is rejected.
 func (k Keeper) SetCurationThreadLocked(ctx sdk.Context, slug string, teamID uint64, root, actor string, locked bool) error {
 	h, err := types.HashBytes(root)
 	if err != nil {
 		return err
 	}
 	key := types.KeyThreadLock(slug, teamID, h)
-	var lockSequence uint64
-	if locked {
-		seq, _, err := k.getU64Key(ctx, []byte(types.PfxPostSeq))
+	stored, wasLocked, err := k.getU64Key(ctx, key)
+	if err != nil {
+		return err
+	}
+	seq, _, err := k.getU64Key(ctx, []byte(types.PfxPostSeq))
+	if err != nil {
+		return err
+	}
+	// lockSequence is where the window this event describes begins, and
+	// unlockSequence where it ends; 0 means the window is still open. Both are
+	// global post sequences, so a reply is inside the window exactly when
+	// lockSequence < its sequence <= unlockSequence.
+	var lockSequence, unlockSequence uint64
+	switch {
+	case locked && wasLocked:
+		// Re-locking must not move the cut-off forward: that would un-hide
+		// every reply written since the thread was originally locked.
+		lockSequence = stored
+	case locked:
+		// Opening a window is what the cap counts, so the count is read here and
+		// not on the redundant-lock or unlock paths. It survives the unlock that
+		// deletes the lock key, which is the only reason it is a separate key.
+		countKey := types.KeyThreadLockCount(slug, teamID, h)
+		used, _, err := k.getU64Key(ctx, countKey)
 		if err != nil {
+			return err
+		}
+		if used >= types.MaxThreadLockWindows {
+			return fmt.Errorf("thread lock limit reached: this team has locked this thread %d times", types.MaxThreadLockWindows)
+		}
+		if err := k.setU64Key(ctx, countKey, used+1); err != nil {
 			return err
 		}
 		if err := k.storeSet(ctx, key, putU64(seq)); err != nil {
 			return err
 		}
 		lockSequence = seq
-	} else {
+	case wasLocked:
 		if err := k.storeDelete(ctx, key); err != nil {
 			return err
 		}
+		lockSequence = stored
+		unlockSequence = seq
 	}
-	// The indexer applies locks by comparing each post's global sequence against
-	// the stored cut-off, so the committed sequence has to travel with the event.
 	ctx.EventManager().EmitEvent(sdk.NewEvent("curation_thread_locked",
 		sdk.NewAttribute("community", slug),
 		sdk.NewAttribute("team_id", fmt.Sprintf("%d", teamID)),
 		sdk.NewAttribute("target", root),
 		sdk.NewAttribute("locked", fmt.Sprintf("%t", locked)),
 		sdk.NewAttribute("lock_sequence", fmt.Sprintf("%d", lockSequence)),
+		sdk.NewAttribute("unlock_sequence", fmt.Sprintf("%d", unlockSequence)),
 		sdk.NewAttribute("actor", actor),
 	))
 	return nil

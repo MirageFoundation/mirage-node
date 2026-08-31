@@ -201,7 +201,7 @@ function CreateAccountView({ state, setCredentials }) {
                     value={usernameInput}
                     onChange={(event) => {
                       const raw = event.target.value;
-                      const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "");
+                      const cleaned = raw.replace(/[^A-Za-z0-9-]/g, "").replace(/^-+/, "");
                       const maxLen = getMaxInputLength(true);
                       setUsernameInput(cleaned.slice(0, maxLen ?? 100));
                       setSubmitError("");
@@ -220,7 +220,7 @@ function CreateAccountView({ state, setCredentials }) {
                   />
                 </HandleField>
                 <AuthHelperText>
-                  Letters, numbers, and hyphens only.
+                  Letters, numbers, and hyphens only. Must start with a letter or number.
                 </AuthHelperText>
               </AuthFieldRow>
 

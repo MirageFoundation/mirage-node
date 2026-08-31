@@ -39,13 +39,12 @@ import { updateNotification } from "../../../utils/notifications";
  *
  * Exports:
  *   • MoreMenuChip — 3-dot ellipsis button with Copy link + Follow
- *     user/topic + Give Award + Gift Mirage + Gift Subscription.
- *     Matches the `MoreButton` menu in CardView.
- *   • ModMenuChip — shield button (admin / curator only) with Mark post
- *     deleted + Curate actions. Separate from the ⋯ menu on purpose.
- *   • BlockChip — filled circle chip with a slashed-circle icon that
- *     opens Block user / Block post / Block topic / Report post.
- *     Matches the `ActionIconChip $danger` block menu in CardView.
+ *     user/topic + Give Award + Gift Mirage + Gift Subscription, plus
+ *     admin Delete network wide. Matches the `MoreButton` menu in CardView.
+ *   • BlockChip — filled circle chip. For ordinary viewers: slashed-circle
+ *     icon with Block user / Block post / Block community / Report post.
+ *     For community curators: red shield with Curate tools + Report post
+ *     in that same slot.
  *
  * Each chip owns its popover state + dialog state so callers only pass
  * `{post, state, updatePost}`. Dialogs render inline via `ConfirmDialog`.
@@ -194,16 +193,9 @@ const MoreButton = styled.button`
     }
 `;
 
-// Shield trigger — heroicons outline uses stroke, not fill.
-const ModButton = styled(MoreButton)`
-    svg {
-        fill: none;
-        stroke: currentColor;
-    }
-`;
-
-// Block icon chip — identical to CardView's `ActionIconChip $danger`.
+// Block / curate icon chip — identical to CardView's `ActionIconChip $danger`.
 // `line-height: 0` + `display: block` on the svg forces optical centering.
+// `$curate` switches the glyph to a stroke shield (heroicons outline).
 const BlockIconChip = styled.button`
     appearance: none;
     display: inline-flex;
@@ -226,7 +218,8 @@ const BlockIconChip = styled.button`
         display: block;
         width: 16px;
         height: 16px;
-        fill: currentColor;
+        fill: ${({ $curate }) => ($curate ? 'none' : 'currentColor')};
+        stroke: ${({ $curate }) => ($curate ? 'currentColor' : 'none')};
     }
 `;
 
@@ -247,6 +240,12 @@ const BlockGlyph = (p) => (
 );
 
 // Shared helpers ─────────────────────────────────────────────────────────────
+
+function isNetworkAdmin(isLoggedIn, isOwnPost) {
+    if (!isLoggedIn || isOwnPost) return false;
+    try { return Number(Storage.load('user_level', '0')) >= 100; }
+    catch (_) { return false; }
+}
 
 function usePostIdentity(post, state) {
     const viewerAddress = state?.publicKey || Storage.load('publicKey', '') || '';
@@ -290,7 +289,7 @@ const stop = e => { if (e && typeof e.stopPropagation === 'function') e.stopProp
 export function MoreMenuChip({
     post,
     state,
-    updatePost, // eslint-disable-line no-unused-vars
+    updatePost,
     align = 'right',
 }) {
     const navigate = useNavigate();
@@ -301,9 +300,11 @@ export function MoreMenuChip({
     const [followOverride, setFollowOverride] = useState(null);
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [networkDeleteOpen, setNetworkDeleteOpen] = useState(false);
     const [deletePending, setDeletePending] = useState(false);
 
     const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
+    const isAdminVisible = isNetworkAdmin(isLoggedIn, isOwnPost);
     const linkTarget = postId ? `/p/${postId}` : '#';
 
     const computedFollowingUser = (() => {
@@ -376,8 +377,28 @@ export function MoreMenuChip({
         setDeletePending(false);
     }, [postId, updatePost]);
 
+    const handleNetworkDelete = useCallback(e => {
+        stop(e);
+        setOpen(false);
+        setDeletePending(false);
+        setNetworkDeleteOpen(true);
+    }, []);
+
+    const confirmNetworkDelete = useCallback(async () => {
+        if (!postId) { setNetworkDeleteOpen(false); return; }
+        setDeletePending(true);
+        try { await tx.deletePost(postId); } catch (_) { /* noop */ }
+        if (typeof updatePost === 'function') {
+            try { updatePost(postId, { deleted: true }); } catch (_) { /* noop */ }
+        }
+        setNetworkDeleteOpen(false);
+        setDeletePending(false);
+        console.debug('[mod] delete post network wide', { postId: String(postId).slice(0, 12) });
+    }, [postId, updatePost]);
+
     const cancelDeletePost = useCallback(() => {
         setDeleteDialogOpen(false);
+        setNetworkDeleteOpen(false);
         setDeletePending(false);
     }, []);
 
@@ -522,6 +543,12 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                             </>
                         )}
+                        {isAdminVisible && (
+                            <MenuItemBtn type="button" $danger onClick={handleNetworkDelete}>
+                                <HiOutlineShieldExclamation />
+                                <span>Delete network wide</span>
+                            </MenuItemBtn>
+                        )}
                     </Menu>
                 )}
             </PopoverRoot>
@@ -533,6 +560,16 @@ export function MoreMenuChip({
                 confirmVariant="danger"
                 pending={deletePending}
                 onConfirm={confirmDeletePost}
+                onCancel={cancelDeletePost}
+            />
+            <ConfirmDialog
+                open={networkDeleteOpen}
+                title="Delete this post network wide?"
+                message="This will permanently remove this post from every feed. This action cannot be undone."
+                confirmLabel="Delete network wide"
+                confirmVariant="danger"
+                pending={deletePending}
+                onConfirm={confirmNetworkDelete}
                 onCancel={cancelDeletePost}
             />
             <GiftMirageDialog
@@ -577,144 +614,47 @@ export function MoreMenuChip({
     );
 }
 
-// ─── ModMenuChip ────────────────────────────────────────────────────────────
-//
-// Shield button shown only to community curators and/or admins. Holds
-// Mark-post-deleted (admin) and Curate actions — kept out of the ⋯ menu
-// so ordinary post actions stay short.
-
-export function ModMenuChip({
-    post,
-    state,
-    updatePost,
-    align = 'right',
-}) {
-    const rootRef = useRef(null);
-    const [open, setOpen] = useState(false);
-    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-    const [deletePending, setDeletePending] = useState(false);
-
-    const { isLoggedIn, postId, authorAddress, isOwnPost } = usePostIdentity(post, state);
-    const { visible: curateVisible } = usePostCurateActions(post);
-
-    const isAdminVisible = (() => {
-        if (!isLoggedIn || isOwnPost || !postId || !authorAddress) return false;
-        try { return Number(Storage.load('user_level', '0')) >= 100; }
-        catch (_) { return false; }
-    })();
-
-    const show = isAdminVisible || curateVisible;
-    const close = useCallback(() => setOpen(false), []);
-    useOutsidePopover(rootRef, open, close);
-    const handleToggle = useCallback(e => { stop(e); setOpen(v => !v); }, []);
-
-    const handleMarkDeleted = useCallback(e => {
-        stop(e);
-        setOpen(false);
-        setDeletePending(false);
-        setDeleteDialogOpen(true);
-    }, []);
-
-    const confirmMarkDeleted = useCallback(async () => {
-        if (!postId) { setDeleteDialogOpen(false); return; }
-        setDeletePending(true);
-        try { await tx.deletePost(postId); } catch (_) { /* noop */ }
-        if (typeof updatePost === 'function') {
-            try { updatePost(postId, { deleted: true }); } catch (_) { /* noop */ }
-        }
-        setDeleteDialogOpen(false);
-        setDeletePending(false);
-        console.debug('[mod] delete post network wide', { postId: String(postId).slice(0, 12) });
-    }, [postId, updatePost]);
-
-    const cancelMarkDeleted = useCallback(() => {
-        setDeleteDialogOpen(false);
-        setDeletePending(false);
-    }, []);
-
-    if (!post || !postId || !show) return null;
-
-    return (
-        <>
-            <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
-                <ModButton
-                    type="button"
-                    aria-label="Moderation menu"
-                    aria-haspopup="menu"
-                    aria-expanded={open}
-                    onClick={handleToggle}
+function renderCurateItem(item, close) {
+    if (item.type === 'select') {
+        return (
+            <MenuSelectRow key={item.key}>
+                {item.icon}
+                <MenuSelect
+                    aria-label={item.label}
+                    value={item.value}
+                    disabled={item.disabled}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                        e.stopPropagation();
+                        item.onSelect(e.target.value);
+                        close();
+                    }}
                 >
-                    <HiOutlineShieldExclamation />
-                </ModButton>
-                {open && (
-                    <Menu role="menu" aria-label="Moderation menu" $align={align}>
-                        {isAdminVisible && (
-                            <MenuItemBtn type="button" $danger onClick={handleMarkDeleted}>
-                                <HiOutlineShieldExclamation />
-                                <span>Delete network wide</span>
-                            </MenuItemBtn>
-                        )}
-                        {isAdminVisible && curateVisible && <MenuDivider />}
-                        {curateVisible && (
-                            <CurateMenuItems
-                                post={post}
-                                active={open}
-                                onDone={close}
-                                renderItem={(item) => (item.type === 'select' ? (
-                                    <MenuSelectRow key={item.key}>
-                                        {item.icon}
-                                        <MenuSelect
-                                            aria-label={item.label}
-                                            value={item.value}
-                                            disabled={item.disabled}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onChange={(e) => {
-                                                e.stopPropagation();
-                                                item.onSelect(e.target.value);
-                                                close();
-                                            }}
-                                        >
-                                            {item.options.map((opt) => (
-                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                        </MenuSelect>
-                                    </MenuSelectRow>
-                                ) : (
-                                    <MenuItemBtn
-                                        key={item.key}
-                                        type="button"
-                                        $danger={item.danger}
-                                        disabled={item.disabled}
-                                        onClick={item.onClick}
-                                    >
-                                        {item.icon}
-                                        <span>{item.label}</span>
-                                    </MenuItemBtn>
-                                ))}
-                            />
-                        )}
-                    </Menu>
-                )}
-            </PopoverRoot>
-            <ConfirmDialog
-                open={deleteDialogOpen}
-                title="Delete this post network wide?"
-                message="This will permanently remove this post from every feed. This action cannot be undone."
-                confirmLabel="Delete network wide"
-                confirmVariant="danger"
-                pending={deletePending}
-                onConfirm={confirmMarkDeleted}
-                onCancel={cancelMarkDeleted}
-            />
-        </>
+                    {item.options.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                </MenuSelect>
+            </MenuSelectRow>
+        );
+    }
+    return (
+        <MenuItemBtn
+            key={item.key}
+            type="button"
+            $danger={item.danger}
+            disabled={item.disabled}
+            onClick={item.onClick}
+        >
+            {item.icon}
+            <span>{item.label}</span>
+        </MenuItemBtn>
     );
 }
 
 // ─── BlockChip ──────────────────────────────────────────────────────────────
 //
-// Mirrors CardView's `ActionIconChip $danger` with the slashed-circle icon
-// + popover menu: Block user / Block post / Block topic / Report post.
-// Each destructive action opens a `ConfirmDialog` (same as CardView).
+// Same footer slot for everyone. Ordinary viewers get Block / Report.
+// Community curators get Curate tools + Report post, with a red shield.
 
 export function BlockChip({ post, state, updatePost, align = 'right' }) {
     const rootRef = useRef(null);
@@ -723,11 +663,25 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     const [pending, setPending] = useState(false);
 
     const { isLoggedIn, postId, topic, authorAddress, isOwnPost, authorLabel } = usePostIdentity(post, state);
+    const { visible: curateVisible } = usePostCurateActions(post);
+    const canReport = isLoggedIn && !isOwnPost;
 
     const close = useCallback(() => setOpen(false), []);
     useOutsidePopover(rootRef, open, close);
 
-    const handleToggle = useCallback(e => { stop(e); setOpen(v => !v); }, []);
+    const handleToggle = useCallback(e => {
+        stop(e);
+        setOpen(v => {
+            const next = !v;
+            if (next) {
+                console.debug('[curation] block chip open', {
+                    curate: curateVisible,
+                    postId: String(postId).slice(0, 12),
+                });
+            }
+            return next;
+        });
+    }, [curateVisible, postId]);
 
     const openDialog = useCallback((e, mode) => {
         stop(e);
@@ -777,41 +731,65 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     }, [postId, closeDialog]);
 
     if (!post || !postId) return null;
-    // Matches CardView: the block chip only shows for logged-in viewers on
-    // other users' posts.
-    if (!isLoggedIn || isOwnPost) return null;
+    if (!isLoggedIn) return null;
+    // Curators still need this chip on their own posts; everyone else only
+    // sees it on other people's posts (block / report).
+    if (isOwnPost && !curateVisible) return null;
+
+    const chipLabel = curateVisible ? 'Curation menu' : 'Block or report';
 
     return (
         <>
             <PopoverRoot ref={rootRef} onClick={stop} data-no-card-click>
                 <BlockIconChip
                     type="button"
+                    $curate={curateVisible}
                     aria-haspopup="menu"
                     aria-expanded={open}
-                    aria-label="Block or report"
-                    title="Block or report"
+                    aria-label={chipLabel}
+                    title={chipLabel}
                     onClick={handleToggle}
                 >
-                    <BlockGlyph />
+                    {curateVisible ? <HiOutlineShieldExclamation /> : <BlockGlyph />}
                 </BlockIconChip>
                 {open && (
-                    <Menu role="menu" aria-label="Block and report" $align={align}>
-                        <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_user')}>
-                            <HiOutlineNoSymbol />
-                            <span>Block user</span>
-                        </MenuItemBtn>
-                        <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_post')}>
-                            <HiOutlineEyeSlash />
-                            <span>Block post</span>
-                        </MenuItemBtn>
-                        <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_topic')}>
-                            <HiOutlineNoSymbol />
-                            <span>Block community</span>
-                        </MenuItemBtn>
-                        <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'report')}>
-                            <HiOutlineFlag />
-                            <span>Report post</span>
-                        </MenuItemBtn>
+                    <Menu role="menu" aria-label={chipLabel} $align={align}>
+                        {curateVisible && (
+                            <CurateMenuItems
+                                post={post}
+                                active={open}
+                                onDone={close}
+                                updatePost={updatePost}
+                                renderItem={(item) => renderCurateItem(item, close)}
+                            />
+                        )}
+                        {curateVisible && canReport && <MenuDivider />}
+                        {curateVisible && canReport && (
+                            <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'report')}>
+                                <HiOutlineFlag />
+                                <span>Report post</span>
+                            </MenuItemBtn>
+                        )}
+                        {!curateVisible && (
+                            <>
+                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_user')}>
+                                    <HiOutlineNoSymbol />
+                                    <span>Block user</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_post')}>
+                                    <HiOutlineEyeSlash />
+                                    <span>Block post</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_topic')}>
+                                    <HiOutlineNoSymbol />
+                                    <span>Block community</span>
+                                </MenuItemBtn>
+                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'report')}>
+                                    <HiOutlineFlag />
+                                    <span>Report post</span>
+                                </MenuItemBtn>
+                            </>
+                        )}
                     </Menu>
                 )}
             </PopoverRoot>

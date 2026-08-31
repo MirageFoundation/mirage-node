@@ -1,13 +1,11 @@
 import { usePostCurateActions } from '../../../logic/usePostCurateActions';
 
 /**
- * Curate action rows for the post Mod (shield) menu.
- *
  * Pass `active` when the menu is open so hide/show state is loaded then.
  * Callers supply `renderItem(item)`. No section headers.
  */
-export default function CurateMenuItems({ post, onDone, renderItem, active = false }) {
-    const { visible, items, loading, modError } = usePostCurateActions(post, { active });
+export default function CurateMenuItems({ post, onDone, renderItem, active = false, updatePost }) {
+    const { visible, items, loading, modError } = usePostCurateActions(post, { active, updatePost });
     if (!visible || typeof renderItem !== 'function') return null;
     if (!active) return null;
     if (loading && items.length === 0) return null;

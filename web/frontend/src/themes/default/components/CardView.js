@@ -13,11 +13,9 @@ import {
     HiOutlineHashtag,
     HiOutlineGift,
     HiOutlineSparkles,
-    HiOutlineNoSymbol,
-    HiOutlineFlag,
-    HiOutlineEyeSlash,
     HiOutlineClipboardDocument,
     HiOutlineArrowDownTray,
+    HiOutlineShieldExclamation,
 } from "react-icons/hi2";
 
 import { getThemeFamily } from "../../../registry/theme";
@@ -34,8 +32,9 @@ import MarkdownRenderer from "./MarkdownRenderer";
 import ConfirmDialog from "./ConfirmDialog";
 import Tooltip from "./Tooltip";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "./GiftDialogs";
-import ContentTagBadge from "./ContentTagBadge";
-import { ModMenuChip } from "./PostMenu";
+import ContentTagBadge, { ThreadLockMark } from "./ContentTagBadge";
+import { BlockChip } from "./PostMenu";
+import { PostLensPicker } from "./CurationLensPicker";
 import usePostGifts from "../../../logic/usePostGifts";
 import { updateNotification } from "../../../utils/notifications";
 import { formatTimeStamp } from "../../../logic/useViewPost";
@@ -535,13 +534,6 @@ const EllipsisIcon = (p) => (
     </svg>
 );
 
-// Block / flag icon for the action-row block button.
-const BlockIcon = (p) => (
-    <svg viewBox="0 0 24 24" aria-hidden="true" {...p}>
-        <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 0 1-6.3-12.9L16.9 18.3A7.96 7.96 0 0 1 12 20zm6.3-3.1L7.1 5.7A8 8 0 0 1 18.3 16.9z" fill="currentColor" />
-    </svg>
-);
-
 /* Share success feedback is now inline on the share button itself
  * ($success state on ActionIconChip swaps icon → check + "Link copied"
  * label). The old bottom toast was removed to match the profile-card
@@ -625,7 +617,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const [menuOpen, setMenuOpen] = useState(false);
     const [followOpen, setFollowOpen] = useState(false);
-    const [blockOpen, setBlockOpen] = useState(false);
+    const [lensOpen, setLensOpen] = useState(false);
     const [shareCopied, setShareCopied] = useState(false);
     const [blurOverride, setBlurOverride] = useState(false);
     const [followOverride, setFollowOverride] = useState(null);
@@ -635,7 +627,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const menuRef = useRef(null);
     const followRef = useRef(null);
-    const blockRef = useRef(null);
     const feedReasonRef = useRef(null);
 
     const [blurSensitive, setBlurSensitive] = useState(() => {
@@ -660,18 +651,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     // Close popovers on outside click / Escape.
     useEffect(() => {
-        const anyOpen = menuOpen || followOpen || blockOpen;
+        const anyOpen = menuOpen || followOpen || lensOpen;
         if (!anyOpen) return undefined;
         const closeAll = () => {
             setMenuOpen(false);
             setFollowOpen(false);
-            setBlockOpen(false);
         };
         const handler = (e) => {
             const t = e.target;
             if (menuOpen && menuRef.current && menuRef.current.contains(t)) return;
             if (followOpen && followRef.current && followRef.current.contains(t)) return;
-            if (blockOpen && blockRef.current && blockRef.current.contains(t)) return;
             closeAll();
         };
         const key = (e) => { if (e.key === 'Escape') closeAll(); };
@@ -681,7 +670,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             document.removeEventListener('mousedown', handler);
             document.removeEventListener('keydown', key);
         };
-    }, [menuOpen, followOpen, blockOpen]);
+    }, [menuOpen, followOpen, lensOpen]);
 
     // Clear flash flag after animation.
     useEffect(() => {
@@ -698,6 +687,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const viewerAddress = state?.publicKey || '';
     const isLoggedIn = !!viewerAddress && viewerAddress !== 'guest';
     const isOwnPost = isLoggedIn && safePost.user_id === state?.publicKey;
+    const isAdminVisible = (() => {
+        if (!isLoggedIn || isOwnPost) return false;
+        try { return Number(Storage.load('user_level', '0')) >= 100; }
+        catch (_) { return false; }
+    })();
 
     const postId = safePost.post_id ? String(safePost.post_id) : '';
     const topic = typeof safePost.topic === 'string' ? safePost.topic : '';
@@ -743,6 +737,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const hasTag = !!(safePost.tag && String(safePost.tag).trim());
     const normalizedTag = hasTag ? normalizeTag(String(safePost.tag).trim()) : '';
+    const threadLocked = !!safePost.thread_locked;
     const shouldBlurMedia = hasMedia && blurSensitive && hasTag && !blurOverride;
 
     const displayBody = useMemo(() => {
@@ -761,14 +756,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     // Track whether any popover is open so we can raise this card's
     // `z-index` above sibling cards (fix for dropdown rendering behind the
     // next card in the feed).
-    const anyMenuOpen = menuOpen || followOpen || blockOpen;
+    const anyMenuOpen = menuOpen || followOpen || lensOpen;
 
     // ─── Handlers ──────────────────────────────────────────────────────────
 
     const closeAllMenus = useCallback(() => {
         setMenuOpen(false);
         setFollowOpen(false);
-        setBlockOpen(false);
     }, []);
 
     const handleCardClick = useCallback((e) => {
@@ -926,14 +920,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     /**
      * Confirmation dialogs (06.3 polish round).
      *
-     * Replaces the previous inline `tx.*` + `window.prompt()` handlers with
-     * a single `activeDialog` state machine. The menu triggers set the
-     * dialog mode; the actual tx fires from the dialog's `onConfirm`.
-     * This lets us share one `ConfirmDialog` across 4 destructive actions
-     * (block user/post/topic + report) and guarantees the Cancel button
-     * works uniformly (resetting `activeDialog` to `null`).
+     * Own-post delete and admin network-wide delete share this state
+     * machine. Block / report live on BlockChip.
      */
-    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_topic' | 'report' | 'delete_post' | null
+    const [activeDialog, setActiveDialog] = useState(null); // 'delete_post' | 'delete_network' | null
     const [dialogPending, setDialogPending] = useState(false);
 
     const openDialog = useCallback((mode) => {
@@ -948,51 +938,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setDialogPending(false);
     }, []);
 
-    const handleBlockUser = useCallback(() => openDialog('block_user'), [openDialog]);
-    const handleBlockPost = useCallback(() => openDialog('block_post'), [openDialog]);
-    const handleBlockTopic = useCallback(() => openDialog('block_topic'), [openDialog]);
-    const handleReport = useCallback(() => openDialog('report'), [openDialog]);
-
-    const confirmBlockUser = useCallback(async () => {
-        if (!authorAddress) { closeDialog(); return; }
-        setDialogPending(true);
-        try { await tx.blockUser(authorAddress, true); } catch (_) { /* noop */ }
-        if (typeof updatePost === 'function' && postId) {
-            try { updatePost(postId, { blocked: true }); } catch (_) { /* noop */ }
-        }
-        closeDialog();
-    }, [authorAddress, postId, updatePost, closeDialog]);
-
-    const confirmBlockPost = useCallback(async () => {
-        setDialogPending(true);
-        try { await tx.blockPost(postId, true); } catch (_) { /* noop */ }
-        if (typeof updatePost === 'function') {
-            try { updatePost(postId, { hidden_client: true }); } catch (_) { /* noop */ }
-        }
-        closeDialog();
-    }, [postId, updatePost, closeDialog]);
-
-    const confirmBlockTopic = useCallback(async () => {
-        if (!topic) { closeDialog(); return; }
-        setDialogPending(true);
-        try { await tx.blockTopic(topic); } catch (_) { /* noop */ }
-        closeDialog();
-    }, [topic, closeDialog]);
-
-    const confirmReport = useCallback(async (reason) => {
-        const trimmed = String(reason || '').trim();
-        if (!trimmed) return; // ConfirmDialog also guards this via requireReason
-        setDialogPending(true);
-        try { await tx.reportPost(postId, trimmed); } catch (_) { /* noop */ }
-        closeDialog();
-    }, [postId, closeDialog]);
-
     const handleEdit = useCallback(() => {
         closeAllMenus();
         navigate(`/create_post?post_id=${postId}&edit=true`);
     }, [closeAllMenus, navigate, postId]);
 
     const handleDelete = useCallback(() => openDialog('delete_post'), [openDialog]);
+    const handleNetworkDelete = useCallback(() => openDialog('delete_network'), [openDialog]);
 
     const confirmDeletePost = useCallback(async () => {
         if (!postId) { closeDialog(); return; }
@@ -1099,6 +1051,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     <TopicLink to={communityPath(topic)} onClick={stop}>
                         {communityLabel(topic)}
                     </TopicLink>
+                    <PostLensPicker
+                        community={topic}
+                        viewer={viewerAddress}
+                        hintLens={post.lens}
+                        onOpenChange={setLensOpen}
+                    />
                     <HeaderDot>·</HeaderDot>
                     <UserLink
                         to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
@@ -1248,6 +1206,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <ContentTagBadge tag={normalizedTag} />
                         </>
                     )}
+                    {threadLocked && (
+                        <>
+                            <HeaderDot>·</HeaderDot>
+                            <ThreadLockMark />
+                        </>
+                    )}
                     {post?.awards?.length > 0 && (
                         <>
                             <HeaderDot>·</HeaderDot>
@@ -1272,7 +1236,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 aria-expanded={followOpen}
                                 onClick={() => {
                                     setMenuOpen(false);
-                                    setBlockOpen(false);
                                     setFollowOpen((v) => !v);
                                 }}
                             >
@@ -1305,7 +1268,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </PopoverRoot>
                     )}
-                    <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                     <PopoverRoot ref={menuRef} onClick={stop}>
                         <MoreButton
                             type="button"
@@ -1314,7 +1276,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             aria-expanded={menuOpen}
                             onClick={() => {
                                 setFollowOpen(false);
-                                setBlockOpen(false);
                                 setMenuOpen((v) => !v);
                             }}
                         >
@@ -1376,6 +1337,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         </MenuItemBtn>
                                     </>
                                 )}
+                                {isAdminVisible && (
+                                    <MenuItemBtn type="button" $danger onClick={handleNetworkDelete}>
+                                        <HiOutlineShieldExclamation />
+                                        <span>Delete network wide</span>
+                                    </MenuItemBtn>
+                                )}
                             </Menu>
                         )}
                     </PopoverRoot>
@@ -1412,45 +1379,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {formatCompact(commentCount)}
                 </ActionPill>
                 <Spacer />
-                {isLoggedIn && !isOwnPost && (
-                    <PopoverRoot ref={blockRef} onClick={stop}>
-                        <ActionIconChip
-                            type="button"
-                            $danger
-                            aria-haspopup="menu"
-                            aria-expanded={blockOpen}
-                            aria-label="Block or report"
-                            title="Block or report"
-                            onClick={() => {
-                                setMenuOpen(false);
-                                setFollowOpen(false);
-                                setBlockOpen((v) => !v);
-                            }}
-                        >
-                            <BlockIcon style={{ width: 18, height: 18 }} />
-                        </ActionIconChip>
-                        {blockOpen && (
-                            <Menu role="menu" aria-label="Block and report" $align="right">
-                                <MenuItemBtn type="button" $danger onClick={handleBlockUser}>
-                                    <HiOutlineNoSymbol />
-                                    <span>Block user</span>
-                                </MenuItemBtn>
-                                <MenuItemBtn type="button" $danger onClick={handleBlockPost}>
-                                    <HiOutlineEyeSlash />
-                                    <span>Block post</span>
-                                </MenuItemBtn>
-                                <MenuItemBtn type="button" $danger onClick={handleBlockTopic}>
-                                    <HiOutlineNoSymbol />
-                                    <span>Block community</span>
-                                </MenuItemBtn>
-                                <MenuItemBtn type="button" $danger onClick={handleReport}>
-                                    <HiOutlineFlag />
-                                    <span>Report post</span>
-                                </MenuItemBtn>
-                            </Menu>
-                        )}
-                    </PopoverRoot>
-                )}
+                <BlockChip post={post} state={state} updatePost={updatePost} align="right" />
                 <ActionIconChip
                     type="button"
                     onClick={handleShare}
@@ -1473,62 +1402,21 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             </ActionRow>
 
             {footer}
-            {/**
-              * Destructive-action dialogs (block post/user/topic + report).
-              * Rendered unconditionally so the `open` prop owns mount/unmount
-              * via `ConfirmDialog`'s internal null-return + fade animation.
-              * All four share the same `dialogPending` flag so the Processing
-              * state is consistent regardless of which action is active.
-              */}
-            <ConfirmDialog
-                open={activeDialog === 'block_user'}
-                title={`Block @${authorDisplay}?`}
-                message="Posts and replies from this user will be hidden from your feeds, comments, and inbox. You can unblock them later from Settings → Blocks or their profile."
-                confirmLabel="Block user"
-                confirmVariant="danger"
-                pending={dialogPending}
-                onConfirm={confirmBlockUser}
-                onCancel={closeDialog}
-            />
-            <ConfirmDialog
-                open={activeDialog === 'block_post'}
-                title="Block this post?"
-                message="This post will be hidden from every feed you see. The author won't be notified."
-                confirmLabel="Block post"
-                confirmVariant="danger"
-                pending={dialogPending}
-                onConfirm={confirmBlockPost}
-                onCancel={closeDialog}
-            />
-            <ConfirmDialog
-                open={activeDialog === 'block_topic'}
-                title={`Block ${communityLabel(topic || 'community')}?`}
-                message="Posts in this community will stop appearing in your Home and discovery feeds."
-                confirmLabel="Block community"
-                confirmVariant="danger"
-                pending={dialogPending}
-                onConfirm={confirmBlockTopic}
-                onCancel={closeDialog}
-            />
-            <ConfirmDialog
-                open={activeDialog === 'report'}
-                title="🚨 Report illegal content only"
-                message="Moderators only act on illegal content (CSAM, credible violent threats, doxxing, etc). Reports about the wrong community, untagged adult content, low quality, or anything you just don't like will be dismissed. Hide those from your feed with blocks and community filters."
-                confirmLabel="Report"
-                confirmVariant="warning"
-                pending={dialogPending}
-                requireReason
-                reasonPlaceholder="Describe the illegality (e.g. CSAM, credible threat, doxxing)"
-                reasonMaxLength={200}
-                wide
-                onConfirm={confirmReport}
-                onCancel={closeDialog}
-            />
             <ConfirmDialog
                 open={activeDialog === 'delete_post'}
                 title="Delete this post?"
                 message="This will permanently remove your post from every feed. This action cannot be undone."
                 confirmLabel="Delete post"
+                confirmVariant="danger"
+                pending={dialogPending}
+                onConfirm={confirmDeletePost}
+                onCancel={closeDialog}
+            />
+            <ConfirmDialog
+                open={activeDialog === 'delete_network'}
+                title="Delete this post network wide?"
+                message="This will permanently remove this post from every feed. This action cannot be undone."
+                confirmLabel="Delete network wide"
                 confirmVariant="danger"
                 pending={dialogPending}
                 onConfirm={confirmDeletePost}
@@ -1599,6 +1487,10 @@ export default memo(CardView, (prev, next) => {
         p?.direction === n?.direction &&
         p?.flash === n?.flash &&
         p?.deleted === n?.deleted &&
-        p?.hidden_client === n?.hidden_client
+        p?.hidden_client === n?.hidden_client &&
+        p?.tag === n?.tag &&
+        p?.thread_locked === n?.thread_locked &&
+        p?.lens?.effective_team_id === n?.lens?.effective_team_id &&
+        p?.lens?.effective_mode === n?.lens?.effective_mode
     );
 });

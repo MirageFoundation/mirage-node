@@ -113,14 +113,14 @@ def _test_curation_visibility() -> None:
         "team_hidden_post": False,
         "team_hidden_author": False,
         "team_subscriber_only": False,
-        "lock_sequence": None,
+        "lock_windows": [],
         "temporary_raw": False,
         "node_blocked": False,
     }
     default = resolve_visibility(**base)
     raw = resolve_visibility(**{**base, "stored_mode": MODE_RAW, "team_hidden_post": True})
     stale = resolve_visibility(**{**base, "stored_mode": MODE_PINNED, "stored_team_id": None})
-    lock = resolve_visibility(**{**base, "lock_sequence": 11})
+    lock = resolve_visibility(**{**base, "lock_windows": [(11, None)]})
     paid = resolve_visibility(**{**base, "team_subscriber_only": True, "was_subscriber_at_creation": False})
     if (
         default["visible"]
@@ -137,6 +137,32 @@ def _test_curation_visibility() -> None:
             "backend_hardening.curation_visibility",
             f"default={default} raw={raw} stale={stale} lock={lock} paid={paid}",
         )
+
+    # A thread can be locked and unlocked repeatedly. Every window a past unlock
+    # closed keeps hiding the replies written inside it, because unlocking a
+    # thread reopens it for new replies rather than publishing the old ones.
+    # post_sequence here is 12; the windows below straddle it deliberately.
+    problems = []
+    for label, windows, want_visible in (
+        ("before_first_lock", [(12, 20)], True),
+        ("inside_closed_window", [(11, 13)], False),
+        ("on_closed_window_end", [(5, 12)], False),
+        ("after_closed_window", [(5, 11)], True),
+        ("between_two_windows", [(3, 8), (14, 19)], True),
+        ("inside_second_window", [(3, 8), (10, 19)], False),
+        ("inside_open_window", [(3, 8), (11, None)], False),
+        ("before_open_window", [(3, 8), (12, None)], True),
+    ):
+        got = resolve_visibility(**{**base, "lock_windows": windows})
+        if got["visible"] is not want_visible:
+            problems.append(
+                f"{label}: windows={windows} visible={got['visible']} reason={got['reason']!r} "
+                f"(wanted visible={want_visible})"
+            )
+    if problems:
+        _fail("backend_hardening.thread_lock_windows", "; ".join(problems))
+    else:
+        _pass("backend_hardening.thread_lock_windows")
 
 
 class _TagCursor:
@@ -279,6 +305,11 @@ def _test_thread_lock_is_read_only() -> None:
     keeper = keeper_path.read_text(encoding="utf-8")
     if "KeyThreadLock" not in keeper:
         problems.append("thread lock key no longer written by the keeper")
+    # The indexer's window list is bounded by this cap and by nothing else. It
+    # cannot be trimmed there without republishing or over-hiding replies, so
+    # losing the chain-side reject makes the list unbounded.
+    if "MaxThreadLockWindows" not in keeper:
+        problems.append("thread lock window cap gone; the indexer window list is unbounded")
 
     post_route = (repo / "web" / "backend" / "routes" / "core.py").read_text(encoding="utf-8")
     if "curation_locks" in post_route:
@@ -287,10 +318,22 @@ def _test_thread_lock_is_read_only() -> None:
     curation = (repo / "web" / "backend" / "curation.py").read_text(encoding="utf-8")
     if "def thread_locked_for_lens" not in curation:
         problems.append("thread_locked_for_lens missing; the client cannot tell the user")
+    # A lock is a timed cut-off, and unlocking must not republish what was
+    # written while the thread was shut. The chain keeps only the open cut-off,
+    # so the closed windows live in the indexer and are read back here.
+    if "def _inside_lock_window" not in curation or "lock_windows" not in curation:
+        problems.append("lock windows gone; unlocking a thread republishes its locked replies")
+    processor = (repo / "indexer" / "message_processor.py").read_text(encoding="utf-8")
+    if "unlock_sequence" not in processor:
+        problems.append("indexer ignores unlock_sequence; closed windows cannot be recorded")
+    if "curation_locks.lock_windows || EXCLUDED.lock_windows" not in processor:
+        problems.append("indexer no longer appends the closed window on unlock")
 
     public = (repo / "web" / "backend" / "routes" / "public.py").read_text(encoding="utf-8")
     if '"thread_locked"' not in public:
         problems.append("get_comments does not report thread_locked")
+    if 'post["thread_locked"]' not in curation:
+        problems.append("filter_posts does not stamp thread_locked for the feed")
 
     view = view_path.read_text(encoding="utf-8")
     for needle, why in (
@@ -316,7 +359,7 @@ def _test_legacy_posts_reach_current_scope() -> None:
     history — became unreachable with no navigation path to it.
 
     They are curated like any other post rather than waved through. Only the
-    thread-lock cutoff and the subscriber-only rule read the metadata the chain
+    thread-lock windows and the subscriber-only rule read the metadata the chain
     never recorded for them, and resolve_visibility already guards both; hiding a
     post or a user keys on the txhash, author and community, which legacy posts
     do have. Exempting them would let a curator hide a user and still see them.
@@ -370,7 +413,7 @@ def _test_legacy_posts_reach_current_scope() -> None:
         team_hidden_post=False,
         team_hidden_author=False,
         team_subscriber_only=False,
-        lock_sequence=None,
+        lock_windows=[],
         temporary_raw=False,
         node_blocked=False,
     )
@@ -380,7 +423,7 @@ def _test_legacy_posts_reach_current_scope() -> None:
         ("legacy_hidden_user", {"team_hidden_author": True}, False, "team_hidden_author"),
         # No post_sequence means no way to tell whether it predates the lock, so
         # the lock must not hide it rather than guess.
-        ("legacy_lock_cannot_fire", {"lock_sequence": 5}, True, "ok"),
+        ("legacy_lock_cannot_fire", {"lock_windows": [(5, None)]}, True, "ok"),
     ):
         got = resolve_visibility(**{**legacy, **overrides})
         if got["visible"] is not want_visible or got["reason"] != want_reason:
@@ -412,7 +455,7 @@ def test_backend_hardening(backend: str):
     _test_legacy_posts_reach_current_scope()
 
     if not _check_local_docker():
-        _skip("backend_hardening.container_probes", "requires local docker")
+        _fail("backend_hardening.container_probes", "local docker required")
         return
 
     # Community ownership, topics and agents all went away in v1.39.0, and the

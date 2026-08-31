@@ -15,7 +15,7 @@ function validateDetail(data, slug) {
 export function useCommunityDetail(community, viewer = '', enabled = true) {
     const slug = enabled ? requireCommunitySlug(community) : '';
     const [detail, setDetail] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(enabled);
     const [error, setError] = useState('');
     // Drops out-of-order HTTP responses so a slow refresh after a rapid lens
     // switch cannot overwrite a newer preference the indexer already returned.
@@ -67,7 +67,12 @@ export function useCommunityDetail(community, viewer = '', enabled = true) {
     }, [enabled, slug, viewer]);
 
     useEffect(() => {
-        if (!enabled) return undefined;
+        if (!enabled) {
+            setDetail(null);
+            setLoading(false);
+            setError('');
+            return undefined;
+        }
         let active = true;
         requestSeq.current += 1;
         refresh().catch(() => {
@@ -76,7 +81,7 @@ export function useCommunityDetail(community, viewer = '', enabled = true) {
         const onUpdate = (event) => {
             const changed = String(event?.detail?.community || '').toLowerCase();
             if (!changed || changed === slug) {
-                refresh({ background: true }).catch(() => {});
+                refresh({ background: true }).catch(() => { });
             }
         };
         window.addEventListener('curationUpdated', onUpdate);

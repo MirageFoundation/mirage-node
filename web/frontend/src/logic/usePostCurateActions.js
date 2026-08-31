@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     HiOutlineEye,
     HiOutlineEyeSlash,
@@ -16,6 +16,7 @@ import { updateNotification } from '../utils/notifications';
 import { usePendingCuration } from './usePendingCuration';
 import { useViewerCuratorMembership } from './useViewerCuratorMembership';
 import { TAG_OPTIONS } from './useCreatePost';
+import { viewingTeamId as viewingTeamIdOf } from '../utils/curation';
 
 // Distinct from the '' tag: '' is the curator saying "untagged", this is the
 // curator having no opinion so the community tag and author tag apply again.
@@ -24,6 +25,14 @@ const POST_TAG_OPTIONS = [
     { value: INHERIT_TAG, label: 'No override' },
     ...TAG_OPTIONS.map(({ value, label }) => ({ value, label: value ? label : 'Untagged' })),
 ];
+
+// Survives the curate menu unmounting on close, so a reopen that beats the
+// indexer still shows the tag we just wrote instead of the previous one.
+const optimisticByPost = new Map();
+
+function optimisticCacheKey(community, teamId, postId) {
+    return `${community}:${teamId}:${postId}`;
+}
 
 function postCommunity(post) {
     const topic = typeof post?.topic === 'string' ? post.topic.trim() : '';
@@ -34,28 +43,41 @@ function postCommunity(post) {
 
 /**
  * Curate actions for a single post, visible only when the viewer is a
- * curator of a team in that post's community.
+ * curator of a team in that post's community AND the post is currently
+ * being viewed through that team's lens (not uncensored, not another team).
  *
  * Pass `active` (menu open) so moderation state is fetched only then.
  * Each pair is a toggle: Hide XOR Show, never both.
  */
-export function usePostCurateActions(post, { active = false } = {}) {
+export function usePostCurateActions(post, { active = false, updatePost } = {}) {
     const community = postCommunity(post);
     const postId = post?.post_id ? String(post.post_id).toLowerCase() : '';
+    const postKey = post?.post_id ? String(post.post_id) : '';
     const author = String(post?.user_id || post?.author || '').trim().toLowerCase();
     const rootHash = String(post?.root_post_id || postId || '').trim().toLowerCase();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const { teamId, teamName, isCurator, loading: membershipLoading } = useViewerCuratorMembership(community);
+    const viewingTeamId = viewingTeamIdOf(post);
+    const viewingAsCuratorTeam = isCurator && !!teamId && viewingTeamId === teamId;
     const { getInfo, getStatus } = usePendingCuration();
-    const [modState, setModState] = useState(null);
+    const cacheKey = community && teamId && postId ? optimisticCacheKey(community, teamId, postId) : '';
+    const storedOptimistic = cacheKey ? optimisticByPost.get(cacheKey) : null;
+    const [modState, setModState] = useState(storedOptimistic?.modState || null);
     const [modError, setModError] = useState('');
     const [modLoading, setModLoading] = useState(false);
+    // Pending optimistic patch. A fetch that beats the indexer must not
+    // overwrite these fields, or the menu snaps back after "Transaction submitted".
+    const optimisticRef = useRef(storedOptimistic?.patch || null);
+    // Effective tag while this team had no override — used when the curator
+    // later picks "No override" so the badge can revert without a round-trip.
+    const inheritedTagRef = useRef(storedOptimistic?.inheritedTag);
 
     useEffect(() => {
-        if (!active || !isCurator || !teamId || !community || !postId || !author || !viewer || viewer === 'guest') {
+        if (!active || !viewingAsCuratorTeam || !teamId || !community || !postId || !author || !viewer || viewer === 'guest') {
             return undefined;
         }
         let cancelled = false;
+        const tagAtOpen = typeof post?.tag === 'string' ? post.tag : '';
         setModLoading(true);
         setModError('');
         console.debug('[curation] load moderation state', {
@@ -80,19 +102,55 @@ export function usePostCurateActions(post, { active = false } = {}) {
                     || typeof data?.thread_locked !== 'boolean') {
                     throw new Error('Invalid moderation state response');
                 }
-                setModState({
+                const fetchedTag = typeof data.post_tag === 'string' ? data.post_tag : null;
+                if (fetchedTag === null && inheritedTagRef.current === undefined) {
+                    inheritedTagRef.current = tagAtOpen;
+                }
+                const pending = optimisticRef.current;
+                const next = {
                     postHidden: data.post_hidden,
                     userHidden: data.user_hidden,
                     threadLocked: data.thread_locked,
                     // null means this team has no tag opinion on the post; ''
                     // means a curator marked it untagged.
-                    postTag: typeof data.post_tag === 'string' ? data.post_tag : null,
-                });
+                    postTag: fetchedTag,
+                };
+                if (pending && typeof pending === 'object') {
+                    const confirmed = Object.keys(pending).every((key) => next[key] === pending[key]);
+                    if (confirmed) {
+                        optimisticRef.current = null;
+                        if (cacheKey) optimisticByPost.delete(cacheKey);
+                        console.debug('[curation] optimistic confirmed by fetch', {
+                            community,
+                            teamId,
+                            postId: postId.slice(0, 12),
+                            pending,
+                        });
+                    } else {
+                        Object.assign(next, pending);
+                        console.debug('[curation] keeping optimistic over stale fetch', {
+                            community,
+                            teamId,
+                            postId: postId.slice(0, 12),
+                            pending,
+                        });
+                    }
+                }
+                setModState(next);
                 setModError('');
             })
             .catch((err) => {
                 if (cancelled) return;
                 const message = String(err?.message || err);
+                if (optimisticRef.current) {
+                    console.error('[curation] moderation state failed, keeping optimistic', {
+                        community,
+                        teamId,
+                        error: message,
+                    });
+                    setModError('');
+                    return;
+                }
                 setModState(null);
                 setModError(message);
                 console.error('[curation] moderation state failed', {
@@ -105,32 +163,112 @@ export function usePostCurateActions(post, { active = false } = {}) {
                 if (!cancelled) setModLoading(false);
             });
         return () => { cancelled = true; };
-    }, [active, author, community, isCurator, postId, rootHash, teamId, viewer]);
+    }, [active, author, cacheKey, community, viewingAsCuratorTeam, postId, rootHash, teamId, viewer]);
+
+    const applyDisplayedTag = useCallback((nextTag, { optimistic } = {}) => {
+        if (typeof updatePost !== 'function' || !postKey) return;
+        const patch = { tag: nextTag };
+        if (optimistic) patch._optimisticTag = nextTag;
+        else patch._optimisticTag = undefined;
+        updatePost(postKey, patch);
+        console.debug('[curation] displayed tag', {
+            postId: postKey.slice(0, 12),
+            tag: nextTag,
+            optimistic: !!optimistic,
+        });
+    }, [postKey, updatePost]);
+
+    const applyDisplayedLock = useCallback((locked, { optimistic } = {}) => {
+        if (typeof updatePost !== 'function') return;
+        const keys = [postKey, rootHash, post?.root_post_id, post?.post_id]
+            .map((key) => String(key || '').trim())
+            .filter(Boolean);
+        const patch = { thread_locked: !!locked };
+        if (optimistic) patch._optimisticLock = !!locked;
+        else patch._optimisticLock = undefined;
+        for (const key of new Set(keys)) {
+            updatePost(key, patch);
+        }
+        console.debug('[curation] displayed lock', {
+            postId: (postKey || rootHash).slice(0, 12),
+            locked: !!locked,
+            optimistic: !!optimistic,
+        });
+    }, [post, postKey, rootHash, updatePost]);
 
     const run = useCallback(async (label, operation, optimistic) => {
+        const snapshot = modState;
+        const previousTag = typeof post?.tag === 'string' ? post.tag : '';
+        const previousLock = (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'threadLocked'))
+            ? !optimistic.threadLocked
+            : !!post?.thread_locked;
+        if (optimistic && typeof optimistic === 'object') {
+            optimisticRef.current = { ...(optimisticRef.current || {}), ...optimistic };
+            const nextMod = {
+                postHidden: false,
+                userHidden: false,
+                threadLocked: false,
+                postTag: null,
+                ...(modState || {}),
+                ...optimistic,
+            };
+            setModState(nextMod);
+            if (cacheKey) {
+                optimisticByPost.set(cacheKey, {
+                    patch: optimisticRef.current,
+                    inheritedTag: inheritedTagRef.current,
+                    modState: nextMod,
+                });
+            }
+            if (Object.prototype.hasOwnProperty.call(optimistic, 'postTag')) {
+                const nextTag = optimistic.postTag === null
+                    ? (inheritedTagRef.current !== undefined ? inheritedTagRef.current : previousTag)
+                    : String(optimistic.postTag);
+                applyDisplayedTag(nextTag, { optimistic: true });
+            }
+            if (Object.prototype.hasOwnProperty.call(optimistic, 'threadLocked')) {
+                applyDisplayedLock(optimistic.threadLocked, { optimistic: true });
+            }
+            console.debug('[curation] optimistic apply', {
+                label,
+                community,
+                teamId,
+                postId: postId.slice(0, 12),
+                optimistic,
+            });
+        }
+        const revert = () => {
+            optimisticRef.current = null;
+            if (cacheKey) optimisticByPost.delete(cacheKey);
+            if (snapshot) setModState(snapshot);
+            if (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'postTag')) {
+                applyDisplayedTag(previousTag, { optimistic: false });
+            }
+            if (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'threadLocked')) {
+                applyDisplayedLock(previousLock, { optimistic: false });
+            }
+            console.debug('[curation] optimistic revert', {
+                label,
+                community,
+                teamId,
+                postId: postId.slice(0, 12),
+            });
+        };
         try {
             console.debug('[curation] post curate action', { label, community, teamId, postId: postId.slice(0, 12) });
             const result = await operation();
             if (!result?.success) {
+                revert();
                 updateNotification(formatError(result), 4);
                 return;
             }
-            if (optimistic && typeof optimistic === 'object') {
-                setModState((prev) => ({
-                    postHidden: false,
-                    userHidden: false,
-                    threadLocked: false,
-                    postTag: null,
-                    ...(prev || {}),
-                    ...optimistic,
-                }));
-            }
         } catch (err) {
+            revert();
             const message = err instanceof Error ? err.message : formatError(err);
             console.error('[curation] post curate failed', { label, error: message });
             updateNotification(message, 4);
         }
-    }, [community, postId, teamId]);
+    }, [applyDisplayedLock, applyDisplayedTag, cacheKey, community, modState, post, postId, teamId]);
 
     const items = useMemo(() => {
         if (!isCurator || !teamId || !community || !postId || !modState) return [];
@@ -246,7 +384,7 @@ export function usePostCurateActions(post, { active = false } = {}) {
     }, [author, community, getInfo, getStatus, isCurator, modState, postId, rootHash, run, teamId]);
 
     return {
-        visible: isCurator && !!teamId && !!community && !!postId,
+        visible: viewingAsCuratorTeam && !!community && !!postId,
         loading: membershipLoading || (active && modLoading),
         modError,
         teamId,

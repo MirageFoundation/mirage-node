@@ -9,6 +9,7 @@ import {
     CURATION_MODE,
     LENS,
     formatSubscriberCount,
+    lensHintLabel,
 } from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
 import FeedControlButton from './FeedControlButton';
@@ -35,6 +36,13 @@ const PickerButton = styled(FeedControlButton)`
        shows in full instead of being cut to an ellipsis. */
     max-width: 100%;
     font-size: var(--community-header-control-font-size, 0.68rem);
+    ${({ $compact }) => $compact ? `
+        height: auto;
+        padding: 0 0.2rem;
+        font-size: inherit;
+        font-weight: 500;
+        max-width: 9rem;
+    ` : ''}
 `;
 
 const PickerLabel = styled.span`
@@ -151,8 +159,8 @@ function sortTeamsBySubscribers(teams) {
 
 // Default stays a fixed label — the concrete default team name belongs in the
 // menu meta ("Currently …"), not on the trigger. Pinned teams keep their name.
-function selectionLabel(selection, teams) {
-    if (selection === LENS.DEFAULT) return 'Default Curation Team';
+function selectionLabel(selection, teams, compact = false) {
+    if (selection === LENS.DEFAULT) return compact ? 'Default' : 'Default Curation Team';
     if (selection === LENS.RAW) return 'Uncensored';
     const [lens, rawTeamId] = selection.split(':');
     if (lens !== LENS.TEAM) throw new Error(`Invalid curation selection: ${selection}`);
@@ -162,14 +170,25 @@ function selectionLabel(selection, teams) {
     return team.name;
 }
 
-export default function CurationLensPicker({ community, viewer, onChange }) {
+export default function CurationLensPicker({
+    community,
+    viewer,
+    onChange,
+    compact = false,
+    lazy = false,
+    hintLens = null,
+    onOpenChange,
+    applyOnLoad = true,
+}) {
     const navigate = useNavigate();
     const rootRef = useRef(null);
     const [open, setOpen] = useState(false);
+    const [activated, setActivated] = useState(!lazy);
     const [optimisticSelection, setOptimisticSelection] = useState(null);
     const viewerAddr = viewer && viewer !== 'guest' ? String(viewer).toLowerCase() : '';
-    const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr);
-    const { teams, loading: teamsLoading } = useCurationTeams(community, { viewer: viewerAddr });
+    const hooksEnabled = Boolean(community) && activated;
+    const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr, hooksEnabled);
+    const { teams, loading: teamsLoading } = useCurationTeams(community, { viewer: viewerAddr, enabled: hooksEnabled });
     const { isCurator, teamId: curatorTeamId } = useViewerCuratorMembership(community);
     const { selectLens, pending, pendingStatus, error } = useCurationPreference(community, detail);
     const liveTeams = useMemo(() => teams.filter((team) => !team.deleted), [teams]);
@@ -192,18 +211,29 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
         return team;
     }, [curated, detail, detailLoading, liveTeams, selected, teamsLoading]);
 
+    const setPickerOpen = (next) => {
+        const value = typeof next === 'function' ? next(open) : next;
+        setOpen(value);
+        if (value) setActivated(true);
+        onOpenChange?.(value);
+    };
+
     useEffect(() => {
         setOpen(false);
         setOptimisticSelection(null);
-    }, [community]);
+        setActivated(!lazy);
+        onOpenChange?.(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [community, lazy]);
 
     useEffect(() => {
         if (!open) return undefined;
         const closeOutside = (event) => {
-            if (!rootRef.current?.contains(event.target)) setOpen(false);
+            if (!rootRef.current?.contains(event.target)) setPickerOpen(false);
         };
         document.addEventListener('pointerdown', closeOutside);
         return () => document.removeEventListener('pointerdown', closeOutside);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
     useEffect(() => {
@@ -220,14 +250,18 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     }, [authoritativeSelection, community, optimisticSelection]);
 
     useEffect(() => {
-        if (detailLoading || teamsLoading) return;
+        // Community header syncs the feed when stored preference loads.
+        // Post pickers must not: an empty detail looks like Default and
+        // snaps the thread back after the user already picked a team.
+        if (!applyOnLoad) return;
+        if (!activated || !detail || detailLoading || teamsLoading) return;
         const [lens, rawTeamId] = selected.split(':');
         console.debug('[lens] applying feed lens', { community, lens, teamId: rawTeamId || null, curated });
         onChange?.(lens, rawTeamId ? Number(rawTeamId) : null, activeTeam);
-    }, [activeTeam, community, curated, detailLoading, onChange, selected, teamsLoading]);
+    }, [activated, activeTeam, applyOnLoad, community, curated, detail, detailLoading, onChange, selected, teamsLoading]);
 
     const change = (selection) => {
-        setOpen(false);
+        setPickerOpen(false);
         if (selection === '__team_action__') {
             const destination = isCurator && curatorTeamId
                 ? `/c/${encodeURIComponent(community)}/teams/${curatorTeamId}`
@@ -240,6 +274,8 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
         const [lens, rawTeamId] = selection.split(':');
         const teamId = rawTeamId ? Number(rawTeamId) : null;
         setOptimisticSelection(selection);
+        console.debug('[lens] user selected', { community, lens, teamId, persist: joined });
+        onChange?.(lens, teamId, null);
         if (!joined) {
             console.debug('[lens] view selection (local preview)', { community, lens, teamId });
             return;
@@ -257,24 +293,34 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
     const defaultTeamName = String(detail?.default_team?.name || '').trim();
     const teamActionLabel = isCurator ? 'Manage my team…' : 'Create new…';
     const currentLabel = pendingStatus
-        || (loading ? 'Loading…' : selectionLabel(selected, rankedTeams));
+        || (loading ? 'Loading…' : (
+            (!activated && lazy)
+                ? lensHintLabel(hintLens)
+                : selectionLabel(selected, rankedTeams, compact)
+        ));
 
     return (
-        <Wrap aria-label="Community lens">
+        <Wrap
+            $compact={compact}
+            aria-label="Community lens"
+            data-no-card-click
+            onClick={(event) => event.stopPropagation()}
+        >
             <PickerRoot
                 ref={rootRef}
                 onKeyDown={(event) => {
-                    if (event.key === 'Escape') setOpen(false);
-                    if (event.key === 'ArrowDown') setOpen(true);
+                    if (event.key === 'Escape') setPickerOpen(false);
+                    if (event.key === 'ArrowDown') setPickerOpen(true);
                 }}
             >
                 <PickerButton
                     type="button"
+                    $compact={compact}
                     disabled={pending || loading}
                     aria-label="Curation lens"
                     aria-haspopup="listbox"
                     aria-expanded={open}
-                    onClick={() => setOpen((value) => !value)}
+                    onClick={() => setPickerOpen((value) => !value)}
                 >
                     <PickerLabel>{currentLabel}</PickerLabel>
                     <Chevron $open={open} aria-hidden="true" />
@@ -336,5 +382,23 @@ export default function CurationLensPicker({ community, viewer, onChange }) {
             </PickerRoot>
             {error && <Status>{error}</Status>}
         </Wrap>
+    );
+}
+
+/** Compact, lazy lens control for a post header. */
+export function PostLensPicker({ community, viewer, hintLens, onChange, onOpenChange }) {
+    const slug = String(community || '').trim();
+    if (!slug) return null;
+    return (
+        <CurationLensPicker
+            community={slug}
+            viewer={viewer}
+            compact
+            lazy
+            applyOnLoad={false}
+            hintLens={hintLens}
+            onChange={onChange}
+            onOpenChange={onOpenChange}
+        />
     );
 }

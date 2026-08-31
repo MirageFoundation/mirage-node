@@ -1050,7 +1050,7 @@ All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work th
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `username` | string | yes | `[A-Za-z0-9-]+`, length from `get_chain_config` |
+| `username` | string | yes | `[A-Za-z0-9][A-Za-z0-9-]*` (must start with a letter or number), length from `get_chain_config` |
 | `invite_code` | string | no | Required for new users if `registration_invite_code_required=true` (`XXXX-XXXX`) |
 | `referrer` | string | no | Optional `mirage1...` address for referral tracking |
 

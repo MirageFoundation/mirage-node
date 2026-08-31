@@ -130,33 +130,13 @@ def run(db, chain, logger):
                 f"chain_only={sorted(chain_team_keys - db_team_keys)}"
             )
 
-        cur.execute("SELECT owner FROM profiles WHERE effective_paid=TRUE ORDER BY owner")
-        paid_owners = [str(row[0]).strip().lower() for row in cur.fetchall()]
-        for owner in paid_owners:
-            runtime = chain.query_subscription_runtime(owner)
-            cur.execute(
-                """
-                UPDATE profiles
-                SET subscriber_quota_epoch=%s,
-                    subscriber_quota_used=%s,
-                    renewal_next_attempt=%s,
-                    renewal_last_attempt_epoch=%s,
-                    renewal_warning_expiry=%s,
-                    renewal_warning_sent=%s
-                WHERE LOWER(owner)=%s
-                """,
-                (
-                    runtime["quota_epoch"],
-                    runtime["quota_used"],
-                    runtime["renewal_next_attempt"],
-                    runtime["renewal_last_attempt_epoch"],
-                    runtime["renewal_expiry"],
-                    runtime["renewal_warning_sent"],
-                    owner,
-                ),
-            )
-            if cur.rowcount != 1:
-                raise RuntimeError(f"paid profile disappeared during runtime backfill: {owner}")
+        # Paid/relay quota projection lives in v1_39_0_quota_paid_backfill.
+        # This migration used to SELECT effective_paid=TRUE here, but that
+        # column is still the DEFAULT FALSE from v1_39_0_communities at this
+        # point in startup (KV sync runs only after all migrations), so the
+        # loop always projected 0 paid profiles on real upgrades. Keep the
+        # counter for the completion log/return string.
+        paid_owners: list[str] = []
 
         cur.execute(
             """

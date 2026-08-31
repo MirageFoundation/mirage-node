@@ -22,7 +22,7 @@ function validateTeam(team) {
 export function useCurationTeams(community, { includeDeleted = false, viewer = '', enabled = true } = {}) {
     const slug = enabled ? requireCommunitySlug(community) : '';
     const [teams, setTeams] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(enabled);
     const [error, setError] = useState('');
     const requestSeq = useRef(0);
 
@@ -68,13 +68,18 @@ export function useCurationTeams(community, { includeDeleted = false, viewer = '
     }, [enabled, includeDeleted, slug, viewer]);
 
     useEffect(() => {
-        if (!enabled) return undefined;
+        if (!enabled) {
+            setTeams([]);
+            setLoading(false);
+            setError('');
+            return undefined;
+        }
         requestSeq.current += 1;
-        refresh().catch(() => {});
+        refresh().catch(() => { });
         const onUpdate = (event) => {
             const changed = String(event?.detail?.community || '').toLowerCase();
             if (!changed || changed === slug) {
-                refresh({ background: true }).catch(() => {});
+                refresh({ background: true }).catch(() => { });
             }
         };
         window.addEventListener('curationUpdated', onUpdate);
@@ -138,10 +143,10 @@ export function useCurationTeam(community, teamId, viewer = '') {
     }, [id, slug, viewer]);
 
     useEffect(() => {
-        refresh().catch(() => {});
+        refresh().catch(() => { });
         const onUpdate = (event) => {
             const changed = String(event?.detail?.community || '').toLowerCase();
-            if (!changed || changed === slug) refresh().catch(() => {});
+            if (!changed || changed === slug) refresh().catch(() => { });
         };
         window.addEventListener('curationUpdated', onUpdate);
         return () => window.removeEventListener('curationUpdated', onUpdate);
@@ -260,10 +265,10 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
             setError('');
             return undefined;
         }
-        refresh().catch(() => {});
+        refresh().catch(() => { });
         const onUpdate = (event) => {
             const changed = String(event?.detail?.community || '').toLowerCase();
-            if (!changed || changed === slug) refresh().catch(() => {});
+            if (!changed || changed === slug) refresh().catch(() => { });
         };
         window.addEventListener('curationUpdated', onUpdate);
         return () => window.removeEventListener('curationUpdated', onUpdate);

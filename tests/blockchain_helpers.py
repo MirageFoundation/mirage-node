@@ -72,6 +72,19 @@ from shared.canon import (
     canon_base_set_curation_team_profile as _canon_base_set_curation_team_profile_raw,
     canon_base_set_curation_preference as _canon_base_set_curation_preference_raw,
     canon_base_set_curation_post_hidden as _canon_base_set_curation_post_hidden_raw,
+    canon_base_set_curation_user_hidden as _canon_base_set_curation_user_hidden_raw,
+    canon_base_invite_curator as _canon_base_invite_curator_raw,
+    canon_base_revoke_curator_invite as _canon_base_revoke_curator_invite_raw,
+    canon_base_accept_curator_invite as _canon_base_accept_curator_invite_raw,
+    canon_base_decline_curator_invite as _canon_base_decline_curator_invite_raw,
+    canon_base_leave_curation_team as _canon_base_leave_curation_team_raw,
+    canon_base_remove_curator as _canon_base_remove_curator_raw,
+    canon_base_transfer_curation_team as _canon_base_transfer_curation_team_raw,
+    canon_base_delete_curation_team as _canon_base_delete_curation_team_raw,
+    canon_base_set_curation_thread_locked as _canon_base_set_curation_thread_locked_raw,
+    canon_base_set_curation_subscriber_only as _canon_base_set_curation_subscriber_only_raw,
+    canon_base_set_curation_tag as _canon_base_set_curation_tag_raw,
+    canon_base_set_curation_post_tag as _canon_base_set_curation_post_tag_raw,
     canon_signed_with_pow,
 )
 from shared.datatypes import (
@@ -111,6 +124,19 @@ from shared.datatypes import (
     MsgSetCurationTeamProfile,
     MsgSetCurationPreference,
     MsgSetCurationPostHidden,
+    MsgSetCurationUserHidden,
+    MsgInviteCurator,
+    MsgRevokeCuratorInvite,
+    MsgAcceptCuratorInvite,
+    MsgDeclineCuratorInvite,
+    MsgLeaveCurationTeam,
+    MsgRemoveCurator,
+    MsgTransferCurationTeam,
+    MsgDeleteCurationTeam,
+    MsgSetCurationThreadLocked,
+    MsgSetCurationSubscriberOnly,
+    MsgSetCurationTag,
+    MsgSetCurationPostTag,
 )
 
 from tests.common import (
@@ -1833,6 +1859,317 @@ def _build_msg_set_curation_post_hidden(
     msg.team_id = int(team_id)
     msg.target = target
     msg.hidden = bool(hidden)
+    return msg
+
+
+def _new_curation_msg(msg_cls, wallet: LocalWallet, lb: str, diff: int, ts: int, nonce: int, base: bytes, pow_val: int):
+    """Build one curation message with its relay envelope already signed.
+
+    The curation family shares an identical envelope, so the per-message
+    builders below only add their own payload fields.
+    """
+    msg = msg_cls()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = wallet.public_key().public_key_bytes
+    msg.envelope_block_hash = _lb_bytes(lb)
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_nonce = int(nonce)
+    msg.envelope_signature = _sign_relay(wallet, base, pow_val)
+    return msg
+
+
+def _build_msg_invite_curator(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgInviteCurator:
+    slug = str(community or "").strip().lower()
+    tgt = str(target or "").strip().lower()
+    base = _canon_base_invite_curator_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tgt, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgInviteCurator, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = tgt
+    return msg
+
+
+def _build_msg_revoke_curator_invite(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgRevokeCuratorInvite:
+    slug = str(community or "").strip().lower()
+    tgt = str(target or "").strip().lower()
+    base = _canon_base_revoke_curator_invite_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tgt, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgRevokeCuratorInvite, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = tgt
+    return msg
+
+
+def _build_msg_accept_curator_invite(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgAcceptCuratorInvite:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_accept_curator_invite_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgAcceptCuratorInvite, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    return msg
+
+
+def _build_msg_decline_curator_invite(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgDeclineCuratorInvite:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_decline_curator_invite_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgDeclineCuratorInvite, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    return msg
+
+
+def _build_msg_leave_curation_team(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgLeaveCurationTeam:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_leave_curation_team_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgLeaveCurationTeam, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    return msg
+
+
+def _build_msg_remove_curator(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgRemoveCurator:
+    slug = str(community or "").strip().lower()
+    tgt = str(target or "").strip().lower()
+    base = _canon_base_remove_curator_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tgt, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgRemoveCurator, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = tgt
+    return msg
+
+
+def _build_msg_transfer_curation_team(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    new_owner: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgTransferCurationTeam:
+    slug = str(community or "").strip().lower()
+    owner = str(new_owner or "").strip().lower()
+    base = _canon_base_transfer_curation_team_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, owner, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgTransferCurationTeam, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.new_owner = owner
+    return msg
+
+
+def _build_msg_delete_curation_team(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgDeleteCurationTeam:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_delete_curation_team_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgDeleteCurationTeam, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    return msg
+
+
+def _build_msg_set_curation_user_hidden(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    hidden: bool = True,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationUserHidden:
+    slug = str(community or "").strip().lower()
+    tgt = str(target or "").strip().lower()
+    base = _canon_base_set_curation_user_hidden_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tgt, hidden, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgSetCurationUserHidden, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = tgt
+    msg.hidden = bool(hidden)
+    return msg
+
+
+def _build_msg_set_curation_thread_locked(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    root_hash: str,
+    locked: bool = True,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationThreadLocked:
+    slug = str(community or "").strip().lower()
+    root = str(root_hash or "").strip().lower()
+    base = _canon_base_set_curation_thread_locked_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, root, locked, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgSetCurationThreadLocked, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.root_hash = root
+    msg.locked = bool(locked)
+    return msg
+
+
+def _build_msg_set_curation_subscriber_only(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    enabled: bool = True,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationSubscriberOnly:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_set_curation_subscriber_only_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, enabled, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgSetCurationSubscriberOnly, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.enabled = bool(enabled)
+    return msg
+
+
+def _build_msg_set_curation_tag(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    tag: str,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationTag:
+    slug = str(community or "").strip().lower()
+    base = _canon_base_set_curation_tag_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tag, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgSetCurationTag, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.tag = tag
+    return msg
+
+
+def _build_msg_set_curation_post_tag(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    community: str,
+    team_id: int,
+    target: str,
+    tag: str = "",
+    clear: bool = False,
+    pow_val: int = 0,
+    nonce: int = 0,
+) -> MsgSetCurationPostTag:
+    slug = str(community or "").strip().lower()
+    tgt = str(target or "").strip().lower()
+    base = _canon_base_set_curation_post_tag_raw(
+        wallet.public_key().public_key_bytes, _lb_bytes(lb), diff, ts, slug, team_id, tgt, tag, clear, nonce=nonce
+    )
+    msg = _new_curation_msg(MsgSetCurationPostTag, wallet, lb, diff, ts, nonce, base, pow_val)
+    msg.community = slug
+    msg.team_id = int(team_id)
+    msg.target = tgt
+    msg.tag = tag
+    msg.clear = bool(clear)
     return msg
 
 

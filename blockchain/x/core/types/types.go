@@ -69,6 +69,22 @@ func (c *ProfileCore) ToProfile() Profile {
 	}
 }
 
+// usernameFormat allows letters, digits and hyphens, but the first character
+// must be a letter or a digit — a username may not start with a hyphen.
+var usernameFormat = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
+
+// ValidateUsernameFormat checks the username character set. An empty username
+// is deferred to the length check in ValidateBasic.
+func ValidateUsernameFormat(username string) error {
+	if username == "" {
+		return nil
+	}
+	if !usernameFormat.MatchString(username) {
+		return fmt.Errorf("invalid username")
+	}
+	return nil
+}
+
 func (p Profile) ValidateBasic(minSize, maxSize uint64) error {
 	usernameLen := uint64(len(p.Username))
 	if usernameLen < minSize {
@@ -77,9 +93,8 @@ func (p Profile) ValidateBasic(minSize, maxSize uint64) error {
 	if usernameLen > maxSize {
 		return fmt.Errorf("username too long: %d > %d", usernameLen, maxSize)
 	}
-	valid := regexp.MustCompile(`^[A-Za-z0-9-]+$`)
-	if p.Username != "" && !valid.MatchString(p.Username) {
-		return fmt.Errorf("invalid username")
+	if err := ValidateUsernameFormat(p.Username); err != nil {
+		return err
 	}
 	if utf8.RuneCountInString(p.Biography) > 512 {
 		return fmt.Errorf("biography too long")

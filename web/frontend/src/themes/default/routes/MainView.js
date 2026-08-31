@@ -1374,8 +1374,11 @@ const MainView = ({
                             </BlockedTopicState>}
 
                             {/* Loading state (also covers the window before node config
-                                has loaded, so guests never flash an empty/splash state) */}
-                            {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && (
+                                has loaded, so guests never flash an empty/splash state).
+                                Never stack skeletons over posts that already rendered —
+                                login used to clear nodeConfig and paint empty rows above
+                                a working feed. */}
+                            {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && orderedPosts.length === 0 && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     {/* Community feeds already show the real title in CommunityLensBar. */}
                                     {!isCurrentTopic && (

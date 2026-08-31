@@ -137,8 +137,7 @@ def _lens_request_args(
         if team_id <= 0:
             raise ValueError("invalid team_id")
     if lens == "team" and (
-        team_id is None
-        or ((not community or community == "all") and not allow_team_without_community)
+        team_id is None or ((not community or community == "all") and not allow_team_without_community)
     ):
         raise ValueError("team lens requires team_id and community")
     if lens != "team" and team_id is not None:
@@ -1815,12 +1814,8 @@ def _get_home_feed_newest(
             if post:
                 batch.append(post)
         if batch:
-            downvote_votes.update(
-                _load_viewer_downvote_ids(cur, viewer_lower, [p["post_id"] for p in batch])
-            )
-            posts.extend(
-                _drop_viewer_downvotes(batch, downvote_votes, context="home.newest")
-            )
+            downvote_votes.update(_load_viewer_downvote_ids(cur, viewer_lower, [p["post_id"] for p in batch]))
+            posts.extend(_drop_viewer_downvotes(batch, downvote_votes, context="home.newest"))
         last_ts = rows[-1][2]
         if len(rows) < batch_size:
             break
@@ -4098,9 +4093,7 @@ def _build_bootstrap_view(
     sort_mode = sort_mode if sort_mode in ("magic", "newest") else "magic"
     limit = min(max(1, int(limit or 15)), 100)
     community_hint = view[len("topic:") :].strip() if view.startswith("topic:") else None
-    lens, team_id, scope = _lens_request_args(
-        community_hint, allow_team_without_community=view.startswith("thread:")
-    )
+    lens, team_id, scope = _lens_request_args(community_hint, allow_team_without_community=view.startswith("thread:"))
 
     # ── thread:<post_id> ──────────────────────────────────────────────
     if view.startswith("thread:"):
@@ -4435,6 +4428,9 @@ def bootstrap():
     if _is_catching_up() and (address or _NODE_CONFIG_CACHE is None or _CHAIN_CONFIG_CACHE is None):
         return api_error_code("node_catching_up", 503)
 
+    # Static sections must survive user-section faults. Login clears nothing useful
+    # when node_config is present; a missing relay-quota projection used to 503
+    # the whole payload and leave the SPA on an endless skeleton + crash.
     try:
         allowed_tags = _viewer_allowed_tags(address)
         resp: Dict[str, Any] = {
@@ -4447,8 +4443,14 @@ def bootstrap():
             "community_preferences": {},
             "daily_quota": None,
             "renewal_warning": None,
-            "view": _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid),
+            "view": None,
         }
+    except Exception as e:
+        log_event(rid, "bootstrap.required.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+    try:
+        resp["view"] = _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid)
         if address:
             resp["user_status"] = _build_user_status(address)
             resp["user_followed"] = _build_user_followed(address)
@@ -4456,14 +4458,24 @@ def bootstrap():
             community_bootstrap = _build_community_bootstrap(address)
             resp.update(community_bootstrap)
     except Exception as e:
-        log_event(rid, "bootstrap.required.err", error=str(e))
-        return api_error_code("indexer_unavailable", 503)
+        # Keep node_config/chain_config. Wipe any partial user fields so the
+        # client never caches user_status without daily_quota/renewal_warning.
+        log_event(rid, "bootstrap.user.err", error=str(e), address=address)
+        resp["user_status"] = None
+        resp["user_followed"] = None
+        resp["user_blocked"] = None
+        resp["rewards_summary"] = None
+        resp["community_preferences"] = {}
+        resp["daily_quota"] = None
+        resp["renewal_warning"] = None
+        resp["view"] = None
 
     log_event(
         rid,
         "bootstrap.ok",
         sections=[k for k, v in resp.items() if v is not None],
         view_kind=(resp["view"] or {}).get("kind") if isinstance(resp.get("view"), dict) else None,
+        user_sections_ok=bool(address is None or resp.get("user_status") is not None),
     )
     return jsonify(resp)
 
@@ -5431,9 +5443,7 @@ def get_posts():
             lens=lens,
             team_id=team_id,
         )
-        if feed in ("home", "following")
-        and _is_guest(address)
-        and (scope == "legacy" or lens == "raw")
+        if feed in ("home", "following") and _is_guest(address) and (scope == "legacy" or lens == "raw")
         else None
     )
     if guest_key is not None:
@@ -5836,9 +5846,7 @@ def get_posts():
                 p.pop("_score", None)
         else:
             # newest: pure chronological
-            candidates = _drop_viewer_downvotes(
-                candidates, user_votes, context=f"topic.newest.{topic_feed_type}"
-            )
+            candidates = _drop_viewer_downvotes(candidates, user_votes, context=f"topic.newest.{topic_feed_type}")
             for c in candidates:
                 c["_N"] = 1.0
                 c["_seen_count"] = 0
@@ -7261,9 +7269,7 @@ def _build_thread(
     root["comments"] = recount_visible(children)
 
     lens_team_id = (root.get("lens") or {}).get("effective_team_id")
-    root["thread_locked"] = thread_locked_for_lens(
-        cur, root.get("topic") or "", root["post_id"], lens_team_id
-    )
+    root["thread_locked"] = thread_locked_for_lens(cur, root.get("topic") or "", root["post_id"], lens_team_id)
     if root["thread_locked"]:
         logger.debug(
             "[lock] thread locked for lens root=%s community=%s team=%s",

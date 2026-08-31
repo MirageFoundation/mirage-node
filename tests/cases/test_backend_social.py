@@ -7,8 +7,8 @@ import math
 import os
 import random
 import string
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
 
 import requests
@@ -27,6 +27,7 @@ from tests.common import (
     _now_ms,
     _fresh_nonce,
     _lb_bytes,
+    parallel_map,
     WALLETS,
     FAUCET_AMOUNTS,
     INDEX_TIMEOUT_SEC,
@@ -488,22 +489,25 @@ def _parallel_backend_pow_ops(n: int, op_fn, label: str) -> list:
     """Run n PoW-backed backend ops concurrently. op_fn(i) -> (target, resp)."""
     if n <= 0:
         return []
-    results: list = [None] * n
-
-    def run(i: int) -> None:
-        results[i] = op_fn(i)
-
     workers = min(4, n)
     _debug(f"hardcap.{label} parallel n={n} workers={workers}")
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(run, i) for i in range(n)]
-        done = 0
-        for f in as_completed(futs):
-            f.result()
+
+    done = 0
+    done_lock = threading.Lock()
+
+    def run(i: int):
+        result = op_fn(i)
+        nonlocal done
+        with done_lock:
             done += 1
-            if done % 10 == 0 or done == n:
-                print(f"    [{done}/{n}] {label}…")
-    return results
+            completed = done
+        if completed % 10 == 0 or completed == n:
+            print(f"    [{completed}/{n}] {label}…")
+        return result
+
+    # parallel_map carries the category and the wallet lease into the workers.
+    # A bare pool leaves both unbound.
+    return parallel_map(run, range(n), workers)
 
 
 def test_hard_cap_vs_deque(backend: str):

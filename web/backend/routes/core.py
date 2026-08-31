@@ -917,7 +917,7 @@ def core_set_username():
             return api_error_code("username_too_short")
         if len(username) > max_u:
             return api_error_code("username_too_long")
-        if not re.fullmatch(r"[A-Za-z0-9-]+", username):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", username):
             return api_error_code("username_invalid_format")
 
         # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.

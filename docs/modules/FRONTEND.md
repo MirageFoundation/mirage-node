@@ -708,7 +708,7 @@ User inputs are validated before submission:
 
 ```javascript
 // Username validation
-if (!username.match(/^[A-Za-z0-9-]+$/)) {
+if (!username.match(/^[A-Za-z0-9][A-Za-z0-9-]*$/)) {
     return { success: false, error: "Invalid username format" };
 }
 if (username.length < minUsername || username.length > maxUsername) {

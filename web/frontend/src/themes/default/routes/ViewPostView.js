@@ -1,5 +1,6 @@
 import { communityLabel, communityPath } from '../../../utils/community';
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { LENS } from '../../../utils/curation';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from "react-helmet-async";
@@ -29,8 +30,9 @@ import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
 import UserAvatar from "../components/UserAvatar.js";
-import ContentTagBadge from "../components/ContentTagBadge";
-import { ModMenuChip } from "../components/PostMenu";
+import ContentTagBadge, { ThreadLockMark } from "../components/ContentTagBadge";
+import { BlockChip } from "../components/PostMenu";
+import { PostLensPicker } from "../components/CurationLensPicker";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -42,11 +44,9 @@ import {
     HiOutlineUserMinus,
     HiOutlineSparkles,
     HiOutlineGift,
-    HiOutlineNoSymbol,
-    HiOutlineEyeSlash,
-    HiOutlineFlag,
     HiOutlineHashtag,
     HiOutlineArrowDownTray,
+    HiOutlineShieldExclamation,
 } from "react-icons/hi2";
 /**
  * Post Details — root post container.
@@ -525,7 +525,8 @@ const ContinueThreadLink = styled(Link)`
     transition: color 0.15s ease, background-color 0.15s ease;
 
     /* The link inherits the parent's ancestor rails so the thread line
-     * continues seamlessly into this row. */
+     * continues seamlessly into this row. Terminal row: J-curve only —
+     * no downward spine past the elbow (that stub looked broken). */
     ${({ $activeDepths, theme }) => {
         const r = buildAncestorRails(
             0, /* level is irrelevant when activeDepths is passed directly */
@@ -541,20 +542,6 @@ const ContinueThreadLink = styled(Link)`
             background-size: ${r.size};
         `;
     }}
-
-    &::after {
-        content: '';
-        position: absolute;
-        top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED};
-        left: ${({ $level }) => {
-        const effective = (Number($level) || 0) + 1;
-        return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + COMMENT_AVATAR_SIZE_PX / 2}px`;
-    }};
-        width: ${COMMENT_RAIL_WIDTH_PX}px;
-        height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED});
-        background: ${({ theme }) => theme.colors.commentThread || theme.colors.borderSubtle || theme.colors.border};
-        pointer-events: none;
-    }
 
     &::before {
         content: '';
@@ -572,9 +559,12 @@ const ContinueThreadLink = styled(Link)`
         pointer-events: none;
     }
 
+    /* Elbow lands at child avatar-left; no avatar here, so park the
+     * label a few px past the tip instead of avatar+gap (that left a
+     * wide empty gutter). */
     padding: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
-        const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX, COMMENT_AVATAR_SIZE_PX, COMMENT_CONTENT_GAP_PX);
+        const leftPad = commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX, COMMENT_INDENT_PX) + 6;
         return `${COMMENT_PAD_TOP_EXPANDED_REM}rem 1rem ${COMMENT_PAD_TOP_EXPANDED_REM}rem ${leftPad}px`;
     }};
 
@@ -601,14 +591,6 @@ const ContinueThreadLink = styled(Link)`
                 background-size: ${r.size};
             `;
     }}
-        &::after {
-            left: ${({ $level }) => {
-        const effective = (Number($level) || 0) + 1;
-        return `${commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + COMMENT_AVATAR_SIZE_PX_MOBILE / 2}px`;
-    }};
-            top: ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE};
-            height: calc(100% - ${COMMENT_AVATAR_CENTER_Y_EXPANDED_MOBILE});
-        }
         &::before {
             left: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
@@ -620,7 +602,7 @@ const ContinueThreadLink = styled(Link)`
         }
         padding: ${({ $level }) => {
         const effective = (Number($level) || 0) + 1;
-        const leftPad = commentContentLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE, COMMENT_AVATAR_SIZE_PX_MOBILE, COMMENT_CONTENT_GAP_PX_MOBILE);
+        const leftPad = commentAvatarLeftPx(effective, COMMENT_BASE_LEFT_PX_MOBILE, COMMENT_INDENT_PX_MOBILE) + 5;
         return `${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem 0.85rem ${COMMENT_PAD_TOP_COLLAPSED_REM_MOBILE}rem ${leftPad}px`;
     }};
     }
@@ -1704,6 +1686,7 @@ function ViewPostView({
     state,
     updatePost
 }) {
+    const [threadLens, setThreadLens] = useState({ lens: LENS.EFFECTIVE, teamId: null });
     const {
         root,
         setRoot,
@@ -1789,16 +1772,12 @@ function ViewPostView({
         limits,
         closeReply,
         toggleReply,
-        handleBlockPost,
         confirmBlockPostAction,
         cancelBlockPost,
-        handleBlockUser,
         confirmBlockUserAction,
         cancelBlockUser,
-        handleBlockTopic,
         confirmBlockTopicAction,
         cancelBlockTopic,
-        handleReport,
         confirmReportAction,
         cancelReport,
         handleDeletePost,
@@ -1837,40 +1816,23 @@ function ViewPostView({
         depthError
     } = useViewPost({
         state,
-        updatePost
+        updatePost,
+        lens: threadLens.lens,
+        teamId: threadLens.teamId,
     });
 
-    // Inline block/report popover (parity with feed CardView's block chip).
-    // Anchored next to the share button in the action bar for each post /
-    // comment row. Keyed by post_id so only one popover is open at a time.
-    const [openBlockMenuId, setOpenBlockMenuId] = useState(null);
-    const [blockMenuPosition, setBlockMenuPosition] = useState({ top: 0, left: 0 });
-    const blockButtonRefs = useRef({});
-    const blockDropdownRef = useRef(null);
-    useEffect(() => {
-        if (!openBlockMenuId) return;
-        const handleClickOutside = event => {
-            const dropdown = blockDropdownRef.current;
-            const button = blockButtonRefs.current[openBlockMenuId];
-            if (dropdown && !dropdown.contains(event.target) && button && !button.contains(event.target)) {
-                setOpenBlockMenuId(null);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [openBlockMenuId]);
+    const handleThreadLensChange = useCallback((nextLens, nextTeamId) => {
+        const teamId = nextTeamId || null;
+        setThreadLens((prev) => {
+            if (prev.lens === nextLens && prev.teamId === teamId) return prev;
+            console.debug('[ViewPostView] thread lens', { lens: nextLens, teamId });
+            return { lens: nextLens, teamId };
+        });
+    }, []);
 
-    /**
-     * Edge-case: when a comment lives near the bottom of the viewport,
-     * its 3-dot dropdown — anchored just below the button — can spill
-     * past the bottom edge and become unreachable (the portal uses
-     * `position: fixed` so the page can't scroll to reveal it).
-     *
-     * After the dropdown mounts we measure its real height and re-anchor:
-     *   • flip above the button if there's room there;
-     *   • else clamp into the viewport with an 8px margin.
-     * Same logic applied to the block/report popover below.
-     */
+    // Inline block/report popover lives on BlockChip (same slot as the
+    // feed). 3-dot overflow clamping below still applies to this page's
+    // custom ⋯ portal.
     const clampMenuIntoViewport = (dropdownEl, buttonEl, setPosition) => {
         if (!dropdownEl || !buttonEl) return;
         const margin = 8;
@@ -1904,16 +1866,6 @@ function ViewPostView({
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [openMenuId]);
-
-    useLayoutEffect(() => {
-        if (!openBlockMenuId) return;
-        clampMenuIntoViewport(
-            blockDropdownRef.current,
-            blockButtonRefs.current[openBlockMenuId],
-            setBlockMenuPosition
-        );
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [openBlockMenuId]);
 
     /**
      * Blocked-post affordance (06.3 polish round 5) — wired to the same
@@ -2347,7 +2299,6 @@ function ViewPostView({
             setOpenMenuId(isOpen ? null : post.post_id);
         };
         return <MenuContainer>
-            <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
             <MenuButton ref={el => menuButtonRefs.current[post.post_id] = el} onClick={handleMenuClick} aria-label="Post menu">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="12" r="1.5"></circle>
@@ -2470,6 +2421,18 @@ function ViewPostView({
                                 <span>{formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}</span>
                             </MenuItem>}
                         </>}
+                        {!isOwnPost && hasValidAccount && (() => {
+                            try { return Number(Storage.load('user_level', '0')) >= 100; }
+                            catch (_) { return false; }
+                        })() && (
+                                <MenuItem data-danger="true" onClick={() => {
+                                    setOpenMenuId(null);
+                                    handleDeletePost(post.post_id);
+                                }}>
+                                    <HiOutlineShieldExclamation />
+                                    <span>Delete network wide</span>
+                                </MenuItem>
+                            )}
                     </>;
                 })()}
             </MenuDropdown>, document.body)}
@@ -2477,7 +2440,13 @@ function ViewPostView({
     };
     // The lock belongs to the thread under the current lens, so it applies to
     // every post in the view, not just the root the backend reports it on.
-    const threadLocked = !!root?.thread_locked;
+    // state.posts wins so a lock/unlock from the curate menu is visible before
+    // the indexer serves the new value.
+    const stateEntry = root?.post_id
+        ? (state?.posts?.[root.post_id] || state?.posts?.[String(root.post_id).toLowerCase()])
+        : null;
+    const stateLock = stateEntry?.thread_locked;
+    const threadLocked = stateLock !== undefined ? !!stateLock : !!root?.thread_locked;
     const renderActionBar = post => {
         const publicKeyStr = String(state.publicKey || '').trim();
         const hasValidAccount = publicKeyStr && publicKeyStr !== 'guest';
@@ -2511,85 +2480,7 @@ function ViewPostView({
                 <span>reply</span>
             </ActionButton>}
             <MetaSeparatorAction />
-            {(() => {
-                const isOwnPostRow = post && state && post.user_id === state.publicKey;
-                if (!isOwnPostRow) {
-                    const isRootPost = !!(post.title && String(post.title).trim() !== '');
-                    const itemLabel = isRootPost ? 'post' : 'comment';
-                    const isBlockOpen = openBlockMenuId === post.post_id;
-                    const handleBlockMenuClick = e => {
-                        e.stopPropagation();
-                        if (!isBlockOpen) {
-                            const btn = blockButtonRefs.current[post.post_id];
-                            if (btn) {
-                                const rect = btn.getBoundingClientRect();
-                                setBlockMenuPosition({
-                                    top: rect.bottom + 4,
-                                    left: Math.max(10, rect.right - 180)
-                                });
-                            }
-                        }
-                        setOpenBlockMenuId(isBlockOpen ? null : post.post_id);
-                    };
-                    return <>
-                        <ActionButton
-                            as="button"
-                            type="button"
-                            ref={el => { blockButtonRefs.current[post.post_id] = el; }}
-                            onClick={handleBlockMenuClick}
-                            title={`Block or report ${itemLabel}`}
-                            aria-haspopup="menu"
-                            aria-expanded={isBlockOpen}
-                            aria-label={`Block or report ${itemLabel}`}
-                            $danger
-                        >
-                            <Icon aria-hidden="true">
-                                <svg viewBox="0 0 24 24">
-                                    <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 0 1-6.3-12.9L16.9 18.3A7.96 7.96 0 0 1 12 20zm6.3-3.1L7.1 5.7A8 8 0 0 1 18.3 16.9z" fill="currentColor" />
-                                </svg>
-                            </Icon>
-                        </ActionButton>
-                        {isBlockOpen && ReactDOM.createPortal(
-                            <MenuDropdown
-                                ref={blockDropdownRef}
-                                style={{ top: blockMenuPosition.top, left: blockMenuPosition.left }}
-                                onClick={e => e.stopPropagation()}
-                            >
-                                <MenuItem data-danger="true" onClick={() => {
-                                    setOpenBlockMenuId(null);
-                                    handleBlockUser(post.user_id, post.post_id);
-                                }}>
-                                    <HiOutlineNoSymbol />
-                                    <span>Block user</span>
-                                </MenuItem>
-                                <MenuItem data-danger="true" onClick={() => {
-                                    setOpenBlockMenuId(null);
-                                    handleBlockPost(post.post_id);
-                                }}>
-                                    <HiOutlineEyeSlash />
-                                    <span>Block {itemLabel}</span>
-                                </MenuItem>
-                                {isRootPost && post?.topic && <MenuItem data-danger="true" onClick={() => {
-                                    setOpenBlockMenuId(null);
-                                    handleBlockTopic(post.topic, post.post_id);
-                                }}>
-                                    <HiOutlineNoSymbol />
-                                    <span>Block community</span>
-                                </MenuItem>}
-                                <MenuItem data-danger="true" onClick={() => {
-                                    setOpenBlockMenuId(null);
-                                    handleReport(post.post_id);
-                                }}>
-                                    <HiOutlineFlag />
-                                    <span>Report {itemLabel}</span>
-                                </MenuItem>
-                            </MenuDropdown>,
-                            document.body
-                        )}
-                    </>;
-                }
-                return null;
-            })()}
+            <BlockChip post={post} state={state} updatePost={updatePost} align="right" />
             {(() => {
                 const shareCopied = !!shareMessages[post.post_id];
                 return (
@@ -2979,6 +2870,7 @@ function ViewPostView({
             if (sp.topic !== undefined) out.topic = sp.topic;
             if (sp.root_topic !== undefined) out.root_topic = sp.root_topic;
             if (sp.tag !== undefined) out.tag = sp.tag;
+            if (sp.thread_locked !== undefined) out.thread_locked = sp.thread_locked;
             if (sp.content !== undefined) out.content = sp.content;
             if (sp.media !== undefined) out.media = sp.media;
             if (sp.edited !== undefined) out.edited = sp.edited;
@@ -3176,6 +3068,11 @@ function ViewPostView({
                                     const isHighlighted = !isRoot && normalizedHighlightId && normalizedPostId === normalizedHighlightId;
                                     const hasChildren = (post.comments || 0) > 0;
                                     const activeDepths = ancestorDepthsMap[idx];
+                                    const editedAt = post.edited ? (post.edited_ts || post.edited_at) : null;
+                                    const displayTs = editedAt || post.timestamp;
+                                    const timeLabel = editedAt
+                                        ? `edited ${formatElapsed(displayTs)} ago`
+                                        : `${formatElapsed(displayTs)} ago`;
                                     return <div id={`comment-${normalizedPostId}`} key={post.post_id}>
                                         <CardComponent className={isHighlighted ? 'inbox-highlight' : undefined} $isFlash={shouldFlash} $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)} $isCollapsed={isCollapsed} $level={displayLevel} $size={cardSize} $hasChildren={hasChildren} $activeDepths={activeDepths}>
                                             <ColumnFlex>
@@ -3186,6 +3083,12 @@ function ViewPostView({
                                                             const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                                                             return topicLabel ? <>
                                                                 <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                <PostLensPicker
+                                                                    community={topicLabel}
+                                                                    viewer={viewerAddress}
+                                                                    hintLens={post.lens || mergedRoot?.lens || root?.lens}
+                                                                    onChange={handleThreadLensChange}
+                                                                />
                                                                 <MetaSeparator>·</MetaSeparator>
                                                             </> : null;
                                                         })()}
@@ -3193,7 +3096,7 @@ function ViewPostView({
                                                         {renderPostMenu(post)}
                                                     </MobileRootMetaTop>
                                                     <MobileRootMetaBottom>
-                                                        <span>{formatElapsed(post.timestamp)} ago</span>
+                                                        <span>{timeLabel}</span>
                                                         {(() => {
                                                             const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
                                                             return tagLabel ? <>
@@ -3201,11 +3104,9 @@ function ViewPostView({
                                                                 <ContentTagBadge tag={tagLabel} size="md" />
                                                             </> : null;
                                                         })()}
-                                                        {post.edited && <>
+                                                        {threadLocked && <>
                                                             <MetaSeparator>·</MetaSeparator>
-                                                            <span style={{
-                                                                fontStyle: 'italic'
-                                                            }}>edited</span>
+                                                            <ThreadLockMark size="md" />
                                                         </>}
                                                         {post?.awards?.length > 0 && <>
                                                             <MetaSeparator>·</MetaSeparator>
@@ -3263,13 +3164,19 @@ function ViewPostView({
                                                             const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                                                             return topicLabel ? <>
                                                                 <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                <PostLensPicker
+                                                                    community={topicLabel}
+                                                                    viewer={viewerAddress}
+                                                                    hintLens={post.lens || mergedRoot?.lens || root?.lens}
+                                                                    onChange={handleThreadLensChange}
+                                                                />
                                                                 <MetaSeparator>·</MetaSeparator>
                                                             </> : null;
                                                         })()}
                                                         {renderAuthorLink(post)}
                                                         <MetaSeparator>·</MetaSeparator>
-                                                        <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
-                                                            {formatElapsed(post.timestamp)} ago
+                                                        <Tooltip $dotted data-tooltip={formatTimeStamp(displayTs)}>
+                                                            {timeLabel}
                                                         </Tooltip>
                                                         {(() => {
                                                             const tagLabel = normalizeTag(post.tag || mergedRoot?.tag || root?.tag || '');
@@ -3278,6 +3185,10 @@ function ViewPostView({
                                                                 <ContentTagBadge tag={tagLabel} size="md" />
                                                             </> : null;
                                                         })()}
+                                                        {isRoot && threadLocked && <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <ThreadLockMark size="md" />
+                                                        </>}
                                                         {post?.awards?.length > 0 && <>
                                                             <MetaSeparator>·</MetaSeparator>
                                                             <span style={{
@@ -3306,14 +3217,6 @@ function ViewPostView({
                                                             >
                                                                 <span aria-hidden="true">{post.collapsed ? '+' : '\u2212'}</span>
                                                             </CollapseToggle>
-                                                        </>}
-                                                        {post.edited && <>
-                                                            <MetaSeparator>·</MetaSeparator>
-                                                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{
-                                                                fontStyle: 'italic'
-                                                            }}>
-                                                                edited {formatElapsed(post.edited_ts)} ago
-                                                            </Tooltip>
                                                         </>}
                                                     </MetaInfoRowLeft>
                                                     {renderPostMenu(post)}

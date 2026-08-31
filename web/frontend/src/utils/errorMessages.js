@@ -13,7 +13,7 @@ const ERROR_MAP = {
     username_required: "A username is required.",
     username_too_short: "Your username is too short.",
     username_too_long: "Your username is too long.",
-    username_invalid_format: "Usernames can only contain letters, numbers, and hyphens.",
+    username_invalid_format: "Usernames can only contain letters, numbers, and hyphens, and must start with a letter or number.",
     username_taken: "That username is already taken.",
 
     // Auth / envelope

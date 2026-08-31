@@ -9,10 +9,11 @@ import CardView from "./components/CardView";
 import CtrlButton from "./components/FeedControlButton";
 import InlineMedia from "./components/InlineMedia";
 import MarkdownRenderer from "./components/MarkdownRenderer";
-import { MoreMenuChip, ModMenuChip, BlockChip } from "./components/PostMenu";
+import { MoreMenuChip, BlockChip } from "./components/PostMenu";
+import { PostLensPicker } from "./components/CurationLensPicker";
 import PostPlaceholderAvatar from "./components/PostPlaceholderAvatar";
 import Tooltip from "./components/Tooltip";
-import ContentTagBadge from "./components/ContentTagBadge";
+import ContentTagBadge, { ThreadLockMark } from "./components/ContentTagBadge";
 import { getThemeFamily } from "../../registry/theme";
 import { getAuthorColor } from "../../utils/tierColors";
 import { normalizeTag } from "../../utils/ContentTags";
@@ -363,6 +364,7 @@ const CompactRoot = styled.article`
     border-radius: 8px;
     position: relative;
     cursor: pointer;
+    z-index: ${({ $menuOpen }) => ($menuOpen ? 50 : 'auto')};
     transition: background-color 0.12s ease;
 
     &:hover {
@@ -1041,6 +1043,7 @@ function CompactRow({ post, state, updatePost }) {
 
     const [shareCopied, setShareCopied] = useState(false);
     const [expanded, setExpanded] = useState(false);
+    const [lensOpen, setLensOpen] = useState(false);
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
     const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
     const feedReasonRef = useRef(null);
@@ -1130,10 +1133,12 @@ function CompactRow({ post, state, updatePost }) {
 
     const hasTag = !!(post.tag && String(post.tag).trim());
     const normalizedTag = hasTag ? normalizeTag(String(post.tag).trim()) : '';
+    const threadLocked = !!post.thread_locked;
 
     return (
         <CompactRoot
             $flash={!!post.flash}
+            $menuOpen={lensOpen}
             onClick={handleRowClick}
             role="link"
             tabIndex={0}
@@ -1152,6 +1157,12 @@ function CompactRow({ post, state, updatePost }) {
                     <CompactTopicLink to={communityPath(topic)} onClick={stop}>
                         {communityLabel(topic)}
                     </CompactTopicLink>
+                    <PostLensPicker
+                        community={topic}
+                        viewer={state?.publicKey}
+                        hintLens={post.lens}
+                        onOpenChange={setLensOpen}
+                    />
                     <CompactHeaderDot>·</CompactHeaderDot>
                     <CompactUserLink
                         to={`/u/${encodeURIComponent(post.username || authorAddress)}`}
@@ -1300,6 +1311,12 @@ function CompactRow({ post, state, updatePost }) {
                             <ContentTagBadge tag={normalizedTag} />
                         </>
                     )}
+                    {threadLocked && (
+                        <>
+                            <CompactHeaderDot>·</CompactHeaderDot>
+                            <ThreadLockMark />
+                        </>
+                    )}
                     {post?.awards?.length > 0 && (
                         <>
                             <CompactHeaderDot>·</CompactHeaderDot>
@@ -1314,9 +1331,7 @@ function CompactRow({ post, state, updatePost }) {
                         </>
                     )}
                 </CompactHeader>
-                {/* Shield mod menu (admin/curator) + 3-dot overflow. */}
                 <CompactTopActions>
-                    <ModMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                     <MoreMenuChip post={post} state={state} updatePost={updatePost} align="right" />
                 </CompactTopActions>
             </CompactTopRow>
@@ -1397,7 +1412,11 @@ export const MemoCompactRow = memo(CompactRow, (prev, next) => {
         p?.comments === n?.comments &&
         p?.flash === n?.flash &&
         p?.deleted === n?.deleted &&
-        p?.hidden_client === n?.hidden_client
+        p?.hidden_client === n?.hidden_client &&
+        p?.tag === n?.tag &&
+        p?.thread_locked === n?.thread_locked &&
+        p?.lens?.effective_team_id === n?.lens?.effective_team_id &&
+        p?.lens?.effective_mode === n?.lens?.effective_mode
     );
 });
 
@@ -1438,7 +1457,9 @@ const MemoRow = memo(FeedRow, (prev, next) => {
         p?.comments === n?.comments &&
         p?.flash === n?.flash &&
         p?.deleted === n?.deleted &&
-        p?.hidden_client === n?.hidden_client
+        p?.hidden_client === n?.hidden_client &&
+        p?.tag === n?.tag &&
+        p?.thread_locked === n?.thread_locked
     );
 });
 

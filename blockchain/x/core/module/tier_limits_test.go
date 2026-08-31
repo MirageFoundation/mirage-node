@@ -407,6 +407,35 @@ func TestSetUsernameSubscriberCanRemoveAnon(t *testing.T) {
 	require.Equal(t, "coolname", core.Username, "subscriber can set custom username")
 }
 
+func TestSetUsernameRejectsLeadingHyphen(t *testing.T) {
+	cases := []struct {
+		name     string
+		level    int32
+		username string
+	}{
+		{"subscriber", int32(types.LevelSubscriber), "-coolname"},
+		{"subscriber_double_hyphen", int32(types.LevelSubscriber), "--coolname"},
+		{"free", int32(types.LevelFree), "-coolname"},
+		{"free_behind_anon_prefix", int32(types.LevelFree), "Anon--coolname"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mk, ctx, am := setupModule(t)
+			pub, owner := testPubkeyOwner()
+			setProfileLevel(t, mk, ctx, owner, tc.level)
+
+			_, err := am.SetUsername(ctx, &types.MsgSetUsername{
+				Authority:      "not-gov",
+				EnvelopePubkey: pub,
+				Target:         owner,
+				Username:       tc.username,
+			})
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "invalid username")
+		})
+	}
+}
+
 // =========================================================================
 // Content and title length limits per tier
 // =========================================================================

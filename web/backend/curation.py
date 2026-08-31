@@ -32,7 +32,7 @@ def resolve_visibility(
     team_hidden_post: bool,
     team_hidden_author: bool,
     team_subscriber_only: bool,
-    lock_sequence: int | None,
+    lock_windows: list[tuple[int, int | None]],
     temporary_raw: bool,
     node_blocked: bool,
 ) -> dict[str, Any]:
@@ -54,9 +54,41 @@ def resolve_visibility(
         return _result(False, True, "team_hidden_author", effective_mode, effective_team)
     if team_subscriber_only and not was_subscriber_at_creation:
         return _result(False, True, "subscriber_only", effective_mode, effective_team)
-    if lock_sequence is not None and post_sequence is not None and post_sequence > lock_sequence:
+    if post_sequence is not None and _inside_lock_window(post_sequence, lock_windows):
         return _result(False, True, "thread_locked", effective_mode, effective_team)
     return _result(True, False, "ok", effective_mode, effective_team)
+
+
+def _lock_windows(lock_sequence, lock_windows) -> list[tuple[int, int | None]]:
+    """Build the window list for one thread out of its ``curation_locks`` row.
+
+    ``lock_windows`` holds the stretches a past unlock closed, and
+    ``lock_sequence`` the start of the one still open, so the open window is
+    appended with no end. A thread that was never locked has no row at all,
+    which arrives here as two Nones.
+    """
+    windows: list[tuple[int, int | None]] = []
+    for window in lock_windows or ():
+        if len(window) != 2:
+            raise RuntimeError(f"curation_locks.lock_windows holds a malformed window: {window!r}")
+        windows.append((int(window[0]), int(window[1])))
+    if lock_sequence is not None:
+        windows.append((int(lock_sequence), None))
+    return windows
+
+
+def _inside_lock_window(post_sequence: int, lock_windows) -> bool:
+    """Report whether this post was written while the thread was locked.
+
+    A window is the half-open sequence range ``(start, end]``, and ``end`` of
+    None is a lock that is still open. Windows closed by a past unlock stay in
+    the list forever: a curator unlocking a thread reopens it for new replies,
+    it does not publish the ones written while it was shut.
+    """
+    for start, end in lock_windows or ():
+        if post_sequence > int(start) and (end is None or post_sequence <= int(end)):
+            return True
+    return False
 
 
 def _effective_lens(stored_mode: int | None, stored_team_id: int | None, default_team_id: int | None):
@@ -344,7 +376,7 @@ def filter_posts(
             continue
         # Protocol-0 posts are curated like any other. The chain never recorded a
         # post_sequence or a subscriber flag for them, but only two of the rules
-        # below read those: resolve_visibility skips the thread-lock cutoff when
+        # below read those: resolve_visibility skips the thread-lock windows when
         # post_sequence is None, and treats an unknown subscriber flag as "not a
         # subscriber". Hiding a post, hiding a user and the community tag all key
         # on the txhash, the author and the community, which legacy posts have.
@@ -366,6 +398,7 @@ def filter_posts(
                 "effective_mode": MODE_RAW,
                 "effective_team_id": None,
             }
+            post["thread_locked"] = False
             visible.append(post)
             continue
         if community not in lenses:
@@ -384,6 +417,7 @@ def filter_posts(
                 "effective_mode": MODE_RAW,
                 "effective_team_id": None,
             }
+            post["thread_locked"] = False
             visible.append(post)
             continue
 
@@ -406,6 +440,10 @@ def filter_posts(
                     SELECT lock_sequence FROM curation_locks
                     WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
                 ),
+                (
+                    SELECT lock_windows FROM curation_locks
+                    WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+                ),
                 EXISTS(
                     SELECT 1 FROM followed_users
                     WHERE LOWER(owner)=%s AND LOWER(target)=%s
@@ -423,11 +461,22 @@ def filter_posts(
                 community,
                 team_id,
                 meta["root_txhash"],
+                community,
+                team_id,
+                meta["root_txhash"],
                 address,
                 meta["author"],
             ),
         )
-        hidden_post, hidden_author, subscriber_only, lock_sequence, follows_author = cur.fetchone()
+        (
+            hidden_post,
+            hidden_author,
+            subscriber_only,
+            lock_sequence,
+            lock_windows,
+            follows_author,
+        ) = cur.fetchone()
+        windows = _lock_windows(lock_sequence, lock_windows)
         visibility = resolve_visibility(
             viewer=address,
             community=community,
@@ -447,7 +496,7 @@ def filter_posts(
             team_hidden_post=bool(hidden_post),
             team_hidden_author=bool(hidden_author),
             team_subscriber_only=bool(subscriber_only),
-            lock_sequence=int(lock_sequence) if lock_sequence is not None else None,
+            lock_windows=windows,
             temporary_raw=False,
             node_blocked=False,
         )
@@ -464,6 +513,18 @@ def filter_posts(
             "effective_mode": visibility["effective_mode"],
             "effective_team_id": visibility["effective_team_id"],
         }
+        # Roots of a locked thread stay in the feed; stamp the lock so the
+        # card can show it. Replies after the lock are already dropped above.
+        # This is the live lock only: a thread unlocked again is not locked now,
+        # even though the replies from its closed windows stay hidden.
+        post["thread_locked"] = lock_sequence is not None
+        if post["thread_locked"]:
+            log.debug(
+                "[lock] feed stamp post=%s community=%s team=%s",
+                post_id[:12],
+                community,
+                team_id,
+            )
         if visibility["visible"]:
             visible.append(post)
         elif direct and visibility["tombstone"]:
@@ -485,6 +546,10 @@ def thread_locked_for_lens(cur, community: str, root_id: str, team_id: int | Non
     two teams can disagree. This is only ever used to tell the client not to
     offer a reply it would immediately hide: the lock is a read filter, so a
     comment written anyway is still valid on chain and still visible on raw.
+
+    A row can outlive the lock that created it, because the windows a past
+    unlock closed are kept there to keep hiding the replies written inside
+    them. Only an open window means the thread is locked now.
     """
     slug = str(community or "").strip().lower()
     root = str(root_id or "").strip().lower()
@@ -494,6 +559,7 @@ def thread_locked_for_lens(cur, community: str, root_id: str, team_id: int | Non
         """
         SELECT 1 FROM curation_locks
         WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+          AND lock_sequence IS NOT NULL
         """,
         (slug, int(team_id), root),
     )

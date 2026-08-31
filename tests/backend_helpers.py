@@ -62,6 +62,18 @@ from shared.canon import (
     canon_base_set_curation_post_hidden as _canon_base_set_curation_post_hidden_raw,
     canon_base_set_curation_user_hidden as _canon_base_set_curation_user_hidden_raw,
     canon_base_set_curation_team_profile as _canon_base_set_curation_team_profile_raw,
+    canon_base_invite_curator as _canon_base_invite_curator_raw,
+    canon_base_revoke_curator_invite as _canon_base_revoke_curator_invite_raw,
+    canon_base_accept_curator_invite as _canon_base_accept_curator_invite_raw,
+    canon_base_decline_curator_invite as _canon_base_decline_curator_invite_raw,
+    canon_base_leave_curation_team as _canon_base_leave_curation_team_raw,
+    canon_base_remove_curator as _canon_base_remove_curator_raw,
+    canon_base_transfer_curation_team as _canon_base_transfer_curation_team_raw,
+    canon_base_delete_curation_team as _canon_base_delete_curation_team_raw,
+    canon_base_set_curation_thread_locked as _canon_base_set_curation_thread_locked_raw,
+    canon_base_set_curation_subscriber_only as _canon_base_set_curation_subscriber_only_raw,
+    canon_base_set_curation_tag as _canon_base_set_curation_tag_raw,
+    canon_base_set_curation_post_tag as _canon_base_set_curation_post_tag_raw,
 )
 
 def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
@@ -1392,6 +1404,297 @@ def _do_set_curation_team_profile(
     payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/set_curation_team_profile", payload)
     return resp or {}
+
+
+def _do_curation_team_msg(
+    backend: str,
+    wallet,
+    route: str,
+    canon_fn,
+    canon_args: tuple,
+    payload_fields: dict,
+    skip_pow: bool = False,
+) -> dict:
+    """POST one signed curation route.
+
+    canon_args are the message payload fields in proto field-number order, and
+    must be byte-identical to what the backend rebuilds from payload_fields —
+    the signature covers the canonical bytes, so a lowercase mismatch on a slug
+    or an address is rejected on chain rather than at the API.
+    """
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    d = 0 if skip_pow else diff
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, *canon_args, nonce=nonce)
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": d,
+        "pow": int(proof),
+        **payload_fields,
+    }
+    _, resp = _post(f"{backend}{route}", payload)
+    return resp or {}
+
+
+def _do_invite_curator(
+    backend: str, wallet, community: str, team_id: int, target: str, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    tgt = (target or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/invite_curator",
+        _canon_base_invite_curator_raw,
+        (slug, int(team_id), tgt),
+        {"community": slug, "team_id": int(team_id), "target": tgt},
+        skip_pow,
+    )
+
+
+def _do_revoke_curator_invite(
+    backend: str, wallet, community: str, team_id: int, target: str, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    tgt = (target or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/revoke_curator_invite",
+        _canon_base_revoke_curator_invite_raw,
+        (slug, int(team_id), tgt),
+        {"community": slug, "team_id": int(team_id), "target": tgt},
+        skip_pow,
+    )
+
+
+def _do_accept_curator_invite(
+    backend: str, wallet, community: str, team_id: int, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/accept_curator_invite",
+        _canon_base_accept_curator_invite_raw,
+        (slug, int(team_id)),
+        {"community": slug, "team_id": int(team_id)},
+        skip_pow,
+    )
+
+
+def _do_decline_curator_invite(
+    backend: str, wallet, community: str, team_id: int, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/decline_curator_invite",
+        _canon_base_decline_curator_invite_raw,
+        (slug, int(team_id)),
+        {"community": slug, "team_id": int(team_id)},
+        skip_pow,
+    )
+
+
+def _do_leave_curation_team(
+    backend: str, wallet, community: str, team_id: int, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/leave_curation_team",
+        _canon_base_leave_curation_team_raw,
+        (slug, int(team_id)),
+        {"community": slug, "team_id": int(team_id)},
+        skip_pow,
+    )
+
+
+def _do_remove_curator(
+    backend: str, wallet, community: str, team_id: int, target: str, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    tgt = (target or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/remove_curator",
+        _canon_base_remove_curator_raw,
+        (slug, int(team_id), tgt),
+        {"community": slug, "team_id": int(team_id), "target": tgt},
+        skip_pow,
+    )
+
+
+def _do_transfer_curation_team(
+    backend: str, wallet, community: str, team_id: int, new_owner: str, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    owner = (new_owner or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/transfer_curation_team",
+        _canon_base_transfer_curation_team_raw,
+        (slug, int(team_id), owner),
+        {"community": slug, "team_id": int(team_id), "new_owner": owner},
+        skip_pow,
+    )
+
+
+def _do_delete_curation_team(
+    backend: str, wallet, community: str, team_id: int, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/delete_curation_team",
+        _canon_base_delete_curation_team_raw,
+        (slug, int(team_id)),
+        {"community": slug, "team_id": int(team_id)},
+        skip_pow,
+    )
+
+
+def _do_set_curation_thread_locked(
+    backend: str,
+    wallet,
+    community: str,
+    team_id: int,
+    root_hash: str,
+    locked: bool = True,
+    skip_pow: bool = False,
+) -> dict:
+    slug = (community or "").strip().lower()
+    root = (root_hash or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/set_curation_thread_locked",
+        _canon_base_set_curation_thread_locked_raw,
+        (slug, int(team_id), root, bool(locked)),
+        {"community": slug, "team_id": int(team_id), "root_hash": root, "locked": bool(locked)},
+        skip_pow,
+    )
+
+
+def _do_set_curation_subscriber_only(
+    backend: str, wallet, community: str, team_id: int, enabled: bool = True, skip_pow: bool = False
+) -> dict:
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/set_curation_subscriber_only",
+        _canon_base_set_curation_subscriber_only_raw,
+        (slug, int(team_id), bool(enabled)),
+        {"community": slug, "team_id": int(team_id), "enabled": bool(enabled)},
+        skip_pow,
+    )
+
+
+def _do_set_curation_tag(
+    backend: str, wallet, community: str, team_id: int, tag: str, skip_pow: bool = False
+) -> dict:
+    """The backend normalizes the tag before rebuilding the message, so callers
+    must pass an already-canonical tag or the signature will not match."""
+    slug = (community or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/set_curation_tag",
+        _canon_base_set_curation_tag_raw,
+        (slug, int(team_id), tag),
+        {"community": slug, "team_id": int(team_id), "tag": tag},
+        skip_pow,
+    )
+
+
+def _do_set_curation_post_tag(
+    backend: str,
+    wallet,
+    community: str,
+    team_id: int,
+    target: str,
+    tag: str = "",
+    clear: bool = False,
+    skip_pow: bool = False,
+) -> dict:
+    slug = (community or "").strip().lower()
+    tgt = (target or "").strip().lower()
+    return _do_curation_team_msg(
+        backend,
+        wallet,
+        "/api/core/set_curation_post_tag",
+        _canon_base_set_curation_post_tag_raw,
+        (slug, int(team_id), tgt, tag, bool(clear)),
+        {
+            "community": slug,
+            "team_id": int(team_id),
+            "target": tgt,
+            "tag": tag,
+            "clear": bool(clear),
+        },
+        skip_pow,
+    )
+
+
+def _wait_team_member(
+    backend: str,
+    community: str,
+    team_id: int,
+    address: str,
+    *,
+    present: bool = True,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    """Poll team detail until address is (or is no longer) on the roster."""
+    slug = (community or "").strip().lower()
+    want = (address or "").strip().lower()
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        code, detail = _get(f"{backend}/api/communities/{slug}/teams/{team_id}")
+        if code == 200 and isinstance(detail, dict):
+            members = {
+                str(m.get("address") or "").lower() for m in (detail.get("members") or [])
+            }
+            if (want in members) is present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_team_owner(
+    backend: str,
+    community: str,
+    team_id: int,
+    owner: str,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> bool:
+    slug = (community or "").strip().lower()
+    want = (owner or "").strip().lower()
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        code, detail = _get(f"{backend}/api/communities/{slug}/teams/{team_id}")
+        if code == 200 and isinstance(detail, dict):
+            if str(detail.get("owner") or "").lower() == want:
+                return True
+        time.sleep(0.5)
+    return False
 
 
 def _wait_curation_team(

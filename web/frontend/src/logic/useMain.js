@@ -564,11 +564,13 @@ export function useMain({
             return null;
         }
     }, [nodeConfigTick]);
+    // Wait for nodeConfig rather than crashing the tree. Bootstrap retries and
+    // get_node_config fall back here; throwing left skeleton rows stuck over the
+    // feed after login when addressed /api/bootstrap 503'd.
     if (nodeConfigTick > 0 && !nodeConfig) {
         try {
-            console.error('[MainView] nodeConfig missing after fetch attempt');
+            console.warn('[MainView] nodeConfig missing after fetch attempt; waiting');
         } catch (_) { }
-        throw new Error('MainView requires nodeConfig to render app banners');
     }
     if (nodeConfig && (typeof nodeConfig.android_banner_enabled !== 'boolean' || typeof nodeConfig.ios_banner_enabled !== 'boolean')) {
         try {

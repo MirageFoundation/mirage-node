@@ -857,9 +857,7 @@ class Indexer:
         An edit resets the column to the offline derivation, which for RedGIFs
         is empty. That post simply becomes a candidate again on a later pass.
         """
-        candidates = self.db.select_redgifs_posts_missing_thumbnail(
-            REDGIFS_BACKFILL_SCAN, sorted(self._redgifs_skip)
-        )
+        candidates = self.db.select_redgifs_posts_missing_thumbnail(REDGIFS_BACKFILL_SCAN, sorted(self._redgifs_skip))
         if not candidates:
             return
 
@@ -916,9 +914,7 @@ class Indexer:
         Same placement rationale as the RedGIFs pass: post-commit, never fatal,
         never during catch-up, capped per pass.
         """
-        candidates = self.db.select_rumble_posts_needing_resolution(
-            RUMBLE_BACKFILL_SCAN, sorted(self._rumble_skip)
-        )
+        candidates = self.db.select_rumble_posts_needing_resolution(RUMBLE_BACKFILL_SCAN, sorted(self._rumble_skip))
         if not candidates:
             return
 
@@ -949,9 +945,7 @@ class Indexer:
             if answer["thumbnail"] and not thumbnail:
                 self.db.update_post_thumbnail(txhash, answer["thumbnail"])
             if answer["embed_id"]:
-                self.db.update_post_media_meta(
-                    txhash, self._media_meta_with_embed(meta_raw, answer["embed_id"])
-                )
+                self.db.update_post_media_meta(txhash, self._media_meta_with_embed(meta_raw, answer["embed_id"]))
             logger.info(
                 "[rumble] tx=%s embed=%s thumb=%s",
                 txhash[:12],
@@ -1514,6 +1508,29 @@ class Indexer:
                     self.db.block_topic(owner, str(target), now)
 
             absent = self._soft_delete_absent_owners(chain_owners, now)
+
+        # Migrations that backfill quota run BEFORE this sync, when effective_paid
+        # is still the column default (false). Sync then flips effective_paid from
+        # chain without projecting quota — leaving relay users NULL and bootstrap
+        # 503. Fill any remaining gaps here (no-op once projections exist).
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT owner FROM profiles
+                    WHERE subscriber_quota_epoch IS NULL
+                      AND (effective_paid = TRUE OR level >= 1)
+                    ORDER BY owner
+                    """
+                )
+                missing_quota = [str(row[0]).strip().lower() for row in cur.fetchall() if row and row[0]]
+        if missing_quota:
+            logger.info(
+                "KV Sync: projecting subscription runtime for %d profiles with NULL quota",
+                len(missing_quota),
+            )
+            for owner in missing_quota:
+                self.processor.update_subscription_runtime(owner)
 
         t_done = time.time()
         logger.info(

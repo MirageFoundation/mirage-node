@@ -4,6 +4,7 @@ import {
     HiOutlineEyeSlash,
     HiOutlineExclamationCircle,
     HiOutlineExclamationTriangle,
+    HiOutlineLockClosed,
 } from "react-icons/hi2";
 
 /**
@@ -66,6 +67,28 @@ function ContentTagBadge({ tag, size = "sm", className }) {
             <Icon aria-hidden="true" />
             {cfg.label}
         </Pill>
+    );
+}
+
+const LockMark = styled.span`
+    display: inline-flex;
+    align-items: center;
+    color: ${({ theme }) => theme.colors.feedCtrlText};
+    line-height: 1;
+    flex-shrink: 0;
+
+    svg {
+        width: ${({ $size }) => ($size === 'md' ? '14px' : '12px')};
+        height: ${({ $size }) => ($size === 'md' ? '14px' : '12px')};
+    }
+`;
+
+/** Quiet lock glyph for a thread the current lens has locked. */
+export function ThreadLockMark({ size = 'sm', className }) {
+    return (
+        <LockMark $size={size} title="Thread locked" aria-label="Thread locked" className={className}>
+            <HiOutlineLockClosed aria-hidden="true" />
+        </LockMark>
     );
 }
 

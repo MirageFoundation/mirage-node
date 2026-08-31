@@ -2,6 +2,7 @@
 Message processing logic for the indexer.
 """
 
+import json
 import logging
 import re
 import time
@@ -379,7 +380,9 @@ class MessageProcessor:
             "/mirage.core.v1.MsgSetCommunityMetadata",
             "/mirage.core.v1.MsgTransferCommunity",
         ):
-            logger.info("[community] historical retired message decoded type_url=%s height=%s tx=%s", type_url, height, tx_hash)
+            logger.info(
+                "[community] historical retired message decoded type_url=%s height=%s tx=%s", type_url, height, tx_hash
+            )
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
         elif type_url == "/mirage.core.v1.MsgBridgeBurn":
@@ -2519,28 +2522,30 @@ class MessageProcessor:
                 continue
 
             if event_type == "curation_thread_locked":
-                if (
-                    not community
-                    or raw_team_id is None
-                    or "target" not in attrs
-                    or "locked" not in attrs
-                ):
+                if not community or raw_team_id is None or "target" not in attrs or "locked" not in attrs:
                     raise RuntimeError("curation_thread_locked event missing final state")
                 team_id = int(raw_team_id)
                 target = str(attrs["target"]).strip().lower()
                 locked = str(attrs["locked"]).lower() == "true"
+                # The chain only keeps the cut-off of the window that is open
+                # right now, so the event has to carry both ends of the window a
+                # lock closes. Without them the history below cannot be rebuilt.
+                for required in ("lock_sequence", "unlock_sequence", "actor"):
+                    if not attrs.get(required):
+                        raise RuntimeError(f"curation_thread_locked event missing {required}")
+                lock_sequence = int(attrs["lock_sequence"])
+                unlock_sequence = int(attrs["unlock_sequence"])
                 with self.db._connect() as conn:
                     with conn.cursor() as cur:
                         if locked:
-                            if not attrs.get("lock_sequence") or not attrs.get("actor"):
-                                raise RuntimeError(
-                                    "curation_thread_locked event missing lock_sequence/actor"
-                                )
+                            # lock_windows is deliberately absent from the UPDATE:
+                            # the closed history has to survive a re-lock.
                             cur.execute(
                                 """
                                 INSERT INTO curation_locks(
-                                    community, team_id, root_txhash, lock_sequence, actor, updated_height
-                                ) VALUES(%s,%s,%s,%s,%s,%s)
+                                    community, team_id, root_txhash, lock_sequence,
+                                    lock_windows, actor, updated_height
+                                ) VALUES(%s,%s,%s,%s,'[]'::jsonb,%s,%s)
                                 ON CONFLICT(community, team_id, root_txhash) DO UPDATE SET
                                     lock_sequence=EXCLUDED.lock_sequence,
                                     actor=EXCLUDED.actor,
@@ -2550,19 +2555,78 @@ class MessageProcessor:
                                     community,
                                     team_id,
                                     target,
-                                    int(attrs["lock_sequence"]),
+                                    lock_sequence,
                                     attrs["actor"],
                                     int(height),
                                 ),
                             )
                         else:
+                            # A window with nothing posted inside it carries no
+                            # information, so only a real stretch is recorded.
+                            if unlock_sequence > lock_sequence:
+                                # Upsert rather than update: an indexer that
+                                # started after the lock never saw the row, and
+                                # the event carries both ends of the window
+                                # precisely so it can still record it.
+                                window = json.dumps([[lock_sequence, unlock_sequence]])
+                                cur.execute(
+                                    """
+                                    INSERT INTO curation_locks(
+                                        community, team_id, root_txhash, lock_sequence,
+                                        lock_windows, actor, updated_height
+                                    ) VALUES(%s,%s,%s,NULL,%s::jsonb,%s,%s)
+                                    ON CONFLICT(community, team_id, root_txhash) DO UPDATE SET
+                                        lock_windows=curation_locks.lock_windows || EXCLUDED.lock_windows,
+                                        lock_sequence=NULL,
+                                        actor=EXCLUDED.actor,
+                                        updated_height=EXCLUDED.updated_height
+                                    """,
+                                    (
+                                        community,
+                                        team_id,
+                                        target,
+                                        window,
+                                        attrs["actor"],
+                                        int(height),
+                                    ),
+                                )
+                            else:
+                                cur.execute(
+                                    """
+                                    UPDATE curation_locks
+                                    SET lock_sequence=NULL,
+                                        actor=%s,
+                                        updated_height=%s
+                                    WHERE community=%s AND team_id=%s AND root_txhash=%s
+                                    """,
+                                    (
+                                        attrs["actor"],
+                                        int(height),
+                                        community,
+                                        team_id,
+                                        target,
+                                    ),
+                                )
+                            # An unlocked thread with no history left is the same
+                            # as never having been locked.
                             cur.execute(
                                 """
                                 DELETE FROM curation_locks
                                 WHERE community=%s AND team_id=%s AND root_txhash=%s
+                                  AND lock_sequence IS NULL
+                                  AND lock_windows='[]'::jsonb
                                 """,
                                 (community, team_id, target),
                             )
+                        logger.debug(
+                            "[lock] projected community=%s team=%s root=%s locked=%s window=(%s,%s]",
+                            community,
+                            team_id,
+                            target[:12],
+                            locked,
+                            lock_sequence,
+                            unlock_sequence,
+                        )
         for community, team_id in sorted(touched):
             self._sync_curation_team(community, team_id, height)
         if touched:

@@ -105,6 +105,23 @@ export function lensQuery(lens, teamId = null, scope = 'current') {
     return params;
 }
 
+/** Team id the current view is actually applying, or null when uncensored/raw. */
+export function viewingTeamId(post) {
+    const id = Number(post?.lens?.effective_team_id);
+    if (!Number.isSafeInteger(id) || id <= 0) return null;
+    return id;
+}
+
+/** Closed-label hint from a stamped post.lens before the picker has fetched teams. */
+export function lensHintLabel(hintLens) {
+    if (!hintLens || typeof hintLens !== 'object') return 'Curation';
+    const mode = Number(hintLens.effective_mode);
+    if (mode === CURATION_MODE.RAW || !hintLens.effective_team_id) return 'Uncensored';
+    if (mode === CURATION_MODE.LIVE_DEFAULT) return 'Default';
+    if (mode === CURATION_MODE.PINNED) return 'Curation';
+    return 'Curation';
+}
+
 export function lensCacheKey({ viewer, community, scope = 'current', lens = LENS.EFFECTIVE, teamId = null }) {
     const normalized = normalizeLens(lens, teamId);
     return [

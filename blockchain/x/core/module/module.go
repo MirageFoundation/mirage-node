@@ -2049,6 +2049,11 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	if err := validateSafeText("username", username); err != nil {
 		return nil, err
 	}
+	// Checked on the requested value, before the "Anon-" prefix is applied, so a
+	// free-tier request for "-name" is rejected rather than stored as "Anon--name".
+	if err := types.ValidateUsernameFormat(username); err != nil {
+		return nil, err
+	}
 
 	// Get user's tier to check if they can change name (only need Level and Username)
 	var userLevel int
@@ -2073,6 +2078,11 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	if !canRemoveAnon {
 		for strings.HasPrefix(strings.ToLower(username), "anon-") {
 			username = username[len("anon-"):]
+		}
+		// Re-checked after stripping so "Anon--name" cannot smuggle a leading
+		// hyphen past the check above.
+		if err := types.ValidateUsernameFormat(username); err != nil {
+			return nil, err
 		}
 		username = "Anon-" + username
 	}

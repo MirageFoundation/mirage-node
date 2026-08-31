@@ -57,12 +57,22 @@ ALL_CATEGORIES = {
     "params_mask": test_params_mask_governance,
 }
 
-STATELESS_CATEGORIES: set[str] = set()
+# Categories that must run alone. The cap fills are heavy but wallet-scoped, so
+# they are wallet-bound rather than exclusive.
+EXCLUSIVE_CATEGORIES = {
+    "params_mask",  # masked governance proposal mutates params, then restores them
+}
 
 # params_mask uses the validator key only.
 WALLETLESS_CATEGORIES = {
     "params_mask",
 }
+
+# Every category is a release gate. A test that may skip without failing the
+# release is a test nobody relies on, and the answer to that is to delete it,
+# not to leave it in the suite reporting green. Skips are still printed with
+# their reason; they just end the run non-zero.
+RELEASE_GATE_CATEGORIES = frozenset(ALL_CATEGORIES)
 
 
 def _pre_run(backend: str) -> int | None:
@@ -85,8 +95,9 @@ def main() -> int:
     return run_suite(
         "Mirage Extended Test Suite",
         ALL_CATEGORIES,
-        STATELESS_CATEGORIES,
+        EXCLUSIVE_CATEGORIES,
         pre_run_hook=_pre_run,
+        no_skip_categories=RELEASE_GATE_CATEGORIES,
         walletless_categories=WALLETLESS_CATEGORIES,
     )
 

@@ -1480,7 +1480,7 @@ def test_anon_visibility(backend: str) -> None:
     path from recomputing a result every guest shares.
     """
     if not _check_local_docker():
-        _skip("anon_visibility", "requires the local mirage container")
+        _fail("anon_visibility", "local docker required")
         return
 
     # ── A guest gets no tags, whatever the client asks for ────────────────

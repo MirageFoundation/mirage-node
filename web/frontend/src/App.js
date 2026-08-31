@@ -339,8 +339,7 @@ class App extends Component {
 
         // On hard refresh, invalidate the chain_config timestamp only — chain config
         // is genuinely volatile (params, difficulty). nodeConfig is deployment-static
-        // and matches the backend's 24h cache; we keep it across reloads. It's still
-        // cleared in setCredentials() on login/logout in case the active validator differs.
+        // and matches the backend's 24h cache; we keep it across reloads and login.
         try {
             const navEntries = performance.getEntriesByType('navigation');
             const isReload = navEntries.length > 0
@@ -690,10 +689,14 @@ class App extends Component {
         // existing fetch logic and pick up the slack.
         const delays = [0, 1000, 3000, 7000];
         if (attempt >= delays.length) {
-            // Out of retries: fire the same nodeConfigUpdated event the
-            // standalone _bootstrapNodeConfig path would, so listeners stop
-            // showing "Loading..." indefinitely.
-            try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
+            // Out of retries: recover nodeConfig via the dedicated endpoint when
+            // still missing. Do NOT fire a bare nodeConfigUpdated here — that
+            // bumps MainView's tick with nothing in storage and used to throw.
+            const stillMissing = !Storage.load('nodeConfig', null);
+            console.error('[App] bootstrap exhausted retries', { stillMissingNodeConfig: stillMissing });
+            if (stillMissing) {
+                try { this._bootstrapNodeConfig(); } catch (_) { }
+            }
             return;
         }
 
@@ -820,7 +823,11 @@ class App extends Component {
 
                     try { window.dispatchEvent(new Event('bootstrapHydrated')); } catch (_) { }
                 })
-                .catch(() => {
+                .catch((err) => {
+                    console.error('[App] bootstrap.fetch failed', {
+                        attempt: attempt + 1,
+                        message: String(err?.message || err || 'unknown'),
+                    });
                     this._bootstrapApp(attempt + 1);
                 })
                 .finally(() => {
@@ -889,11 +896,12 @@ class App extends Component {
             seedVault.clear();
         }
 
-        // Clear old cached data (from previous wallet)
+        // Clear wallet-bound caches. Keep nodeConfig: it is deployment-static
+        // (matches the backend's 24h cache). Wiping it on login races the feed
+        // against a re-fetch and paints skeleton rows over real posts when
+        // addressed bootstrap is slow or 503s.
         Storage.remove('chainConfig');
-        Storage.remove('nodeConfig');
         Storage.remove('chain_config_cached_at');
-        Storage.remove('node_config_cached_at');
         Storage.remove('user_balance');
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
@@ -1018,11 +1026,32 @@ class App extends Component {
 
                 if (prevState.posts[postId]) {
                     const existing = prevState.posts[postId];
-                    updatedPosts[postId] = {
+                    const incoming = newPosts[postId];
+                    const merged = {
                         ...existing,
-                        ...newPosts[postId],
+                        ...incoming,
                         direction: dir
                     };
+                    // A curator tag/lock write is visible locally before the indexer
+                    // serves it. A feed refresh that still carries the previous
+                    // value must not put the old badge back.
+                    if (existing._optimisticTag !== undefined) {
+                        if (incoming.tag === existing._optimisticTag) {
+                            delete merged._optimisticTag;
+                        } else {
+                            merged.tag = existing._optimisticTag;
+                            merged._optimisticTag = existing._optimisticTag;
+                        }
+                    }
+                    if (existing._optimisticLock !== undefined) {
+                        if (incoming.thread_locked === existing._optimisticLock) {
+                            delete merged._optimisticLock;
+                        } else {
+                            merged.thread_locked = existing._optimisticLock;
+                            merged._optimisticLock = existing._optimisticLock;
+                        }
+                    }
+                    updatedPosts[postId] = merged;
                 } else {
                     updatedPosts[postId] = {
                         ...newPosts[postId],

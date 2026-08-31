@@ -510,6 +510,7 @@ def community_team_moderation(slug: str, team_id: int):
                     EXISTS(
                         SELECT 1 FROM curation_locks
                         WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
+                          AND lock_sequence IS NOT NULL
                     ),
                     (
                         SELECT tag FROM curation_post_tags
@@ -517,10 +518,18 @@ def community_team_moderation(slug: str, team_id: int):
                     )
                 """,
                 (
-                    slug, team_id, post_id,
-                    slug, team_id, author,
-                    slug, team_id, root,
-                    slug, team_id, post_id,
+                    slug,
+                    team_id,
+                    post_id,
+                    slug,
+                    team_id,
+                    author,
+                    slug,
+                    team_id,
+                    root,
+                    slug,
+                    team_id,
+                    post_id,
                 ),
             )
             post_hidden, user_hidden, thread_locked, post_tag = cur.fetchone()

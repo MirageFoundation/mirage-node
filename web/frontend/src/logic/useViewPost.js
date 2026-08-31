@@ -20,8 +20,14 @@ import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
 import { communityLabel } from "../utils/community";
+import { LENS, lensQuery } from "../utils/curation";
 import { signPlainPayload } from "../utils/signPlain";
 export const pickCard = requireThemeColor;
+
+function commentsLensParams(lens, teamId) {
+    if (lens === LENS.TEAM) return lensQuery(lens, teamId);
+    return lensQuery(lens || LENS.EFFECTIVE, null);
+}
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
 // Supports $size prop ('compact' or 'large') to match feed view mode
@@ -80,8 +86,12 @@ export let _cachedHighlightPostId = null;
 export let _highlightConsumed = false;
 export function useViewPost({
     state,
-    updatePost
+    updatePost,
+    lens = LENS.EFFECTIVE,
+    teamId = null,
 }) {
+    const threadLensRef = useRef({ lens, teamId });
+    threadLensRef.current = { lens, teamId };
     const [root, setRoot] = useState({});
     const [children, setChildren] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1984,8 +1994,7 @@ export function useViewPost({
                                 const data = await Api.get('get_comments', {
                                     post_id: postId,
                                     address: viewerAddress,
-                                    lens: 'effective',
-                                    scope: 'current',
+                                    ...commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId),
                                 });
                                 if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                     try { Api.invalidate('get_comments'); } catch (_) { }
@@ -2093,20 +2102,35 @@ export function useViewPost({
 
     const commentsRequestRef = useRef(0);
     const commentsAutoOpenTimersRef = useRef(new Set());
+    const loadedPostIdRef = useRef(null);
     useEffect(() => {
         const autoOpenTimeouts = commentsAutoOpenTimersRef.current;
         const post_id = postId;
         const requestId = commentsRequestRef.current + 1;
         commentsRequestRef.current = requestId;
         let cancelled = false;
-        setLoading(true);
+        const keepContent = !!(
+            post_id
+            && loadedPostIdRef.current
+            && String(loadedPostIdRef.current).toLowerCase() === String(post_id).toLowerCase()
+        );
         setError(null);
-        setRoot({});
-        setChildren([]);
-        setAncestors([]);
-        setAncestorsOmitted(0);
-        setLastVisitTs(null);
+        if (!keepContent) {
+            setLoading(true);
+            setRoot({});
+            setChildren([]);
+            setAncestors([]);
+            setAncestorsOmitted(0);
+            setLastVisitTs(null);
+        } else {
+            console.debug('[ViewPostView] lens refetch in place', {
+                postId: post_id,
+                lens,
+                teamId,
+            });
+        }
         if (!post_id) {
+            loadedPostIdRef.current = null;
             setLoading(false);
             return () => {
                 cancelled = true;
@@ -2139,6 +2163,7 @@ export function useViewPost({
                 return;
             }
             setLoading(false);
+            loadedPostIdRef.current = post_id;
             setRoot(data.root);
             setChildren(data.children);
             const nextAncestors = data.ancestors;
@@ -2156,6 +2181,9 @@ export function useViewPost({
                 const f = tx && tx['reconcileAfterCommentsFetch'];
                 if (typeof f === 'function') f(post_id, data.root, data.children);
             } catch (_) { }
+            if (keepContent) {
+                return;
+            }
             // Mark current comment count as visited
             if (data.root && data.root.comments !== undefined) {
                 try {
@@ -2206,38 +2234,41 @@ export function useViewPost({
 
         const viewerAddress = Storage.load("publicKey", "");
         (async () => {
-            try {
-                const stashed = await peekBootstrapStashAfterBootstrap(
-                    'bootstrap_view',
-                    viewerAddress || null,
-                );
-                if (cancelled || commentsRequestRef.current !== requestId) return;
-                const rootId = stashed && stashed.root && stashed.root.post_id
-                    ? String(stashed.root.post_id).toLowerCase()
-                    : '';
-                if (
-                    stashed
-                    && stashed.kind === 'thread'
-                    && stashed.found !== false
-                    && rootId
-                    && rootId === String(post_id).toLowerCase()
-                ) {
-                    readBootstrapStash('bootstrap_view', viewerAddress || null);
-                    console.debug('[Bootstrap] thread stash hit', { postId: post_id });
-                    applyCommentsData({ ...stashed, __bootstrap: true });
-                    return;
-                }
-            } catch (_) { /* fall through */ }
+            if (!keepContent) {
+                try {
+                    const stashed = await peekBootstrapStashAfterBootstrap(
+                        'bootstrap_view',
+                        viewerAddress || null,
+                    );
+                    if (cancelled || commentsRequestRef.current !== requestId) return;
+                    const rootId = stashed && stashed.root && stashed.root.post_id
+                        ? String(stashed.root.post_id).toLowerCase()
+                        : '';
+                    if (
+                        stashed
+                        && stashed.kind === 'thread'
+                        && stashed.found !== false
+                        && rootId
+                        && rootId === String(post_id).toLowerCase()
+                    ) {
+                        readBootstrapStash('bootstrap_view', viewerAddress || null);
+                        console.debug('[Bootstrap] thread stash hit', { postId: post_id });
+                        applyCommentsData({ ...stashed, __bootstrap: true });
+                        return;
+                    }
+                } catch (_) { /* fall through */ }
+            }
 
             if (cancelled || commentsRequestRef.current !== requestId) return;
             // Independent fetch: drop late launch stash so it cannot override
             // a later navigation to the same route within the stash TTL.
             try { Storage.remove('bootstrap_view'); } catch (_) { }
+            const lensParams = commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId);
+            console.debug('[ViewPostView] get_comments', { postId: post_id, ...lensParams });
             Api.get('get_comments', {
                 post_id,
                 address: viewerAddress,
-                lens: 'effective',
-                scope: 'current',
+                ...lensParams,
             }).then(data => {
                 applyCommentsData(data);
             }).catch(error => {
@@ -2283,7 +2314,7 @@ export function useViewPost({
             autoOpenTimeouts.clear();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [postId]);
+    }, [postId, lens, teamId]);
 
     useEffect(() => {
         if (!postId) return;
@@ -2348,8 +2379,7 @@ export function useViewPost({
                         const data = await Api.get('get_comments', {
                             post_id: normalizedPostId,
                             address: viewerAddress,
-                            lens: 'effective',
-                            scope: 'current',
+                            ...commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId),
                         });
                         if (data && data.root && data.root.post_id) {
                             applyIndexedPost(
@@ -2588,6 +2618,7 @@ export function useViewPost({
                 if (statePost.topic !== undefined) merged.topic = statePost.topic;
                 if (statePost.root_topic !== undefined) merged.root_topic = statePost.root_topic;
                 if (statePost.tag !== undefined) merged.tag = statePost.tag;
+                if (statePost.thread_locked !== undefined) merged.thread_locked = statePost.thread_locked;
                 if (statePost.edited !== undefined) merged.edited = statePost.edited;
                 if (statePost.edited_ts !== undefined) merged.edited_ts = statePost.edited_ts;
             }

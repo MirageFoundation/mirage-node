@@ -93,7 +93,11 @@ from tests.cases.test_backend_indexer import (
     test_rumble_embeds,
 )
 from tests.cases.test_backend_hardening import test_backend_hardening
-from tests.cases.test_backend_curation import test_curation_backend
+from tests.cases.test_backend_curation import (
+    test_curation_backend,
+    test_curation_team_lifecycle,
+    test_curation_thread_lock_windows,
+)
 from tests.cases.test_backend_net_tags import test_net_tags, test_net_tags_live
 from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
 from tests.cases.test_backend_install import test_install
@@ -159,6 +163,8 @@ ALL_CATEGORIES = {
     "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
     "curation": test_curation_backend,
+    "curation_team": test_curation_team_lifecycle,
+    "curation_lock": test_curation_thread_lock_windows,
     "net_tags": test_net_tags,
     "net_tags_live": test_net_tags_live,
     "subscribe_gift_validation": test_subscribe_gift_validation,
@@ -180,37 +186,23 @@ ALL_CATEGORIES = {
     "install": test_install,
 }
 
-STATELESS_CATEGORIES = {
-    "params",
-    "bootstrap",
-    "search",
-    "tier_config_api",
-    "image_impressions",
-    "upload_media",
-    "stats_admin_auth",
-    "stats_attribution",
-    "stats_pure",
-    "error_registry",
-    "indexer_fail_hard",
-    "block_hash_window",
-    "indexer_hardening",
-    "redgifs_thumbnails",
-    "rumble_embeds",
-    "route_authz",
-    "admin_authz",
-    "cross_user_reads",
-    "client_ip_trust",
-    "hash_salt",
-    "upload_bound",
-    "indexer_drift",
-    "runner_accounting",
-    "fleet_url",
-    "analytics_identity",
-    # The other push outbox categories drive the shared outbox with their own
-    # tick clock, so they run sequentially and never lease each other's rows.
-    "push_outbox_schema",
-    "net_tags",
-    "install",
+# Categories that must run alone. Everything else runs concurrently, each
+# wallet-bound one holding its own wallet set, so an entry here has to name a
+# genuinely shared resource that a private wallet set cannot isolate. Keep the
+# reason next to the entry and keep the list short.
+EXCLUSIVE_CATEGORIES = {
+    "rate_limit",  # bursts past Caddy's 50/s limiter on the shared container IP
+    "pow",  # asserts difficulty, which tracks chain-wide recent message volume
+    "anon_visibility",  # asserts what the global anonymous feed serves
+    "recent_content",  # asserts the global recent feed
+    "node_join",  # probes container bootstrap configuration
+    "backend_hardening",  # probes container and service configuration
+    # The push outbox categories drive shared outbox rows on their own tick
+    # clock, and delivery restarts a service to prove a queued push survives.
+    "push_outbox_enqueue",
+    "push_outbox_delivery",
+    "push_outbox_retry",
+    "push_outbox_cleanup",
 }
 
 # These categories use source probes, generated addresses, or direct database
@@ -243,49 +235,18 @@ WALLETLESS_CATEGORIES = {
     "install",
 }
 
-# Categories that guard a security or economic invariant. They must execute; a
-# skip here means the invariant went unchecked, which is a failure, not a pass.
-RELEASE_GATE_CATEGORIES = {
-    # A skip here means nobody checked whether the anonymous frontpage is
-    # serving tagged content, which is the exact regression it exists to catch.
-    "anon_visibility",
-    "route_authz",
-    "admin_authz",
-    "reward_claim_authz",
-    "cross_user_reads",
-    "relay_signing",
-    "envelope_window",
-    "client_ip_trust",
-    "hash_salt",
-    "error_registry",
-    "indexer_fail_hard",
-    "indexer_profile_absent",
-    "node_join",
-    "block_hash_window",
-    "stats_pure",
-    "runner_accounting",
-    "fleet_url",
-    "analytics_identity",
-    "push_outbox_schema",
-    "push_outbox_enqueue",
-    "push_outbox_delivery",
-    "push_outbox_retry",
-    "push_outbox_cleanup",
-    # The memo is written by any fee-paying relayer, so a parser that raises is
-    # an indexer-kill primitive reachable from the chain. Must not be skipped.
-    "net_tags",
-    # Every offline net_tags check can pass while no tag ever reaches the chain.
-    # A skip here means the release shipped the feature unverified end to end.
-    "net_tags_live",
-    "install",
-}
+# Every category is a release gate. A test that may skip without failing the
+# release is a test nobody relies on, and the answer to that is to delete it,
+# not to leave it in the suite reporting green. Skips are still printed with
+# their reason; they just end the run non-zero.
+RELEASE_GATE_CATEGORIES = frozenset(ALL_CATEGORIES)
 
 
 def main() -> int:
     return run_suite(
         "Mirage Local Test Suite",
         ALL_CATEGORIES,
-        STATELESS_CATEGORIES,
+        EXCLUSIVE_CATEGORIES,
         no_skip_categories=RELEASE_GATE_CATEGORIES,
         walletless_categories=WALLETLESS_CATEGORIES,
     )
