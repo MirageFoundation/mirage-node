@@ -85,6 +85,13 @@ COPY blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
 # Proto sources, not Go source: test_blockchain_params compares them against
 # shared/datatypes.py, and the suites only run inside this container.
 COPY blockchain/proto/ /opt/mirage/blockchain/proto/
+# Two Go files are the exception, because two release-gate probes read them:
+# indexer_hardening.relay_types_known derives the relayable message set from
+# relay_messages.go, and backend_hardening.thread_lock_read_only asserts the
+# thread lock stays a read filter instead of becoming a write gate. A
+# release-gate check is not allowed to skip, so what it reads has to ship.
+COPY blockchain/app/relay_messages.go /opt/mirage/blockchain/app/relay_messages.go
+COPY blockchain/x/core/keeper/team.go /opt/mirage/blockchain/x/core/keeper/team.go
 COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
@@ -159,6 +166,8 @@ WORKDIR /opt/mirage
 COPY --from=builder /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
 COPY --from=builder /opt/mirage/blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
 COPY --from=builder /opt/mirage/blockchain/proto /opt/mirage/blockchain/proto
+COPY --from=builder /opt/mirage/blockchain/app /opt/mirage/blockchain/app
+COPY --from=builder /opt/mirage/blockchain/x /opt/mirage/blockchain/x
 RUN chmod +x /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/compact-db
 
 # Copy built frontend, plus the source the suites diff against (error copy,
