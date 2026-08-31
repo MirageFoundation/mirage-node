@@ -18,7 +18,11 @@
 #          --cluster=mirage-1 \
 #          --peer=root@<val3> \
 #          --peer=root@<val4> \
-#          --container-host=root@<val2>
+#          --container-host=root@<val1>
+#
+#      --cluster is a label for the keypair (typically the chain id), NOT a
+#      hostname. One pair is reused for every host passed in that cluster.
+#      The workstation copy lives at ~/.mirage/recovery_keys/recovery_id_<cluster>.
 #
 #      What this does:
 #        - creates/reuses a local Ed25519 recovery keypair;
@@ -1304,6 +1308,7 @@ cmd_provision() {
   #   - recover.sh is copied only when sha256 differs;
   #   - authorized_keys is not appended twice if the cluster marker exists.
   local cluster=""
+  # Labelled keypair store, not per-server. Filename is recovery_id_<cluster>.
   local key_dir="$HOME/.mirage/recovery_keys"
   local regenerate=0
   local assume_yes=0
@@ -1555,12 +1560,16 @@ Usage: recover.sh provision --cluster=NAME --peer=user@host[:port] [...]
                             [--container-host=user@host[:port]]
                             [--key-dir=PATH] [--regenerate] [--yes]
 
+--cluster is a label for this keypair (typically the chain id mirage-1), not a
+server. The same pair is installed on every --container-host; every --peer gets
+the matching public key. Workstation copy: ~/.mirage/recovery_keys/recovery_id_<cluster>
+
 Example:
   ./scripts/recover.sh provision \\
     --cluster=mirage-1 \\
     --peer=root@<val3> \\
     --peer=root@<val4> \\
-    --container-host=root@<val2>
+    --container-host=root@<val1>
 
 What --peer means:
   Install recover.sh plus a forced authorized_keys entry on this source peer.
@@ -1569,6 +1578,8 @@ What --peer means:
 What --container-host means:
   Install the private recovery key into that host's ~/.mirage/.ssh/recovery_id,
   which is visible inside the mirage container as /root/.mirage/.ssh/recovery_id.
+  That is the validator that should be able to pull (usually the one with
+  WATCHDOG_AUTORECOVER, i.e. prod).
 EOF
 }
 

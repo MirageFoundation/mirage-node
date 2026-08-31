@@ -23,6 +23,13 @@
 - When the queue is clear and a local deploy is needed to verify, either wait for an explicit `deploy` or do one deploy after the batch — never one deploy per message.
 - **Frontend-only local sync is not a deploy and is always immediate.** After UI-only changes, rebuild and copy the static frontend into the running local Docker container so the user can refresh and test it, even when more work is queued. Do not restart the container, backend, indexer, or node for a UI sync.
 
+### #4 RULE: NEVER PIPE A COMMAND THROUGH `tail` / `head` / `grep` TO HIDE OUTPUT FROM THE USER.
+- The terminal is for the operator. Run the command as-is so the full live log is visible.
+- Do not `| tail -20`, `| head`, `| grep … | tail`, or otherwise truncate stdout/stderr on the command the user is watching. That is done to save *model* tokens and it leaves the operator staring at a blank pane until the process dies.
+- Long jobs: launch them in the background (no pipe), then poll status files or read the terminal log yourself with an offset/limit. The LLM-side read is what gets tailed — never the process.
+- When you need a one-line status, query the dedicated status file (`pipeline.stage`, `*.state`, `all.json`) instead of wrapping the live command.
+- Also enforced in `.cursor/rules/no-tail.mdc`.
+
 ### SERVERS
 
 Addresses are not in this repo — it is public. They live in `.env` on the
@@ -194,6 +201,7 @@ separate, explicit per-task approval.
 - Instead, use the `working_directory` parameter to set the cwd, and just run commands normally.
 - For Python scripts: `conda activate mirage-node && python script.py` with `working_directory` set — no special permissions needed.
 - Sandbox already allows network and workspace writes, which covers most use cases.
+- **Never pipe a live command through `tail`/`head`.** See #4 RULE. The user watches the terminal; you truncate only when *reading* a log file.
 
 ### Profile Data Architecture
 
@@ -327,7 +335,9 @@ scripts/test_upgrade.sh --wait   # block until done; exit 0 iff all three passed
   yourself is NOT a substitute, even if you run all of them in order. The script
   exists so the sequence and its gates cannot be partially performed.
 - **The release is not ready until `blockchain`, `backend` and `verify` all report
-  `passed`.** Read `~/.mirage/upgrade_tests/all.json` and `verify.out`.
+  `passed`.** `--wait` prints `all.json` and `verify.out`, then deletes
+  `~/.mirage/upgrade_tests`. Poll those files only while the jobs are still
+  running.
 - **On any failure: fix the cause and re-run the whole pipeline.** Re-running a
   single pane and declaring the release verified is not acceptable.
 - The rehearsal deploys the way production deploys, which is why it catches what
@@ -336,8 +346,8 @@ scripts/test_upgrade.sh --wait   # block until done; exit 0 iff all three passed
   shipped mislabelled.
 - Agents: launch it with `required_permissions: ["all"]`. It writes status files
   to `~/.mirage/upgrade_tests`, outside the workspace, so the sandbox kills it at
-  the first step with `rm: Permission denied`. `--wait` only reads, so it works
-  sandboxed.
+  the first step with `rm: Permission denied`. `--wait` reads then removes that
+  directory; it works sandboxed.
 
 ### Tests
 

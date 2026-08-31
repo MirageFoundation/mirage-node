@@ -2574,7 +2574,7 @@ def _test_moniker_update_pays_and_verifies() -> None:
             "moniker update discards its own failure, which is how the stale monikers went unnoticed",
         )
         return
-    if '.code // empty' not in code or 'CODE" != "0"' not in code:
+    if ".code // empty" not in code or 'CODE" != "0"' not in code:
         _fail(
             "install.moniker.checks_broadcast_code",
             "a rejected broadcast must be fatal, not ignored",
@@ -3588,6 +3588,19 @@ activate_if_halted
     rehearsal = Path(os.path.join(REPO_ROOT, "scripts", "test_upgrade.sh")).read_text(encoding="utf-8")
     if "tmux" in rehearsal:
         _fail("install.upgrade.rehearsal_tmux", "test_upgrade.sh still references tmux")
+        return
+    if "remove_status_dir" not in rehearsal:
+        _fail(
+            "install.upgrade.rehearsal_cleans_status",
+            "test_upgrade.sh must remove ~/.mirage/upgrade_tests after --wait",
+        )
+        return
+    reset_src = Path(os.path.join(REPO_ROOT, "scripts", "reset_local_testnet.py")).read_text(encoding="utf-8")
+    if "def cleanup_mirage_tmp" not in reset_src or "cleanup_mirage_tmp()" not in reset_src:
+        _fail(
+            "install.upgrade.reset_cleans_tmp",
+            "reset_local_testnet.py must remove ~/.mirage/tmp when it finishes",
+        )
         return
     _pass("install.upgrade.prepare_and_activate")
 

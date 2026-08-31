@@ -65,6 +65,13 @@ EXTRA_VALIDATOR_FUNDS_MIRAGE = 10_000_000
 EXTRA_VALIDATOR_FUNDS_UMIRAGE = EXTRA_VALIDATOR_FUNDS_MIRAGE * 1_000_000
 
 
+def cleanup_mirage_tmp() -> None:
+    """Remove ~/.mirage/tmp entirely. Recreated on the next reset."""
+    if MIRAGE_TMP.exists():
+        status(f"Removing {MIRAGE_TMP}")
+        shutil.rmtree(MIRAGE_TMP, ignore_errors=True)
+
+
 def ensure_mirage_tmp() -> Path:
     """Ensure ~/.mirage/tmp/ exists and is writable."""
 
@@ -1251,12 +1258,9 @@ def main():
     # Step 7: Prepare node directory (genesis, identity files, fresh data, postgres, indexer)
     prepare_local_node(new_genesis)
 
-    # Clean up temp files
+    # Clean up temp files (the whole ~/.mirage/tmp dir goes in __main__ finally)
     if export_path.exists():
         export_path.unlink()
-    for item in MIRAGE_TMP.iterdir():
-        if item.is_dir():
-            shutil.rmtree(item, ignore_errors=True)
 
     # Clean up staging directory in container
     run(
@@ -1289,3 +1293,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        cleanup_mirage_tmp()

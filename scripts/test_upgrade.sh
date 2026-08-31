@@ -17,7 +17,9 @@
 #     chain at the plan height with nothing able to resume it, which looks like
 #     a hung node rather than an operator error.
 #
-# Status files (host path, volume-mounted) so an LLM can poll without attaching:
+# Status files (host path, volume-mounted) so an LLM can poll without attaching
+# while the jobs are running. --wait prints the summary and then deletes the
+# directory; do not leave ~/.mirage/upgrade_tests sitting around afterwards.
 #   ~/.mirage/upgrade_tests/pipeline.stage                         current pipeline step
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.state      running|passed|failed
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.exit       set when done
@@ -70,7 +72,7 @@ aborts if the flag and the source disagree in either direction, because both
 mistakes are silent: skipping the proposal leaves a real upgrade unrehearsed,
 and passing it without a handler halts the local chain permanently.
 
-Poll:
+Poll while jobs are running (the directory is removed when --wait finishes):
   cat ~/.mirage/upgrade_tests/pipeline.stage
   cat ~/.mirage/upgrade_tests/{blockchain,backend,verify}.state
   cat ~/.mirage/upgrade_tests/all.json
@@ -414,6 +416,15 @@ clear_status() {
   write_run_job
 }
 
+# Jobs are done (or never launched). The printed summary is the record; do not
+# leave ~/.mirage/upgrade_tests as leftover scratch.
+remove_status_dir() {
+  if [[ -d "$STATUS_HOST" ]]; then
+    log "removing ${STATUS_HOST}"
+    rm -rf "$STATUS_HOST"
+  fi
+}
+
 job_state() {
   local name="$1"
   local path="${STATUS_HOST}/${name}.state"
@@ -447,6 +458,7 @@ wait_for_jobs() {
       echo
       log "pipeline.failed: $(cat "${STATUS_HOST}/pipeline.failed")"
       print_job_states
+      remove_status_dir
       die "the pipeline died at stage '${stage}' before launching the panes; fix the cause and re-run scripts/test_upgrade.sh"
     fi
     log "pipeline.stage=${stage}"
@@ -456,20 +468,25 @@ wait_for_jobs() {
       log "all jobs finished"
       cat "${STATUS_HOST}/all.json"
       echo
-      log "verify_upgrade output: ${STATUS_HOST}/verify.out"
+      if [[ -f "${STATUS_HOST}/verify.out" ]]; then
+        log "verify_upgrade output:"
+        cat "${STATUS_HOST}/verify.out"
+      fi
       local name rc=0
       for name in "${JOBS[@]}"; do
         if [[ "$(job_state "$name")" != "passed" ]]; then
           rc=1
         fi
       done
+      remove_status_dir
       exit "$rc"
     fi
     sleep 5
   done
   echo
   print_job_states
-  die "timed out after ${WAIT_BUDGET_SEC}s waiting for jobs (see ${STATUS_HOST})"
+  remove_status_dir
+  die "timed out after ${WAIT_BUDGET_SEC}s waiting for jobs"
 }
 
 wait_for_halt() {
@@ -600,13 +617,13 @@ print_monitor() {
 Jobs launched as detached docker exec processes.
 Watch live status:  mirage-status
 
-Poll (host, volume-mounted):
+Poll while running (removed once --wait finishes):
   cat ${STATUS_HOST}/pipeline.stage
   cat ${STATUS_HOST}/blockchain.state ${STATUS_HOST}/backend.state ${STATUS_HOST}/verify.state
   cat ${STATUS_HOST}/all.json
   cat ${STATUS_HOST}/verify.out
 
-Block until done:
+Block until done (prints the summary, then deletes ${STATUS_HOST}):
   scripts/test_upgrade.sh --wait
 EOF
 }
