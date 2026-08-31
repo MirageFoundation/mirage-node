@@ -121,9 +121,7 @@ def _test_curation_visibility() -> None:
     raw = resolve_visibility(**{**base, "stored_mode": MODE_RAW, "team_hidden_post": True})
     stale = resolve_visibility(**{**base, "stored_mode": MODE_PINNED, "stored_team_id": None})
     lock = resolve_visibility(**{**base, "lock_sequence": 11})
-    paid = resolve_visibility(
-        **{**base, "team_subscriber_only": True, "was_subscriber_at_creation": False}
-    )
+    paid = resolve_visibility(**{**base, "team_subscriber_only": True, "was_subscriber_at_creation": False})
     if (
         default["visible"]
         and default["effective_team_id"] == 7
@@ -211,9 +209,9 @@ def _test_visible_comment_recount() -> None:
     this pins both halves of that: unchanged when nothing is hidden, and equal
     to the visible node count when something is.
     """
-    source = (
-        Path(__file__).resolve().parents[2] / "web" / "backend" / "routes" / "public.py"
-    ).read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "web" / "backend" / "routes" / "public.py").read_text(
+        encoding="utf-8"
+    )
     if "def recount_visible" not in source:
         _fail("backend_hardening.visible_comment_recount", "recount_visible missing from _build_thread")
         return
@@ -315,38 +313,85 @@ def _test_legacy_posts_reach_current_scope() -> None:
 
     v1.39 gated current scope on protocol_version == 1 while the web client only
     ever sends scope=current, so every protocol-0 post — the entire pre-upgrade
-    history — became unreachable with no navigation path to it. They are shown on
-    the raw lens instead: the chain recorded no post_sequence or subscriber flag
-    for them, so no team rule can be evaluated and fabricating the inputs would
-    make thread locks and subscriber-only lenses behave arbitrarily on old
-    threads.
+    history — became unreachable with no navigation path to it.
+
+    They are curated like any other post rather than waved through. Only the
+    thread-lock cutoff and the subscriber-only rule read the metadata the chain
+    never recorded for them, and resolve_visibility already guards both; hiding a
+    post or a user keys on the txhash, author and community, which legacy posts
+    do have. Exempting them would let a curator hide a user and still see them.
     """
-    source = (
-        Path(__file__).resolve().parents[2] / "web" / "backend" / "curation.py"
-    ).read_text(encoding="utf-8")
+    backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    from curation import MODE_LIVE_DEFAULT, resolve_visibility
+
+    source = (backend_dir / "curation.py").read_text(encoding="utf-8")
     problems = []
     if 'if meta["protocol_version"] != wanted_protocol' in source:
         problems.append("current scope still drops every protocol-0 post")
     if "wanted_protocol" in source:
         problems.append("wanted_protocol gate still present")
-    if 'if meta["protocol_version"] == 0:' not in source:
-        problems.append("no protocol-0 branch in filter_posts")
+    # A blanket protocol-0 branch is how these posts skipped curation entirely.
+    if 'if meta["protocol_version"] == 0:' in source:
+        problems.append("protocol-0 posts bypass curation again")
     # Legacy scope must stay the protocol-0 archive, not become a union.
     if 'if meta["protocol_version"] != 0:' not in source:
         problems.append("legacy scope no longer restricted to protocol 0")
-    # The integrity guards on real protocol-1 posts must survive untouched.
+    # The integrity guards must survive, and must apply only to protocol 1 —
+    # asserting them against legacy posts would drop the archive all over again.
     for needle in (
         "protocol-1 post is missing required curation metadata",
         "protocol-1 post is missing community",
     ):
         if needle not in source:
             problems.append(f"integrity guard removed: {needle}")
+    if 'if meta["protocol_version"] == 1 and (' not in source:
+        problems.append("metadata guard is no longer scoped to protocol 1")
+
+    # A curator hiding a legacy post or user has to actually hide it, and the
+    # rules that need metadata the chain never recorded must not fire on it.
+    legacy = dict(
+        viewer="mirage1viewer",
+        community="goddesses",
+        author="mirage1author",
+        txhash="a" * 64,
+        root_txhash="b" * 64,
+        post_sequence=None,
+        was_subscriber_at_creation=None,
+        deleted=False,
+        viewer_blocks_author=False,
+        viewer_blocks_post=False,
+        viewer_blocks_community=False,
+        viewer_follows_author=False,
+        stored_mode=MODE_LIVE_DEFAULT,
+        stored_team_id=1,
+        default_team_id=1,
+        team_hidden_post=False,
+        team_hidden_author=False,
+        team_subscriber_only=False,
+        lock_sequence=None,
+        temporary_raw=False,
+        node_blocked=False,
+    )
+    for label, overrides, want_visible, want_reason in (
+        ("legacy_visible_by_default", {}, True, "ok"),
+        ("legacy_hidden_post", {"team_hidden_post": True}, False, "team_hidden_post"),
+        ("legacy_hidden_user", {"team_hidden_author": True}, False, "team_hidden_author"),
+        # No post_sequence means no way to tell whether it predates the lock, so
+        # the lock must not hide it rather than guess.
+        ("legacy_lock_cannot_fire", {"lock_sequence": 5}, True, "ok"),
+    ):
+        got = resolve_visibility(**{**legacy, **overrides})
+        if got["visible"] is not want_visible or got["reason"] != want_reason:
+            problems.append(
+                f"{label}: visible={got['visible']} reason={got['reason']!r} "
+                f"(wanted visible={want_visible} reason={want_reason!r})"
+            )
 
     # The community a legacy comment was posted in has to survive a reindex, or
     # the backfill silently reverts and the comments drop out of feeds again.
-    db_source = (
-        Path(__file__).resolve().parents[2] / "indexer" / "database.py"
-    ).read_text(encoding="utf-8")
+    db_source = (backend_dir.parents[1] / "indexer" / "database.py").read_text(encoding="utf-8")
     if "community=COALESCE(NULLIF(EXCLUDED.community, ''), posts.community)" not in db_source:
         problems.append("posts upsert blanks community on replay")
 

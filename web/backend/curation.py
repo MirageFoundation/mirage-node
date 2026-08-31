@@ -342,15 +342,25 @@ def filter_posts(
                 continue
             visible.append(post)
             continue
-        # Protocol-0 posts predate curation entirely: the chain never recorded a
-        # post_sequence or a subscriber flag for them, so no team rule can be
-        # evaluated against them and inventing the inputs would only make thread
-        # locks and subscriber-only lenses behave arbitrarily on old threads.
-        # They are shown, on the raw lens, and stay subject to the personal
-        # blocks and content-tag filters their callers apply afterwards. Before
-        # v1.39 they were dropped from every scope the UI could actually
-        # request, which hid the entire pre-upgrade history.
-        if meta["protocol_version"] == 0:
+        # Protocol-0 posts are curated like any other. The chain never recorded a
+        # post_sequence or a subscriber flag for them, but only two of the rules
+        # below read those: resolve_visibility skips the thread-lock cutoff when
+        # post_sequence is None, and treats an unknown subscriber flag as "not a
+        # subscriber". Hiding a post, hiding a user and the community tag all key
+        # on the txhash, the author and the community, which legacy posts have.
+        # Exempting them from curation entirely would mean a curator could hide a
+        # user and still see them in the feed, which is the whole point of the
+        # control — and today essentially every post is protocol 0.
+        if meta["protocol_version"] == 1 and (
+            meta["post_sequence"] is None or meta["was_subscriber_at_creation"] is None
+        ):
+            raise RuntimeError(f"protocol-1 post is missing required curation metadata: {post_id}")
+        community = meta["community"]
+        if not community:
+            if meta["protocol_version"] == 1:
+                raise RuntimeError(f"protocol-1 post is missing community: {post_id}")
+            # A legacy comment whose root is not in the database has no community
+            # to resolve a team against, so there is no curation to apply.
             post["lens"] = {
                 "requested": requested_lens,
                 "effective_mode": MODE_RAW,
@@ -358,11 +368,6 @@ def filter_posts(
             }
             visible.append(post)
             continue
-        if meta["post_sequence"] is None or meta["was_subscriber_at_creation"] is None:
-            raise RuntimeError(f"protocol-1 post is missing required curation metadata: {post_id}")
-        community = meta["community"]
-        if not community:
-            raise RuntimeError(f"protocol-1 post is missing community: {post_id}")
         if community not in lenses:
             lenses[community] = resolve_lens(
                 cur,
