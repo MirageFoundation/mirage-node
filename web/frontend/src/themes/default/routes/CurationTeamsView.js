@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
@@ -10,6 +10,7 @@ import {
     CURATION_TEAM_DESCRIPTION_EXAMPLE,
     MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
     MAX_CURATION_TEAM_NAME_LENGTH,
+    invalidateCurationReads,
     runeLength,
     sliceRunes,
     waitForOwnCurationTeam,
@@ -74,18 +75,6 @@ const Slug = styled.span`
     white-space: nowrap;
     font-weight: 500;
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
-`;
-
-const Card = styled.section`
-    display: grid;
-    gap: 0.65rem;
-    padding: 1rem;
-    margin-top: 0.85rem;
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
-    border-radius: 12px;
-    background: ${({ theme }) => requireThemeColor(theme, 'panel')};
-    font-size: 0.8rem;
-    line-height: 1.45;
 `;
 
 const FormSection = styled.section`
@@ -227,15 +216,29 @@ export default function CurationTeamsView() {
     const pending = getInfo('create_curation_team', community);
     const alreadyCurator = Boolean(viewer) && teamState.teams.some((team) => String(team.owner || '').toLowerCase() === viewer);
     const ownTeam = teamState.teams.find((team) => String(team.owner || '').toLowerCase() === viewer);
+    // null = checking; true/false = confirmed from get_user_status.
+    // Eligibility fetch failures must NOT look like "not subscribed".
     const [eligible, setEligible] = useState(null);
+    const [eligibilityError, setEligibilityError] = useState('');
+    const [eligibilityNonce, setEligibilityNonce] = useState(0);
     const label = communityLabel(routeCommunity || previewSlug || '');
+
+    const retryEligibility = useCallback(() => {
+        setEligible(null);
+        setEligibilityError('');
+        setEligibilityNonce((n) => n + 1);
+        console.debug('[curation] retry eligibility check');
+    }, []);
 
     useEffect(() => {
         if (!viewer) {
             setEligible(false);
+            setEligibilityError('');
             return undefined;
         }
         let cancelled = false;
+        setEligible(null);
+        setEligibilityError('');
         Api.get('get_user_status', { address: viewer, _cb: Date.now() })
             .then((data) => {
                 if (cancelled) return;
@@ -247,6 +250,7 @@ export default function CurationTeamsView() {
                 }
                 const next = canCurate(data.effective_paid, data.user_level);
                 setEligible(next);
+                setEligibilityError('');
                 setError('');
                 tx.cacheUserStatus(data);
                 console.debug('[curation] create eligibility', {
@@ -258,12 +262,13 @@ export default function CurationTeamsView() {
             .catch((err) => {
                 if (cancelled) return;
                 const message = formatError(err);
-                setEligible(false);
-                setError(message);
+                // Leave eligible null — a failed check is not "ineligible".
+                setEligible(null);
+                setEligibilityError(message);
                 console.error('[curation] eligibility check failed', { error: message });
             });
         return () => { cancelled = true; };
-    }, [viewer]);
+    }, [viewer, eligibilityNonce]);
 
     const maxTeamNameLength = MAX_CURATION_TEAM_NAME_LENGTH;
     const maxTeamDescriptionLength = MAX_CURATION_TEAM_DESCRIPTION_LENGTH;
@@ -356,6 +361,14 @@ export default function CurationTeamsView() {
                 community: nextSlug,
                 teamId: visible.team_id,
             });
+            // The viewer just became a curator here, but the membership lookup
+            // behind the curate buttons caches per community for the life of the
+            // page, and every feed read still holds a pre-team response. Without
+            // this the community feed shows no curator controls until a reload.
+            // Safe to fire now and not earlier: waitForOwnCurationTeam has already
+            // proven the indexer serves the team, so the refetch cannot re-cache
+            // the state we are replacing.
+            invalidateCurationReads(nextSlug);
             const visibleId = Number(visible.team_id);
             console.debug('[curation] opening created team', {
                 community: nextSlug,
@@ -382,16 +395,19 @@ export default function CurationTeamsView() {
     // While creating/verifying, keep the form mounted as membership data updates.
     let createPhase = 'form';
     if (!viewer) createPhase = 'signin';
+    else if (eligibilityError) createPhase = 'eligibility_error';
     else if (eligible === null) createPhase = 'checking';
     else if (eligible === false) createPhase = 'subscribe';
     else if (teamState.error) createPhase = 'error';
     else if (alreadyCurator && createStatus === 'idle') createPhase = 'already';
     else if (previewSlug && (communityState.loading || teamState.loading) && createStatus === 'idle') createPhase = 'loading';
 
+    // Page is always "create a team" — never retitle to Subscribe on a gate/error.
     const createTitle = {
-        signin: 'Sign in',
+        signin: 'New team',
         checking: 'New team',
-        subscribe: 'Subscribe',
+        eligibility_error: 'New team',
+        subscribe: 'New team',
         error: 'New team',
         already: 'Your team',
         loading: 'New team',
@@ -478,26 +494,35 @@ export default function CurationTeamsView() {
             </HeaderRow>
 
             {createPhase === 'signin' && (
-                <Card>
+                <FormSection>
                     <Meta>Sign in with a paid subscription or admin account to create a curator team here.</Meta>
                     <CardActions>
                         <Button to={withReturnTo('/login', returnTo)} size="xs">Sign in</Button>
                     </CardActions>
-                </Card>
+                </FormSection>
             )}
-            {createPhase === 'checking' && <Card><Meta>Checking eligibility…</Meta></Card>}
+            {createPhase === 'checking' && <FormSection><Meta>Checking eligibility…</Meta></FormSection>}
+            {createPhase === 'eligibility_error' && (
+                <FormSection>
+                    <ErrorText role="alert">{eligibilityError}</ErrorText>
+                    <CardActions>
+                        <Button type="button" size="xs" onClick={retryEligibility}>Retry</Button>
+                    </CardActions>
+                </FormSection>
+            )}
             {createPhase === 'subscribe' && (
-                <Card>
+                <FormSection>
                     <Meta>Curator teams require an active paid subscription or an admin account.</Meta>
                     <CardActions>
                         <Button to={withReturnTo('/subscription', returnTo)} size="xs">Subscribe</Button>
                     </CardActions>
-                    {error && <ErrorText>{error}</ErrorText>}
-                </Card>
+                </FormSection>
             )}
-            {createPhase === 'error' && <Card><ErrorText>{teamState.error}</ErrorText></Card>}
+            {createPhase === 'error' && (
+                <FormSection><ErrorText role="alert">{teamState.error}</ErrorText></FormSection>
+            )}
             {createPhase === 'already' && (
-                <Card>
+                <FormSection>
                     <Meta>
                         You already curate {ownTeam?.name || 'a team'} here.
                         One membership per community.
@@ -512,9 +537,9 @@ export default function CurationTeamsView() {
                             </Button>
                         </CardActions>
                     )}
-                </Card>
+                </FormSection>
             )}
-            {createPhase === 'loading' && <Card><Meta>Loading community…</Meta></Card>}
+            {createPhase === 'loading' && <FormSection><Meta>Loading community…</Meta></FormSection>}
             {createPhase === 'form' && createForm}
         </Page>
     );
