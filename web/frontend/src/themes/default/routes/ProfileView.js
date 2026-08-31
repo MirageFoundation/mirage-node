@@ -2085,8 +2085,8 @@ function ProfileViewAuthenticated({
                                         }} />
                                     </>}
 
-                                    {activeTab === 'earnings' && isOwnProfile && profileAddress && (
-                                        <CreatorEarningsPanel creator={profileAddress} />
+                                    {activeTab === 'earnings' && profileAddress && (
+                                        <CreatorEarningsPanel creator={profileAddress} canClaim={isOwnProfile} />
                                     )}
 
                                     {isPostsTab && !profileUsesListFeed && <>

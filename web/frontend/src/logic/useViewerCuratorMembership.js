@@ -39,18 +39,21 @@ if (typeof window !== 'undefined') {
     });
 }
 
-async function fetchMembership(community, viewer) {
+export async function fetchViewerCuratorMembership(community, viewer, { fresh = false } = {}) {
     const slug = requireCommunitySlug(community);
     const owner = String(viewer || '').trim().toLowerCase();
     if (!owner || owner === 'guest') return null;
     const key = cacheKey(owner, slug);
+    if (fresh) {
+        membershipCache.delete(key);
+        inflight.delete(key);
+    }
     if (membershipCache.has(key)) return membershipCache.get(key);
     if (inflight.has(key)) return inflight.get(key);
 
     const pending = (async () => {
-        const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, {
-            viewer: owner,
-        });
+        const params = fresh ? { viewer: owner, _cb: Date.now() } : { viewer: owner };
+        const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, params);
         if (!data || !Array.isArray(data.items)) {
             throw new Error('Invalid curator teams response');
         }
@@ -67,15 +70,34 @@ async function fetchMembership(community, viewer) {
             throw new Error('Invalid viewer_team_ids entry');
         }
         const team = data.items.find((item) => Number(item.team_id) === teamId);
+        if (!team) throw new Error(`Viewer curator team ${teamId} is missing`);
+        const memberCount = Number(team.member_count);
+        if (!Number.isSafeInteger(memberCount) || memberCount <= 0) {
+            throw new Error(`Invalid curator team member_count: ${team.member_count}`);
+        }
+        if (typeof team.name !== 'string' || !team.name.trim()) {
+            throw new Error(`Invalid curator team name for team ${teamId}`);
+        }
+        if (typeof team.owner !== 'string' || !team.owner.trim()) {
+            throw new Error(`Invalid curator team owner for team ${teamId}`);
+        }
+        const isLeader = team.owner.toLowerCase() === owner;
+        if (memberCount === 1 && !isLeader) {
+            throw new Error(`Curator team ${teamId} has one member but a different owner`);
+        }
         const result = {
             teamId,
-            teamName: typeof team?.name === 'string' ? team.name : '',
+            teamName: team.name,
+            memberCount,
+            isLeader,
         };
         membershipCache.set(key, result);
         console.debug('[curation] viewer membership', {
             community: slug,
             teamId,
             teamName: result.teamName,
+            memberCount,
+            isLeader: result.isLeader,
         });
         return result;
     })();
@@ -183,7 +205,7 @@ export function useViewerCuratorMembership(community) {
         setError('');
         try {
             clearMembershipCache(slug);
-            const next = await fetchMembership(slug, viewer);
+            const next = await fetchViewerCuratorMembership(slug, viewer);
             setMembership(next);
             return next;
         } catch (err) {
@@ -206,7 +228,7 @@ export function useViewerCuratorMembership(community) {
         }
         let cancelled = false;
         setLoading(!membershipCache.has(cacheKey(viewer, slug)));
-        fetchMembership(slug, viewer)
+        fetchViewerCuratorMembership(slug, viewer)
             .then((next) => {
                 if (!cancelled) {
                     setMembership(next);
@@ -227,7 +249,7 @@ export function useViewerCuratorMembership(community) {
             const changed = String(event?.detail?.community || '').toLowerCase();
             if (changed && changed !== slug) return;
             clearMembershipCache(slug);
-            fetchMembership(slug, viewer)
+            fetchViewerCuratorMembership(slug, viewer)
                 .then((next) => {
                     if (!cancelled) setMembership(next);
                 })

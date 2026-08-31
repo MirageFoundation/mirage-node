@@ -403,11 +403,32 @@ func (am AppModule) SetCurationPreference(ctx context.Context, req *types.MsgSet
 
 func (am AppModule) SetCurationPostHidden(ctx context.Context, req *types.MsgSetCurationPostHidden) (*types.MsgSetCurationPostHiddenResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
+	slug := strings.TrimSpace(req.GetCommunity())
+	target := strings.ToLower(req.GetTarget())
+	actor, err := am.curationActor(sdkCtx, req, slug, req.GetTeamId())
 	if err != nil {
 		return nil, err
 	}
-	if err := am.k.SetCurationActionHiddenPost(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.ToLower(req.GetTarget()), actor, req.GetHidden()); err != nil {
+	if req.GetHidden() {
+		meta, found, err := am.k.GetPostMetadata(sdkCtx, target)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, fmt.Errorf("post metadata not found")
+		}
+		if meta.GetCommunity() != slug {
+			return nil, fmt.Errorf("post does not belong to community")
+		}
+		protected, err := am.k.IsCommunityCurator(sdkCtx, meta.GetAuthor(), slug)
+		if err != nil {
+			return nil, err
+		}
+		if protected {
+			return nil, fmt.Errorf("cannot ban a curator's post in this community")
+		}
+	}
+	if err := am.k.SetCurationActionHiddenPost(sdkCtx, slug, req.GetTeamId(), target, actor, req.GetHidden()); err != nil {
 		return nil, err
 	}
 	return &types.MsgSetCurationPostHiddenResponse{}, nil
@@ -434,11 +455,22 @@ func (am AppModule) SetCurationPostTag(ctx context.Context, req *types.MsgSetCur
 
 func (am AppModule) SetCurationUserHidden(ctx context.Context, req *types.MsgSetCurationUserHidden) (*types.MsgSetCurationUserHiddenResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	actor, err := am.curationActor(sdkCtx, req, strings.TrimSpace(req.GetCommunity()), req.GetTeamId())
+	slug := strings.TrimSpace(req.GetCommunity())
+	target := strings.TrimSpace(req.GetTarget())
+	actor, err := am.curationActor(sdkCtx, req, slug, req.GetTeamId())
 	if err != nil {
 		return nil, err
 	}
-	if err := am.k.SetCurationActionHiddenUser(sdkCtx, strings.TrimSpace(req.GetCommunity()), req.GetTeamId(), strings.TrimSpace(req.GetTarget()), actor, req.GetHidden()); err != nil {
+	if req.GetHidden() {
+		protected, err := am.k.IsCommunityCurator(sdkCtx, target, slug)
+		if err != nil {
+			return nil, err
+		}
+		if protected {
+			return nil, fmt.Errorf("cannot ban a curator in this community")
+		}
+	}
+	if err := am.k.SetCurationActionHiddenUser(sdkCtx, slug, req.GetTeamId(), target, actor, req.GetHidden()); err != nil {
 		return nil, err
 	}
 	return &types.MsgSetCurationUserHiddenResponse{}, nil

@@ -30,6 +30,14 @@ function mapCommunity(item) {
         default_team: item.default_team,
     };
 }
+
+function sortByPostCount(list) {
+    return [...list].sort((a, b) => {
+        const diff = b.post_count - a.post_count;
+        if (diff !== 0) return diff;
+        return String(a.topic).localeCompare(String(b.topic));
+    });
+}
 export const tagColors = {
     adult: {
         bg: 'rgba(236, 72, 153, 0.18)',
@@ -97,11 +105,15 @@ export function useDiscover({
         }).then(data => {
             if (!alive || !mountedRef.current) return;
             if (data && Array.isArray(data.items)) {
-                const topicsList = data.items.map(mapCommunity);
+                const topicsList = sortByPostCount(data.items.map(mapCommunity));
                 setTopics(topicsList);
                 setFilteredTopics(topicsList);
                 setSmallTopicsCount(0);
-                console.debug('[DiscoverView] loaded communities', { count: topicsList.length });
+                console.debug('[DiscoverView] loaded communities', {
+                    count: topicsList.length,
+                    first: topicsList[0]?.topic,
+                    firstPosts: topicsList[0]?.post_count,
+                });
             } else {
                 setTopics([]);
                 setFilteredTopics([]);
@@ -156,9 +168,11 @@ export function useDiscover({
                 if (searchRequestId.current !== requestId || !mountedRef.current) return;
                 const results = Array.isArray(data?.items) ? data.items : [];
                 const existingLower = new Set(topics.map(t => t.topic.toLowerCase()));
-                const newTopics = results
-                    .filter(t => t && t.community && !existingLower.has(String(t.community).toLowerCase()))
-                    .map(mapCommunity);
+                const newTopics = sortByPostCount(
+                    results
+                        .filter(t => t && t.community && !existingLower.has(String(t.community).toLowerCase()))
+                        .map(mapCommunity)
+                );
                 setSearchResults(newTopics);
             } catch (_) {
                 if (searchRequestId.current === requestId) setSearchResults([]);

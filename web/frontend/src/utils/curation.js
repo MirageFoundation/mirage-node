@@ -86,6 +86,13 @@ export function formatSubscriberCount(count) {
     return n === 1 ? '1 user pinned' : `${n} users pinned`;
 }
 
+/** Compact team score for the curation lens dropdown. */
+export function formatPinCount(count) {
+    const n = Number(count);
+    formatSubscriberCount(n);
+    return n === 1 ? '1 pin' : `${n} pins`;
+}
+
 /** Live team with the most subscribers (ties → lowest team_id). */
 export function teamIdWithMostSubscribers(teams) {
     if (!Array.isArray(teams) || teams.length === 0) return null;

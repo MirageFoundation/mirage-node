@@ -1,5 +1,8 @@
 import transactionHandler from './TransactionHandler';
 import { fetchProfile, getFollowedTopics as getTopicsFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheTopics, scheduleRefresh } from './ProfileCache';
+import { fetchViewerCuratorMembership } from '../logic/useViewerCuratorMembership';
+import { invalidateCurationReads } from './curation';
+import { requestCommunityLeaveConfirmation } from './communityLeaveConfirmation';
 
 export async function fetchFollowedTopics(viewerAddress) {
     const addr = String(viewerAddress || '').trim().toLowerCase();
@@ -103,6 +106,28 @@ export async function unsubscribe(address, topic) {
     const t = String(topic || '').trim();
     if (!t) return [];
     const lower = t.toLowerCase();
+    const membership = await fetchViewerCuratorMembership(lower, address, { fresh: true });
+    if (membership) {
+        console.debug('[Subscriptions] Curator community leave requires confirmation', {
+            community: lower,
+            teamId: membership.teamId,
+            memberCount: membership.memberCount,
+            isLeader: membership.isLeader,
+        });
+        const confirmed = await requestCommunityLeaveConfirmation({
+            community: lower,
+            membership,
+        });
+        if (!confirmed) {
+            console.debug('[Subscriptions] Curator community leave cancelled', {
+                community: lower,
+                teamId: membership.teamId,
+            });
+            const error = new Error('Community leave cancelled');
+            error.code = 'community_leave_cancelled';
+            throw error;
+        }
+    }
 
     const result = await transactionHandler.unfollowTopic(t);
 
@@ -110,6 +135,7 @@ export async function unsubscribe(address, topic) {
         scheduleRefresh(address); // Clear cache, start no-cache window
         removeFromCache(t, address); // Will be skipped during no-cache window
         notifyTopicsUpdated({ removed: lower });
+        invalidateCurationReads(lower);
         return [];
     } else {
         // "not followed" / "not following" means the user's intent is satisfied
@@ -117,6 +143,7 @@ export async function unsubscribe(address, topic) {
         if (errLower.includes('not followed') || errLower.includes('not following')) {
             removeFromCache(t, address);
             notifyTopicsUpdated({ removed: lower });
+            invalidateCurationReads(lower);
             return [];
         }
         console.error('[Subscriptions] Unsubscribe transaction failed:', result.error);

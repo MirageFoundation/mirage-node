@@ -196,6 +196,28 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         });
     }, [post, postKey, rootHash, updatePost]);
 
+    const applyDisplayedVisibility = useCallback((kind, target, hidden) => {
+        if (kind !== 'post' && kind !== 'user') throw new Error(`Invalid curation visibility kind: ${kind}`);
+        const normalizedTarget = String(target || '').trim().toLowerCase();
+        if (!community || !teamId || !normalizedTarget) return;
+        window.dispatchEvent(new CustomEvent('curationModerationOptimistic', {
+            detail: {
+                community,
+                teamId,
+                kind,
+                target: normalizedTarget,
+                hidden: !!hidden,
+            },
+        }));
+        console.debug('[curation] displayed visibility', {
+            community,
+            teamId,
+            kind,
+            target: normalizedTarget.slice(0, 12),
+            hidden: !!hidden,
+        });
+    }, [community, teamId]);
+
     const run = useCallback(async (label, operation, optimistic) => {
         const snapshot = modState;
         const previousTag = typeof post?.tag === 'string' ? post.tag : '';
@@ -229,6 +251,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
             if (Object.prototype.hasOwnProperty.call(optimistic, 'threadLocked')) {
                 applyDisplayedLock(optimistic.threadLocked, { optimistic: true });
             }
+            if (Object.prototype.hasOwnProperty.call(optimistic, 'postHidden')) {
+                applyDisplayedVisibility('post', postId, optimistic.postHidden);
+            }
+            if (Object.prototype.hasOwnProperty.call(optimistic, 'userHidden')) {
+                applyDisplayedVisibility('user', author, optimistic.userHidden);
+            }
             console.debug('[curation] optimistic apply', {
                 label,
                 community,
@@ -246,6 +274,12 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
             }
             if (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'threadLocked')) {
                 applyDisplayedLock(previousLock, { optimistic: false });
+            }
+            if (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'postHidden')) {
+                applyDisplayedVisibility('post', postId, !!snapshot?.postHidden);
+            }
+            if (optimistic && Object.prototype.hasOwnProperty.call(optimistic, 'userHidden')) {
+                applyDisplayedVisibility('user', author, !!snapshot?.userHidden);
             }
             console.debug('[curation] optimistic revert', {
                 label,
@@ -268,7 +302,7 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
             console.error('[curation] post curate failed', { label, error: message });
             updateNotification(message, 4);
         }
-    }, [applyDisplayedLock, applyDisplayedTag, cacheKey, community, modState, post, postId, teamId]);
+    }, [applyDisplayedLock, applyDisplayedTag, applyDisplayedVisibility, author, cacheKey, community, modState, post, postId, teamId]);
 
     const items = useMemo(() => {
         if (!isCurator || !teamId || !community || !postId || !modState) return [];

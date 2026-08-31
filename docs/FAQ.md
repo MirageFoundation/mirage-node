@@ -37,10 +37,9 @@ normal users on purpose. You do not connect a wallet, you do not buy anything, y
 learn token jargon.
 
 You write a post, your browser does a quick proof of work in the background, the post
-appears, done. If you later want extras, like skipping proof of work, reserving a clean
-username, higher limits, cosmetic features, or sending paid “admiration” to posts you like,
-you can opt in. But Mirage is designed so a normal user can use it for years without ever
-touching tokens.
+appears, done. If you later want extras, like skipping proof of work, higher limits,
+cosmetic features, or sending paid awards to posts you like, you can opt in. But Mirage is
+designed so a normal user can use it for years without ever touching tokens.
 
 ### Mirage looks and feels like Reddit - what is different?
 
@@ -58,8 +57,8 @@ network.
 
 Nodes can differ in UI, uptime, and local display policies, but they do not own you.
 Switching nodes is seamless and does not change your content or account. Your feed is shaped
-by your actions, what you follow, what you vote on, what you block, and who you choose to
-trust, not by a hidden engagement algorithm.
+by your actions, the communities you join, who you follow, what you vote on, and what you
+block, not by a hidden engagement algorithm.
 
 If you want more filtering, you block users and communities. If you want less filtering,
 you choose that too. You are not stuck under one set of rules written by strangers.
@@ -103,7 +102,7 @@ surveillance.
 
 This protects the network from spam. Subscriptions exist, but they are optional. A
 subscription removes friction and increases limits, for example skipping proof of work
-delays, reserving a clean username, longer posts, and other convenience features.
+delays, longer posts, and other convenience features.
 
 Subscriptions are paid with MIRAGE inside the product, not with credit cards, and they are
 never required to participate. The core rule is simple. If you want to use Mirage like a
@@ -452,9 +451,21 @@ your content settings and use blocks.
 Yes. Mirage no longer has an Agent subscription tier, an Agents page, or opt-in
 moderation overlays from other accounts.
 
-Moderation is personal: you follow communities, block users, posts, and communities, and
+Moderation is personal: you join communities, block users, posts, and communities, and
 use your own content filters. Nodes can still apply local display rules for legal reasons.
 Nobody publishes a feed overlay that other users enable.
+
+### What happened to quests, invite bonuses, and referrals?
+
+They are gone. There is no quest board, no invite-and-earn payout, and no referral bonus in
+this version. Campaign links can still tell a node where a visitor came from; they do not
+mint tokens.
+
+Authors earn from a daily creator pool instead. Half of every new subscription payment is
+burned. The other half funds that day's pool for authors who received an upvote or a direct
+reply from a paying subscriber that day. The split is equal among those subscribers, then
+among the actions they took, so one frantic account cannot vacuum the pool. Authors have
+thirty days after a day's settlement to claim what they earned. Unused remainder is burned.
 
 ### What is the difference between reports, blocks, and filters?
 
@@ -538,8 +549,8 @@ Yes.
 
 You can create multiple accounts, because accounts are just separate seed phrases. Mirage
 does not require email or phone verification, so it does not try to enforce “one human, one
-account” through surveillance. Abuse is handled through economics, filtering, and opt-in
-moderation.
+account” through surveillance. Abuse is handled through economics, filtering, and personal
+blocks.
 
 Individual nodes can still choose to add their own anti-abuse measures, especially if they
 offer user rewards. A node might rate-limit, check IP patterns, use invite codes, or apply
@@ -841,30 +852,57 @@ engagement engine deciding what you should see behind your back.
 Communities are named spaces, shown as [slug], like [test]. Each post belongs to one
 community, so content stays organized and discoverable. Every valid slug is already a
 community: there is no registration, claim, title, founder, or owner. Posting to a new valid
-slug starts an uncurated community immediately.
+slug starts an uncurated community immediately. Open one at /c/ plus its name.
 
-Anyone can follow a community and post in it. A community becomes curated when at least one
-live curator team exists for its slug. Teams publish their own description, but
-no team owns or officially represents the community.
+Browse the directory at /communities, which lists communities by how much is posted there.
+Join the ones you want in your home feed. Joining is personal: it shapes what you see, it
+does not grant you ownership, and anyone can still post in a community they have not joined.
+You follow users separately.
+
+A community becomes curated when at least one live curator team exists for its slug. Teams
+publish their own description, but no team owns or officially represents the community.
 
 Communities are network wide and not owned by a node, which is why switching nodes does not
 break them.
 
+### What is the home feed?
+
+Your home feed is the communities you joined, plus posts from users you follow. It is not a
+hidden ranking of the whole network. If you have not joined anything yet, home stays empty
+on purpose. Mirage will not invent a default set of communities for you. Join from the
+directory or from a community page, and leave any time.
+
 ### What are curator teams and lenses?
 
 A curator team is an optional group of up to ten paid users who maintain one view of a
-community. Its leader can invite curators, and each invitee must accept before joining.
-Creating a team, or accepting an invite to one, automatically joins you to that community
-(you do not have to join first). Team curators can hide posts or users from that team's view
-and lock threads. Those actions never erase the underlying content or change another team's
-view. Hiding is only for that team's lens; the post is still on the network, and anyone can
-pick Uncensored or another team.
+community. Free accounts cannot lead or join teams. Subscribers can hold up to ten team
+memberships, and appointed admins up to one thousand. Its leader can invite curators, and
+each invitee must accept before joining. Creating a team, or accepting an invite to one,
+automatically joins you to that community. Team curators can hide posts or users from that
+team's view, lock threads, and optionally limit that lens to posts written while the author
+was a paid subscriber. Those actions never erase the underlying content or change another
+team's view. Hiding is only for that team's lens; the post is still on the network, and
+anyone can pick Uncensored or another team.
 
 You choose the lens you want: the node default, a specific team, or Uncensored. The node
-default is the live team with the most paid subscribers, with older teams winning ties.
-Choosing a specific team is a personal preference. If that team disappears, Mirage returns
-you to the node default; if no live team remains, the community is simply uncurated and the
-default view is uncensored.
+default is the live team with the most paid subscribers who explicitly selected it, with
+older teams winning ties. A free user can still look through a team's lens; that does not
+count toward the default. Choosing a specific team is a personal preference. If that team
+disappears, Mirage returns you to the node default; if no live team remains, the community
+is simply uncurated and the default view is uncensored.
+
+### What happens when a curator locks a thread?
+
+A lock is a cut-off in time for that team's lens, not a delete and not a write ban. Replies
+already there stay exactly where they were. New replies written after the lock are hidden
+from that lens and stay visible in Uncensored. Unlocking reopens the thread for new replies;
+it does not publish the ones written while it was shut. Locking the same thread again later
+draws a second line without disturbing the first. A team can draw up to a hundred of those
+lines on any one thread, after which the chain stops accepting new locks on it.
+
+Nothing stops you from replying to a locked thread. The network accepts the reply like any
+other. The client will tell you a thread is locked before you spend the effort, so you are
+not surprised when that team's readers cannot see it.
 
 ### Can communities be taken over, censored, or renamed?
 
@@ -886,7 +924,8 @@ signed message broadcast to the network that updates the content. Nodes that ret
 display the post will apply the edit and show the updated version.
 
 Deletion works the same way. You publish a signed deletion message. Nodes that honor it will
-stop displaying and serving the content.
+stop displaying and serving the content. A delete is final: editing a post you already
+deleted does not bring it back.
 
 So edits and deletes are coordinated network wide, not controlled by a single site admin.
 
@@ -976,7 +1015,7 @@ by posting a comment, “this is a repost”, “this looks automated”, “thi
 suspicious”, and the user still has to sift through garbage.
 
 On Mirage, you control your own feed with blocks, content filters, and the communities you
-follow. No single party decides for everyone. Independent builders can still write tools
+join. No single party decides for everyone. Independent builders can still write tools
 against the public API, but they do not get a privileged agent tier or a feed overlay that
 other users enable.
 
@@ -1171,7 +1210,7 @@ No extensions, no wallet plugins.
 Yes. The best place for announcements is Mirage itself in the community [mirage].
 
 You can view it from any running node, for example
-[https://mirage.talk/t/mirage](https://mirage.talk/t/mirage).
+[https://mirage.talk/c/mirage](https://mirage.talk/c/mirage).
 
 You can also follow progress here:
 
@@ -1188,8 +1227,8 @@ X: [https://x.com/getmirage](https://x.com/getmirage)
 Mirage is live and usable today, but it is intentionally evolving. The core network,
 posting, voting, communities, and identity are in place.
 
-At the same time, features like DMs, notifications, richer moderation tooling, more clients,
-and mobile apps are actively being built. The goal is not a “finished” platform frozen in
+At the same time, features like DMs, more clients, and richer tools are still being built.
+Inbox notifications already exist. The goal is not a “finished” platform frozen in
 time, but a stable core with room to improve without breaking user freedom or centralizing
 control.
 
@@ -1245,9 +1284,9 @@ You do not need it. Most users can use Mirage for years without ever touching to
 basic tier works with browser proof of work and no wallet.
 
 MIRAGE exists for optional upgrades and network economics. It can be used for subscriptions,
-reserving a clean username, skipping proof of work delays, higher limits, and showing
-appreciation on posts by burning tokens. It is also part of how nodes and validators get
-paid to run infrastructure.
+skipping proof of work delays, higher limits, and showing appreciation on posts by awarding
+or gifting tokens. It is also part of how nodes and validators get paid to run
+infrastructure.
 
 ### What is the MIRAGE supply? Is there a cap, a premine, or hidden insider tokens?
 
@@ -1259,7 +1298,7 @@ New MIRAGE is minted on a schedule and paid to validators for producing blocks a
 network traffic, roughly every ten minutes, weighted toward the validators actually carrying
 load. That is the emission side, and it is how infrastructure gets paid without ads. At the same
 time, MIRAGE is continuously burned: transaction fees are burned every block, a share of every
-subscription is burned, paid admiration on posts is burned, and governance can burn tokens
+subscription is burned, paid awards on posts are burned, and governance can burn tokens
 outright. So the supply is not a fixed number stamped on a coin, it is the running result of
 emission minus burns.
 
@@ -1287,13 +1326,15 @@ power users can pay for convenience without turning Mirage into a pay to speak p
 Mirage has Free and Subscriber as purchasable tiers. Admin is a separate appointed tier
 (level 100+) set by governance, not something you buy.
 
-Free is the default. It lets you browse, post, comment, vote, follow communities, follow
+Free is the default. It lets you browse, post, comment, vote, join communities, follow
 users, and block content. Free users use browser proof of work for transactions. Free
 accounts cannot lead or join curator teams.
 
-Subscriber is the convenience tier. It removes proof of work delays, increases limits,
-unlocks profile features like biography, avatar, and banner, and lets paid users lead or
-join curator teams (up to ten memberships).
+Subscriber is the convenience tier. It removes proof of work delays and transaction fees,
+increases limits, unlocks profile features like biography, avatar, and banner, and lets paid
+users lead or join curator teams (up to ten memberships). Subscribers get two hundred and
+fifty instant messages each UTC day. After that they wait until the next day; there is no
+extra quota for sale.
 
 Admin accounts keep the high limits, skip proof of work with a higher daily message cap, give awards without burning MIRAGE, and can lead or join up to one thousand curator teams even without an active paid subscription.
 
@@ -1302,13 +1343,14 @@ Admin accounts keep the high limits, skip proof of work with a higher daily mess
 Subscriptions are paid in MIRAGE inside the product. You do not enter a credit card, and you
 do not connect an external wallet.
 
-When you choose a paid tier, the chain charges the period fee in MIRAGE and sets your
-subscription level and expiry. Subscriptions renew automatically if auto-renewal is enabled
-and your account has enough MIRAGE. If renewal fails, or if you cancel and the period ends,
-your account falls back to Free.
+When you choose a paid tier, you can buy one to twelve months at a time. The chain charges
+the period fee in MIRAGE and sets your subscription level and expiry. Subscriptions renew
+automatically if auto-renewal is enabled and your account has enough MIRAGE. Auto-renewal
+tries a week before expiry so leftover paid time is not wasted. If renewal fails, or if you
+cancel and the period ends, your account falls back to Free.
 
 The current default period is 30 days, but subscription parameters are network parameters
-and can change through governance.
+and can change through governance. Existing paid time is kept through upgrades.
 
 ### Why are subscriptions paid in MIRAGE instead of dollars?
 
@@ -1336,7 +1378,9 @@ No.
 
 Subscriber buys convenience. It does not give you global control over other users. A
 subscriber cannot ban users from Mirage, seize a community, delete accounts, or force
-everyone else to see the feed their way.
+everyone else to see the feed their way. Leading a curator team is still not ownership. You
+can hide posts in your own lens. You cannot silence Uncensored or make other teams
+disappear.
 
 ### What happens when my subscription expires?
 
@@ -1344,8 +1388,8 @@ If auto-renewal succeeds, it renews. If renewal fails or you cancel, your paid t
 and you return to Free.
 
 Your account does not disappear. Your posts do not disappear. You simply lose paid-tier
-convenience and features going forward, such as instant posting, higher limits, clean-name
-eligibility, and curator-team membership.
+convenience and features going forward, such as instant posting, higher limits, and
+curator-team membership.
 
 ### Where can I buy the MIRAGE token?
 
@@ -1381,7 +1425,9 @@ to fund your own subscription and unlock upgrades without ever buying anything.
 
 So the short version is: the network pays nodes for real usage, nodes compete for users, and
 many nodes choose to share rewards with users to accelerate growth and reward genuine
-participation.
+participation. Authors also earn from the daily creator pool when a paying subscriber
+upvotes or replies to their posts. That is separate from node rewards, and it has to be
+claimed within thirty days.
 
 ### Can I pay for a subscription without buying crypto?
 
@@ -1412,8 +1458,8 @@ what is happening today. The focus is the platform and the network, not retail h
 ### Is MIRAGE a meme token?
 
 No. MIRAGE is a utility token for the Mirage network. It exists to fund infrastructure and
-to unlock optional upgrades, for example subscriptions, skipping proof-of-work, reserving a
-clean username, higher limits, and other features.
+to unlock optional upgrades, for example subscriptions, skipping proof-of-work, higher
+limits, and other features.
 
 Normal users can ignore it completely, and the platform still works. A meme token is
 primarily about trading and attention. Mirage is primarily about building a
@@ -1758,7 +1804,7 @@ users adapt or disappear. Mirage takes the opposite approach.
 
 It does not try to enforce a single global culture or taste. Communities are broad,
 moderation is personal, and there is no central authority deciding what discussion should
-look like everywhere. If you want a tightly curated experience similar to HN, you can follow
+look like everywhere. If you want a tightly curated experience similar to HN, you can join
 narrow communities and use blocks and filters.
 
 If you do not, you do not have to. Hacker News works by filtering users out. Mirage works

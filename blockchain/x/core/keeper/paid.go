@@ -106,7 +106,7 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		return err
 	}
 	for _, m := range memberships {
-		if err := k.handlePaidDeactivationMembership(ctx, owner, m.slug, m.teamID); err != nil {
+		if err := k.removeCurationMembership(ctx, owner, m.slug, m.teamID, "curator_removed"); err != nil {
 			return err
 		}
 	}
@@ -130,13 +130,13 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 	return nil
 }
 
-func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug string, teamID uint64) error {
+func (k Keeper) removeCurationMembership(ctx sdk.Context, owner, slug string, teamID uint64, emit string) error {
 	team, ok, err := k.GetCurationTeam(ctx, slug, teamID)
 	if err != nil || !ok || !k.teamLive(team) {
 		return err
 	}
 	if team.Owner != owner {
-		return k.RemoveCuratorFromTeam(ctx, slug, teamID, owner, "curator_removed")
+		return k.RemoveCuratorFromTeam(ctx, slug, teamID, owner, emit)
 	}
 	type mem struct {
 		addr  string
@@ -176,7 +176,7 @@ func (k Keeper) handlePaidDeactivationMembership(ctx sdk.Context, owner, slug st
 	if successor == "" {
 		return k.DeleteCurationTeam(ctx, slug, teamID)
 	}
-	if err := k.RemoveCuratorFromTeam(ctx, slug, teamID, owner, "curator_removed"); err != nil {
+	if err := k.RemoveCuratorFromTeam(ctx, slug, teamID, owner, emit); err != nil {
 		return err
 	}
 	oldOwner := team.Owner

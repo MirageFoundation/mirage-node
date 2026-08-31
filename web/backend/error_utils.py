@@ -75,6 +75,7 @@ ERRORS = {
     "missing_author": "author is required",
     "invalid_offset": "offset must be a non-negative integer",
     "invalid_limit": "limit must be an integer from 1 to 50",
+    "invalid_cursor": "cursor must be post_count:community",
     "internal_error": "internal server error",
     "indexer_unavailable": "indexer DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",

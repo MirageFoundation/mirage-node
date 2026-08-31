@@ -15,6 +15,7 @@ import { getResolvedTheme, getThemeFamily, normalizeThemeId, DEFAULT_THEME_ID } 
 
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
+import CommunityLeaveConfirmation from './components/CommunityLeaveConfirmation';
 import { installCrossTabSessionWatcher, onSessionReset, resetClientSession } from './utils/sessionLifecycle';
 import { updateNotification } from './utils/notifications';
 import { withReturnTo } from './utils/returnTo';
@@ -1161,6 +1162,7 @@ class App extends Component {
                             <RouteTracker>
                                 <Shell state={this.state}>
                                     <AuthPromptModal />
+                                    <CommunityLeaveConfirmation />
                                     <React.Suspense fallback={null}>
                                         <Routes>
                                             <Route

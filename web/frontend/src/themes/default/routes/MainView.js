@@ -1,6 +1,6 @@
 import { communityLabel, communityPath } from '../../../utils/community';
 import { Helmet } from "react-helmet-async";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     HiNoSymbol,
 } from "react-icons/hi2";
@@ -917,6 +917,46 @@ const MainView = ({
     const theme = useTheme();
     const showHero = theme.caps.showHeroCards;
     const [curationHeader, setCurationHeader] = useState({ community: '', team: null });
+    const optimisticCurationPostsRef = useRef(new Set());
+    const optimisticCurationUsersRef = useRef(new Set());
+    const [, setCurationVisibilityRevision] = useState(0);
+    useEffect(() => {
+        const handleOptimisticModeration = (event) => {
+            const detail = event?.detail;
+            const community = String(detail?.community || '').trim().toLowerCase();
+            const teamId = Number(detail?.teamId);
+            const kind = detail?.kind;
+            const target = String(detail?.target || '').trim().toLowerCase();
+            if (!community || !Number.isSafeInteger(teamId) || teamId <= 0 || !['post', 'user'].includes(kind) || !target) {
+                throw new Error('Invalid optimistic curation moderation event');
+            }
+            const key = `${community}:${teamId}:${target}`;
+            const entries = kind === 'post' ? optimisticCurationPostsRef.current : optimisticCurationUsersRef.current;
+            if (detail.hidden) entries.add(key);
+            else entries.delete(key);
+            setCurationVisibilityRevision((current) => current + 1);
+            console.debug('[curation] feed visibility updated', {
+                community,
+                teamId,
+                kind,
+                target: target.slice(0, 12),
+                hidden: !!detail.hidden,
+            });
+        };
+        window.addEventListener('curationModerationOptimistic', handleOptimisticModeration);
+        return () => window.removeEventListener('curationModerationOptimistic', handleOptimisticModeration);
+    }, []);
+    const isOptimisticallyCurationHidden = useCallback((post) => {
+        const community = String(post?.topic || post?.community || '').trim().toLowerCase();
+        const teamId = Number(post?.lens?.effective_team_id);
+        const postId = String(post?.post_id || '').trim().toLowerCase();
+        const author = String(post?.user_id || post?.author || '').trim().toLowerCase();
+        if (!community || !Number.isSafeInteger(teamId) || teamId <= 0) return false;
+        return (
+            (postId && optimisticCurationPostsRef.current.has(`${community}:${teamId}:${postId}`))
+            || (author && optimisticCurationUsersRef.current.has(`${community}:${teamId}:${author}`))
+        );
+    }, []);
     const {
         isTopicPending: isBlockTopicPending,
         formatTopicStatus: formatBlockTopicStatus,
@@ -1100,6 +1140,7 @@ const MainView = ({
             const isTopLevelPost = p => {
                 if (!p || p.deleted) return false;
                 if (p.hidden_client) return false;
+                if (isOptimisticallyCurationHidden(p)) return false;
                 const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();

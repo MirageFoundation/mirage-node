@@ -57,6 +57,7 @@ const ERROR_MAP = {
     invalid_base64: "That request wasn't valid. Please try again.",
     invalid_limit: "That request wasn't valid. Please try again.",
     invalid_offset: "That request wasn't valid. Please try again.",
+    invalid_cursor: "That request wasn't valid. Please try again.",
     missing_author: "An author is required.",
 
     // PoW

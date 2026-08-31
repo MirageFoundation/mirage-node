@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
-import * as tx from "../utils/tx";
 import { unfollow, notifyUsersUpdated } from "../utils/FollowUsers";
-import { notifyTopicsUpdated } from "../utils/Subscriptions";
+import { unsubscribe } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 export const shortenAddress = addr => {
@@ -96,16 +95,10 @@ export function useFollows({
         const topicTrimmed = String(topic || '').trim().toLowerCase();
         if (!topicTrimmed) return;
         try {
-            const result = await tx.unfollowTopic(topicTrimmed);
-            if (result && result.success) {
-                setFollowedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
-                notifyTopicsUpdated({
-                    removed: topicTrimmed
-                });
-            } else {
-                alert(`Failed to leave community: ${result?.error || 'Unknown error'}`);
-            }
+            await unsubscribe(address, topicTrimmed);
+            setFollowedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
         } catch (error) {
+            if (error?.code === 'community_leave_cancelled') return;
             alert(`Error leaving community: ${error?.message || error}`);
         }
     };

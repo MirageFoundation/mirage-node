@@ -292,7 +292,9 @@ func (k Keeper) LeaveCommunity(ctx sdk.Context, owner, slug string, paid bool) e
 	if teamID, ok, err := k.getU64Key(ctx, types.KeyCurationTeamUser(owner, slug)); err != nil {
 		return err
 	} else if ok && teamID > 0 {
-		return fmt.Errorf("cannot leave community %s while curating a team", slug)
+		if err := k.removeCurationMembership(ctx, owner, slug, teamID, "curator_left"); err != nil {
+			return err
+		}
 	}
 	if paid {
 		if err := k.removeSubscriberContribution(ctx, slug, pref); err != nil {

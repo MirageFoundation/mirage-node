@@ -164,6 +164,62 @@ func TestLeaveCurationTeamOwnerMustTransferOrDelete(t *testing.T) {
 	require.ErrorContains(t, err, "team not found")
 }
 
+func TestLeaveCommunityAlsoLeavesOrDeletesCurationTeam(t *testing.T) {
+	t.Run("non-owner curator leaves team", func(t *testing.T) {
+		mk, ctx, am := setupModule(t)
+		f := newCurationFixture(t, mk, ctx, "leave-community-member", 0x40, 0x41)
+
+		_, err := am.LeaveCommunity(ctx, &types.MsgLeaveCommunity{
+			EnvelopePubkey: f.curatorPub,
+			Community:      f.slug,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{f.owner}, teamMemberAddrs(t, mk, ctx, f.slug, f.teamID))
+		_, joined, err := mk.GetPreference(ctx, f.curator, f.slug)
+		require.NoError(t, err)
+		require.False(t, joined)
+		team, found, err := mk.GetCurationTeam(ctx, f.slug, f.teamID)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Zero(t, team.DeletedHeight)
+		require.Equal(t, f.owner, team.Owner)
+	})
+
+	t.Run("owner promotes successor then last curator deletes team", func(t *testing.T) {
+		mk, ctx, am := setupModule(t)
+		f := newCurationFixture(t, mk, ctx, "leave-community-owner", 0x42, 0x43)
+
+		_, err := am.LeaveCommunity(ctx, &types.MsgLeaveCommunity{
+			EnvelopePubkey: f.ownerPub,
+			Community:      f.slug,
+		})
+		require.NoError(t, err)
+		team, found, err := mk.GetCurationTeam(ctx, f.slug, f.teamID)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Zero(t, team.DeletedHeight)
+		require.Equal(t, f.curator, team.Owner)
+		require.ElementsMatch(t, []string{f.curator}, teamMemberAddrs(t, mk, ctx, f.slug, f.teamID))
+		_, joined, err := mk.GetPreference(ctx, f.owner, f.slug)
+		require.NoError(t, err)
+		require.False(t, joined)
+
+		_, err = am.LeaveCommunity(ctx, &types.MsgLeaveCommunity{
+			EnvelopePubkey: f.curatorPub,
+			Community:      f.slug,
+		})
+		require.NoError(t, err)
+		team, found, err = mk.GetCurationTeam(ctx, f.slug, f.teamID)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotZero(t, team.DeletedHeight)
+		require.Empty(t, teamMemberAddrs(t, mk, ctx, f.slug, f.teamID))
+		_, joined, err = mk.GetPreference(ctx, f.curator, f.slug)
+		require.NoError(t, err)
+		require.False(t, joined)
+	})
+}
+
 func TestTransferCurationTeamRequiresAcceptedCurator(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	f := newCurationFixture(t, mk, ctx, "transfer-team", 0x16, 0x17)
@@ -348,6 +404,10 @@ func TestCurationModerationActionsRequireTeamMembership(t *testing.T) {
 	post := genTxHash(7)
 	_, target := curationSigner(0x28)
 	setPaidProfile(t, mk, ctx, target)
+	require.NoError(t, mk.SetPostMetadata(ctx, post, &types.PostMetadata{
+		Author:    target,
+		Community: f.slug,
+	}))
 
 	// Every action rejects a paid non-member, so the failure is membership and
 	// not eligibility.
@@ -394,6 +454,73 @@ func TestCurationModerationActionsRequireTeamMembership(t *testing.T) {
 		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: post, Hidden: false,
 	})
 	require.ErrorContains(t, err, "must be an active subscriber or admin")
+}
+
+func TestCurationCannotBanCommunityCuratorsOrTheirPosts(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	f := newCurationFixture(t, mk, ctx, "protected-curators", 0x36, 0x37)
+	_, otherCurator := curationSigner(0x38)
+	setPaidProfile(t, mk, ctx, otherCurator)
+	_, err := mk.CreateCurationTeam(ctx, otherCurator, f.slug, "OtherTeam", "")
+	require.NoError(t, err)
+
+	protected := []string{f.curator, f.owner, otherCurator}
+	for i, target := range protected {
+		_, err = am.SetCurationUserHidden(ctx, &types.MsgSetCurationUserHidden{
+			EnvelopePubkey: f.curatorPub,
+			Community:      f.slug,
+			TeamId:         f.teamID,
+			Target:         target,
+			Hidden:         true,
+		})
+		require.ErrorContains(t, err, "cannot ban a curator in this community")
+
+		post := genTxHash(20 + i)
+		require.NoError(t, mk.SetPostMetadata(ctx, post, &types.PostMetadata{
+			Author:    target,
+			Community: f.slug,
+		}))
+		_, err = am.SetCurationPostHidden(ctx, &types.MsgSetCurationPostHidden{
+			EnvelopePubkey: f.curatorPub,
+			Community:      f.slug,
+			TeamId:         f.teamID,
+			Target:         post,
+			Hidden:         true,
+		})
+		require.ErrorContains(t, err, "cannot ban a curator's post in this community")
+	}
+
+	_, ordinary := curationSigner(0x39)
+	ordinaryPost := genTxHash(30)
+	require.NoError(t, mk.SetPostMetadata(ctx, ordinaryPost, &types.PostMetadata{
+		Author:    ordinary,
+		Community: f.slug,
+	}))
+	_, err = am.SetCurationUserHidden(ctx, &types.MsgSetCurationUserHidden{
+		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: ordinary, Hidden: true,
+	})
+	require.NoError(t, err)
+	_, err = am.SetCurationPostHidden(ctx, &types.MsgSetCurationPostHidden{
+		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: ordinaryPost, Hidden: true,
+	})
+	require.NoError(t, err)
+
+	// Existing bans must remain removable after this protection activates.
+	protectedPost := genTxHash(31)
+	require.NoError(t, mk.SetPostMetadata(ctx, protectedPost, &types.PostMetadata{
+		Author:    f.owner,
+		Community: f.slug,
+	}))
+	require.NoError(t, mk.SetCurationActionHiddenUser(ctx, f.slug, f.teamID, f.owner, f.curator, true))
+	require.NoError(t, mk.SetCurationActionHiddenPost(ctx, f.slug, f.teamID, protectedPost, f.curator, true))
+	_, err = am.SetCurationUserHidden(ctx, &types.MsgSetCurationUserHidden{
+		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: f.owner, Hidden: false,
+	})
+	require.NoError(t, err)
+	_, err = am.SetCurationPostHidden(ctx, &types.MsgSetCurationPostHidden{
+		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: protectedPost, Hidden: false,
+	})
+	require.NoError(t, err)
 }
 
 func TestSetCurationPostTagRejectsClearWithTag(t *testing.T) {

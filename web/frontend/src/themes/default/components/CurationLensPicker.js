@@ -8,7 +8,7 @@ import { useViewerCuratorMembership } from '../../../logic/useViewerCuratorMembe
 import {
     CURATION_MODE,
     LENS,
-    formatSubscriberCount,
+    formatPinCount,
     lensHintLabel,
 } from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
@@ -379,7 +379,7 @@ export default function CurationLensPicker({
                                     $selected={selected === value}
                                     onClick={() => change(value)}
                                 >
-                                    <span>{team.name} ({formatSubscriberCount(Number(team.subscriber_count))})</span>
+                                    <span>{team.name} ({formatPinCount(Number(team.subscriber_count))})</span>
                                     {selected === value && <Check aria-hidden="true">✓</Check>}
                                 </Option>
                             );

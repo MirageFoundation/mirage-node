@@ -283,6 +283,24 @@ func (k Keeper) RequireTeamCurator(ctx sdk.Context, actor, slug string, teamID u
 	return k.requireTeamActor(ctx, actor, slug, teamID, false)
 }
 
+func (k Keeper) IsCommunityCurator(ctx sdk.Context, actor, slug string) (bool, error) {
+	if _, err := types.CanonicalAccBytes(actor); err != nil {
+		return false, err
+	}
+	teamID, found, err := k.getU64Key(ctx, types.KeyCurationTeamUser(actor, slug))
+	if err != nil || !found {
+		return false, err
+	}
+	team, found, err := k.GetCurationTeam(ctx, slug, teamID)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, fmt.Errorf("curation membership points to missing team community=%s team=%d", slug, teamID)
+	}
+	return k.teamLive(team), nil
+}
+
 func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, teamID uint64, name, description string) error {
 	team, err := k.RequireTeamOwner(ctx, actor, slug, teamID)
 	if err != nil {

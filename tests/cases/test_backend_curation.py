@@ -327,6 +327,33 @@ def test_curation_backend(backend: str) -> None:
     else:
         _fail("curation.backend_hidden_posts_limit_cap", f"code={code} body={bad_limit}")
 
+    code, listed = _get(f"{backend}/api/communities", {"limit": 25})
+    items = (listed or {}).get("items") if isinstance(listed, dict) else None
+    if code != 200 or not isinstance(items, list):
+        _fail("curation.communities_sorted_by_post_count", f"code={code} body={listed}")
+    else:
+        pairs = [(int(item["post_count"]), str(item["community"])) for item in items]
+        expected = sorted(pairs, key=lambda row: (-row[0], row[1]))
+        if pairs != expected:
+            _fail("curation.communities_sorted_by_post_count", f"got={pairs[:8]}")
+        else:
+            _pass("curation.communities_sorted_by_post_count")
+        if listed.get("has_more"):
+            last = items[-1]
+            want_cursor = f"{int(last['post_count'])}:{last['community']}"
+            if listed.get("next_cursor") != want_cursor:
+                _fail(
+                    "curation.communities_post_count_cursor",
+                    f"cursor={listed.get('next_cursor')} want={want_cursor}",
+                )
+            else:
+                _pass("curation.communities_post_count_cursor")
+    code, bad_cursor = _get(f"{backend}/api/communities", {"cursor": "not-a-cursor"})
+    if code == 400 and isinstance(bad_cursor, dict) and bad_cursor.get("error_code") == "invalid_cursor":
+        _pass("curation.communities_invalid_cursor")
+    else:
+        _fail("curation.communities_invalid_cursor", f"code={code} body={bad_cursor}")
+
     _debug(f"curation.backend done community={slug} team_id={team_id}")
 
 

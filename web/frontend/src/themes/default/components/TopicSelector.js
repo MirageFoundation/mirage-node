@@ -372,7 +372,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                             .filter(t => t && t.community && typeof t.community === 'string' && t.community.trim() !== '')
                             .map(t => ({
                                 topic: t.community,
-                                count: 0,
+                                count: t.post_count,
                                 flags: {},
                                 dominant_tag: '',
                                 dominant_ratio: 0
@@ -449,11 +449,12 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                     .filter(t => t && t.community && typeof t.community === 'string')
                     .map(t => ({
                         topic: t.community,
-                        count: 0,
+                        count: t.post_count,
                         flags: {},
                         dominant_tag: '',
                         dominant_ratio: 0
-                    }));
+                    }))
+                    .sort((a, b) => (b.count - a.count) || String(a.topic).localeCompare(String(b.topic)));
                 setSearchResults(normalized);
             } catch (_) {
                 if (searchRequestId.current !== requestId) return;

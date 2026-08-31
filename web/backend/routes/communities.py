@@ -44,6 +44,22 @@ def _team_summary(team: dict | None) -> dict | None:
     }
 
 
+def _parse_list_cursor(raw: str):
+    """Return ((post_count, community), None) or (None, error_response). Empty is (None, None)."""
+    if not raw:
+        return None, None
+    if ":" not in raw:
+        return None, api_error_code("invalid_cursor", 400)
+    count_str, community = raw.split(":", 1)
+    try:
+        post_count = int(count_str)
+    except (TypeError, ValueError):
+        return None, api_error_code("invalid_cursor", 400)
+    if post_count < 0 or not community:
+        return None, api_error_code("invalid_cursor", 400)
+    return (post_count, community), None
+
+
 def _parse_hidden_list_paging():
     """Return ((offset, limit), None) or (None, error_response)."""
     try:
@@ -78,7 +94,13 @@ def list_communities():
     rid = next_request_id()
     q = (request.args.get("query") or "").strip().lower()
     joined_by = (request.args.get("joined_by") or "").strip().lower()
-    cursor = (request.args.get("cursor") or "").strip().lower()
+    cursor_raw = (request.args.get("cursor") or "").strip().lower()
+    cursor_pair, cursor_err = _parse_list_cursor(cursor_raw)
+    if cursor_err is not None:
+        return cursor_err
+    skip_cursor = cursor_pair is None
+    cursor_count = 0 if skip_cursor else cursor_pair[0]
+    cursor_community = "" if skip_cursor else cursor_pair[1]
     curated_raw = (request.args.get("curated") or "").strip().lower()
     if curated_raw not in ("", "true", "false"):
         return api_error_code("invalid_curated", 400)
@@ -119,7 +141,6 @@ def list_communities():
                      AND COALESCE(p.target,'')=''
                      AND p.deleted=FALSE
                     WHERE (%s='' OR c.community LIKE %s)
-                      AND (%s='' OR c.community>%s)
                       AND (
                         %s=''
                         OR EXISTS(
@@ -132,7 +153,8 @@ def list_communities():
                 SELECT community, live_team_count, post_count
                 FROM aggregates
                 WHERE (%s::BOOLEAN IS NULL OR (live_team_count>0)=%s)
-                ORDER BY community
+                  AND (%s OR post_count < %s OR (post_count = %s AND community > %s))
+                ORDER BY post_count DESC, community ASC
                 LIMIT %s
                 """,
                 (
@@ -140,12 +162,14 @@ def list_communities():
                     joined_by,
                     q,
                     q + "%",
-                    cursor,
-                    cursor,
                     joined_by,
                     joined_by,
                     curated,
                     curated,
+                    skip_cursor,
+                    cursor_count,
+                    cursor_count,
+                    cursor_community,
                     limit + 1,
                 ),
             )
@@ -163,8 +187,19 @@ def list_communities():
                     }
                 )
         has_more = len(rows) > limit
-        next_cursor = items[-1]["community"] if has_more and items else None
-        log_event(rid, "[community] list.ok", count=len(items), joined_by=joined_by, curated=curated)
+        next_cursor = (
+            f"{items[-1]['post_count']}:{items[-1]['community']}" if has_more and items else None
+        )
+        log_event(
+            rid,
+            "[community] list.ok",
+            count=len(items),
+            joined_by=joined_by,
+            curated=curated,
+            sort="post_count_desc",
+            first=items[0]["community"] if items else None,
+            first_posts=items[0]["post_count"] if items else None,
+        )
         return jsonify({"items": items, "next_cursor": next_cursor, "has_more": has_more})
     except Exception as e:
         log_event(rid, "communities.list.err", error=str(e))

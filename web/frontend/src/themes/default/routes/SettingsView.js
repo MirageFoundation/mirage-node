@@ -109,7 +109,9 @@ const SectionDivider = styled.div`
 
 const SettingRow = styled.div`
     display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-columns: ${({ $fullWidth }) => ($fullWidth
+        ? 'minmax(0, 1fr)'
+        : '150px minmax(0, 1fr)')};
     align-items: flex-start;
     gap: 1rem;
     padding: 0.55rem 1rem;
@@ -863,7 +865,7 @@ export default function SettingsView({ state }) {
                                 </SettingControl>
                             </SettingRow>
 
-                            <SettingRow>
+                            <SettingRow $fullWidth>
                                 <SettingControl>
                                     <ToggleRow as="div">
                                         <div>
@@ -880,7 +882,7 @@ export default function SettingsView({ state }) {
                                 </SettingControl>
                             </SettingRow>
 
-                            <SettingRow>
+                            <SettingRow $fullWidth>
                                 <SettingControl>
                                     <ToggleRow as="div">
                                         <div>
@@ -905,7 +907,7 @@ export default function SettingsView({ state }) {
                                 </ClickableRowRight>
                             </ClickableSettingRow>
 
-                            <SettingRow>
+                            <SettingRow $fullWidth>
                                 <SettingControl>
                                     <ToggleRow as="div">
                                         <div>

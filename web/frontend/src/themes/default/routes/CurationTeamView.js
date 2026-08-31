@@ -194,11 +194,71 @@ const ItemLabel = styled.span`
     text-overflow: ellipsis;
     white-space: nowrap;
 `;
+const TabsRow = styled.div`
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(${({ $count }) => $count}, minmax(0, 1fr));
+    margin-top: 0.65rem;
+    border-bottom: 1px solid ${({ theme }) => requireThemeColor(theme, 'border')};
+`;
+const TabButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 0.55rem 0.35rem;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: ${({ $active, theme }) => requireThemeColor(theme, $active ? 'text' : 'subtleText')};
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.15s ease;
+
+    &:hover {
+        color: ${({ theme }) => requireThemeColor(theme, 'text')};
+    }
+
+    @media (max-width: 600px) {
+        padding: 0.5rem 0.15rem;
+        font-size: 0.62rem;
+    }
+`;
+const TabIndicator = styled.div`
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    width: calc(100% / ${({ $count }) => $count});
+    height: 2px;
+    background: ${({ theme }) => requireThemeColor(theme, 'focusBlue')};
+    transform: translateX(${({ $index }) => `${$index * 100}%`});
+    transition: transform 0.2s ease;
+`;
+
+const PUBLIC_TABS = [
+    { id: 'overview', label: 'Overview', hash: '', panelId: 'curation-overview' },
+    { id: 'curators', label: 'Curators', hash: 'curators', panelId: 'curation-curators' },
+];
+const CURATOR_TABS = [
+    ...PUBLIC_TABS,
+    { id: 'banned-posts', label: 'Banned posts', hash: 'hidden-posts', panelId: 'hidden-posts' },
+    { id: 'banned-users', label: 'Banned users', hash: 'hidden-users', panelId: 'hidden-users' },
+];
+
+function tabFromHash(hash) {
+    const value = String(hash || '').replace(/^#/, '');
+    return CURATOR_TABS.find((tab) => tab.hash === value)?.id || 'overview';
+}
 
 export default function CurationTeamView() {
     const { topic: community, teamId } = useParams();
     const location = useLocation();
     const navigate = useNavigate();
+    const [activeTab, setActiveTab] = useState(() => tabFromHash(location.hash));
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const { team, loading, error: loadError, refresh: refreshTeam } = useCurationTeam(community, teamId, viewer);
     const { getInfo, getStatus } = usePendingCuration();
@@ -224,13 +284,15 @@ export default function CurationTeamView() {
     );
     const hiddenUsers = useHiddenCurationUsers(community, teamId, {
         viewer,
-        enabled: isCurator,
+        enabled: isCurator && activeTab === 'banned-users',
     });
     const hiddenPosts = useHiddenCurationPosts(community, teamId, {
         viewer,
-        enabled: isCurator,
+        enabled: isCurator && activeTab === 'banned-posts',
     });
     const myInvitation = invitations.find((invite) => invite.address === viewer);
+    const tabs = isCurator ? CURATOR_TABS : PUBLIC_TABS;
+    const activeTabIndex = Math.max(0, tabs.findIndex((tab) => tab.id === activeTab));
 
     useEffect(() => {
         if (!team) return;
@@ -257,13 +319,25 @@ export default function CurationTeamView() {
     }, [community, optimisticTag, team, teamId]);
 
     useEffect(() => {
-        if (!isCurator || location.hash !== '#hidden-users') return undefined;
-        const el = document.getElementById('hidden-users');
-        if (!el) return undefined;
-        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        console.debug('[curation] scrolled to hidden users', { community, teamId });
-        return undefined;
-    }, [community, isCurator, location.hash, teamId]);
+        if (!team) return;
+        const requested = tabFromHash(location.hash);
+        const next = tabs.some((tab) => tab.id === requested) ? requested : 'overview';
+        setActiveTab(next);
+    }, [location.hash, tabs, team]);
+
+    const selectTab = (tab) => {
+        setActiveTab(tab.id);
+        navigate({
+            pathname: location.pathname,
+            search: location.search,
+            hash: tab.hash ? `#${tab.hash}` : '',
+        }, { replace: true });
+        console.debug('[curation] team section', {
+            community,
+            teamId,
+            section: tab.id,
+        });
+    };
 
     const run = async (operation) => {
         setError('');
@@ -428,7 +502,27 @@ export default function CurationTeamView() {
         {team.deleted && <ErrorText>This curator team has been deleted.</ErrorText>}
         <Meta>{formatSubscriberCount(Number(team.subscriber_count))}</Meta>
         {error && <ErrorText role="alert">{error}</ErrorText>}
+        <TabsRow role="tablist" aria-label="Curator team sections" $count={tabs.length}>
+            {tabs.map((tab) => {
+                const selected = activeTab === tab.id;
+                return (
+                    <TabButton
+                        key={tab.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        aria-controls={tab.panelId}
+                        $active={selected}
+                        onClick={() => selectTab(tab)}
+                    >
+                        {tab.label}
+                    </TabButton>
+                );
+            })}
+            <TabIndicator $count={tabs.length} $index={activeTabIndex} aria-hidden="true" />
+        </TabsRow>
 
+        {activeTab === 'overview' && <div id="curation-overview" role="tabpanel">
         {isLeader ? (
             <>
                 <Card>
@@ -553,7 +647,9 @@ export default function CurationTeamView() {
                 </Card>
             </>
         )}
+        </div>}
 
+        {activeTab === 'curators' && <div id="curation-curators" role="tabpanel">
         {!team.deleted && myInvitation && <Card>
             <CardTitle>Team invitation</CardTitle>
             <Body>The leader invited you to join this curator team.</Body>
@@ -620,9 +716,10 @@ export default function CurationTeamView() {
                 </FormActions>
             )}
         </Card>
+        </div>}
 
-        {isCurator && (
-            <Card id="hidden-users">
+        {isCurator && activeTab === 'banned-users' && (
+            <Card id="hidden-users" role="tabpanel">
                 <CardTitle>Banned users</CardTitle>
                 <Meta>Banned from this team&apos;s feed. Newest first.</Meta>
                 {hiddenUsers.loading && hiddenUsers.users.length === 0 && <Meta>Loading banned users…</Meta>}
@@ -672,8 +769,8 @@ export default function CurationTeamView() {
             </Card>
         )}
 
-        {isCurator && (
-            <Card id="hidden-posts">
+        {isCurator && activeTab === 'banned-posts' && (
+            <Card id="hidden-posts" role="tabpanel">
                 <CardTitle>Banned posts</CardTitle>
                 <Meta>Banned from this team&apos;s feed. Newest first.</Meta>
                 {hiddenPosts.loading && hiddenPosts.posts.length === 0 && <Meta>Loading banned posts…</Meta>}
@@ -726,7 +823,7 @@ export default function CurationTeamView() {
             </Card>
         )}
 
-        {isLeader && !team.deleted && (
+        {activeTab === 'overview' && isLeader && !team.deleted && (
             <DangerCard>
                 <CardTitle>Danger zone</CardTitle>
                 <SettingRow>

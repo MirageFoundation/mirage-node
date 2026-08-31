@@ -7,6 +7,7 @@ import {
     MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
     MAX_CURATION_TEAM_NAME_LENGTH,
     curationPendingKey,
+    formatPinCount,
     formatSubscriberCount,
     lensCacheKey,
     lensHintLabel,
@@ -22,6 +23,10 @@ import {
 } from '../../src/utils/curation.js';
 import { currentCreatorEpoch, normalizeClaimEpochs } from '../../src/logic/useCreatorEarnings.js';
 import Api from '../../src/utils/api.js';
+import {
+    registerCommunityLeaveConfirmationHandler,
+    requestCommunityLeaveConfirmation,
+} from '../../src/utils/communityLeaveConfirmation.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendSrc = join(here, '../../src');
@@ -54,6 +59,20 @@ describe('curation lenses', () => {
     it('uses the global pending tuple contract', () => {
         expect(curationPendingKey('invite_curator', 'Tech', 2, 'MIRAGE1USER'))
             .toBe('invite_curator:tech:2:mirage1user');
+    });
+});
+
+describe('community leave confirmation', () => {
+    it('routes curator leave consequences through the registered dialog', async () => {
+        const details = {
+            community: 'tech',
+            membership: { teamId: 2, teamName: 'Signal', memberCount: 1, isLeader: true },
+        };
+        const handler = vi.fn().mockResolvedValue(true);
+        const unregister = registerCommunityLeaveConfirmationHandler(handler);
+        await expect(requestCommunityLeaveConfirmation(details)).resolves.toBe(true);
+        expect(handler).toHaveBeenCalledWith(details);
+        unregister();
     });
 });
 
@@ -108,7 +127,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/if \(!detail\.curated\) return LENS\.RAW/);
         expect(pickerSrc).toMatch(/LENS\.DEFAULT/);
         expect(pickerSrc).not.toMatch(/Node default/);
-        expect(pickerSrc).toMatch(/formatSubscriberCount/);
+        expect(pickerSrc).toMatch(/formatPinCount/);
         expect(pickerSrc).toMatch(/__team_action__/);
         expect(pickerSrc).toMatch(/Create new…/);
         expect(pickerSrc).toMatch(/Manage my team…/);
@@ -138,6 +157,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(formatSubscriberCount(0)).toBe('0 users pinned');
         expect(formatSubscriberCount(1)).toBe('1 user pinned');
         expect(formatSubscriberCount(2)).toBe('2 users pinned');
+        expect(formatPinCount(0)).toBe('0 pins');
+        expect(formatPinCount(1)).toBe('1 pin');
+        expect(formatPinCount(2)).toBe('2 pins');
         expect(teamIdWithMostSubscribers([
             { team_id: '2', subscriber_count: '1' },
             { team_id: '1', subscriber_count: '3' },
@@ -320,6 +342,14 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).toMatch(/Banned posts/);
         expect(detail).toMatch(/hidden-users/);
         expect(detail).toMatch(/hidden-posts/);
+        expect(detail).toMatch(/Overview[\s\S]*Curators[\s\S]*Banned posts[\s\S]*Banned users/);
+        expect(detail).toMatch(/role="tablist" aria-label="Curator team sections"/);
+        expect(detail).toMatch(/activeTab === 'overview'/);
+        expect(detail).toMatch(/activeTab === 'curators'/);
+        expect(detail).toMatch(/activeTab === 'banned-posts'/);
+        expect(detail).toMatch(/activeTab === 'banned-users'/);
+        expect(detail).toMatch(/enabled: isCurator && activeTab === 'banned-posts'/);
+        expect(detail).toMatch(/enabled: isCurator && activeTab === 'banned-users'/);
         expect(detail.indexOf('CardTitle>Danger zone')).toBeGreaterThan(detail.indexOf('Card id="hidden-posts"'));
         expect(detail).toMatch(/useHiddenCurationUsers/);
         expect(detail).toMatch(/useHiddenCurationPosts/);
@@ -537,6 +567,13 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/Unban post/);
         expect(actions).toMatch(/Ban user/);
         expect(actions).toMatch(/Unban user/);
+        expect(actions).toMatch(/curationModerationOptimistic/);
+        expect(actions).toMatch(/applyDisplayedVisibility\('post', postId, optimistic\.postHidden\)/);
+        expect(actions).toMatch(/applyDisplayedVisibility\('user', author, optimistic\.userHidden\)/);
+        expect(mainView).toMatch(/window\.addEventListener\('curationModerationOptimistic'/);
+        expect(mainView).toMatch(/optimisticCurationPostsRef/);
+        expect(mainView).toMatch(/optimisticCurationUsersRef/);
+        expect(mainView).toMatch(/if \(isOptimisticallyCurationHidden\(p\)\) return false;/);
         expect(actions).toMatch(/Lock thread/);
         expect(actions).toMatch(/Unlock thread/);
         // Toggle: only one of each pair is pushed per state branch.
@@ -709,6 +746,18 @@ describe('v1.39 curation UI contracts', () => {
         expect(listeners).toContain('curationUpdated');
     });
 
+    it('warns before every curator community leave path', () => {
+        const subscriptions = readFileSync(join(frontendSrc, 'utils/Subscriptions.js'), 'utf8');
+        const app = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
+        const follows = readFileSync(join(frontendSrc, 'logic/useFollows.js'), 'utf8');
+
+        expect(subscriptions).toMatch(/fetchViewerCuratorMembership\(lower, address, \{ fresh: true \}\)/);
+        expect(subscriptions).toMatch(/requestCommunityLeaveConfirmation/);
+        expect(app).toMatch(/<CommunityLeaveConfirmation \/>/);
+        expect(follows).toMatch(/await unsubscribe\(address, topicTrimmed\)/);
+        expect(follows).not.toMatch(/tx\.unfollowTopic/);
+    });
+
     it('invalidates curation reads once the created team is indexed', () => {
         const teamsView = readFileSync(
             join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
@@ -719,8 +768,10 @@ describe('v1.39 curation UI contracts', () => {
         // otherwise the refetch re-caches the pre-team state it is replacing.
         const waitAt = teamsView.indexOf('waitForOwnCurationTeam(nextSlug');
         const invalidateAt = teamsView.indexOf('invalidateCurationReads(nextSlug)');
+        const topicsAt = teamsView.indexOf('notifyTopicsUpdated({ added: nextSlug })');
         expect(waitAt).toBeGreaterThan(-1);
         expect(invalidateAt).toBeGreaterThan(waitAt);
+        expect(topicsAt).toBeGreaterThan(invalidateAt);
     });
 });
 
