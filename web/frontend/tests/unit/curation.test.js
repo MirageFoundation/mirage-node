@@ -544,6 +544,42 @@ describe('v1.39 curation UI contracts', () => {
         expect(postMenu).toMatch(/item\.type === 'select'/);
         expect(postMenu).toMatch(/MenuSelect/);
     });
+
+    it('clears the curator membership cache from module scope, not only while mounted', async () => {
+        // Creating a team happens on the teams route, which never mounts
+        // useViewerCuratorMembership. When the invalidation only reached the
+        // hook's own listeners there was nothing to hear it, so the cached
+        // "not a curator" survived into the community feed and the curate
+        // buttons stayed hidden until a reload.
+        const listeners = [];
+        const addSpy = vi
+            .spyOn(window, 'addEventListener')
+            .mockImplementation((type, handler) => {
+                listeners.push(type);
+                return undefined;
+            });
+        try {
+            vi.resetModules();
+            await import('../../src/logic/useViewerCuratorMembership.js');
+        } finally {
+            addSpy.mockRestore();
+        }
+        expect(listeners).toContain('curationUpdated');
+    });
+
+    it('invalidates curation reads once the created team is indexed', () => {
+        const teamsView = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
+            'utf8',
+        );
+        expect(teamsView).toMatch(/invalidateCurationReads/);
+        // Must come after the indexer has been confirmed to serve the team,
+        // otherwise the refetch re-caches the pre-team state it is replacing.
+        const waitAt = teamsView.indexOf('waitForOwnCurationTeam(nextSlug');
+        const invalidateAt = teamsView.indexOf('invalidateCurationReads(nextSlug)');
+        expect(waitAt).toBeGreaterThan(-1);
+        expect(invalidateAt).toBeGreaterThan(waitAt);
+    });
 });
 
 describe('waitForOwnCurationTeam', () => {

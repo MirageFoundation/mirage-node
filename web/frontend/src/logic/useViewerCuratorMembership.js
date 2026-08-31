@@ -28,6 +28,17 @@ function clearMembershipCache(community = '') {
     console.debug('[curation] membership cache cleared for community', { community: slug });
 }
 
+// The per-component listeners below only run while something is rendering that
+// community, and the page that makes you a curator is not one of them: creating
+// a team happens on the teams route, which never mounts this hook. Clearing from
+// module scope means the cache cannot outlive the change that invalidated it and
+// hand a stale "not a curator" to the feed you navigate to next.
+if (typeof window !== 'undefined') {
+    window.addEventListener('curationUpdated', (event) => {
+        clearMembershipCache(String(event?.detail?.community || ''));
+    });
+}
+
 async function fetchMembership(community, viewer) {
     const slug = requireCommunitySlug(community);
     const owner = String(viewer || '').trim().toLowerCase();
