@@ -168,6 +168,19 @@ describe('v1.39 curation UI contracts', () => {
         expect(teams).toMatch(/or an admin account/);
     });
 
+    it('keeps New team title on eligibility failure and does not treat fetch errors as subscribe', () => {
+        const teams = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamsView.js'),
+            'utf8',
+        );
+        expect(teams).toMatch(/eligibility_error/);
+        expect(teams).toMatch(/retryEligibility/);
+        expect(teams).toMatch(/Leave eligible null/);
+        expect(teams).toMatch(/subscribe: 'New team'/);
+        expect(teams).not.toMatch(/subscribe: 'Subscribe'/);
+        expect(teams).not.toMatch(/setEligible\(false\);\s*setError\(message\)/);
+    });
+
     it('does not show Create curator team on the Communities discover page', () => {
         const discover = readFileSync(
             join(frontendSrc, 'themes/default/routes/DiscoverView.js'),

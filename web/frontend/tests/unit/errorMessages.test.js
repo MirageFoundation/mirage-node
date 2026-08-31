@@ -19,4 +19,8 @@ describe('formatError', () => {
         expect(formatError({ success: false, cancelled: true, error_code: 'missing_onboarding_handoff' }))
             .toBe('Recovery phrase is missing.');
     });
+
+    it('surfaces client/network Error.message when error_code is absent', () => {
+        expect(formatError(new Error('Failed to fetch'))).toBe('Failed to fetch');
+    });
 });

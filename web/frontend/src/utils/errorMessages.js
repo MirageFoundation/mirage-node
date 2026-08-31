@@ -277,6 +277,11 @@ export function formatError(resp) {
             try { console.error('[errorMessages] cancelled/unmapped without error_code', resp); } catch (_) { }
             return String(reason);
         }
+        // Client/network throws (TypeError, Error from fetch) carry .message only.
+        if (resp instanceof Error && resp.message) {
+            try { console.error('[errorMessages] client error without error_code', resp); } catch (_) { }
+            return resp.message;
+        }
         try { console.error('[errorMessages] missing error_code', resp); } catch (_) { }
         return "Missing error code.";
     }
