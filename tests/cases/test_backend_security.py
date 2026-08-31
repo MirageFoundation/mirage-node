@@ -844,7 +844,12 @@ def test_validation(backend: str):
             resp = _do_set_username_raw(backend, free_wallet, test_uname)
             txh = str(resp.get("tx_hash", "")).lower()
             if txh:
-                resolved = _wait_username(backend, free_addr, timeout=15.0)
+                resolved = _wait_username(
+                    backend,
+                    free_addr,
+                    timeout=15.0,
+                    expected=test_uname,
+                )
                 if resolved == test_uname:
                     _pass("validation.free_username_exact", username=resolved)
                 elif resolved:

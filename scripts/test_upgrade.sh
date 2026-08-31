@@ -18,8 +18,8 @@
 #     a hung node rather than an operator error.
 #
 # Status files (host path, volume-mounted) so an LLM can poll without attaching
-# while the jobs are running. --wait prints the summary and then deletes the
-# directory; do not leave ~/.mirage/upgrade_tests sitting around afterwards.
+# while the jobs are running. --wait deletes the directory only after all jobs
+# pass; failures and timeouts preserve every captured log for diagnosis.
 #   ~/.mirage/upgrade_tests/pipeline.stage                         current pipeline step
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.state      running|passed|failed
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.exit       set when done
@@ -416,8 +416,8 @@ clear_status() {
   write_run_job
 }
 
-# Jobs are done (or never launched). The printed summary is the record; do not
-# leave ~/.mirage/upgrade_tests as leftover scratch.
+# Successful jobs need no leftover scratch. Failed runs preserve this directory
+# because their captured output is the evidence needed to diagnose the failure.
 remove_status_dir() {
   if [[ -d "$STATUS_HOST" ]]; then
     log "removing ${STATUS_HOST}"
@@ -458,8 +458,7 @@ wait_for_jobs() {
       echo
       log "pipeline.failed: $(cat "${STATUS_HOST}/pipeline.failed")"
       print_job_states
-      remove_status_dir
-      die "the pipeline died at stage '${stage}' before launching the panes; fix the cause and re-run scripts/test_upgrade.sh"
+      die "the pipeline died at stage '${stage}'; logs preserved at ${STATUS_HOST}"
     fi
     log "pipeline.stage=${stage}"
     print_job_states
@@ -476,17 +475,27 @@ wait_for_jobs() {
       for name in "${JOBS[@]}"; do
         if [[ "$(job_state "$name")" != "passed" ]]; then
           rc=1
+          echo
+          log "${name} failure output:"
+          if [[ -f "${STATUS_HOST}/${name}.out" ]]; then
+            cat "${STATUS_HOST}/${name}.out"
+          else
+            printf 'missing captured output: %s\n' "${STATUS_HOST}/${name}.out"
+          fi
         fi
       done
+      if (( rc != 0 )); then
+        log "rehearsal failed; logs preserved at ${STATUS_HOST}"
+        exit "$rc"
+      fi
       remove_status_dir
-      exit "$rc"
+      exit 0
     fi
     sleep 5
   done
   echo
   print_job_states
-  remove_status_dir
-  die "timed out after ${WAIT_BUDGET_SEC}s waiting for jobs"
+  die "timed out after ${WAIT_BUDGET_SEC}s; logs preserved at ${STATUS_HOST}"
 }
 
 wait_for_halt() {

@@ -1040,13 +1040,18 @@ def _wait_tx_deliver(
     return None
 
 
-def _wait_username(backend: str, address: str, timeout: float = INDEX_TIMEOUT_SEC) -> str | None:
-    """Wait until a username is visible on-chain (via get_profile)."""
+def _wait_username(
+    backend: str,
+    address: str,
+    timeout: float = INDEX_TIMEOUT_SEC,
+    expected: str | None = None,
+) -> str | None:
+    """Wait until a username, or the requested username, is visible via get_profile."""
     deadline = time.perf_counter() + timeout
     while time.perf_counter() < deadline:
         try:
             uname = get_username_from_address(backend, address)
-            if uname:
+            if uname and (expected is None or uname == expected):
                 return uname
         except Exception:
             pass
