@@ -665,8 +665,14 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
     Uses the chain's bank module directly (no relay/PoW needed).
     Default: 500 MIRAGE (500_000_000 umirage).
-    Retries on sequence mismatch (code 32) and waits for the tx to be
-    committed before returning so the next send gets the right sequence.
+
+    The transaction is unordered. scripts/test_upgrade.sh funds the blockchain
+    and backend suites from this one validator account at the same time, and an
+    ordered transaction has to guess the account sequence: two concurrent
+    senders read the same sequence, one of them commits, and the other is
+    rejected with "expected N, got N-1" until it gives up and aborts wallet
+    setup. Retrying cannot fix that — the sibling suite keeps taking the next
+    sequence. An unordered transaction carries no sequence at all.
     """
     kb = _keyring_backend()
 
@@ -680,109 +686,97 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
         print(f"    [faucet] bad validator address: {from_addr!r}")
         return False
 
-    max_retries = 5
-    for attempt in range(max_retries):
-        send_args = [
-            "tx",
+    send_args = [
+        "tx",
+        "bank",
+        "send",
+        from_addr,
+        address,
+        f"{amount}umirage",
+        "--home",
+        "/root/.mirage/node",
+        "--keyring-backend",
+        kb,
+        "--chain-id",
+        "mirage-1",
+        "--yes",
+        "--gas",
+        "auto",
+        "--gas-adjustment",
+        "1.5",
+        "--gas-prices",
+        "1000umirage",
+        "--unordered",
+        "--timeout-duration",
+        "90s",
+        "-o",
+        "json",
+    ]
+
+    code, out = _run_miraged(send_args, timeout=30)
+    if code != 0:
+        # Show the FATAL/error line (usually at the end), not the Usage block
+        lines = out.strip().splitlines()
+        fatal = next(
+            (l for l in reversed(lines) if "FATAL" in l or "insufficient" in l.lower() or "error" in l.lower()),
+            None,
+        )
+        if fatal:
+            import re
+
+            def _umirage_to_mirage(m: re.Match) -> str:
+                return f"{int(m.group(1)) / 1_000_000:,.0f} MIRAGE"
+
+            msg = re.sub(r"(\d+)umirage", _umirage_to_mirage, fatal.strip())
+            print(f"    [faucet] {msg}")
+        else:
+            last = lines[-1].strip() if lines else out[:200]
+            print(f"    [faucet] exit code {code}: {last}")
+        return False
+    # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
+    try:
+        # miraged may print log/gas-estimate lines before the JSON object
+        json_start = out.rfind("{")
+        if json_start < 0:
+            raise ValueError("no JSON object in output")
+        resp = json.loads(out[json_start:])
+        tx_code = int(resp.get("code", 1))
+        tx_hash = resp.get("txhash", "")
+        raw_log = resp.get("raw_log", "") or ""
+        if tx_code != 0:
+            print(f"    [faucet] tx failed code={tx_code}: {raw_log[:200]}")
+            return False
+    except Exception as e:
+        print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+        return False
+    # Wait for tx to be committed by polling the recipient's balance
+    # (tx_index is disabled, so we cannot look up by hash)
+    if tx_hash:
+        bal_args = [
+            "q",
             "bank",
-            "send",
-            from_addr,
+            "balances",
             address,
-            f"{amount}umirage",
             "--home",
             "/root/.mirage/node",
-            "--keyring-backend",
-            kb,
-            "--chain-id",
-            "mirage-1",
-            "--yes",
-            "--gas",
-            "auto",
-            "--gas-adjustment",
-            "1.5",
-            "--gas-prices",
-            "1000umirage",
+            "--node",
+            "tcp://127.0.0.1:26657",
             "-o",
             "json",
         ]
-
-        code, out = _run_miraged(send_args, timeout=30)
-        if code != 0:
-            # Sequence mismatch at CLI level — retry
-            if "sequence mismatch" in out.lower() and attempt < max_retries - 1:
-                wait = 2 * (attempt + 1)
-                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait)
-                continue
-            # Show the FATAL/error line (usually at the end), not the Usage block
-            lines = out.strip().splitlines()
-            fatal = next(
-                (l for l in reversed(lines) if "FATAL" in l or "insufficient" in l.lower() or "error" in l.lower()),
-                None,
-            )
-            if fatal:
-                import re
-
-                def _umirage_to_mirage(m: re.Match) -> str:
-                    return f"{int(m.group(1)) / 1_000_000:,.0f} MIRAGE"
-
-                msg = re.sub(r"(\d+)umirage", _umirage_to_mirage, fatal.strip())
-                print(f"    [faucet] {msg}")
-            else:
-                last = lines[-1].strip() if lines else out[:200]
-                print(f"    [faucet] exit code {code}: {last}")
-            return False
-        # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
-        try:
-            # miraged may print log/gas-estimate lines before the JSON object
-            json_start = out.rfind("{")
-            if json_start < 0:
-                raise ValueError("no JSON object in output")
-            resp = json.loads(out[json_start:])
-            tx_code = int(resp.get("code", 1))
-            tx_hash = resp.get("txhash", "")
-            raw_log = resp.get("raw_log", "") or ""
-            if tx_code == 32 or "account sequence mismatch" in str(raw_log).lower():
-                wait = 2 * (attempt + 1)
-                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait)
-                continue
-            if tx_code != 0:
-                print(f"    [faucet] tx failed code={tx_code}: {raw_log[:200]}")
-                return False
-        except Exception as e:
-            print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
-            return False
-        # Wait for tx to be committed by polling the recipient's balance
-        # (tx_index is disabled, so we cannot look up by hash)
-        if tx_hash:
-            bal_args = [
-                "q",
-                "bank",
-                "balances",
-                address,
-                "--home",
-                "/root/.mirage/node",
-                "--node",
-                "tcp://127.0.0.1:26657",
-                "-o",
-                "json",
-            ]
-            for _ in range(15):
-                time.sleep(1)
-                qcode, qout = _run_miraged(bal_args, timeout=10)
-                if qcode == 0 and qout:
-                    try:
-                        json_str = qout[qout.index("{") :]
-                        bal_resp = json.loads(json_str)
-                        for coin in bal_resp.get("balances", []):
-                            if coin.get("denom") == "umirage" and int(coin.get("amount", 0)) >= amount:
-                                return True
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s (balance never reached {amount}umirage)")
-        return False
-    print(f"    [faucet] exhausted {max_retries} retries on sequence mismatch")
+        for _ in range(15):
+            time.sleep(1)
+            qcode, qout = _run_miraged(bal_args, timeout=10)
+            if qcode == 0 and qout:
+                try:
+                    json_str = qout[qout.index("{") :]
+                    bal_resp = json.loads(json_str)
+                    for coin in bal_resp.get("balances", []):
+                        if coin.get("denom") == "umirage" and int(coin.get("amount", 0)) >= amount:
+                            return True
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s (balance never reached {amount}umirage)")
     return False
 
 
