@@ -46,6 +46,7 @@ from tests.common import (
     _keyring_backend,
     TestResult,
     summarize,
+    INVARIANTS_CATEGORY,
     _INSIDE_CONTAINER,
     _check_local_docker,
     DEFAULT_BACKEND,
@@ -1933,6 +1934,13 @@ def test_runner_accounting(backend: str):
         name = suite.__name__.rsplit(".", 1)[-1]
         categories = set(suite.ALL_CATEGORIES)
         gates = set(suite.RELEASE_GATE_CATEGORIES)
+        # A post_run_hook records its results under INVARIANTS_CATEGORY, which is
+        # never dispatched and so is absent from ALL_CATEGORIES. Counting it as a
+        # category for a suite that installs a hook makes the name legal there and
+        # required there: without the gate, a whole-database invariant could skip
+        # and still let the release through.
+        if "post_run_hook=" in inspect.getsource(suite.main):
+            categories = categories | {INVARIANTS_CATEGORY}
         ungated = sorted(categories - gates)
         unknown = sorted(gates - categories)
         if ungated or unknown:

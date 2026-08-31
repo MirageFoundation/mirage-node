@@ -825,11 +825,17 @@ class DatabaseManager:
         )
 
     def get_post(self, txhash: str):
-        """Get post by txhash. Returns (topic, title, content, target, paid, thumbnail_url, created_at, media)."""
+        """Get post by txhash.
+
+        Returns (topic, title, content, target, paid, thumbnail_url, created_at,
+        media, deleted). `deleted` is last so positional readers keep working.
+        The edit handler needs it: a soft delete is terminal, and an edit that
+        does not check it republishes the post.
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT community, title, content, target, paid, COALESCE(thumbnail_url,''), created_at, COALESCE(media,'[]') FROM posts WHERE txhash = %s",
+                    "SELECT community, title, content, target, paid, COALESCE(thumbnail_url,''), created_at, COALESCE(media,'[]'), COALESCE(deleted, FALSE) FROM posts WHERE txhash = %s",
                     (txhash,),
                 )
                 return cur.fetchone()

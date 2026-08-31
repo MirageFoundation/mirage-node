@@ -293,6 +293,34 @@ def check_curation_tag_schema() -> None:
             ok(f"{path} registered (status={status})")
 
 
+def check_deleted_posts_stay_deleted() -> None:
+    """A post the chain reports deleted must not be live in the index.
+
+    `deleted_height` is only ever written from the chain's own PostMetadata, so a
+    row carrying one while `deleted` is false is the projection contradicting the
+    chain: a post its author removed is back in every feed. MsgEdit used to cause
+    exactly that, because it re-upserted the post without the stored flag. The
+    v1.39.0 repair migration restores these rows, so a surviving one means either
+    the migration did not run or something reintroduced the resurrection.
+    """
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        fail("INDEXER_DB_URL missing from deployed environment")
+        return
+    import psycopg
+
+    with psycopg.connect(db_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM posts WHERE COALESCE(deleted, FALSE) = FALSE AND deleted_height IS NOT NULL"
+            )
+            revived = int(cursor.fetchone()[0])
+    if revived:
+        fail(f"{revived} post(s) the chain reports deleted are live in the index")
+    else:
+        ok("no deleted post was resurrected by an edit")
+
+
 def check_legacy_history_reachable() -> None:
     """The pre-upgrade history must survive the upgrade in the scope the UI uses.
 
@@ -391,6 +419,7 @@ def main() -> int:
         check_gone_routes,
         check_open_community_contract,
         check_curation_tag_schema,
+        check_deleted_posts_stay_deleted,
         check_legacy_history_reachable,
         check_progress,
     )

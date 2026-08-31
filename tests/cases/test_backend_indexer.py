@@ -730,13 +730,14 @@ class _StubEditDB:
     Records every write so a test can assert that a rejected edit writes nothing.
     """
 
-    def __init__(self, stored_owner: str):
+    def __init__(self, stored_owner: str, deleted: bool = False):
         self._stored_owner = stored_owner
+        self._deleted = deleted
         self.writes: list[str] = []
 
     def get_post(self, txhash: str):
-        # (topic, title, content, target, paid, thumbnail_url, created_at, media)
-        return ("technology", "original title", "original content", "", True, None, 1000, None)
+        # (topic, title, content, target, paid, thumbnail_url, created_at, media, deleted)
+        return ("technology", "original title", "original content", "", True, None, 1000, None, self._deleted)
 
     def get_post_owner(self, txhash: str) -> str:
         return self._stored_owner
@@ -1219,9 +1220,27 @@ def test_indexer_hardening(backend: str):
             _pass("indexer_hardening.owner_edit_applied")
         else:
             _fail("indexer_hardening.owner_edit_applied", f"wrote {sorted(set(own_db.writes))}")
+
+        # A soft delete is terminal. upsert_post writes `deleted` from an argument
+        # that defaults to False, so an edit that does not check the stored flag
+        # republishes a post its author removed — and leaves user_topic_stats short,
+        # because delete_post recomputed it from the canonical tables and an edit
+        # applies no delta. The author is the one editing here, so this cannot pass
+        # on the ownership check.
+        deleted_db = _StubEditDB(stored_owner=envelope_addr, deleted=True)
+        deleted_proc = MessageProcessor(deleted_db, None, lambda *a, **k: None, lambda t: "")
+        deleted_proc._handle_edit("/mirage.core.v1.MsgEdit", _edit_msg_bytes(pubkey, override), "d" * 64, 1234, 99)
+        if deleted_db.writes:
+            _fail(
+                "indexer_hardening.deleted_post_edit_rejected",
+                f"edit on a deleted post wrote {sorted(set(deleted_db.writes))}",
+            )
+        else:
+            _pass("indexer_hardening.deleted_post_edit_rejected")
     else:
         _skip("indexer_hardening.foreign_edit_rejected", "could not derive test address")
         _skip("indexer_hardening.owner_edit_applied", "could not derive test address")
+        _skip("indexer_hardening.deleted_post_edit_rejected", "could not derive test address")
 
     # ── M-7: a message the chain accepted must never be able to halt a node ──
     #
@@ -2064,7 +2083,6 @@ def _indexer_hardening_db_checks(backend: str) -> None:
 
     if not _check_local_docker():
         _fail("indexer_hardening.checkpoint_has_provenance", "local docker required")
-        _fail("indexer_hardening.net_votes_matches_canonical_votes", "local docker required")
         _fail("indexer_hardening.block_transaction_rolls_back", "local docker required")
         _fail("indexer_hardening.corrupt_profile_degrades", "local docker required")
         return
@@ -2098,8 +2116,55 @@ FROM meta WHERE key IN ('chain_id', 'last_block_hash', 'last_height');\\" 2>&1" 
         else:
             _fail("indexer_hardening.checkpoint_has_provenance", f"meta keys={keys!r}")
 
-    # M-8: net_votes must equal the sum of the user's current canonical vote
-    # signs in that topic. Re-votes and cleared votes are what used to break it.
+
+def test_indexer_invariants(backend: str) -> None:
+    """Whole-database invariants, asserted after every category has run.
+
+    These sweep every row rather than a fixture, so they only mean anything once
+    the suite has finished generating traffic. Both of them lived in
+    `indexer_hardening` and passed for the wrong reason: that category runs early,
+    so the sweep happened before the posts, votes, deletes and edits that could
+    break it. A real projection bug — MsgEdit clearing `deleted` and republishing
+    a removed post — shipped green through the release gate because of it, and was
+    only visible when the same query was run by hand after the suite.
+    """
+
+    del backend  # queries the indexer database directly
+
+    if not _check_local_docker():
+        _fail("invariants.net_votes_matches_canonical_votes", "local docker required")
+        _fail("invariants.deleted_posts_stay_deleted", "local docker required")
+        return
+
+    db_name = _get_indexer_db_name()
+
+    # `deleted_height` is only ever written by update_post_protocol_metadata, from
+    # the chain's own PostMetadata. A row that carries one while `deleted` is false
+    # is the indexer contradicting the chain about whether the post exists, which
+    # is how a deleted post gets back into every feed.
+    rc, out = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT count(*) FROM posts
+WHERE COALESCE(deleted, FALSE) = FALSE AND deleted_height IS NOT NULL;\\" 2>&1" """,
+        timeout=20,
+    )
+    if rc != 0:
+        _fail("invariants.deleted_posts_stay_deleted", f"db query failed rc={rc} out={out}")
+    else:
+        try:
+            revived = int(out.strip())
+        except ValueError:
+            _fail("invariants.deleted_posts_stay_deleted", f"non-numeric output: {out}")
+            revived = -1
+        if revived == 0:
+            _pass("invariants.deleted_posts_stay_deleted")
+        elif revived > 0:
+            _fail(
+                "invariants.deleted_posts_stay_deleted",
+                f"{revived} post(s) the chain reports deleted are live in the index",
+            )
+
+    # net_votes must equal the sum of the user's current canonical vote signs in
+    # that topic. Re-votes and cleared votes are what used to break it.
     #
     # The canonical sum below must exclude an author's own vote on their own
     # deleted post, matching _VOTE_STATS_FROM_CANONICAL in indexer/database.py.
@@ -2114,7 +2179,7 @@ FROM meta WHERE key IN ('chain_id', 'last_block_hash', 'last_height');\\" 2>&1" 
     migration_done = rc_mig == 0 and out_mig.strip() not in ("",)
     if not migration_done:
         _skip(
-            "indexer_hardening.net_votes_matches_canonical_votes",
+            "invariants.net_votes_matches_canonical_votes",
             "v1_33_0_rebuild_derived_stats not applied on this database yet",
         )
         return
@@ -2138,18 +2203,18 @@ WHERE s.net_votes <> COALESCE(d.net, 0)
         timeout=20,
     )
     if rc2 != 0:
-        _fail("indexer_hardening.net_votes_matches_canonical_votes", f"db query failed rc={rc2} out={out2}")
+        _fail("invariants.net_votes_matches_canonical_votes", f"db query failed rc={rc2} out={out2}")
     else:
         try:
             mismatched = int(out2.strip())
         except ValueError:
-            _fail("indexer_hardening.net_votes_matches_canonical_votes", f"non-numeric output: {out2}")
+            _fail("invariants.net_votes_matches_canonical_votes", f"non-numeric output: {out2}")
             return
         if mismatched == 0:
-            _pass("indexer_hardening.net_votes_matches_canonical_votes")
+            _pass("invariants.net_votes_matches_canonical_votes")
         else:
             _fail(
-                "indexer_hardening.net_votes_matches_canonical_votes",
+                "invariants.net_votes_matches_canonical_votes",
                 f"{mismatched} (owner, topic) rows disagree with their canonical votes",
             )
 

@@ -26,7 +26,7 @@ REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from tests.common import run_suite
+from tests.common import INVARIANTS_CATEGORY, run_suite
 from tests.cases.test_backend_infra import (
     test_params,
     test_bootstrap,
@@ -89,6 +89,7 @@ from tests.cases.test_backend_authz import (
 from tests.cases.test_backend_agents import test_agents, test_agent_behavior
 from tests.cases.test_backend_indexer import (
     test_indexer_hardening,
+    test_indexer_invariants,
     test_redgifs_thumbnails,
     test_rumble_embeds,
 )
@@ -239,7 +240,7 @@ WALLETLESS_CATEGORIES = {
 # release is a test nobody relies on, and the answer to that is to delete it,
 # not to leave it in the suite reporting green. Skips are still printed with
 # their reason; they just end the run non-zero.
-RELEASE_GATE_CATEGORIES = frozenset(ALL_CATEGORIES)
+RELEASE_GATE_CATEGORIES = frozenset(ALL_CATEGORIES) | {INVARIANTS_CATEGORY}
 
 
 def main() -> int:
@@ -249,6 +250,9 @@ def main() -> int:
         EXCLUSIVE_CATEGORIES,
         no_skip_categories=RELEASE_GATE_CATEGORIES,
         walletless_categories=WALLETLESS_CATEGORIES,
+        # Whole-database sweeps, so they run once every category has finished
+        # generating traffic rather than as a category racing it.
+        post_run_hook=test_indexer_invariants,
     )
 
 

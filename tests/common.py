@@ -98,6 +98,10 @@ FAUCET_AMOUNTS: dict[str, int] = {}
 # second suite is provisioning from this same faucet while this one checks it.
 _FAUCET_RESERVE_SUITES = 2
 
+# Results recorded by a suite's post_run_hook are attributed here. It is a real
+# category name so the release gate treats a skip in it like any other.
+INVARIANTS_CATEGORY = "invariants"
+
 _WALLET_SETS: list[dict[str, LocalWallet]] = []
 
 
@@ -183,6 +187,7 @@ class TestResult:
 
 RESULTS: list[TestResult] = []
 _RESULTS_LOCK = threading.Lock()
+
 
 def _current_category() -> Optional[str]:
     """Category of the test recording this result.
@@ -1246,6 +1251,7 @@ def run_suite(
     pre_run_hook: callable | None = None,
     no_skip_categories: set[str] | frozenset = frozenset(),
     walletless_categories: set[str] | frozenset = frozenset(),
+    post_run_hook: callable | None = None,
 ) -> int:
     """Generic test suite runner.
 
@@ -1422,6 +1428,21 @@ def run_suite(
         _debug(f"exclusive categories ({len(exclusive_names)}): {', '.join(exclusive_names)}")
         for cat_name in exclusive_names:
             _run_category(cat_name, to_run[cat_name], _needs_wallet(cat_name))
+
+    # A check that sweeps the whole database for drift has to run after every
+    # category, not inside one. As a category it passed for the wrong reason: it
+    # ran before the traffic that could break the invariant, so an indexer bug
+    # that drifted vote standing reached the release gate reporting green, and
+    # only showed up when the same check was re-run by hand afterwards.
+    if post_run_hook:
+        print(f"\n{_COLOR_BOLD}[{INVARIANTS_CATEGORY}]{_COLOR_RESET}")
+        _TEST_CTX.set(_TestContext(category=INVARIANTS_CATEGORY, wallet_set=None))
+        try:
+            post_run_hook(backend)
+        except Exception as e:
+            _fail(f"{INVARIANTS_CATEGORY}.UNEXPECTED_ERROR", str(e))
+        finally:
+            _TEST_CTX.set(None)
 
     return_test_wallet_funds(backend)
 

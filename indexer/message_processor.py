@@ -1068,8 +1068,31 @@ class MessageProcessor:
             return
 
         # Determine if root (target empty in DB); enforce target immutability
-        existing_topic, _, _, existing_target, _, _, existing_created_at, _existing_media_raw = existing
+        (
+            existing_topic,
+            _,
+            _,
+            existing_target,
+            _,
+            _,
+            existing_created_at,
+            _existing_media_raw,
+            existing_deleted,
+        ) = existing
         is_root = not bool(existing_target)
+
+        # A soft delete is terminal — the chain has no undelete message. The chain
+        # does not store post bodies either, so it accepts an edit naming a deleted
+        # post and leaves the decision here. upsert_post writes the deleted flag
+        # from its argument, which defaults to False, so applying the edit would
+        # clear it and republish a post its author had removed. The standing stays
+        # retracted, because delete_post recomputed it from the canonical tables
+        # and an edit applies no delta, so the row also reappears in the canonical
+        # vote definition while user_topic_stats stays short. Same visibility
+        # boundary as a foreign edit: leave the index alone.
+        if existing_deleted:
+            logger.warning("Rejected edit %s: post %s is deleted", tx_hash, override)
+            return
 
         # Target immutability: the chain never compares the supplied target against
         # the stored one, so a mismatch is user-reachable. Leave the index unchanged,

@@ -14,6 +14,10 @@ When a curator locks a thread, that lens stops showing anything written from tha
 
 Be clear about what a lock is not. It is not a write gate: nothing stops you from replying to a locked thread, your reply is accepted by the network like any other, and it is still there in the uncensored view for anyone who wants to read it. What a lock does is tell one curator team's lens to stop carrying new arrivals, which is a decision about that team's feed and not about your words. The client will tell you a thread is locked before you spend the effort, and switching to raw shows you everything that team's readers are not seeing.
 
+### Deleting a post now sticks
+
+If you deleted one of your own posts and later edited it, it came back. The delete worked, the post vanished from every feed, and then the edit quietly put it back on the shelves as though nothing had happened — with the standing it had earned still written off, so the ranking maths disagreed with itself from then on. That is fixed: a delete is final, and an edit naming a removed post is ignored rather than treated as permission to republish it. This upgrade also goes back through the archive and re-removes anything that came back this way, using the network's own record of what was deleted. One honest limit: posts made before this version's new post format do not carry that record, so a handful of very old revivals cannot be told apart from ordinary posts and stay where they are. Nothing new can slip through.
+
 ### Tags that reflect where you actually are
 
 Content tags used to depend entirely on whoever hit publish, which works right up until someone forgets. Now a curator team leader can tag a whole community at once, so an adult community reads as adult without asking every poster to remember, and any curator on the team can correct the tag on a single post that came in mislabeled. Nothing new gets invented here: curators pick from the same short list you already filter on, and a post still carries one tag.
