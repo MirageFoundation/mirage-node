@@ -3,9 +3,9 @@ export function deriveBootstrapView(pathname) {
     const path = pathname.split('?')[0];
     if (path === '/home' || path === '/') return 'feed:home';
     if (path === '/following') return 'feed:following';
-    if (path.startsWith('/t/')) {
-        const topic = decodeURIComponent(path.slice(3).split('/')[0] || '').trim();
-        return topic ? `topic:${topic}` : null;
+    if (path.startsWith('/c/')) {
+        const community = decodeURIComponent(path.slice(3).split('/')[0] || '').trim();
+        return community ? `topic:${community}` : null;
     }
     if (path.startsWith('/p/')) {
         const id = path.slice(3).split('/')[0].split('?')[0].trim().toLowerCase();

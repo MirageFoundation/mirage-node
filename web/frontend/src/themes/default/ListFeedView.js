@@ -181,7 +181,7 @@ const Toolbar = styled.div`
 `;
 
 /* Optional title that can sit at the left of the toolbar (e.g. the
- * topic name on `/t/:topic` feeds). Anchors to the leading edge and
+ * community name on `/c/:community` feeds). Anchors to the leading edge and
  * pushes any sort/view controls to the right via `margin-left: auto`
  * on the first adjacent `PopoverRoot`. */
 const ToolbarTitle = styled.h1`

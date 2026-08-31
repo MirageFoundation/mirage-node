@@ -19,6 +19,7 @@ import {
     waitForCurationTeamGone,
     waitForCurationTeamProfile,
 } from '../../../utils/curation';
+import { setOptimisticCurationVisibility } from '../../../utils/curationVisibility';
 import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
 import {
     useCurationTeam,
@@ -345,6 +346,44 @@ export default function CurationTeamView() {
         if (!result?.success) setError(formatError(result));
         return result;
     };
+    const unban = async (kind, item) => {
+        if (kind !== 'post' && kind !== 'user') throw new Error(`Invalid unban kind: ${kind}`);
+        const isPost = kind === 'post';
+        const list = isPost ? hiddenPosts : hiddenUsers;
+        const target = isPost ? item.postId : item.address;
+        list.removeOptimistically(item);
+        try {
+            const result = await run(() => (
+                isPost
+                    ? tx.moderateCurationPost(community, Number(teamId), target, false)
+                    : tx.moderateCurationUser(community, Number(teamId), target, false)
+            ));
+            if (!result?.success) {
+                list.restoreOptimistically(item);
+            } else {
+                setOptimisticCurationVisibility({
+                    community,
+                    teamId: Number(teamId),
+                    kind,
+                    target,
+                    hidden: false,
+                });
+            }
+            return result;
+        } catch (err) {
+            list.restoreOptimistically(item);
+            const message = formatError(err);
+            setError(message);
+            console.error('[curation] unban failed', {
+                community,
+                teamId,
+                kind,
+                target: target.slice(0, 12),
+                error: message,
+            });
+            return undefined;
+        }
+    };
     const pendingFor = (action, target = '') => getInfo(action, community, Number(teamId), target);
     const statusFor = (action, target, fallback) => getStatus(action, community, Number(teamId), target, fallback);
     const maxTeamNameLength = MAX_CURATION_TEAM_NAME_LENGTH;
@@ -523,199 +562,199 @@ export default function CurationTeamView() {
         </TabsRow>
 
         {activeTab === 'overview' && <div id="curation-overview" role="tabpanel">
-        {isLeader ? (
-            <>
-                <Card>
-                    <CardTitle>Team profile</CardTitle>
-                    <Meta>Set the name and explain how your team curates this community.</Meta>
-                    <Form onSubmit={saveProfile}>
-                        <Field>
-                            <FieldHeader>
-                                <FieldLabel>Team name</FieldLabel>
-                                <Meta>{runeLength(name)} / {maxTeamNameLength}</Meta>
-                            </FieldHeader>
-                            <Input
-                                value={name}
-                                onChange={(event) => setName(sliceRunes(event.target.value, maxTeamNameLength))}
-                                placeholder={team.name || 'e.g. Signal Desk'}
-                                maxLength={maxTeamNameLength}
-                            />
-                        </Field>
-                        <Field>
-                            <FieldHeader>
-                                <FieldLabel>Community header description</FieldLabel>
-                                <Meta>{runeLength(description)} / {maxTeamDescriptionLength}</Meta>
-                            </FieldHeader>
-                            <Meta>Shown beneath your team name when users choose your curation team.</Meta>
-                            <Textarea
-                                value={description}
-                                onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
-                                placeholder={CURATION_TEAM_DESCRIPTION_EXAMPLE}
-                                maxLength={maxTeamDescriptionLength * 2}
-                            />
-                        </Field>
-                        <FormActions>
-                            <Button
-                                type="submit"
-                                size="xs"
-                                disabled={profileStatus !== 'idle' || !!pendingFor('set_curation_team_profile')}
-                            >
-                                {profileStatus === 'verifying'
-                                    ? 'Verifying…'
-                                    : (statusFor('set_curation_team_profile', '', 'Saving…')
-                                        || (profileStatus === 'saving' ? 'Saving…' : 'Save team profile'))}
-                            </Button>
-                        </FormActions>
-                    </Form>
-                </Card>
+            {isLeader ? (
+                <>
+                    <Card>
+                        <CardTitle>Team profile</CardTitle>
+                        <Meta>Set the name and explain how your team curates this community.</Meta>
+                        <Form onSubmit={saveProfile}>
+                            <Field>
+                                <FieldHeader>
+                                    <FieldLabel>Team name</FieldLabel>
+                                    <Meta>{runeLength(name)} / {maxTeamNameLength}</Meta>
+                                </FieldHeader>
+                                <Input
+                                    value={name}
+                                    onChange={(event) => setName(sliceRunes(event.target.value, maxTeamNameLength))}
+                                    placeholder={team.name || 'e.g. Signal Desk'}
+                                    maxLength={maxTeamNameLength}
+                                />
+                            </Field>
+                            <Field>
+                                <FieldHeader>
+                                    <FieldLabel>Community header description</FieldLabel>
+                                    <Meta>{runeLength(description)} / {maxTeamDescriptionLength}</Meta>
+                                </FieldHeader>
+                                <Meta>Shown beneath your team name when users choose your curation team.</Meta>
+                                <Textarea
+                                    value={description}
+                                    onChange={(event) => setDescription(sliceRunes(event.target.value, maxTeamDescriptionLength))}
+                                    placeholder={CURATION_TEAM_DESCRIPTION_EXAMPLE}
+                                    maxLength={maxTeamDescriptionLength * 2}
+                                />
+                            </Field>
+                            <FormActions>
+                                <Button
+                                    type="submit"
+                                    size="xs"
+                                    disabled={profileStatus !== 'idle' || !!pendingFor('set_curation_team_profile')}
+                                >
+                                    {profileStatus === 'verifying'
+                                        ? 'Verifying…'
+                                        : (statusFor('set_curation_team_profile', '', 'Saving…')
+                                            || (profileStatus === 'saving' ? 'Saving…' : 'Save team profile'))}
+                                </Button>
+                            </FormActions>
+                        </Form>
+                    </Card>
 
-                <Card>
-                    <CardTitle>Community defaults</CardTitle>
-                    <SettingRow>
-                        <SettingCopy>
-                            <SettingTitle>Subscriber-only posting</SettingTitle>
-                            <Meta>Require users to be active subscribers when they create a post.</Meta>
-                        </SettingCopy>
-                        <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => run(() => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only))}>
-                            {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
-                        </Button>
-                    </SettingRow>
-                    <SettingRow>
-                        <SettingCopy>
-                            <SettingTitle>Community tag</SettingTitle>
-                            <Meta>
-                                Tags every post in this community, overriding what authors set.
-                                Curators can still override it on individual posts.
-                            </Meta>
-                        </SettingCopy>
-                        <Select
-                            value={displayTag}
-                            disabled={!!pendingFor('set_curation_tag')}
-                            onChange={async (e) => {
-                                const next = e.target.value;
-                                setOptimisticTag(next);
-                                console.debug('[curation] optimistic community tag', {
-                                    community,
-                                    teamId,
-                                    tag: next,
-                                });
-                                const result = await run(() => tx.setCurationTag(community, Number(teamId), next));
-                                if (!result?.success) {
-                                    setOptimisticTag(null);
-                                    console.debug('[curation] community tag reverted', {
+                    <Card>
+                        <CardTitle>Community defaults</CardTitle>
+                        <SettingRow>
+                            <SettingCopy>
+                                <SettingTitle>Subscriber-only posting</SettingTitle>
+                                <Meta>Require users to be active subscribers when they create a post.</Meta>
+                            </SettingCopy>
+                            <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => run(() => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only))}>
+                                {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
+                            </Button>
+                        </SettingRow>
+                        <SettingRow>
+                            <SettingCopy>
+                                <SettingTitle>Community tag</SettingTitle>
+                                <Meta>
+                                    Tags every post in this community, overriding what authors set.
+                                    Curators can still override it on individual posts.
+                                </Meta>
+                            </SettingCopy>
+                            <Select
+                                value={displayTag}
+                                disabled={!!pendingFor('set_curation_tag')}
+                                onChange={async (e) => {
+                                    const next = e.target.value;
+                                    setOptimisticTag(next);
+                                    console.debug('[curation] optimistic community tag', {
                                         community,
                                         teamId,
-                                        tag: team.tag || '',
+                                        tag: next,
                                     });
-                                }
-                            }}
-                        >
-                            {TAG_OPTIONS.map(({ value, label }) => (
-                                <option key={value} value={value}>{value ? label : 'No community tag'}</option>
-                            ))}
-                        </Select>
-                    </SettingRow>
-                    {statusFor('set_curation_tag', '', 'Updating…') ? (
-                        <Meta>{statusFor('set_curation_tag', '', 'Updating…')}</Meta>
-                    ) : null}
-                </Card>
-            </>
-        ) : (
-            <>
-                <Card>
-                    <CardTitle>Team profile</CardTitle>
-                    <Body>{team.description || 'No description provided.'}</Body>
-                </Card>
-                <Card>
-                    <CardTitle>Community defaults</CardTitle>
-                    <SettingRow>
-                        <SettingCopy>
-                            <SettingTitle>Subscriber-only posting</SettingTitle>
-                            <Meta>{team.subscriber_only ? 'Enabled' : 'Disabled'}</Meta>
-                        </SettingCopy>
-                    </SettingRow>
-                    <SettingRow>
-                        <SettingCopy>
-                            <SettingTitle>Community tag</SettingTitle>
-                            <Meta>
-                                {team.tag
-                                    ? (TAG_OPTIONS.find((opt) => opt.value === team.tag)?.label || team.tag)
-                                    : 'No community tag'}
-                            </Meta>
-                        </SettingCopy>
-                    </SettingRow>
-                </Card>
-            </>
-        )}
+                                    const result = await run(() => tx.setCurationTag(community, Number(teamId), next));
+                                    if (!result?.success) {
+                                        setOptimisticTag(null);
+                                        console.debug('[curation] community tag reverted', {
+                                            community,
+                                            teamId,
+                                            tag: team.tag || '',
+                                        });
+                                    }
+                                }}
+                            >
+                                {TAG_OPTIONS.map(({ value, label }) => (
+                                    <option key={value} value={value}>{value ? label : 'No community tag'}</option>
+                                ))}
+                            </Select>
+                        </SettingRow>
+                        {statusFor('set_curation_tag', '', 'Updating…') ? (
+                            <Meta>{statusFor('set_curation_tag', '', 'Updating…')}</Meta>
+                        ) : null}
+                    </Card>
+                </>
+            ) : (
+                <>
+                    <Card>
+                        <CardTitle>Team profile</CardTitle>
+                        <Body>{team.description || 'No description provided.'}</Body>
+                    </Card>
+                    <Card>
+                        <CardTitle>Community defaults</CardTitle>
+                        <SettingRow>
+                            <SettingCopy>
+                                <SettingTitle>Subscriber-only posting</SettingTitle>
+                                <Meta>{team.subscriber_only ? 'Enabled' : 'Disabled'}</Meta>
+                            </SettingCopy>
+                        </SettingRow>
+                        <SettingRow>
+                            <SettingCopy>
+                                <SettingTitle>Community tag</SettingTitle>
+                                <Meta>
+                                    {team.tag
+                                        ? (TAG_OPTIONS.find((opt) => opt.value === team.tag)?.label || team.tag)
+                                        : 'No community tag'}
+                                </Meta>
+                            </SettingCopy>
+                        </SettingRow>
+                    </Card>
+                </>
+            )}
         </div>}
 
         {activeTab === 'curators' && <div id="curation-curators" role="tabpanel">
-        {!team.deleted && myInvitation && <Card>
-            <CardTitle>Team invitation</CardTitle>
-            <Body>The leader invited you to join this curator team.</Body>
-            <Actions>
-                <Button size="xs" disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), true))}>
-                    {getStatus('accept_curator_invite', community, Number(teamId), viewer, 'Accepting…') || 'Accept'}
-                </Button>
-                <Button size="xs" variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), false))}>
-                    {getStatus('decline_curator_invite', community, Number(teamId), viewer, 'Declining…') || 'Decline'}
-                </Button>
-            </Actions>
-        </Card>}
+            {!team.deleted && myInvitation && <Card>
+                <CardTitle>Team invitation</CardTitle>
+                <Body>The leader invited you to join this curator team.</Body>
+                <Actions>
+                    <Button size="xs" disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), true))}>
+                        {getStatus('accept_curator_invite', community, Number(teamId), viewer, 'Accepting…') || 'Accept'}
+                    </Button>
+                    <Button size="xs" variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), false))}>
+                        {getStatus('decline_curator_invite', community, Number(teamId), viewer, 'Declining…') || 'Decline'}
+                    </Button>
+                </Actions>
+            </Card>}
 
-        <Card>
-            <CardTitle>Curators ({members.length})</CardTitle>
-            {members.map((member) => <Row key={member.address}>
-                <span title={member.address}>
-                    {formatUserLabel(member.username, member.address)}
-                    {member.address === team.owner ? ' · leader' : ''}
-                </span>
-                {isLeader && member.address !== team.owner && <Actions>
-                    <Button size="xs" variant="subtle" disabled={!!pendingFor('transfer_curation_team', member.address)} onClick={() => run(() => tx.transferCurationTeamLeadership(community, Number(teamId), member.address))}>
-                        {statusFor('transfer_curation_team', member.address, 'Transferring…') || 'Transfer leadership'}
-                    </Button>
-                    <Button size="xs" variant="danger" disabled={!!pendingFor('remove_curator', member.address)} onClick={() => run(() => tx.removeCurationTeamMember(community, Number(teamId), member.address))}>
-                        {statusFor('remove_curator', member.address, 'Removing…') || 'Remove'}
-                    </Button>
-                </Actions>}
-            </Row>)}
-            {isLeader && <Form onSubmit={submitInvite}>
-                <Field>
-                    <FieldLabel>Invite curator</FieldLabel>
-                    <Input
-                        aria-label="Username or address to invite"
-                        value={invitee}
-                        onChange={(event) => setInvitee(event.target.value)}
-                        placeholder="Username or mirage1…"
-                        required
-                        disabled={inviteBusy}
-                    />
-                </Field>
-                <FormActions>
-                    <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
-                        {inviteBusy ? 'Inviting…' : 'Invite curator'}
-                    </Button>
-                </FormActions>
-            </Form>}
-            {invitations.filter((invite) => invite.address !== viewer).map((invite) => <Row key={invite.address}>
-                <Meta title={invite.address}>Pending: {formatUserLabel(invite.username, invite.address)}</Meta>
-                {isLeader && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
-                    {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
-                </Button>}
-            </Row>)}
-            {isCurator && !isLeader && (
-                <FormActions>
-                    <Button
-                        size="xs"
-                        variant="danger"
-                        disabled={!!pendingFor('leave_curation_team', viewer)}
-                        onClick={() => run(() => tx.leaveCurationTeam(community, Number(teamId)))}
-                    >
-                        {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
-                    </Button>
-                </FormActions>
-            )}
-        </Card>
+            <Card>
+                <CardTitle>Curators ({members.length})</CardTitle>
+                {members.map((member) => <Row key={member.address}>
+                    <span title={member.address}>
+                        {formatUserLabel(member.username, member.address)}
+                        {member.address === team.owner ? ' · leader' : ''}
+                    </span>
+                    {isLeader && member.address !== team.owner && <Actions>
+                        <Button size="xs" variant="subtle" disabled={!!pendingFor('transfer_curation_team', member.address)} onClick={() => run(() => tx.transferCurationTeamLeadership(community, Number(teamId), member.address))}>
+                            {statusFor('transfer_curation_team', member.address, 'Transferring…') || 'Transfer leadership'}
+                        </Button>
+                        <Button size="xs" variant="danger" disabled={!!pendingFor('remove_curator', member.address)} onClick={() => run(() => tx.removeCurationTeamMember(community, Number(teamId), member.address))}>
+                            {statusFor('remove_curator', member.address, 'Removing…') || 'Remove'}
+                        </Button>
+                    </Actions>}
+                </Row>)}
+                {isLeader && <Form onSubmit={submitInvite}>
+                    <Field>
+                        <FieldLabel>Invite curator</FieldLabel>
+                        <Input
+                            aria-label="Username or address to invite"
+                            value={invitee}
+                            onChange={(event) => setInvitee(event.target.value)}
+                            placeholder="Username or mirage1…"
+                            required
+                            disabled={inviteBusy}
+                        />
+                    </Field>
+                    <FormActions>
+                        <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
+                            {inviteBusy ? 'Inviting…' : 'Invite curator'}
+                        </Button>
+                    </FormActions>
+                </Form>}
+                {invitations.filter((invite) => invite.address !== viewer).map((invite) => <Row key={invite.address}>
+                    <Meta title={invite.address}>Pending: {formatUserLabel(invite.username, invite.address)}</Meta>
+                    {isLeader && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
+                        {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
+                    </Button>}
+                </Row>)}
+                {isCurator && !isLeader && (
+                    <FormActions>
+                        <Button
+                            size="xs"
+                            variant="danger"
+                            disabled={!!pendingFor('leave_curation_team', viewer)}
+                            onClick={() => run(() => tx.leaveCurationTeam(community, Number(teamId)))}
+                        >
+                            {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
+                        </Button>
+                    </FormActions>
+                )}
+            </Card>
         </div>}
 
         {isCurator && activeTab === 'banned-users' && (
@@ -736,12 +775,7 @@ export default function CurationTeamView() {
                             size="xs"
                             variant="subtle"
                             disabled={!!pendingFor('set_curation_user_hidden', user.address)}
-                            onClick={() => run(() => tx.moderateCurationUser(
-                                community,
-                                Number(teamId),
-                                user.address,
-                                false,
-                            ))}
+                            onClick={() => unban('user', user)}
                         >
                             {statusFor('set_curation_user_hidden', user.address, 'Unbanning…') || 'Unban'}
                         </Button>
@@ -790,12 +824,7 @@ export default function CurationTeamView() {
                             size="xs"
                             variant="subtle"
                             disabled={!!pendingFor('set_curation_post_hidden', post.postId)}
-                            onClick={() => run(() => tx.moderateCurationPost(
-                                community,
-                                Number(teamId),
-                                post.postId,
-                                false,
-                            ))}
+                            onClick={() => unban('post', post)}
                         >
                             {statusFor('set_curation_post_hidden', post.postId, 'Unbanning…') || 'Unban'}
                         </Button>

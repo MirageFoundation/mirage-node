@@ -15,9 +15,9 @@ that can wipe your account, quarantine a community, or silently throttle you. A 
 what it shows locally for legal or policy reasons, but it cannot erase you from Mirage as a
 whole, and you can switch nodes seamlessly without having to start over.
 
-Moderation is voluntary and personal. You choose what you want filtered by blocking users or
-communities and shaping your own feed. If you want an unfiltered view, you can choose that
-too. Control sits with the user, not with a small group of gatekeepers.
+Moderation is voluntary and chosen by the user. You can block posts, users, or communities
+for yourself, or view a community through a curator team's lens. If you want an unfiltered
+view, choose Uncensored. No curator team can impose its decisions on every user.
 
 Mirage is built as a network, not a single site. Multiple independent nodes can host Mirage
 frontends, index content, and serve users.
@@ -178,10 +178,12 @@ Mirage has no global moderators. There are no power moderators with god mode ove
 community, and there is no central authority that can decide what the entire network is
 allowed to say.
 
-Moderation is voluntary and personal. You control what you see by blocking users, blocking
-communities, and shaping your feed.
+Moderation is voluntary. You control what you see with personal blocks, content filters,
+and community curation lenses. A curator team can ban posts or users from its own lens,
+correct content tags, and lock threads for users viewing through that team. It cannot erase
+the underlying content, ban anyone from Mirage, or change another team's view.
 
-If you want an unfiltered view, you can choose that too.
+If you do not want a curated view, choose Uncensored.
 
 Nodes can also choose local display policies on their own site, but that does not make them
 rulers of your account. It just means they control their own frontend, not the network.
@@ -449,11 +451,12 @@ your content settings and use blocks.
 ### Were agents removed?
 
 Yes. Mirage no longer has an Agent subscription tier, an Agents page, or opt-in
-moderation overlays from other accounts.
+network-wide moderation overlays published by individual accounts.
 
-Moderation is personal: you join communities, block users, posts, and communities, and
-use your own content filters. Nodes can still apply local display rules for legal reasons.
-Nobody publishes a feed overlay that other users enable.
+Community curator teams are different. Their decisions are limited to one community and one
+named lens, they compete with other teams, and every user can switch teams or choose
+Uncensored. Personal blocks and content filters remain available regardless of which lens
+you use. Nodes can still apply local display rules for legal reasons.
 
 ### What happened to quests, invite bonuses, and referrals?
 
@@ -467,11 +470,14 @@ reply from a paying subscriber that day. The split is equal among those subscrib
 among the actions they took, so one frantic account cannot vacuum the pool. Authors have
 thirty days after a day's settlement to claim what they earned. Unused remainder is burned.
 
-### What is the difference between reports, blocks, and filters?
+### What is the difference between reports, personal blocks, curation bans, and filters?
 
 Reports are for illegal content and admin review.
 
 Blocks are personal. They remove a post, user, or community from your own experience.
+
+Curation bans are team decisions. They remove a post or user's content from one curator
+team's lens without deleting it from Mirage or hiding it through other lenses.
 
 Filters are personal content preferences, such as whether you want adult or gore content in
 your feed.
@@ -872,24 +878,107 @@ hidden ranking of the whole network. If you have not joined anything yet, home s
 on purpose. Mirage will not invent a default set of communities for you. Join from the
 directory or from a community page, and leave any time.
 
+### How are comments sorted?
+
+Comments are sorted separately at each level of a thread. Your own comments appear first,
+then comments with more awards, then comments with a higher vote score. Equal scores are
+ordered oldest first so the conversation remains readable. A comment you just submitted
+also appears immediately while it is being confirmed.
+
+Replies are sorted within their own parent comment. Mirage does not flatten the entire
+thread into one global score order.
+
 ### What are curator teams and lenses?
 
 A curator team is an optional group of up to ten paid users who maintain one view of a
 community. Free accounts cannot lead or join teams. Subscribers can hold up to ten team
 memberships, and appointed admins up to one thousand. Its leader can invite curators, and
 each invitee must accept before joining. Creating a team, or accepting an invite to one,
-automatically joins you to that community. Team curators can hide posts or users from that
-team's view, lock threads, and optionally limit that lens to posts written while the author
-was a paid subscriber. Those actions never erase the underlying content or change another
-team's view. Hiding is only for that team's lens; the post is still on the network, and
-anyone can pick Uncensored or another team.
+automatically joins you to that community. Creating a team also selects the new team as its
+creator's lens.
+
+Team curators can ban posts or users from that team's view, lock threads, correct content
+tags, and optionally limit that lens to posts written while the author was a paid
+subscriber. Those actions never erase the underlying content or change another team's
+view. A team ban only affects that team's lens; the content remains on the network and
+remains visible through Uncensored and any team that has not banned it.
 
 You choose the lens you want: the node default, a specific team, or Uncensored. The node
-default is the live team with the most paid subscribers who explicitly selected it, with
-older teams winning ties. A free user can still look through a team's lens; that does not
-count toward the default. Choosing a specific team is a personal preference. If that team
-disappears, Mirage returns you to the node default; if no live team remains, the community
-is simply uncurated and the default view is uncensored.
+default is the live team with the most active Subscribers and appointed admins who
+explicitly selected it, with older teams winning ties. A Free user can still select and use
+a team's lens, but that selection does not increase the team's pin count. Users who select
+Default also do not count as pins.
+
+Choosing a specific team is a personal preference. If that team disappears, Mirage moves
+you to the current default. If no live team remains, the community is uncurated and its
+default view is Uncensored.
+
+### Where do I choose a curation lens?
+
+Use the lens selector in the community header. One selection applies to the entire
+community feed, so Mirage does not repeat a lens control on every post. A post page has its
+own selector near the other thread controls when you want to inspect that conversation
+through a different lens.
+
+Default follows the highest-ranked eligible team as rankings change. Selecting a named
+team pins that team until you choose something else or the team becomes unavailable.
+Uncensored bypasses curator-team bans and thread locks, although the node you use can still
+apply its own local legal or display policy.
+
+### What does a team's pin count mean?
+
+The pin count is the number of active Subscribers and appointed admins who explicitly
+selected that team. Those pins determine which team becomes the default for the community.
+Higher pin count wins; the older team wins a tie.
+
+Free users are allowed to select a team and use its lens, but their selection does not
+count toward the ranking. Users who choose Default are following the ranking rather than
+pinning a particular team, so they do not add a pin either.
+
+### What is shown on a curator team's page?
+
+Overview explains the team's lens and shows its support. Curators lists the accepted team
+members. Team curators also get separate Banned Posts and Banned Users sections where they
+can review and undo that team's moderation decisions.
+
+These lists describe one team's lens, not network-wide deletions or personal blocks.
+Choosing Unban removes the item from that team's banned list.
+
+### Does “Ban post” or “Ban user” delete anything?
+
+No. A curation ban removes matching content only from that team's lens. The post or user
+remains on Mirage and can still appear through Uncensored or another team's lens.
+
+Personal blocking is separate: it changes only your own experience. Network deletion is
+also separate and is not something a curator team can perform.
+
+### Can curators ban themselves or other curators?
+
+No. A curator cannot ban themselves, another curator in the same community, or a post or
+comment written by any curator in that community. This protection applies across curator
+teams, not only within the curator's own team.
+
+The restriction is enforced by the network, not merely hidden by the interface. Existing
+team bans can still be removed with Unban.
+
+### What happens if the team I selected bans me?
+
+You stop using that team's lens automatically. Mirage moves you to the next-highest-ranked
+live team that has not banned you. If no eligible team remains, your preference becomes
+Uncensored.
+
+This applies whether you explicitly pinned the banning team or reached it through Default.
+You cannot select that team again while its ban remains. If the team later unbans you,
+Mirage does not silently move you back; you can choose it again yourself.
+
+### What happens if I leave a community while I am a curator?
+
+Leaving the community also removes you from its curator team. Mirage warns you before
+submitting the action because both changes happen together.
+
+If you lead a team with other curators, leadership passes to its longest-serving remaining
+curator. If you are the team's last curator, leaving permanently deletes the team. Leaving
+the curator team by itself does not require leaving the community.
 
 ### What happens when a curator locks a thread?
 
@@ -1333,10 +1422,26 @@ accounts cannot lead or join curator teams.
 Subscriber is the convenience tier. It removes proof of work delays and transaction fees,
 increases limits, unlocks profile features like biography, avatar, and banner, and lets paid
 users lead or join curator teams (up to ten memberships). Subscribers get two hundred and
-fifty instant messages each UTC day. After that they wait until the next day; there is no
-extra quota for sale.
+fifty instant network actions each UTC day. After that they wait until the next day; there
+is no extra quota for sale.
 
-Admin accounts keep the high limits, skip proof of work with a higher daily message cap, give awards without burning MIRAGE, and can lead or join up to one thousand curator teams even without an active paid subscription.
+Admin accounts keep the high limits, skip proof of work with a higher daily action cap, give
+awards without burning MIRAGE, and can lead or join up to one thousand curator teams even
+without an active paid subscription.
+
+### What does “Daily no-PoW” mean?
+
+It is the number of signed network actions your account can submit during the current UTC
+day without waiting for browser proof of work. Posts, comments, votes, follows, community
+changes, and other transactions all use the same allowance.
+
+The current defaults are 250 actions per day for Subscribers and 1,000 for appointed
+admins. These are governance-controlled network limits, so the number shown on your profile
+or subscription screen is authoritative if the values change.
+
+The counter resets at the start of the next UTC day. Reaching the limit does not silently
+switch a Subscriber or admin action to proof of work; further actions wait until the daily
+allowance resets.
 
 ### How do subscriptions work?
 
@@ -1379,7 +1484,7 @@ No.
 Subscriber buys convenience. It does not give you global control over other users. A
 subscriber cannot ban users from Mirage, seize a community, delete accounts, or force
 everyone else to see the feed their way. Leading a curator team is still not ownership. You
-can hide posts in your own lens. You cannot silence Uncensored or make other teams
+can ban posts from your own lens. You cannot silence Uncensored or make other teams
 disappear.
 
 ### What happens when my subscription expires?
@@ -1428,6 +1533,44 @@ many nodes choose to share rewards with users to accelerate growth and reward ge
 participation. Authors also earn from the daily creator pool when a paying subscriber
 upvotes or replies to their posts. That is separate from node rewards, and it has to be
 claimed within thirty days.
+
+### What are creator earnings?
+
+Creator earnings are daily MIRAGE rewards for authors who receive an upvote or direct reply
+from an active Subscriber. Half of new subscription payments funds that day's creator pool;
+the other half is burned. Each eligible Subscriber receives an equal share of the day's
+pool, and that share is divided among the eligible actions they made, preventing one very
+active account from taking the entire pool.
+
+The Earnings tab shows the UTC day when each reward was earned, the amount, whether it was
+claimed, and the date by which it must be claimed.
+
+### Why is an Earnings tab empty?
+
+An empty Earnings tab means that profile has no creator reward allocation yet. Creator
+earnings are settled by UTC day, so an eligible upvote or direct reply does not become a
+claimable row until that day's pool has been settled.
+
+The tab is not hidden from profile visitors. When public earnings exist, everyone can see
+them; only the creator receives the claim controls.
+
+### Why can other users see my creator earnings?
+
+Creator rewards, claims, and expiry state are public network data, just like votes,
+balances, and other on-chain actions. Hiding the figures in one frontend would not make
+them private.
+
+Anyone can view a profile's Earnings tab, but only the owner of that profile can select and
+claim its rewards.
+
+### Why do creator rewards expire?
+
+Creator rewards must be claimed within thirty days after the earning day is settled. The
+deadline prevents unclaimed allocations from accumulating forever as permanent network
+state. Any unclaimed remainder is burned after expiry.
+
+The interface shows readable earning and claim-by dates rather than internal epoch numbers.
+Once a reward has expired, it cannot be claimed.
 
 ### Can I pay for a subscription without buying crypto?
 

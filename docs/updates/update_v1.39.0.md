@@ -2,7 +2,7 @@
 
 ### Communities, not topics
 
-The places you post are communities now. Open one at `/c/` plus its name, browse the directory at `/communities`, and join the ones you actually want in your home feed. Old `/t/` links still work; they take you to the new address. Every valid community name is open for conversation immediately—there is no registration, founder, owner, or claim.
+The places you post are communities now. Open one at `/c/` plus its name, browse the directory at `/communities`, and join the ones you actually want in your home feed. Every valid community name is open for conversation immediately—there is no registration, founder, owner, or claim.
 
 ### Curation you choose
 

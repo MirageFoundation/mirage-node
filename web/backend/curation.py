@@ -111,18 +111,31 @@ def _result(visible: bool, tombstone: bool, reason: str, mode, team_id) -> dict[
     }
 
 
-def get_default_team(cur, community: str) -> dict[str, Any] | None:
-    """Return this node's live default: paid subscribers, then oldest team."""
+def get_default_team(cur, community: str, viewer: str | None = None) -> dict[str, Any] | None:
+    """Return the best live team that has not banned this viewer."""
+    address = str(viewer or "").strip().lower()
+    if address == "guest":
+        address = ""
     cur.execute(
         """
-        SELECT team_id, owner, name, description, subscriber_only,
-               subscriber_count, created_height, created_order, tag
-        FROM curation_teams
-        WHERE community=%s AND deleted_height IS NULL
-        ORDER BY subscriber_count DESC, created_order ASC, team_id ASC
+        SELECT t.team_id, t.owner, t.name, t.description, t.subscriber_only,
+               t.subscriber_count, t.created_height, t.created_order, t.tag
+        FROM curation_teams t
+        WHERE t.community=%s AND t.deleted_height IS NULL
+          AND (
+              %s = ''
+              OR NOT EXISTS (
+                  SELECT 1
+                  FROM curation_hidden_users h
+                  WHERE h.community=t.community
+                    AND h.team_id=t.team_id
+                    AND LOWER(h.target_user)=%s
+              )
+          )
+        ORDER BY t.subscriber_count DESC, t.created_order ASC, t.team_id ASC
         LIMIT 1
         """,
-        (community,),
+        (community, address, address),
     )
     row = cur.fetchone()
     if not row:
@@ -157,7 +170,10 @@ def resolve_lens(
     if lens != "team" and requested_team_id is not None:
         raise ValueError("team_id is only valid with team lens")
 
-    default_team = get_default_team(cur, community)
+    address = str(viewer or "").strip().lower()
+    if address == "guest":
+        address = ""
+    default_team = get_default_team(cur, community, address)
     if lens == "raw":
         result = {"requested_lens": lens, "effective_mode": MODE_RAW, "effective_team_id": None}
     elif lens == "team":
@@ -170,11 +186,28 @@ def resolve_lens(
         )
         if not cur.fetchone():
             raise LookupError("curation team not found")
-        result = {
-            "requested_lens": lens,
-            "effective_mode": MODE_PINNED,
-            "effective_team_id": int(requested_team_id),
-        }
+        banned = False
+        if address:
+            cur.execute(
+                """
+                SELECT 1 FROM curation_hidden_users
+                WHERE community=%s AND team_id=%s AND LOWER(target_user)=%s
+                """,
+                (community, int(requested_team_id), address),
+            )
+            banned = cur.fetchone() is not None
+        if banned:
+            result = {
+                "requested_lens": lens,
+                "effective_mode": MODE_PINNED if default_team else MODE_RAW,
+                "effective_team_id": default_team["team_id"] if default_team else None,
+            }
+        else:
+            result = {
+                "requested_lens": lens,
+                "effective_mode": MODE_PINNED,
+                "effective_team_id": int(requested_team_id),
+            }
     elif lens == "default":
         result = {
             "requested_lens": lens,
@@ -184,8 +217,7 @@ def resolve_lens(
     else:
         stored_mode = None
         stored_team_id = None
-        address = str(viewer or "").strip().lower()
-        if address and address != "guest":
+        if address:
             cur.execute(
                 """
                 SELECT mode, pinned_team_id
@@ -203,10 +235,17 @@ def resolve_lens(
         elif stored_mode == MODE_PINNED and stored_team_id is not None:
             cur.execute(
                 """
-                SELECT 1 FROM curation_teams
-                WHERE community=%s AND team_id=%s AND deleted_height IS NULL
+                SELECT 1 FROM curation_teams t
+                WHERE t.community=%s AND t.team_id=%s AND t.deleted_height IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM curation_hidden_users h
+                      WHERE h.community=t.community
+                        AND h.team_id=t.team_id
+                        AND LOWER(h.target_user)=%s
+                  )
                 """,
-                (community, stored_team_id),
+                (community, stored_team_id, address),
             )
             if cur.fetchone():
                 effective_mode, effective_team_id = MODE_PINNED, stored_team_id

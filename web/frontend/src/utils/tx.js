@@ -375,14 +375,14 @@ export async function unblockPost(txhash) {
     return h.unblockPost(txhash);
 }
 
-export async function blockTopic(topic) {
+export async function blockCommunity(community) {
     const h = await getHandler();
-    return h.blockTopic(topic);
+    return h.blockCommunity(community);
 }
 
-export async function unblockTopic(topic) {
+export async function unblockCommunity(community) {
     const h = await getHandler();
-    return h.unblockTopic(topic);
+    return h.unblockCommunity(community);
 }
 
 export async function reportPost(txhash, reason) {
@@ -479,14 +479,14 @@ export async function unfollowUser(address) {
     return h.unfollowUser(address);
 }
 
-export async function followTopic(topic) {
+export async function joinCommunity(community) {
     const h = await getHandler();
-    return h.followTopic(topic);
+    return h.joinCommunity(community);
 }
 
-export async function unfollowTopic(topic) {
+export async function leaveCommunity(community) {
     const h = await getHandler();
-    return h.unfollowTopic(topic);
+    return h.leaveCommunity(community);
 }
 
 export async function editPost(overrideId, changes) {

@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -521,6 +522,89 @@ func TestCurationCannotBanCommunityCuratorsOrTheirPosts(t *testing.T) {
 		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: protectedPost, Hidden: false,
 	})
 	require.NoError(t, err)
+}
+
+func TestBannedUserMovesToNextCurationTeamOrRaw(t *testing.T) {
+	t.Run("default and pinned users move to next best team", func(t *testing.T) {
+		for _, pinned := range []bool{false, true} {
+			mk, ctx, am := setupModule(t)
+			f := newCurationFixture(t, mk, ctx, fmt.Sprintf("ban-reroute-%t", pinned), 0x44, 0x45)
+			_, secondOwner := curationSigner(0x46)
+			setPaidProfile(t, mk, ctx, secondOwner)
+			secondTeamID, err := mk.CreateCurationTeam(ctx, secondOwner, f.slug, "Second", "")
+			require.NoError(t, err)
+
+			_, target := curationSigner(0x47)
+			setPaidProfile(t, mk, ctx, target)
+			joinOpenCommunity(t, mk, ctx, target, f.slug)
+			if pinned {
+				require.NoError(t, mk.SetCurationPreference(
+					ctx,
+					target,
+					f.slug,
+					types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED,
+					f.teamID,
+					true,
+				))
+			}
+
+			_, err = am.SetCurationUserHidden(ctx, &types.MsgSetCurationUserHidden{
+				EnvelopePubkey: f.curatorPub,
+				Community:      f.slug,
+				TeamId:         f.teamID,
+				Target:         target,
+				Hidden:         true,
+			})
+			require.NoError(t, err)
+			pref, found, err := mk.GetPreference(ctx, target, f.slug)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, pref.Mode)
+			require.Equal(t, secondTeamID, pref.PinnedTeamId)
+			bannedTeam, found, err := mk.GetCurationTeam(ctx, f.slug, f.teamID)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, uint64(1), bannedTeam.SubscriberCount)
+			nextTeam, found, err := mk.GetCurationTeam(ctx, f.slug, secondTeamID)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, uint64(2), nextTeam.SubscriberCount)
+			require.ErrorContains(
+				t,
+				mk.SetCurationPreference(
+					ctx,
+					target,
+					f.slug,
+					types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED,
+					f.teamID,
+					true,
+				),
+				"cannot pin a team that banned this user",
+			)
+		}
+	})
+
+	t.Run("no eligible team falls back to uncensored", func(t *testing.T) {
+		mk, ctx, am := setupModule(t)
+		f := newCurationFixture(t, mk, ctx, "ban-reroute-raw", 0x48, 0x49)
+		_, target := curationSigner(0x4a)
+		setPaidProfile(t, mk, ctx, target)
+		joinOpenCommunity(t, mk, ctx, target, f.slug)
+
+		_, err := am.SetCurationUserHidden(ctx, &types.MsgSetCurationUserHidden{
+			EnvelopePubkey: f.curatorPub,
+			Community:      f.slug,
+			TeamId:         f.teamID,
+			Target:         target,
+			Hidden:         true,
+		})
+		require.NoError(t, err)
+		pref, found, err := mk.GetPreference(ctx, target, f.slug)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, pref.Mode)
+		require.Zero(t, pref.PinnedTeamId)
+	})
 }
 
 func TestSetCurationPostTagRejectsClearWithTag(t *testing.T) {

@@ -1396,7 +1396,7 @@ function ProfileCommentRow({ post }) {
     // (parent post's topic). `useProfile.js` synthesizes a `comment-<short>`
     // placeholder when neither is present — we surface that too so every
     // comment row has a topic chip, and the chip links back to the parent
-    // thread via the usual `/t/<topic>` route.
+    // thread via the usual `/c/<community>` route.
     const rawTopic = typeof post.topic === 'string' ? post.topic.trim() : '';
     const rootTopic = typeof post.root_topic === 'string' ? post.root_topic.trim() : '';
     const displayTopic = rawTopic || rootTopic;

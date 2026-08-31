@@ -17,6 +17,7 @@ import { usePendingCuration } from './usePendingCuration';
 import { useViewerCuratorMembership } from './useViewerCuratorMembership';
 import { TAG_OPTIONS } from './useCreatePost';
 import { viewingTeamId as viewingTeamIdOf } from '../utils/curation';
+import { setOptimisticCurationVisibility } from '../utils/curationVisibility';
 
 // Distinct from the '' tag: '' is the curator saying "untagged", this is the
 // curator having no opinion so the community tag and author tag apply again.
@@ -58,7 +59,8 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const { teamId, teamName, isCurator, loading: membershipLoading } = useViewerCuratorMembership(community);
     const viewingTeamId = viewingTeamIdOf(post);
-    const viewingAsCuratorTeam = isCurator && !!teamId && viewingTeamId === teamId;
+    const isOwnContent = !!author && author === viewer;
+    const viewingAsCuratorTeam = isCurator && !isOwnContent && !!teamId && viewingTeamId === teamId;
     const { getInfo, getStatus } = usePendingCuration();
     const cacheKey = community && teamId && postId ? optimisticCacheKey(community, teamId, postId) : '';
     const storedOptimistic = cacheKey ? optimisticByPost.get(cacheKey) : null;
@@ -200,15 +202,13 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
         if (kind !== 'post' && kind !== 'user') throw new Error(`Invalid curation visibility kind: ${kind}`);
         const normalizedTarget = String(target || '').trim().toLowerCase();
         if (!community || !teamId || !normalizedTarget) return;
-        window.dispatchEvent(new CustomEvent('curationModerationOptimistic', {
-            detail: {
-                community,
-                teamId,
-                kind,
-                target: normalizedTarget,
-                hidden: !!hidden,
-            },
-        }));
+        setOptimisticCurationVisibility({
+            community,
+            teamId,
+            kind,
+            target: normalizedTarget,
+            hidden,
+        });
         console.debug('[curation] displayed visibility', {
             community,
             teamId,

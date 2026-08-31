@@ -17,7 +17,7 @@ import {
     HiChevronDown,
 } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
-import { fetchFollowedTopics, loadSubscriptions } from '../../../utils/Subscriptions';
+import { fetchJoinedCommunities, loadSubscriptions } from '../../../utils/Subscriptions';
 import { fetchFollowedUsers, loadFollowedAuthors } from '../../../utils/FollowUsers';
 import { resolveUsernames } from '../../../utils/UsernameCache';
 import { communityLabel, communityPath } from '../../../utils/community';
@@ -262,7 +262,7 @@ const icons = {
 };
 
 function isActivePath(pathname, target) {
-    if (target === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/c/') || pathname.startsWith('/t/');
+    if (target === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/c/');
     if (target === '/profile') return pathname === '/profile' || pathname.startsWith('/u/');
     return pathname === target;
 }
@@ -350,7 +350,7 @@ function Sidebar({ state }) {
             }
             try {
                 const [followedTopics, followedUsers] = await Promise.all([
-                    fetchFollowedTopics(viewerAddress),
+                    fetchJoinedCommunities(viewerAddress),
                     fetchFollowedUsers(viewerAddress),
                 ]);
                 if (mounted) {
@@ -362,7 +362,7 @@ function Sidebar({ state }) {
             }
         };
 
-        const handleTopicsUpdated = (e) => {
+        const handleJoinedCommunitiesUpdated = (e) => {
             const detail = e?.detail || {};
             if (detail.added) {
                 const t = String(detail.added).trim().toLowerCase();
@@ -392,12 +392,12 @@ function Sidebar({ state }) {
         };
 
         loadFollows();
-        window.addEventListener('followedTopicsUpdated', handleTopicsUpdated);
+        window.addEventListener('joinedCommunitiesUpdated', handleJoinedCommunitiesUpdated);
         window.addEventListener('followedUsersUpdated', handleUsersUpdated);
 
         return () => {
             mounted = false;
-            window.removeEventListener('followedTopicsUpdated', handleTopicsUpdated);
+            window.removeEventListener('joinedCommunitiesUpdated', handleJoinedCommunitiesUpdated);
             window.removeEventListener('followedUsersUpdated', handleUsersUpdated);
         };
     }, [viewerAddress]);

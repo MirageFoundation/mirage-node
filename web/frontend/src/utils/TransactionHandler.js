@@ -6,7 +6,7 @@ import { derivePrivateKeyFromSeed, deriveKeysFromSeed, requireValidMnemonic } fr
 import { getSessionGeneration } from './sessionLifecycle';
 import { peekHandoffByPurpose } from './onboardingSession';
 import Api from './api';
-import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
+import { notifyJoinedCommunitiesUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 import { generateEnvelopeNonce, buildCanonical, encStr, uvarint64 } from './canonicalEncoding';
 import { ensureCosmCrypto as ensureCosmCryptoShared } from './cosmCrypto';
 import {
@@ -60,15 +60,15 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "user is already blocked": "user_already_blocked",
     "block user already in progress": "block_user_in_progress",
     "unblock user already in progress": "unblock_user_in_progress",
-    "empty topic": "topic_required",
-    "topic is already blocked": "topic_already_blocked",
-    "block topic already in progress": "block_topic_in_progress",
-    "unblock topic already in progress": "unblock_topic_in_progress",
+    "empty community": "community_required",
+    "community is already blocked": "community_already_blocked",
+    "block community already in progress": "block_community_in_progress",
+    "unblock community already in progress": "unblock_community_in_progress",
     "Not logged in": "not_logged_in",
     "follow user already in progress": "follow_user_in_progress",
     "unfollow user already in progress": "unfollow_user_in_progress",
-    "follow topic already in progress": "follow_topic_in_progress",
-    "unfollow topic already in progress": "unfollow_topic_in_progress",
+    "join community already in progress": "join_community_in_progress",
+    "leave community already in progress": "leave_community_in_progress",
     "empty target": "target_required",
     "empty reason": "reason_required",
     "Invalid recipient or amount": "invalid_recipient_or_amount",
@@ -209,12 +209,12 @@ class TransactionHandler {
             this._draining = false;
 
             // Track in-flight follow/unfollow operations with queue position and action type
-            // Map<key, { action: 'follow'|'unfollow', type: 'user'|'topic', target: string, queuePosition: number }>
+            // Map<key, { action: 'follow'|'unfollow'|'join'|'leave', type: 'user'|'community', target: string, queuePosition: number }>
             this.pendingFollows = new Map();
             this._followListeners = new Set();
 
             // Track in-flight block/unblock operations with queue position and action type
-            // Map<key, { action: 'block'|'unblock', type: 'user'|'topic'|'post', target: string, queuePosition: number }>
+            // Map<key, { action: 'block'|'unblock', type: 'user'|'community'|'post', target: string, queuePosition: number }>
             this.pendingBlocks = new Map();
             this._blockListeners = new Set();
 
@@ -1424,36 +1424,35 @@ class TransactionHandler {
         }
     }
 
-    async blockTopic(topic) {
+    async blockCommunity(community) {
         try {
             const publicKey = Storage.load("publicKey", "");
-            const community = String(topic || "").trim().toLowerCase();
-            if (!community) return this._fail("empty community");
+            const slug = String(community || "").trim().toLowerCase();
+            if (!slug) return this._fail("empty community");
             if (!publicKey) return this._fail("Not logged in");
 
             // Check if community is already blocked
             try {
                 const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
                 const blockedCommunities = (blocked?.blocked_communities || []).map(t => String(t).toLowerCase());
-                if (blockedCommunities.includes(community)) {
+                if (blockedCommunities.includes(slug)) {
                     return this._fail("community is already blocked");
                 }
             } catch (_) { }
 
-            const key = `topic:${community}`;
+            const key = `community:${slug}`;
             if (this.pendingBlocks.has(key)) {
-                return this._fail("block topic already in progress");
+                return this._fail("block community already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
-            this.pendingBlocks.set(key, { action: 'block', type: 'topic', target: community, queuePosition });
+            this.pendingBlocks.set(key, { action: 'block', type: 'community', target: slug, queuePosition });
             this._notifyBlockListeners();
-            console.debug("[blocks] enqueue block_community", { community, target: publicKey, queuePosition });
+            console.debug("[blocks] enqueue block_community", { community: slug, target: publicKey, queuePosition });
 
             const baseTx = {
                 action: 'block_community',
-                community,
-                topic: community,
+                community: slug,
                 target: publicKey,
             };
 
@@ -1466,12 +1465,12 @@ class TransactionHandler {
                     if (result?.success) {
                         // Delay all feed/sidebar updates so the caller can show success UI first
                         setTimeout(() => {
-                            notifyTopicsUpdated({ removed: community });
+                            notifyJoinedCommunitiesUpdated({ removed: slug });
                             invalidateSubCache();
-                            window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: community } }));
+                            window.dispatchEvent(new CustomEvent('communityBlocked', { detail: { community: slug } }));
                         }, 3200);
                     }
-                    console.debug("[blocks] resolved block_community", { community, success: !!result?.success, error: result?.error });
+                    console.debug("[blocks] resolved block_community", { community: slug, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
@@ -1482,26 +1481,25 @@ class TransactionHandler {
         }
     }
 
-    async unblockTopic(topic) {
+    async unblockCommunity(community) {
         try {
             const publicKey = Storage.load("publicKey", "");
-            const community = String(topic || "").trim().toLowerCase();
-            if (!community) return this._fail("empty community");
+            const slug = String(community || "").trim().toLowerCase();
+            if (!slug) return this._fail("empty community");
             if (!publicKey) return this._fail("Not logged in");
-            const key = `topic:${community}`;
+            const key = `community:${slug}`;
             if (this.pendingBlocks.has(key)) {
-                return this._fail("unblock topic already in progress");
+                return this._fail("unblock community already in progress");
             }
 
             const queuePosition = this.totalTransactions + 1;
-            this.pendingBlocks.set(key, { action: 'unblock', type: 'topic', target: community, queuePosition });
+            this.pendingBlocks.set(key, { action: 'unblock', type: 'community', target: slug, queuePosition });
             this._notifyBlockListeners();
-            console.debug("[blocks] enqueue unblock_community", { community, target: publicKey, queuePosition });
+            console.debug("[blocks] enqueue unblock_community", { community: slug, target: publicKey, queuePosition });
 
             const baseTx = {
                 action: 'unblock_community',
-                community,
-                topic: community,
+                community: slug,
                 target: publicKey,
             };
 
@@ -1510,9 +1508,9 @@ class TransactionHandler {
                     this.pendingBlocks.delete(key);
                     this._notifyBlockListeners();
                     if (result?.success) {
-                        window.dispatchEvent(new CustomEvent('topicUnblocked', { detail: { topic: community } }));
+                        window.dispatchEvent(new CustomEvent('communityUnblocked', { detail: { community: slug } }));
                     }
-                    console.debug("[blocks] resolved unblock_community", { community, success: !!result?.success, error: result?.error });
+                    console.debug("[blocks] resolved unblock_community", { community: slug, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };
                 const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
@@ -1601,7 +1599,7 @@ class TransactionHandler {
         });
     }
 
-    followTopic(topic) {
+    joinCommunity(community) {
         const publicKey = Storage.load("publicKey", "");
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
@@ -1609,25 +1607,24 @@ class TransactionHandler {
             return Promise.resolve(this._fail("Not logged in"));
         }
 
-        const topicTrimmed = String(topic || "").trim().toLowerCase();
-        if (!topicTrimmed) {
-            return Promise.resolve(this._fail("empty topic"));
+        const slug = String(community || "").trim().toLowerCase();
+        if (!slug) {
+            return Promise.resolve(this._fail("empty community"));
         }
 
-        const key = `topic:${topicTrimmed}`;
+        const key = `community:${slug}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve(this._fail("follow topic already in progress"));
+            return Promise.resolve(this._fail("join community already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
-        this.pendingFollows.set(key, { action: 'follow', type: 'topic', target: topicTrimmed, queuePosition });
+        this.pendingFollows.set(key, { action: 'join', type: 'community', target: slug, queuePosition });
         this._notifyFollowListeners();
 
         const baseTx = {
             action: 'join_community',
             userId: publicKey,
-            community: topicTrimmed,
-            topic: topicTrimmed,
+            community: slug,
         };
 
         return new Promise((resolve) => {
@@ -1641,7 +1638,7 @@ class TransactionHandler {
         });
     }
 
-    unfollowTopic(topic) {
+    leaveCommunity(community) {
         const publicKey = Storage.load("publicKey", "");
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
@@ -1649,25 +1646,24 @@ class TransactionHandler {
             return Promise.resolve(this._fail("Not logged in"));
         }
 
-        const topicTrimmed = String(topic || "").trim().toLowerCase();
-        if (!topicTrimmed) {
-            return Promise.resolve(this._fail("empty topic"));
+        const slug = String(community || "").trim().toLowerCase();
+        if (!slug) {
+            return Promise.resolve(this._fail("empty community"));
         }
 
-        const key = `topic:${topicTrimmed}`;
+        const key = `community:${slug}`;
         if (this.pendingFollows.has(key)) {
-            return Promise.resolve(this._fail("unfollow topic already in progress"));
+            return Promise.resolve(this._fail("leave community already in progress"));
         }
 
         const queuePosition = this.totalTransactions + 1;
-        this.pendingFollows.set(key, { action: 'unfollow', type: 'topic', target: topicTrimmed, queuePosition });
+        this.pendingFollows.set(key, { action: 'leave', type: 'community', target: slug, queuePosition });
         this._notifyFollowListeners();
 
         const baseTx = {
             action: 'leave_community',
             userId: publicKey,
-            community: topicTrimmed,
-            topic: topicTrimmed,
+            community: slug,
         };
 
         return new Promise((resolve) => {
@@ -1675,7 +1671,7 @@ class TransactionHandler {
                 this.pendingFollows.delete(key);
                 this._notifyFollowListeners();
                 if (result?.success) {
-                    notifyTopicsUpdated({ removed: topicTrimmed });
+                    notifyJoinedCommunitiesUpdated({ removed: slug });
                     invalidateSubCache();
                 }
                 resolve(result);
@@ -2408,11 +2404,11 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
-            else if (transaction.action === "follow_topic" || transaction.action === "join_community") {
+            else if (transaction.action === "join_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
                     action: 'join_community',
-                    community: (transaction.community || transaction.topic || "").toLowerCase(),
+                    community: (transaction.community || "").toLowerCase(),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2435,11 +2431,11 @@ class TransactionHandler {
                     final_transaction[fieldName] = transaction[fieldName];
                 }
             }
-            else if (transaction.action === "unfollow_topic" || transaction.action === "leave_community") {
+            else if (transaction.action === "leave_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
                     action: 'leave_community',
-                    community: (transaction.community || transaction.topic || "").toLowerCase(),
+                    community: (transaction.community || "").toLowerCase(),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2471,15 +2467,13 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
-            else if (transaction.action === "block_topic" || transaction.action === "unblock_topic"
-                || transaction.action === "block_community" || transaction.action === "unblock_community") {
+            else if (transaction.action === "block_community" || transaction.action === "unblock_community") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const community = (transaction.community || "").toLowerCase();
                 final_transaction = {
                     action: transaction.action,
                     target: transaction.target || "",
                     community,
-                    topic: community,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -3264,116 +3258,6 @@ class TransactionHandler {
         );
     }
 
-    // Build canonical bytes for MsgFollowTopic
-    canonicalFollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgFollowTopic\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);
-        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
-        const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]);
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
-        );
-    }
-
-    // Build canonical bytes for MsgUnfollowTopic
-    canonicalUnfollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnfollowTopic\x00");
-        const tag2 = Uint8Array.from([2]);
-        const tag3 = Uint8Array.from([3]);
-        const tag4 = Uint8Array.from([4]);
-        const tag5 = Uint8Array.from([5]);
-        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
-        const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]);
-        return concat(
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            Uint8Array.from([7]), uvarint64(nonce),
-            tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
-        );
-    }
-
     // Build canonical bytes for MsgUnblockPost
     canonicalUnblockPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
@@ -3586,8 +3470,8 @@ class TransactionHandler {
         );
     }
 
-    // Build canonical bytes for MsgBlockTopic
-    canonicalBlockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
+    // Build canonical bytes for MsgBlockCommunity
+    canonicalBlockCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, community, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3637,12 +3521,11 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
+            tag101, encStr(community || ""),
         );
     }
 
-    // Build canonical bytes for MsgUnblockCommunity (legacy helper name)
-    canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
+    canonicalUnblockCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, community, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3692,7 +3575,7 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
+            tag101, encStr(community || ""),
         );
     }
 
@@ -3899,14 +3782,14 @@ class TransactionHandler {
             else if (action === 'create_post' || action === 'create_comment') msgName = 'MsgPost';
             else if (action === 'follow_user') msgName = 'MsgFollowUser';
             else if (action === 'unfollow_user') msgName = 'MsgUnfollowUser';
-            else if (action === 'follow_topic' || action === 'join_community') msgName = 'MsgJoinCommunity';
-            else if (action === 'unfollow_topic' || action === 'leave_community') msgName = 'MsgLeaveCommunity';
+            else if (action === 'join_community') msgName = 'MsgJoinCommunity';
+            else if (action === 'leave_community') msgName = 'MsgLeaveCommunity';
             else if (action === 'block_post') msgName = 'MsgBlockPost';
             else if (action === 'unblock_post') msgName = 'MsgUnblockPost';
             else if (action === 'block_user') msgName = 'MsgBlockUser';
             else if (action === 'unblock_user') msgName = 'MsgUnblockUser';
-            else if (action === 'block_topic' || action === 'block_community') msgName = 'MsgBlockCommunity';
-            else if (action === 'unblock_topic' || action === 'unblock_community') msgName = 'MsgUnblockCommunity';
+            else if (action === 'block_community') msgName = 'MsgBlockCommunity';
+            else if (action === 'unblock_community') msgName = 'MsgUnblockCommunity';
             else if (action === 'delete_post') msgName = 'MsgDelete';
             else if (action === 'delete_user') msgName = 'MsgDeleteUser';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
@@ -4062,7 +3945,7 @@ class TransactionHandler {
                 endpoint = 'core/unfollow_user';
             } else if (msgName === 'MsgJoinCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const communityLower = (transaction.community || transaction.topic || "").toLowerCase();
+                const communityLower = (transaction.community || "").toLowerCase();
                 const canon = this.canonicalJoinCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -4089,7 +3972,7 @@ class TransactionHandler {
                 endpoint = 'core/join_community';
             } else if (msgName === 'MsgLeaveCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const communityLower = (transaction.community || transaction.topic || "").toLowerCase();
+                const communityLower = (transaction.community || "").toLowerCase();
                 const canon = this.canonicalLeaveCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -4220,16 +4103,16 @@ class TransactionHandler {
                 endpoint = 'core/unblock_user';
             } else if (msgName === 'MsgBlockCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const community = (transaction.community || "").toLowerCase();
                 const targetAddr = (transaction.target || "").toLowerCase();
-                const canon = this.canonicalBlockTopic({
+                const canon = this.canonicalBlockCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: targetAddr,
-                    topic: community,
+                    community,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -4250,16 +4133,16 @@ class TransactionHandler {
                 endpoint = 'core/block_community';
             } else if (msgName === 'MsgUnblockCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
-                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const community = (transaction.community || "").toLowerCase();
                 const targetAddr = (transaction.target || "").toLowerCase();
-                const canon = this.canonicalUnblockTopic({
+                const canon = this.canonicalUnblockCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: targetAddr,
-                    topic: community,
+                    community,
                     nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
@@ -5259,7 +5142,7 @@ class TransactionHandler {
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.user || "").toLowerCase()),
                 );
-            } else if (action === 'follow_topic' || action === 'join_community') {
+            } else if (action === 'join_community') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgJoinCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
@@ -5272,9 +5155,9 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr((transaction.community || transaction.topic || "").toLowerCase()),
+                    tag100, encStr((transaction.community || "").toLowerCase()),
                 );
-            } else if (action === 'unfollow_topic' || action === 'leave_community') {
+            } else if (action === 'leave_community') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgLeaveCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
@@ -5287,7 +5170,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
-                    tag100, encStr((transaction.community || transaction.topic || "").toLowerCase()),
+                    tag100, encStr((transaction.community || "").toLowerCase()),
                 );
             } else if (action === 'block_post') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockPost\x00");
@@ -5349,14 +5232,14 @@ class TransactionHandler {
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
-            } else if (action === 'block_topic' || action === 'block_community') {
+            } else if (action === 'block_community') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
                 const tag101 = Uint8Array.from([101]);
-                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const community = (transaction.community || "").toLowerCase();
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -5367,14 +5250,14 @@ class TransactionHandler {
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(community),
                 );
-            } else if (action === 'unblock_topic' || action === 'unblock_community') {
+            } else if (action === 'unblock_community') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
                 const tag101 = Uint8Array.from([101]);
-                const community = (transaction.community || transaction.topic || "").toLowerCase();
+                const community = (transaction.community || "").toLowerCase();
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),

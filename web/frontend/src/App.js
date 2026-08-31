@@ -117,7 +117,6 @@ const restorableRoutePrefixes = [
     '/home',
     '/following',
     '/c/',
-    '/t/',
     '/profile',
     '/u/',
     '/settings',
@@ -130,15 +129,9 @@ const restorableRoutePrefixes = [
     '/reports',
     '/inbox',
     '/communities',
-    '/topics',
     '/stats',
     '/search',
 ];
-
-function TopicToCommunityRedirect() {
-    const { topic } = useParams();
-    return <Navigate to={`/c/${topic || ''}`} replace />;
-}
 
 function CommunityTeamsRedirect() {
     const { topic } = useParams();
@@ -222,13 +215,10 @@ function RouteTracker({ children }) {
         const path = pathname === '/' ? '/home' : pathname;
         const full = `${path}${search}`;
 
-        // /c/ is the canonical community feed (v1.39+). /t/ remains so a
-        // stale last_feed_route from before the redirect still restores.
         const isFeedRoute =
             path === '/home' ||
             path === '/following' ||
-            path.startsWith('/c/') ||
-            path.startsWith('/t/');
+            path.startsWith('/c/');
 
         if (!isFeedRoute) return;
 
@@ -1193,7 +1183,6 @@ class App extends Component {
                                                 path="/c/:topic"
                                                 element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} />}
                                             />
-                                            <Route path="/t/:topic" element={<TopicToCommunityRedirect />} />
 
                                             <Route path="/create_post" element={<CreatePostView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} />} />
                                             <Route path="/signup" element={<CreateAccountView state={this.state} setCredentials={this.setCredentials} />} />
@@ -1207,7 +1196,6 @@ class App extends Component {
 
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />
-                                            <Route path="/agents" element={<Navigate to="/home" replace />} />
                                             <Route path="/faq" element={<FAQView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
@@ -1217,7 +1205,6 @@ class App extends Component {
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
                                             <Route path="/curator-teams/new" element={<CurationTeamsView />} />
                                             <Route path="/communities" element={<DiscoverView state={this.state} />} />
-                                            <Route path="/topics" element={<Navigate to="/communities" replace />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
                                             <Route path="*" element={<NotFoundView state={this.state} />} />

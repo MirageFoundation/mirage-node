@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
 import { unfollow, notifyUsersUpdated } from "../utils/FollowUsers";
-import { unsubscribe } from "../utils/Subscriptions";
+import { leaveCommunity } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 export const shortenAddress = addr => {
@@ -23,9 +23,9 @@ export function useFollows({
     const [listsLoading, setListsLoading] = useState(false);
     const [listsError, setListsError] = useState('');
     const {
-        isTopicPending: isFollowTopicPending,
+        isCommunityPending: isCommunityPending,
         isUserPending: isFollowUserPending,
-        formatTopicStatus: formatFollowTopicStatus,
+        formatCommunityStatus: formatCommunityStatus,
         formatUserStatus: formatFollowUserStatus
     } = usePendingFollows();
     useEffect(() => {
@@ -90,12 +90,12 @@ export function useFollows({
             cancelled = true;
         };
     }, [followedUsers]);
-    const handleUnfollowTopic = async (e, topic) => {
+    const handleLeaveCommunity = async (e, topic) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
         const topicTrimmed = String(topic || '').trim().toLowerCase();
         if (!topicTrimmed) return;
         try {
-            await unsubscribe(address, topicTrimmed);
+            await leaveCommunity(address, topicTrimmed);
             setFollowedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
         } catch (error) {
             if (error?.code === 'community_leave_cancelled') return;
@@ -124,11 +124,11 @@ export function useFollows({
         followedUsernames,
         listsLoading,
         listsError,
-        isFollowTopicPending,
+        isCommunityPending,
         isFollowUserPending,
-        formatFollowTopicStatus,
+        formatCommunityStatus,
         formatFollowUserStatus,
-        handleUnfollowTopic,
+        handleLeaveCommunity,
         handleUnfollowUser
     };
 }

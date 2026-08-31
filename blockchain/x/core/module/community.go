@@ -473,6 +473,11 @@ func (am AppModule) SetCurationUserHidden(ctx context.Context, req *types.MsgSet
 	if err := am.k.SetCurationActionHiddenUser(sdkCtx, slug, req.GetTeamId(), target, actor, req.GetHidden()); err != nil {
 		return nil, err
 	}
+	if req.GetHidden() {
+		if err := am.k.RerouteBannedUserPreference(sdkCtx, slug, req.GetTeamId(), target); err != nil {
+			return nil, err
+		}
+	}
 	return &types.MsgSetCurationUserHiddenResponse{}, nil
 }
 

@@ -16,7 +16,7 @@ import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import * as tx from "../../../utils/tx";
-import { isSubscribed, subscribe, unsubscribe, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
+import { isJoinedCommunity, joinCommunity, leaveCommunity, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
 import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
@@ -24,6 +24,7 @@ import CurationLensPicker from "../components/CurationLensPicker";
 import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import AccountStatusNotices from "../components/AccountStatusNotices";
 import { usePendingBlocks } from "../../../logic/usePendingBlocks";
+import { isOptimisticallyCurationHidden } from "../../../utils/curationVisibility";
 
 // Mobile header branding for home/following feeds
 
@@ -635,7 +636,7 @@ const LoadingText = styled.div`
 `;
 
 /**
- * Blocked-topic empty state — shown when the viewer navigates to `/t/<topic>`
+ * Blocked-community empty state — shown when the viewer navigates to `/c/<community>`
  * where the topic is in their blocked list. Mirrors the `StateBlock`
  * pattern used across BlocksView / Follows / Reports so the visual
  * language stays consistent (circle icon + title + message + action).
@@ -917,8 +918,6 @@ const MainView = ({
     const theme = useTheme();
     const showHero = theme.caps.showHeroCards;
     const [curationHeader, setCurationHeader] = useState({ community: '', team: null });
-    const optimisticCurationPostsRef = useRef(new Set());
-    const optimisticCurationUsersRef = useRef(new Set());
     const [, setCurationVisibilityRevision] = useState(0);
     useEffect(() => {
         const handleOptimisticModeration = (event) => {
@@ -930,10 +929,6 @@ const MainView = ({
             if (!community || !Number.isSafeInteger(teamId) || teamId <= 0 || !['post', 'user'].includes(kind) || !target) {
                 throw new Error('Invalid optimistic curation moderation event');
             }
-            const key = `${community}:${teamId}:${target}`;
-            const entries = kind === 'post' ? optimisticCurationPostsRef.current : optimisticCurationUsersRef.current;
-            if (detail.hidden) entries.add(key);
-            else entries.delete(key);
             setCurationVisibilityRevision((current) => current + 1);
             console.debug('[curation] feed visibility updated', {
                 community,
@@ -946,20 +941,9 @@ const MainView = ({
         window.addEventListener('curationModerationOptimistic', handleOptimisticModeration);
         return () => window.removeEventListener('curationModerationOptimistic', handleOptimisticModeration);
     }, []);
-    const isOptimisticallyCurationHidden = useCallback((post) => {
-        const community = String(post?.topic || post?.community || '').trim().toLowerCase();
-        const teamId = Number(post?.lens?.effective_team_id);
-        const postId = String(post?.post_id || '').trim().toLowerCase();
-        const author = String(post?.user_id || post?.author || '').trim().toLowerCase();
-        if (!community || !Number.isSafeInteger(teamId) || teamId <= 0) return false;
-        return (
-            (postId && optimisticCurationPostsRef.current.has(`${community}:${teamId}:${postId}`))
-            || (author && optimisticCurationUsersRef.current.has(`${community}:${teamId}:${author}`))
-        );
-    }, []);
     const {
-        isTopicPending: isBlockTopicPending,
-        formatTopicStatus: formatBlockTopicStatus,
+        isCommunityPending: isCommunityBlockPending,
+        formatCommunityStatus: formatCommunityBlockStatus,
     } = usePendingBlocks();
     const {
         urlTopic,
@@ -983,10 +967,10 @@ const MainView = ({
         isTopicBlockedLocal,
         location,
         viewerAddress,
-        followedTopicsSet,
-        setFollowedTopicsSet,
-        isTopicPending,
-        formatTopicStatus,
+        joinedCommunitiesSet,
+        setJoinedCommunitiesSet,
+        isCommunityPending,
+        formatCommunityStatus,
         forceHardRefreshRef,
         dismissAndroidBanner,
         dismissIPhoneBanner,
@@ -1050,8 +1034,8 @@ const MainView = ({
         const p = pid ? state.posts[pid] : null;
         if (p) {
             const topicKey = String(p.topic || '').trim().toLowerCase();
-            const isTopicFollowing = topicKey && (followedTopicsSet.has(topicKey) || isSubscribed(viewerAddress || 'guest', p.topic));
-            const isTopicInProgress = isTopicPending(topicKey);
+            const isJoined = topicKey && (joinedCommunitiesSet.has(topicKey) || isJoinedCommunity(viewerAddress || 'guest', p.topic));
+            const isCommunityInProgress = isCommunityPending(topicKey);
             header = <PostHeaderCard role="region" aria-label="Post context">
                 <PostHeaderText>
                     Posted in{' '}
@@ -1063,25 +1047,25 @@ const MainView = ({
                         e.preventDefault();
                         const key = topicKey;
                         if (!key) return;
-                        if (isTopicPending(key)) return;
+                        if (isCommunityPending(key)) return;
                         try {
-                            const isCurrentlyFollowing = key && (followedTopicsSet.has(key) || isSubscribed(viewerAddress || 'guest', p.topic));
+                            const isCurrentlyFollowing = key && (joinedCommunitiesSet.has(key) || isJoinedCommunity(viewerAddress || 'guest', p.topic));
                             if (isCurrentlyFollowing) {
-                                await unsubscribe(viewerAddress || 'guest', p.topic);
-                                setFollowedTopicsSet(prev => {
+                                await leaveCommunity(viewerAddress || 'guest', p.topic);
+                                setJoinedCommunitiesSet(prev => {
                                     const next = new Set(prev);
                                     next.delete(key);
                                     return next;
                                 });
                             } else {
-                                await subscribe(viewerAddress || 'guest', p.topic);
-                                setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                await joinCommunity(viewerAddress || 'guest', p.topic);
+                                setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                             }
                             invalidateTopicsCache();
                             setStableOrder(s => s.slice());
                         } catch (_) {/* noop */ }
                     }}>
-                        {isTopicInProgress ? formatTopicStatus(topicKey) : isTopicFollowing ? 'Leave' : 'Join'}
+                        {isCommunityInProgress ? formatCommunityStatus(topicKey) : isJoined ? 'Leave' : 'Join'}
                     </HeaderInlineLink>
                     )
                 </PostHeaderText>
@@ -1094,16 +1078,16 @@ const MainView = ({
         const displayTopic = currentTopicRef.current || urlTopic;
         const routeTopicLower = urlTopic ? String(urlTopic).toLowerCase() : '';
         const topicKeyLower = routeTopicLower || (displayTopic ? String(displayTopic).toLowerCase() : '');
-        const isCurrentTopic = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
-        const isTopicFollowing = isCurrentTopic && (followedTopicsSet.has(routeTopicLower) || isSubscribed(viewerAddress || 'guest', urlTopic));
-        const isTopicInProgress = isCurrentTopic && isTopicPending(routeTopicLower);
+        const isCurrentCommunity = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
+        const isJoined = isCurrentCommunity && (joinedCommunitiesSet.has(routeTopicLower) || isJoinedCommunity(viewerAddress || 'guest', urlTopic));
+        const isCommunityInProgress = isCurrentCommunity && isCommunityPending(routeTopicLower);
         /**
-         * When the viewer navigates to `/t/<topic>` for a topic they've
+         * When the viewer navigates to `/c/<community>` for a community they've
          * blocked, hide the feed and show a dedicated `BlockedTopicState`
          * panel with an Unblock CTA. Keeps the visual language of the
          * BlocksView state blocks (circle icon + title + message).
          */
-        const isUrlTopicBlocked = !!(isLoggedIn && isCurrentTopic && typeof isTopicBlockedLocal === 'function' && isTopicBlockedLocal(routeTopicLower));
+        const isUrlTopicBlocked = !!(isLoggedIn && isCurrentCommunity && typeof isTopicBlockedLocal === 'function' && isTopicBlockedLocal(routeTopicLower));
 
         // Determine what content to show
         let showEmptyHome = false;
@@ -1201,7 +1185,7 @@ const MainView = ({
                     <MainFeedPanel>
                         <ModernPostFeed>
 
-                            {isLoggedIn && isCurrentTopic && showHero && !isUrlTopicBlocked && <TopicHeroCard>
+                            {isLoggedIn && isCurrentCommunity && showHero && !isUrlTopicBlocked && <TopicHeroCard>
                                 <TopicHeroHeader>
                                     <TopicHeroTitle>{communityLabel(urlTopic)}</TopicHeroTitle>
                                     <HomeFeedModeInline>
@@ -1219,30 +1203,30 @@ const MainView = ({
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
                                         <CommunityMembershipButton
-                                            joined={isTopicFollowing}
-                                            pending={isTopicInProgress}
-                                            statusLabel={formatTopicStatus(topicKeyLower)}
+                                            joined={isJoined}
+                                            pending={isCommunityInProgress}
+                                            statusLabel={formatCommunityStatus(topicKeyLower)}
                                             onToggle={async () => {
-                                            const topicName = urlTopic;
-                                            if (!topicName) return;
-                                            const key = topicKeyLower;
-                                            if (!key) return;
-                                            if (isTopicPending(key)) return;
-                                            try {
-                                                if (isTopicFollowing) {
-                                                    await unsubscribe(viewerAddress || 'guest', topicName);
-                                                    setFollowedTopicsSet(prev => {
-                                                        const next = new Set(prev);
-                                                        next.delete(key);
-                                                        return next;
-                                                    });
-                                                } else {
-                                                    await subscribe(viewerAddress || 'guest', topicName);
-                                                    setFollowedTopicsSet(prev => new Set([...prev, key]));
-                                                }
-                                                invalidateTopicsCache();
-                                            } catch (_) {/* noop */ }
-                                        }}
+                                                const topicName = urlTopic;
+                                                if (!topicName) return;
+                                                const key = topicKeyLower;
+                                                if (!key) return;
+                                                if (isCommunityPending(key)) return;
+                                                try {
+                                                    if (isJoined) {
+                                                        await leaveCommunity(viewerAddress || 'guest', topicName);
+                                                        setJoinedCommunitiesSet(prev => {
+                                                            const next = new Set(prev);
+                                                            next.delete(key);
+                                                            return next;
+                                                        });
+                                                    } else {
+                                                        await joinCommunity(viewerAddress || 'guest', topicName);
+                                                        setJoinedCommunitiesSet(prev => new Set([...prev, key]));
+                                                    }
+                                                    invalidateTopicsCache();
+                                                } catch (_) {/* noop */ }
+                                            }}
                                         />
                                     </HomeFeedModeInline>
                                 </TopicHeroHeader>
@@ -1251,7 +1235,7 @@ const MainView = ({
                                 </TopicHeroDescription>
                             </TopicHeroCard>}
 
-                            {isCurrentTopic && !isUrlTopicBlocked && (
+                            {isCurrentCommunity && !isUrlTopicBlocked && (
                                 <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
                                     <CommunityLensTopRow $divided={Boolean(activeCurationTeam?.description)}>
                                         <CommunityLensHeading>
@@ -1260,30 +1244,30 @@ const MainView = ({
                                         <CommunityLensControls>
                                             {isLoggedIn && (
                                                 <CommunityMembershipButton
-                                                    joined={isTopicFollowing}
-                                                    pending={isTopicInProgress}
-                                                    statusLabel={formatTopicStatus(topicKeyLower)}
+                                                    joined={isJoined}
+                                                    pending={isCommunityInProgress}
+                                                    statusLabel={formatCommunityStatus(topicKeyLower)}
                                                     onToggle={async () => {
                                                         const topicName = urlTopic;
                                                         if (!topicName) return;
                                                         const key = topicKeyLower;
                                                         if (!key) return;
-                                                        if (isTopicPending(key)) return;
+                                                        if (isCommunityPending(key)) return;
                                                         console.debug('[community] membership toggle', {
                                                             community: key,
-                                                            following: isTopicFollowing,
+                                                            following: isJoined,
                                                         });
                                                         try {
-                                                            if (isTopicFollowing) {
-                                                                await unsubscribe(viewerAddress || 'guest', topicName);
-                                                                setFollowedTopicsSet(prev => {
+                                                            if (isJoined) {
+                                                                await leaveCommunity(viewerAddress || 'guest', topicName);
+                                                                setJoinedCommunitiesSet(prev => {
                                                                     const next = new Set(prev);
                                                                     next.delete(key);
                                                                     return next;
                                                                 });
                                                             } else {
-                                                                await subscribe(viewerAddress || 'guest', topicName);
-                                                                setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                                                await joinCommunity(viewerAddress || 'guest', topicName);
+                                                                setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                                                             }
                                                             invalidateTopicsCache();
                                                         } catch (err) {
@@ -1413,12 +1397,12 @@ const MainView = ({
                                         variant="danger"
                                         size="md"
                                         minWidth="5.5rem"
-                                        disabled={isBlockTopicPending(routeTopicLower)}
+                                        disabled={isCommunityBlockPending(routeTopicLower)}
                                         onClick={async () => {
-                                            try { await tx.unblockTopic(routeTopicLower); } catch (_) { /* noop */ }
+                                            try { await tx.unblockCommunity(routeTopicLower); } catch (_) { /* noop */ }
                                         }}
                                     >
-                                        {formatBlockTopicStatus(routeTopicLower) || `Unblock ${communityLabel(urlTopic)}`}
+                                        {formatCommunityBlockStatus(routeTopicLower) || `Unblock ${communityLabel(urlTopic)}`}
                                     </Button>
                                 </BlockedTopicActions>
                             </BlockedTopicState>}
@@ -1431,7 +1415,7 @@ const MainView = ({
                             {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && orderedPosts.length === 0 && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     {/* Community feeds already show the real title in CommunityLensBar. */}
-                                    {!isCurrentTopic && (
+                                    {!isCurrentCommunity && (
                                         <PageHeaderSkeleton showSubtitle={false} titleWidth="20%" />
                                     )}
                                     <FeedCardSkeletonList count={5} />

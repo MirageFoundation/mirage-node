@@ -24,7 +24,7 @@ import { normalizeTag } from "../../../utils/ContentTags";
 import { isLikelyImageUrl, isLikelyVideoUrl, getDownloadableMedia, mediaDownloadLabel, triggerMediaDownload } from "../../../utils/media";
 import * as tx from "../../../utils/tx";
 import { follow, unfollow, isFollowing } from "../../../utils/FollowUsers";
-import { subscribe, unsubscribe, isSubscribed } from "../../../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, isJoinedCommunity } from "../../../utils/Subscriptions";
 import Storage from "../../../utils/Storage";
 
 import InlineMedia from "./InlineMedia";
@@ -616,9 +616,9 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
         [theme.themeId]
     );
     const {
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
     } = usePendingFollows();
 
@@ -628,7 +628,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     const [shareCopied, setShareCopied] = useState(false);
     const [blurOverride, setBlurOverride] = useState(false);
     const [followOverride, setFollowOverride] = useState(null);
-    const [topicFollowOverride, setTopicFollowOverride] = useState(null);
+    const [communityJoinOverride, setCommunityJoinOverride] = useState(null);
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
     const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
 
@@ -704,7 +704,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     const topic = typeof safePost.topic === 'string' ? safePost.topic : '';
     const linkTarget = postId ? `/p/${postId}` : '#';
     const authorAddress = safePost.user_id || safePost.author || '';
-    const topicFollowPending = isTopicPending(topic);
+    const communityJoinPending = isCommunityPending(topic);
     const userFollowPending = isUserPending(authorAddress);
     const authorDisplay = (() => {
         if (typeof safePost.username === 'string' && safePost.username.trim()) return safePost.username.trim();
@@ -727,12 +727,12 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     })();
     const followingUser = followOverride !== null ? followOverride : computedFollowingUser;
 
-    const computedFollowingTopic = (() => {
+    const computedJoinedCommunity = (() => {
         if (!isLoggedIn || !topic) return false;
-        try { return isSubscribed(viewerAddress, topic); }
+        try { return isJoinedCommunity(viewerAddress, topic); }
         catch (_) { return false; }
     })();
-    const followingTopic = topicFollowOverride !== null ? topicFollowOverride : computedFollowingTopic;
+    const joinedCommunity = communityJoinOverride !== null ? communityJoinOverride : computedJoinedCommunity;
 
     const displayTitle = safePost.title;
     const displayRawContent = safePost.content;
@@ -912,19 +912,19 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
         }
     }, [closeAllMenus, authorAddress, followingUser, viewerAddress]);
 
-    const handleFollowTopic = useCallback(async () => {
+    const handleJoinCommunity = useCallback(async () => {
         closeAllMenus();
         if (!topic) return;
         if (!requireAccount('join communities')) return;
-        const next = !followingTopic;
-        setTopicFollowOverride(next);
+        const next = !joinedCommunity;
+        setCommunityJoinOverride(next);
         try {
-            if (next) await subscribe(viewerAddress, topic);
-            else await unsubscribe(viewerAddress, topic);
+            if (next) await joinCommunity(viewerAddress, topic);
+            else await leaveCommunity(viewerAddress, topic);
         } catch (_) {
-            setTopicFollowOverride(!next);
+            setCommunityJoinOverride(!next);
         }
-    }, [closeAllMenus, topic, followingTopic, viewerAddress]);
+    }, [closeAllMenus, topic, joinedCommunity, viewerAddress]);
 
     /**
      * Confirmation dialogs (06.3 polish round).
@@ -1240,7 +1240,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                         <PopoverRoot ref={followRef} onClick={stop}>
                             <FollowButton
                                 type="button"
-                                $active={followingUser || followingTopic}
+                                $active={followingUser || joinedCommunity}
                                 aria-haspopup="menu"
                                 aria-expanded={followOpen}
                                 onClick={() => {
@@ -1248,7 +1248,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                     setFollowOpen((v) => !v);
                                 }}
                             >
-                                {formatUserStatus(authorAddress) || formatTopicStatus(topic) || (followingUser ? 'Following' : followingTopic ? 'Joined' : 'Follow')}
+                                {formatUserStatus(authorAddress) || formatCommunityStatus(topic) || (followingUser ? 'Following' : joinedCommunity ? 'Joined' : 'Follow')}
                             </FollowButton>
                             {followOpen && (
                                 <Menu role="menu" aria-label="Follow options" $align="right">
@@ -1256,13 +1256,13 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                     <MenuItemBtn
                                         type="button"
                                         role="menuitemradio"
-                                        aria-checked={followingTopic}
-                                        $active={followingTopic}
-                                        disabled={topicFollowPending}
-                                        onClick={handleFollowTopic}
+                                        aria-checked={joinedCommunity}
+                                        $active={joinedCommunity}
+                                        disabled={communityJoinPending}
+                                        onClick={handleJoinCommunity}
                                     >
                                         <HiOutlineHashtag />
-                                        <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
+                                        <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                     </MenuItemBtn>
                                     <MenuItemBtn
                                         type="button"
@@ -1330,9 +1330,9 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                             {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
                                             <span>{formatUserStatus(authorAddress) || (followingUser ? 'Unfollow user' : 'Follow user')}</span>
                                         </MenuItemBtn>
-                                        <MenuItemBtn type="button" disabled={topicFollowPending} onClick={handleFollowTopic}>
+                                        <MenuItemBtn type="button" disabled={communityJoinPending} onClick={handleJoinCommunity}>
                                             <HiOutlineHashtag />
-                                            <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
+                                            <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleGiveAward}>
                                             <HiOutlineSparkles />

@@ -165,6 +165,11 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
     const [loading, setLoading] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState('');
+    const optimisticallyRemovedRef = useRef(new Set());
+
+    const itemKey = useCallback((item) => (
+        kind === 'posts' ? String(item?.postId || '').toLowerCase() : String(item?.address || '').toLowerCase()
+    ), [kind]);
 
     const fetchPage = useCallback(async ({ offset, limit, append }) => {
         if (!enabled || !slug || !id || !viewerAddr || viewerAddr === 'guest') {
@@ -215,7 +220,8 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
                     username: item.username || null,
                 };
             });
-            setItems((prev) => (append ? [...prev, ...next] : next));
+            const visible = next.filter((item) => !optimisticallyRemovedRef.current.has(itemKey(item)));
+            setItems((prev) => (append ? [...prev, ...visible] : visible));
             setHasMore(data.has_more);
             console.debug(`[curation] ${pathSuffix} loaded`, {
                 community: slug,
@@ -241,7 +247,7 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
             if (append) setLoadingMore(false);
             else setLoading(false);
         }
-    }, [enabled, id, kind, pathSuffix, slug, viewerAddr]);
+    }, [enabled, id, itemKey, kind, pathSuffix, slug, viewerAddr]);
 
     const refresh = useCallback(async () => (
         fetchPage({ offset: 0, limit: HIDDEN_LIST_INITIAL, append: false })
@@ -255,6 +261,32 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
             append: true,
         });
     }, [fetchPage, hasMore, items.length, loading, loadingMore]);
+
+    const removeOptimistically = useCallback((item) => {
+        const key = itemKey(item);
+        if (!key) throw new Error(`Cannot optimistically unban invalid ${kind === 'posts' ? 'post' : 'user'}`);
+        optimisticallyRemovedRef.current.add(key);
+        setItems((prev) => prev.filter((candidate) => itemKey(candidate) !== key));
+        console.debug(`[curation] ${pathSuffix} optimistic remove`, {
+            community: slug,
+            teamId: id,
+            target: key.slice(0, 12),
+        });
+    }, [id, itemKey, kind, pathSuffix, slug]);
+
+    const restoreOptimistically = useCallback((item) => {
+        const key = itemKey(item);
+        if (!key) throw new Error(`Cannot restore invalid ${kind === 'posts' ? 'post' : 'user'}`);
+        optimisticallyRemovedRef.current.delete(key);
+        setItems((prev) => (
+            prev.some((candidate) => itemKey(candidate) === key) ? prev : [item, ...prev]
+        ));
+        console.debug(`[curation] ${pathSuffix} optimistic restore`, {
+            community: slug,
+            teamId: id,
+            target: key.slice(0, 12),
+        });
+    }, [id, itemKey, kind, pathSuffix, slug]);
 
     useEffect(() => {
         if (!enabled) {
@@ -282,6 +314,8 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
         error,
         refresh,
         loadMore,
+        removeOptimistically,
+        restoreOptimistically,
     };
 }
 
@@ -295,6 +329,8 @@ export function useHiddenCurationUsers(community, teamId, options) {
         error: state.error,
         refresh: state.refresh,
         loadMore: state.loadMore,
+        removeOptimistically: state.removeOptimistically,
+        restoreOptimistically: state.restoreOptimistically,
     };
 }
 
@@ -308,5 +344,7 @@ export function useHiddenCurationPosts(community, teamId, options) {
         error: state.error,
         refresh: state.refresh,
         loadMore: state.loadMore,
+        removeOptimistically: state.removeOptimistically,
+        restoreOptimistically: state.restoreOptimistically,
     };
 }

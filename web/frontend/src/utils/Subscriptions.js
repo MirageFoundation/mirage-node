@@ -1,20 +1,18 @@
 import transactionHandler from './TransactionHandler';
-import { fetchProfile, getFollowedTopics as getTopicsFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheTopics, scheduleRefresh } from './ProfileCache';
+import { fetchProfile, getJoinedCommunities as getCommunitiesFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheTopics, scheduleRefresh } from './ProfileCache';
 import { fetchViewerCuratorMembership } from '../logic/useViewerCuratorMembership';
 import { invalidateCurationReads } from './curation';
 import { requestCommunityLeaveConfirmation } from './communityLeaveConfirmation';
 
-export async function fetchFollowedTopics(viewerAddress) {
+export async function fetchJoinedCommunities(viewerAddress) {
     const addr = String(viewerAddress || '').trim().toLowerCase();
     if (!addr || addr === 'guest') {
         return [];
     }
 
     try {
-        // Always go through ProfileCache so no-cache window / TTL logic applies.
         const profile = await fetchProfile(addr);
         if (profile && Array.isArray(profile.joined_communities)) {
-            // Normalize the list the same way as getTopicsFromCache()
             return profile.joined_communities
                 .map(t => String(t || '').trim())
                 .filter(t => {
@@ -22,11 +20,10 @@ export async function fetchFollowedTopics(viewerAddress) {
                     return v !== 'all' && v !== 'home' && v !== '';
                 });
         }
-        // Fallback to whatever is in cache (may be empty during no-cache window)
-        return getTopicsFromCache() || [];
+        return getCommunitiesFromCache() || [];
     } catch (e) {
-        console.error('[Subscriptions] Failed to fetch followed topics:', e);
-        return getTopicsFromCache() || [];
+        console.error('[Subscriptions] Failed to fetch joined communities:', e);
+        return getCommunitiesFromCache() || [];
     }
 }
 
@@ -34,76 +31,75 @@ export function invalidateCache() {
     invalidateProfileCache();
 }
 
-export function notifyTopicsUpdated(detail = {}) {
-    window.dispatchEvent(new CustomEvent('followedTopicsUpdated', { detail }));
+export function notifyJoinedCommunitiesUpdated(detail = {}) {
+    window.dispatchEvent(new CustomEvent('joinedCommunitiesUpdated', { detail }));
 }
 
 export function loadSubscriptions(address) {
     const addr = String(address || '').trim().toLowerCase();
     if (isCacheValid(addr)) {
-        return [...getTopicsFromCache()];
+        return [...getCommunitiesFromCache()];
     }
     return [];
 }
 
-export function isSubscribed(address, topic) {
-    const t = String(topic || '').trim();
+export function isJoinedCommunity(address, community) {
+    const t = String(community || '').trim();
     if (!t) return false;
     const list = loadSubscriptions(address);
     return list.map(x => x.toLowerCase()).includes(t.toLowerCase());
 }
 
-export async function isSubscribedAsync(address, topic) {
-    const t = String(topic || '').trim();
+export async function isJoinedCommunityAsync(address, community) {
+    const t = String(community || '').trim();
     if (!t) return false;
-    const list = await fetchFollowedTopics(address);
+    const list = await fetchJoinedCommunities(address);
     return list.map(x => x.toLowerCase()).includes(t.toLowerCase());
 }
 
-function addToCache(topic, address) {
-    const t = String(topic || '').trim().toLowerCase();
+function addToCache(community, address) {
+    const t = String(community || '').trim().toLowerCase();
     if (!t || t === 'all' || t === 'home') return;
-    const current = getTopicsFromCache() || [];
+    const current = getCommunitiesFromCache() || [];
     if (!current.map(x => x.toLowerCase()).includes(t)) {
         updateCacheTopics([...current, t], address);
     }
 }
 
-function removeFromCache(topic, address) {
-    const t = String(topic || '').trim().toLowerCase();
+function removeFromCache(community, address) {
+    const t = String(community || '').trim().toLowerCase();
     if (!t) return;
-    const current = getTopicsFromCache() || [];
+    const current = getCommunitiesFromCache() || [];
     updateCacheTopics(current.filter(x => x.toLowerCase() !== t), address);
 }
 
-export async function subscribe(address, topic) {
-    const t = String(topic || '').trim();
+export async function joinCommunity(address, community) {
+    const t = String(community || '').trim();
     if (!t) return [];
     const lower = t.toLowerCase();
     if (lower === 'all' || lower === 'home') return [];
 
-    const result = await transactionHandler.followTopic(t);
+    const result = await transactionHandler.joinCommunity(t);
 
     if (result.success) {
-        scheduleRefresh(address); // Clear cache, start no-cache window
-        addToCache(t, address);   // Will be skipped during no-cache window
-        notifyTopicsUpdated({ added: lower });
+        scheduleRefresh(address);
+        addToCache(t, address);
+        notifyJoinedCommunitiesUpdated({ added: lower });
         return [];
     } else {
-        // "already followed" means the user's intent is satisfied
         const errLower = String(result.error || '').toLowerCase();
-        if (errLower.includes('already followed')) {
+        if (errLower.includes('already followed') || errLower.includes('already joined')) {
             addToCache(t, address);
-            notifyTopicsUpdated({ added: lower });
+            notifyJoinedCommunitiesUpdated({ added: lower });
             return [];
         }
-        console.error('[Subscriptions] Subscribe transaction failed:', result.error);
-        throw new Error(result.error || 'Subscribe failed');
+        console.error('[Subscriptions] Join community transaction failed:', result.error);
+        throw new Error(result.error || 'Join community failed');
     }
 }
 
-export async function unsubscribe(address, topic) {
-    const t = String(topic || '').trim();
+export async function leaveCommunity(address, community) {
+    const t = String(community || '').trim();
     if (!t) return [];
     const lower = t.toLowerCase();
     const membership = await fetchViewerCuratorMembership(lower, address, { fresh: true });
@@ -129,30 +125,23 @@ export async function unsubscribe(address, topic) {
         }
     }
 
-    const result = await transactionHandler.unfollowTopic(t);
+    const result = await transactionHandler.leaveCommunity(t);
 
     if (result.success) {
-        scheduleRefresh(address); // Clear cache, start no-cache window
-        removeFromCache(t, address); // Will be skipped during no-cache window
-        notifyTopicsUpdated({ removed: lower });
+        scheduleRefresh(address);
+        removeFromCache(t, address);
+        notifyJoinedCommunitiesUpdated({ removed: lower });
         invalidateCurationReads(lower);
         return [];
     } else {
-        // "not followed" / "not following" means the user's intent is satisfied
         const errLower = String(result.error || '').toLowerCase();
-        if (errLower.includes('not followed') || errLower.includes('not following')) {
+        if (errLower.includes('not followed') || errLower.includes('not following') || errLower.includes('not joined')) {
             removeFromCache(t, address);
-            notifyTopicsUpdated({ removed: lower });
+            notifyJoinedCommunitiesUpdated({ removed: lower });
             invalidateCurationReads(lower);
             return [];
         }
-        console.error('[Subscriptions] Unsubscribe transaction failed:', result.error);
-        throw new Error(result.error || 'Unsubscribe failed');
+        console.error('[Subscriptions] Leave community transaction failed:', result.error);
+        throw new Error(result.error || 'Leave community failed');
     }
 }
-
-export const loadFollowedTopics = loadSubscriptions;
-export const saveFollowedTopics = () => { };
-export const isFollowingTopic = isSubscribed;
-export const followTopic = subscribe;
-export const unfollowTopic = unsubscribe;

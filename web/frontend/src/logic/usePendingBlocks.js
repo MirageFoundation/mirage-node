@@ -44,11 +44,11 @@ export function usePendingBlocks() {
         return pendingBlocks[key] || null;
     }, [pendingBlocks]);
 
-    const isTopicPending = useCallback((topic) => isPending('topic', topic), [isPending]);
+    const isCommunityPending = useCallback((community) => isPending('community', community), [isPending]);
     const isUserPending = useCallback((user) => isPending('user', user), [isPending]);
     const isPostPending = useCallback((postId) => isPending('post', postId), [isPending]);
 
-    const getTopicInfo = useCallback((topic) => getInfo('topic', topic), [getInfo]);
+    const getCommunityInfo = useCallback((community) => getInfo('community', community), [getInfo]);
     const getUserInfo = useCallback((user) => getInfo('user', user), [getInfo]);
     const getPostInfo = useCallback((postId) => getInfo('post', postId), [getInfo]);
 
@@ -60,7 +60,7 @@ export function usePendingBlocks() {
         return info.action === 'unblock' ? 'Unblocking…' : 'Blocking…';
     }, [getInfo, formatStatusForPosition]);
 
-    const formatTopicStatus = useCallback((topic) => formatStatus('topic', topic), [formatStatus]);
+    const formatCommunityStatus = useCallback((community) => formatStatus('community', community), [formatStatus]);
     const formatUserStatus = useCallback((user) => formatStatus('user', user), [formatStatus]);
     const formatPostStatus = useCallback((postId) => formatStatus('post', postId), [formatStatus]);
 
@@ -68,13 +68,13 @@ export function usePendingBlocks() {
         pendingBlocks,
         isPending,
         getInfo,
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
         isPostPending,
-        getTopicInfo,
+        getCommunityInfo,
         getUserInfo,
         getPostInfo,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
         formatPostStatus,
     };

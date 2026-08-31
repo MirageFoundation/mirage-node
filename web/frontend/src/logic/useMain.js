@@ -4,7 +4,7 @@ import { useLocation, useParams, useNavigationType } from "react-router-dom";
 import Storage from "../utils/Storage";
 import { getAllowedTagsParam } from "../utils/ContentTags";
 import Api from "../utils/api";
-import { fetchFollowedTopics } from "../utils/Subscriptions";
+import { fetchJoinedCommunities } from "../utils/Subscriptions";
 import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
@@ -428,7 +428,7 @@ export function useMain({
     }, [viewerAddress]);
     // Hydrate the local blocked-topics set from the server on login / viewer
     // change. Without this, `isTopicBlockedLocal` only reflects topics the
-    // viewer blocked in THIS session — so visiting /t/<already-blocked>
+    // viewer blocked in THIS session — so visiting /c/<already-blocked>
     // would still render the normal "no posts" state on a fresh page load.
     // On cold load the data is usually already in the bootstrap stash; we
     // consume that first and skip the request entirely.
@@ -461,12 +461,12 @@ export function useMain({
         })();
         return () => { cancelled = true; };
     }, [viewerAddress]);
-    const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
+    const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);
     const {
-        isTopicPending,
-        formatTopicStatus
+        isCommunityPending,
+        formatCommunityStatus
     } = usePendingFollows();
     const followDataLoadedRef = useRef(false);
     const afterSetPostsRef = useRef(0);
@@ -673,9 +673,9 @@ export function useMain({
         const loadFollowData = async () => {
             if (!viewerAddress || viewerAddress === 'guest' || followDataLoadedRef.current) return;
             try {
-                const [topics, authors] = await Promise.all([fetchFollowedTopics(viewerAddress), fetchFollowedUsers(viewerAddress)]);
+                const [topics, authors] = await Promise.all([fetchJoinedCommunities(viewerAddress), fetchFollowedUsers(viewerAddress)]);
                 if (cancelled) return;
-                setFollowedTopicsSet(new Set(topics.map(t => t.toLowerCase())));
+                setJoinedCommunitiesSet(new Set(topics.map(t => t.toLowerCase())));
                 setFollowedAuthorsSet(new Set(authors.map(a => a.toLowerCase())));
                 followDataLoadedRef.current = true;
             } catch (_) { }
@@ -986,7 +986,7 @@ export function useMain({
         });
         Api.get('get_posts', params).then(handleResponse).catch(onError);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback(allowNsfw => {
@@ -1478,7 +1478,7 @@ export function useMain({
         const filtered = urlTopic === "all" || urlTopic === "home" || urlTopic === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
         // Server already returns posts in correct order
         setStableOrder(filtered.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading, isTopicBlockedLocal]);
+    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, joinedCommunitiesSet, followedAuthorsSet, isLoading, isTopicBlockedLocal]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
@@ -1633,21 +1633,21 @@ export function useMain({
                 topic
             });
         };
-        const onTopicBlocked = e => {
-            applyBlockedTopic(e?.detail?.topic || '');
+        const onCommunityBlocked = e => {
+            applyBlockedTopic(e?.detail?.community || '');
             handler();
         };
-        const onTopicUnblocked = e => {
-            removeBlockedTopic(e?.detail?.topic || '');
+        const onCommunityUnblocked = e => {
+            removeBlockedTopic(e?.detail?.community || '');
             handler();
         };
         window.addEventListener('mirageRefreshFeed', handler);
-        window.addEventListener('topicBlocked', onTopicBlocked);
-        window.addEventListener('topicUnblocked', onTopicUnblocked);
+        window.addEventListener('communityBlocked', onCommunityBlocked);
+        window.addEventListener('communityUnblocked', onCommunityUnblocked);
         return () => {
             window.removeEventListener('mirageRefreshFeed', handler);
-            window.removeEventListener('topicBlocked', onTopicBlocked);
-            window.removeEventListener('topicUnblocked', onTopicUnblocked);
+            window.removeEventListener('communityBlocked', onCommunityBlocked);
+            window.removeEventListener('communityUnblocked', onCommunityUnblocked);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [getPosts, urlTopic]);
@@ -1673,12 +1673,12 @@ export function useMain({
         isTopicBlockedLocal,
         location,
         viewerAddress,
-        followedTopicsSet,
-        setFollowedTopicsSet,
+        joinedCommunitiesSet,
+        setJoinedCommunitiesSet,
         topicFollowHover,
         setTopicFollowHover,
-        isTopicPending,
-        formatTopicStatus,
+        isCommunityPending,
+        formatCommunityStatus,
         forceHardRefreshRef,
         dismissAndroidBanner,
         dismissIPhoneBanner,

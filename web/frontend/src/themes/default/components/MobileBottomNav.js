@@ -240,7 +240,7 @@ function MobileBottomNav({ state }) {
 
     const shouldHide = HIDDEN_ROUTES.some(route => pathname === route || pathname.startsWith(route));
 
-    const isHomeActive = isPathActive(pathname, ['/', '/home', '/following']) || pathname.startsWith('/c/') || pathname.startsWith('/t/');
+    const isHomeActive = isPathActive(pathname, ['/', '/home', '/following']) || pathname.startsWith('/c/');
     const isSearchActive = pathname === '/search' || pathname.startsWith('/search');
     const isCreateActive = pathname === '/create_post';
     const isInboxActive = pathname === '/inbox';
@@ -369,7 +369,7 @@ function MobileBottomNav({ state }) {
         if (isProfileSheetOpen) setIsProfileSheetOpen(false);
 
         const isAlreadyOnRoute = pathname === targetPath ||
-            (targetPath === '/home' && (pathname === '/' || pathname === '/home' || pathname.startsWith('/c/') || pathname.startsWith('/t/')));
+            (targetPath === '/home' && (pathname === '/' || pathname === '/home' || pathname.startsWith('/c/')));
 
         window.scrollTo({ top: 0, behavior: 'instant' });
 
@@ -393,7 +393,7 @@ function MobileBottomNav({ state }) {
     // LoggedOutPromptCard logged-out users see on large screens — avoids
     // dumping them straight onto the signup form.
     const createLink = hasPublicKey && currentTopic
-        ? `/create_post?topic=${encodeURIComponent(currentTopic)}`
+        ? `/create_post?community=${encodeURIComponent(currentTopic)}`
         : '/create_post';
 
     return ReactDOM.createPortal(

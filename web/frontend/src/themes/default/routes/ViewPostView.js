@@ -26,6 +26,7 @@ import { getAuthorColor, getAuthorTooltip } from "../../../utils/tierColors";
 import { Tooltip, tooltipStyles } from "../components/Tooltip.js";
 import { useViewPost, formatTimeStamp, formatElapsed } from "../../../logic/useViewPost";
 import { normalizeTag } from "../../../utils/ContentTags";
+import { isOptimisticallyCurationHidden } from "../../../utils/curationVisibility";
 import ConfirmDialog from "../components/ConfirmDialog.js";
 import { GiftMirageDialog, GiftSubscriptionDialog, GiveAwardDialog } from "../components/GiftDialogs.js";
 import { useBlocks } from "../../../logic/useBlocks";
@@ -1694,7 +1695,7 @@ function ViewPostView({
         isBlocking,
         confirmBlockPost,
         confirmBlockUser,
-        confirmBlockTopic,
+        confirmBlockCommunity,
         confirmDeletePost,
         isDeleting,
         deleteMessages,
@@ -1728,9 +1729,9 @@ function ViewPostView({
         isMobile,
         goBackToFeed,
         viewerAddress,
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
         isSendPending,
         formatSendStatus,
@@ -1744,8 +1745,8 @@ function ViewPostView({
         menuDropdownRef,
         isFollowingAuthor,
         handleFollowToggle,
-        isSubscribedTopic,
-        handleTopicFollowToggle,
+        isJoinedCommunity,
+        handleCommunityJoinToggle,
         replyUploadProgress,
         setReplyUploadProgress,
         replyEditorUpload,
@@ -1770,8 +1771,8 @@ function ViewPostView({
         cancelBlockPost,
         confirmBlockUserAction,
         cancelBlockUser,
-        confirmBlockTopicAction,
-        cancelBlockTopic,
+        confirmBlockCommunityAction,
+        cancelBlockCommunity,
         confirmReportAction,
         cancelReport,
         handleDeletePost,
@@ -1814,6 +1815,14 @@ function ViewPostView({
         lens: threadLens.lens,
         teamId: threadLens.teamId,
     });
+    const [, setCurationVisibilityRevision] = useState(0);
+    useEffect(() => {
+        const handleOptimisticModeration = () => {
+            setCurationVisibilityRevision((current) => current + 1);
+        };
+        window.addEventListener('curationModerationOptimistic', handleOptimisticModeration);
+        return () => window.removeEventListener('curationModerationOptimistic', handleOptimisticModeration);
+    }, []);
 
     const handleThreadLensChange = useCallback((nextLens, nextTeamId) => {
         const next = normalizeLens(nextLens, nextTeamId);
@@ -2183,7 +2192,7 @@ function ViewPostView({
         // the remaining flows (donate, gift sub, award) still render below.
         if (confirmBlockPost === post.post_id) return null;
         if (confirmBlockUser?.postId === post.post_id) return null;
-        if (confirmBlockTopic?.postId === post.post_id) return null;
+        if (confirmBlockCommunity?.postId === post.post_id) return null;
         if (confirmDeletePost === post.post_id) return null;
         // Report popup moved to a root-level `ConfirmDialog` (06.3 polish).
         if (confirmReportPost === post.post_id) return null;
@@ -2308,7 +2317,7 @@ function ViewPostView({
                     const isRootPost = !!(post.title && String(post.title).trim() !== '');
                     const itemLabel = isRootPost ? 'post' : 'comment';
                     const topicLower = (post && typeof post.topic === 'string') ? post.topic.trim().toLowerCase() : '';
-                    const followingTopic = topicLower ? isSubscribedTopic(topicLower) : false;
+                    const joinedCommunity = topicLower ? isJoinedCommunity(topicLower) : false;
                     const postLinkPath = isRootPost
                         ? `/p/${post.post_id}`
                         : `/p/${post.post_id}`;
@@ -2386,12 +2395,12 @@ function ViewPostView({
                                 {isFollowingThisAuthor ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
                                 <span>{isUserPending(authorAddr) ? formatUserStatus(authorAddr) : isFollowingThisAuthor ? 'Unfollow user' : 'Follow user'}</span>
                             </MenuItem>
-                            {isRootPost && post?.topic && <MenuItem disabled={isTopicPending(topicLower)} onClick={() => {
+                            {isRootPost && post?.topic && <MenuItem disabled={isCommunityPending(topicLower)} onClick={() => {
                                 setOpenMenuId(null);
-                                handleTopicFollowToggle(post.topic);
+                                handleCommunityJoinToggle(post.topic);
                             }}>
                                 <HiOutlineHashtag />
-                                <span>{isTopicPending(topicLower) ? formatTopicStatus(topicLower) : followingTopic ? 'Leave community' : 'Join community'}</span>
+                                <span>{isCommunityPending(topicLower) ? formatCommunityStatus(topicLower) : joinedCommunity ? 'Leave community' : 'Join community'}</span>
                             </MenuItem>}
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2984,8 +2993,8 @@ function ViewPostView({
                             {(() => {
                                 const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
                                 const topicLower = displayTopic.toLowerCase();
-                                const isTopicFollowing = isSubscribedTopic(topicLower);
-                                const isTopicInProgress = isTopicPending(topicLower);
+                                const isJoined = isJoinedCommunity(topicLower);
+                                const isCommunityInProgress = isCommunityPending(topicLower);
                                 const hasValidAccount = state.publicKey && state.publicKey !== 'guest';
                                 return <TopicHeroWrapper>
                                     <TopicHeroCard role="region" aria-label="Community context">
@@ -3007,10 +3016,10 @@ function ViewPostView({
                                             </BackButton>
                                             <TopicHeroMobileActions>
                                                 {hasValidAccount && <CommunityMembershipButton
-                                                    joined={isTopicFollowing}
-                                                    pending={isTopicInProgress}
-                                                    statusLabel={formatTopicStatus(topicLower)}
-                                                    onToggle={() => handleTopicFollowToggle(displayTopic)}
+                                                    joined={isJoined}
+                                                    pending={isCommunityInProgress}
+                                                    statusLabel={formatCommunityStatus(topicLower)}
+                                                    onToggle={() => handleCommunityJoinToggle(displayTopic)}
                                                 />}
                                                 {renderHeaderLensPicker(displayTopic)}
                                             </TopicHeroMobileActions>
@@ -3037,11 +3046,11 @@ function ViewPostView({
                                         {/* Desktop: Follow button */}
                                         <TopicAction>
                                             {hasValidAccount && <CommunityMembershipButton
-                                                joined={isTopicFollowing}
-                                                pending={isTopicInProgress}
-                                                statusLabel={formatTopicStatus(topicLower)}
+                                                joined={isJoined}
+                                                pending={isCommunityInProgress}
+                                                statusLabel={formatCommunityStatus(topicLower)}
                                                 communityLabel={communityLabel(displayTopic)}
-                                                onToggle={() => handleTopicFollowToggle(displayTopic)}
+                                                onToggle={() => handleCommunityJoinToggle(displayTopic)}
                                             />}
                                             {renderHeaderLensPicker(displayTopic)}
                                         </TopicAction>
@@ -3049,7 +3058,11 @@ function ViewPostView({
                                 </TopicHeroWrapper>;
                             })()}
                             {(() => {
-                                const visibleAnnotated = annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id));
+                                const visibleAnnotated = annotated.filter(p => (
+                                    !p.hidden
+                                    && !deletedPosts.has(p.post_id)
+                                    && !isOptimisticallyCurationHidden(p)
+                                ));
                                 const ancestorDepthsMap = visibleAnnotated.map((_, idx) => getAncestorRailDepths(visibleAnnotated, idx));
                                 return visibleAnnotated.map((post, idx) => {
                                     const normalizedPostId = String(post.post_id).toLowerCase();
@@ -3311,15 +3324,20 @@ function ViewPostView({
                                                 {typeof post.comments === 'number' && <CommentsHeaderCount>({post.comments})</CommentsHeaderCount>}
                                             </CommentsHeaderTitle>
                                         </CommentsHeaderRow>}
-                                        {isRoot && annotated.filter(p => !p.hidden && !deletedPosts.has(p.post_id) && p.level > 0).length === 0 && <VPStateBlock>
-                                            <VPStateIcon>
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                                                </svg>
-                                            </VPStateIcon>
-                                            <VPStateTitle>No comments yet</VPStateTitle>
-                                            <VPStateMessage>Be the first to share your thoughts.</VPStateMessage>
-                                        </VPStateBlock>}
+                                        {isRoot && annotated.filter(p => (
+                                            !p.hidden
+                                            && !deletedPosts.has(p.post_id)
+                                            && !isOptimisticallyCurationHidden(p)
+                                            && p.level > 0
+                                        )).length === 0 && <VPStateBlock>
+                                                <VPStateIcon>
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                                    </svg>
+                                                </VPStateIcon>
+                                                <VPStateTitle>No comments yet</VPStateTitle>
+                                                <VPStateMessage>Be the first to share your thoughts.</VPStateMessage>
+                                            </VPStateBlock>}
                                         {/* Continue thread link for deeply nested comments with unloaded children */}
                                         {(() => {
                                             // Don't show for root post
@@ -3356,7 +3374,7 @@ function ViewPostView({
               * Rendered at the route root so a single `ConfirmDialog` owns
               * the modal UI for the whole page. The existing state machine
               * in `useViewPost` (`confirmBlockPost`, `confirmBlockUser`,
-              * `confirmBlockTopic`, `confirmReportPost`) drives visibility;
+              * `confirmBlockCommunity`, `confirmReportPost`) drives visibility;
               * the on-click handlers still live inside the hook.
               *
               * Username lookup uses `state.posts[postId]?.username` so the
@@ -3407,14 +3425,14 @@ function ViewPostView({
                         onCancel={cancelBlockUser}
                     />
                     <ConfirmDialog
-                        open={!!confirmBlockTopic}
-                        title={`Block ${communityLabel(confirmBlockTopic?.topic || 'community')}?`}
+                        open={!!confirmBlockCommunity}
+                        title={`Block ${communityLabel(confirmBlockCommunity?.community || 'community')}?`}
                         message="Posts in this community will stop appearing in your Home and discovery feeds."
                         confirmLabel="Block community"
                         confirmVariant="danger"
                         pending={isBlocking}
-                        onConfirm={confirmBlockTopicAction}
-                        onCancel={cancelBlockTopic}
+                        onConfirm={confirmBlockCommunityAction}
+                        onCancel={cancelBlockCommunity}
                     />
                     {(() => {
                         const deletePostId = confirmDeletePost;

@@ -27,6 +27,10 @@ import {
     registerCommunityLeaveConfirmationHandler,
     requestCommunityLeaveConfirmation,
 } from '../../src/utils/communityLeaveConfirmation.js';
+import {
+    isOptimisticallyCurationHidden,
+    setOptimisticCurationVisibility,
+} from '../../src/utils/curationVisibility.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendSrc = join(here, '../../src');
@@ -73,6 +77,35 @@ describe('community leave confirmation', () => {
         await expect(requestCommunityLeaveConfirmation(details)).resolves.toBe(true);
         expect(handler).toHaveBeenCalledWith(details);
         unregister();
+    });
+});
+
+describe('optimistic curation visibility', () => {
+    it('retains bans across route consumers until an unban clears them', () => {
+        const post = {
+            post_id: 'post-1',
+            user_id: 'mirage1author',
+            topic: 'tech',
+            lens: { effective_team_id: 7 },
+        };
+        for (const [kind, target] of [['post', 'post-1'], ['user', 'mirage1author']]) {
+            setOptimisticCurationVisibility({
+                community: 'tech',
+                teamId: 7,
+                kind,
+                target,
+                hidden: true,
+            });
+            expect(isOptimisticallyCurationHidden(post)).toBe(true);
+            setOptimisticCurationVisibility({
+                community: 'tech',
+                teamId: 7,
+                kind,
+                target,
+                hidden: false,
+            });
+            expect(isOptimisticallyCurationHidden(post)).toBe(false);
+        }
     });
 });
 
@@ -145,6 +178,46 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/useViewerCuratorMembership/);
         expect(pickerSrc).not.toMatch(/ManageLink/);
         expect(pickerSrc).not.toMatch(/Curator teams/);
+    });
+
+    it('does not keep topic or agent routes as compatibility redirects', () => {
+        const appSrc = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
+        expect(appSrc).not.toMatch(/path="\/t\//);
+        expect(appSrc).not.toMatch(/path="\/topics"/);
+        expect(appSrc).not.toMatch(/path="\/agents"/);
+        expect(appSrc).not.toMatch(/TopicToCommunityRedirect/);
+
+        const handler = readFileSync(join(frontendSrc, 'utils/TransactionHandler.js'), 'utf8');
+        expect(handler).not.toMatch(/followTopic/);
+        expect(handler).not.toMatch(/unfollowTopic/);
+        expect(handler).not.toMatch(/blockTopic/);
+        expect(handler).not.toMatch(/unblockTopic/);
+        expect(handler).not.toMatch(/MsgFollowTopic/);
+        expect(handler).not.toMatch(/MsgUnfollowTopic/);
+
+        const txApi = readFileSync(join(frontendSrc, 'utils/tx.js'), 'utf8');
+        expect(txApi).not.toMatch(/followTopic/);
+        expect(txApi).not.toMatch(/unfollowTopic/);
+        expect(txApi).not.toMatch(/function blockTopic/);
+        expect(txApi).not.toMatch(/function unblockTopic/);
+
+        const subscriptions = readFileSync(join(frontendSrc, 'utils/Subscriptions.js'), 'utf8');
+        expect(subscriptions).toMatch(/export async function joinCommunity/);
+        expect(subscriptions).toMatch(/export async function leaveCommunity/);
+        expect(subscriptions).not.toMatch(/export async function subscribe\(/);
+        expect(subscriptions).not.toMatch(/export const followTopic/);
+        expect(subscriptions).not.toMatch(/export const unfollowTopic/);
+
+        const aasa = readFileSync(
+            join(here, '../../public/.well-known/apple-app-site-association'),
+            'utf8',
+        );
+        expect(aasa).toMatch(/\/c\/\*/);
+        expect(aasa).toMatch(/\/communities/);
+        expect(aasa).not.toMatch(/\/t\/\*/);
+        expect(aasa).not.toMatch(/\/topics/);
+        expect(aasa).not.toMatch(/\/agents/);
+        expect(aasa).not.toMatch(/\/referrals/);
     });
 
     it('redirects the obsolete team listing route to the community', () => {
@@ -355,6 +428,8 @@ describe('v1.39 curation UI contracts', () => {
         expect(detail).toMatch(/useHiddenCurationPosts/);
         expect(detail).toMatch(/moderateCurationUser/);
         expect(detail).toMatch(/moderateCurationPost/);
+        expect(detail).toMatch(/list\.removeOptimistically\(item\)/);
+        expect(detail).toMatch(/list\.restoreOptimistically\(item\)/);
         expect(detail).toMatch(/Load 50 more/);
         expect(detail).toMatch(/FormActions/);
         expect(detail).toMatch(/justify-content: flex-end/);
@@ -368,6 +443,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(teamsHook).toMatch(/HIDDEN_LIST_MORE/);
         expect(teamsHook).toMatch(/'hidden-users'/);
         expect(teamsHook).toMatch(/'hidden-posts'/);
+        expect(teamsHook).toMatch(/optimisticallyRemovedRef/);
+        expect(teamsHook).toMatch(/removeOptimistically/);
+        expect(teamsHook).toMatch(/restoreOptimistically/);
         const curationUtils = readFileSync(
             join(frontendSrc, 'utils/curation.js'),
             'utf8',
@@ -493,6 +571,10 @@ describe('v1.39 curation UI contracts', () => {
             join(frontendSrc, 'logic/usePostCurateActions.js'),
             'utf8',
         );
+        const curationVisibility = readFileSync(
+            join(frontendSrc, 'utils/curationVisibility.js'),
+            'utf8',
+        );
         const mainView = readFileSync(
             join(frontendSrc, 'themes/default/routes/MainView.js'),
             'utf8',
@@ -527,6 +609,10 @@ describe('v1.39 curation UI contracts', () => {
         expect(curateItems).toMatch(/updatePost/);
         expect(actions).toMatch(/viewingAsCuratorTeam/);
         expect(actions).toMatch(/viewingTeamId === teamId/);
+        expect(actions).toMatch(/const isOwnContent = !!author && author === viewer/);
+        expect(actions).toMatch(/isCurator && !isOwnContent/);
+        expect(postMenu).toMatch(/String\(authorAddress\)\.toLowerCase\(\) === String\(viewerAddress\)\.toLowerCase\(\)/);
+        expect(postMenu).toMatch(/if \(isOwnPost && !curateVisible\) return null/);
         expect(cardView).toMatch(/PostLensPicker/);
         expect(viewPost).toMatch(/PostLensPicker/);
         expect(listFeed).toMatch(/PostLensPicker/);
@@ -567,13 +653,16 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/Unban post/);
         expect(actions).toMatch(/Ban user/);
         expect(actions).toMatch(/Unban user/);
-        expect(actions).toMatch(/curationModerationOptimistic/);
+        expect(actions).toMatch(/setOptimisticCurationVisibility/);
+        expect(curationVisibility).toMatch(/curationModerationOptimistic/);
+        expect(curationVisibility).toMatch(/const hiddenPosts = new Set\(\)/);
+        expect(curationVisibility).toMatch(/const hiddenUsers = new Set\(\)/);
         expect(actions).toMatch(/applyDisplayedVisibility\('post', postId, optimistic\.postHidden\)/);
         expect(actions).toMatch(/applyDisplayedVisibility\('user', author, optimistic\.userHidden\)/);
         expect(mainView).toMatch(/window\.addEventListener\('curationModerationOptimistic'/);
-        expect(mainView).toMatch(/optimisticCurationPostsRef/);
-        expect(mainView).toMatch(/optimisticCurationUsersRef/);
         expect(mainView).toMatch(/if \(isOptimisticallyCurationHidden\(p\)\) return false;/);
+        expect(viewPost).toMatch(/window\.addEventListener\('curationModerationOptimistic'/);
+        expect(viewPost).toMatch(/&& !isOptimisticallyCurationHidden\(p\)/);
         expect(actions).toMatch(/Lock thread/);
         expect(actions).toMatch(/Unlock thread/);
         // Toggle: only one of each pair is pushed per state branch.
@@ -754,8 +843,8 @@ describe('v1.39 curation UI contracts', () => {
         expect(subscriptions).toMatch(/fetchViewerCuratorMembership\(lower, address, \{ fresh: true \}\)/);
         expect(subscriptions).toMatch(/requestCommunityLeaveConfirmation/);
         expect(app).toMatch(/<CommunityLeaveConfirmation \/>/);
-        expect(follows).toMatch(/await unsubscribe\(address, topicTrimmed\)/);
-        expect(follows).not.toMatch(/tx\.unfollowTopic/);
+        expect(follows).toMatch(/await leaveCommunity\(address, topicTrimmed\)/);
+        expect(follows).not.toMatch(/tx\.leaveCommunity/);
     });
 
     it('invalidates curation reads once the created team is indexed', () => {
@@ -768,7 +857,7 @@ describe('v1.39 curation UI contracts', () => {
         // otherwise the refetch re-caches the pre-team state it is replacing.
         const waitAt = teamsView.indexOf('waitForOwnCurationTeam(nextSlug');
         const invalidateAt = teamsView.indexOf('invalidateCurationReads(nextSlug)');
-        const topicsAt = teamsView.indexOf('notifyTopicsUpdated({ added: nextSlug })');
+        const topicsAt = teamsView.indexOf('notifyJoinedCommunitiesUpdated({ added: nextSlug })');
         expect(waitAt).toBeGreaterThan(-1);
         expect(invalidateAt).toBeGreaterThan(waitAt);
         expect(topicsAt).toBeGreaterThan(invalidateAt);

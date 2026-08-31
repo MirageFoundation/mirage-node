@@ -48,28 +48,28 @@ export function usePendingFollows() {
         return pendingFollows[key] || null;
     }, [pendingFollows]);
 
-    const isTopicPending = useCallback((topic) => {
-        return isPending('topic', topic);
+    const isCommunityPending = useCallback((community) => {
+        return isPending('community', community);
     }, [isPending]);
 
     const isUserPending = useCallback((user) => {
         return isPending('user', user);
     }, [isPending]);
 
-    const getTopicInfo = useCallback((topic) => {
-        return getInfo('topic', topic);
+    const getCommunityInfo = useCallback((community) => {
+        return getInfo('community', community);
     }, [getInfo]);
 
     const getUserInfo = useCallback((user) => {
         return getInfo('user', user);
     }, [getInfo]);
 
-    const formatTopicStatus = useCallback((topic) => {
-        const info = getInfo('topic', topic);
+    const formatCommunityStatus = useCallback((community) => {
+        const info = getInfo('community', community);
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
-        return info.action === 'unfollow' ? 'Leaving…' : 'Joining…';
+        return info.action === 'leave' ? 'Leaving…' : 'Joining…';
     }, [getInfo, formatStatusForPosition]);
 
     const formatUserStatus = useCallback((user) => {
@@ -84,11 +84,11 @@ export function usePendingFollows() {
         pendingFollows,
         isPending,
         getInfo,
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        getTopicInfo,
+        getCommunityInfo,
         getUserInfo,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
     };
 }

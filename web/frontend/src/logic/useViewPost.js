@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as tx from "../utils/tx.js";
 import Api from "../utils/api";
 import Storage from "../utils/Storage";
-import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";
 import { usePendingSends } from "./usePendingSends.js";
@@ -100,7 +100,7 @@ export function useViewPost({
     const [isBlocking, setIsBlocking] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(null);
     const [confirmBlockUser, setConfirmBlockUser] = useState(null); // { userId, postId }
-    const [confirmBlockTopic, setConfirmBlockTopic] = useState(null); // { topic, postId }
+    const [confirmBlockCommunity, setConfirmBlockCommunity] = useState(null); // { community, postId }
     const [confirmDeletePost, setConfirmDeletePost] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteMessages, setDeleteMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
@@ -162,7 +162,7 @@ export function useViewPost({
     const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
-    // reliably return to the originating feed route (including /t/:topic).
+    // reliably return to the originating feed route (including /c/:community).
     const openedFromFeedInfoRef = useRef(null);
     if (openedFromFeedInfoRef.current === null) {
         openedFromFeedInfoRef.current = (() => {
@@ -306,6 +306,9 @@ export function useViewPost({
             // last_feed_route only started tracking /c/ after v1.39; a stale
             // "/home" here would strand community readers on the wrong feed.
             let target = typeof last === 'string' && last.startsWith('/') ? last : '';
+            if (target.startsWith('/t/') || target === '/topics' || target === '/agents') {
+                target = '';
+            }
             if (!target || target === '/home' || target === '/') {
                 if (postCommunity) target = `/c/${encodeURIComponent(postCommunity)}`;
                 else target = '/home';
@@ -315,7 +318,7 @@ export function useViewPost({
                     if (openedFromFeedInfoRef.current?.topic) return openedFromFeedInfoRef.current.topic;
                     if (route === '/home') return 'home';
                     if (route === '/following') return 'following';
-                    if (route.startsWith('/c/') || route.startsWith('/t/')) {
+                    if (route.startsWith('/c/')) {
                         const withoutPrefix = route.slice(3);
                         const segment = withoutPrefix.split('?')[0].split('#')[0].split('/')[0];
                         const trimmed = String(segment || '').trim();
@@ -354,12 +357,12 @@ export function useViewPost({
     };
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
-    const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
+    const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);
     const {
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus
     } = usePendingFollows();
     const {
@@ -403,10 +406,10 @@ export function useViewPost({
         const loadFollowed = async () => {
             if (!viewerAddress || viewerAddress === 'guest') return;
             try {
-                const [authors, topics] = await Promise.all([fetchFollowedUsers(viewerAddress), fetchFollowedTopics(viewerAddress)]);
+                const [authors, topics] = await Promise.all([fetchFollowedUsers(viewerAddress), fetchJoinedCommunities(viewerAddress)]);
                 if (!cancelled) {
                     setFollowedAuthorsSet(new Set(authors.map(a => a.toLowerCase())));
-                    setFollowedTopicsSet(new Set(topics.map(t => t.toLowerCase())));
+                    setJoinedCommunitiesSet(new Set(topics.map(t => t.toLowerCase())));
                 }
             } catch (_) { }
         };
@@ -444,30 +447,30 @@ export function useViewPost({
             console.error('[ViewPostView] Follow toggle error:', e);
         }
     };
-    const isSubscribedTopic = topic => {
-        return followedTopicsSet.has(String(topic || '').toLowerCase());
+    const isJoinedCommunity = topic => {
+        return joinedCommunitiesSet.has(String(topic || '').toLowerCase());
     };
-    const handleTopicFollowToggle = async topic => {
+    const handleCommunityJoinToggle = async topic => {
         const t = String(topic || '').trim().toLowerCase();
-        if (!t || isTopicPending(t)) return;
+        if (!t || isCommunityPending(t)) return;
         if (!requireAccount('join communities')) return;
-        const wasSubscribed = isSubscribedTopic(topic);
+        const wasSubscribed = isJoinedCommunity(topic);
         // Optimistic update
         if (wasSubscribed) {
-            setFollowedTopicsSet(prev => {
+            setJoinedCommunitiesSet(prev => {
                 const next = new Set(prev);
                 next.delete(t);
                 return next;
             });
         } else {
-            setFollowedTopicsSet(prev => new Set([...prev, t]));
+            setJoinedCommunitiesSet(prev => new Set([...prev, t]));
         }
         try {
             if (wasSubscribed) {
-                await unsubscribe(viewerAddress, topic);
+                await leaveCommunity(viewerAddress, topic);
                 updateNotification(`Left ${communityLabel(t)}`);
             } else {
-                await subscribe(viewerAddress, topic);
+                await joinCommunity(viewerAddress, topic);
                 updateNotification(`Joined ${communityLabel(t)}`);
             }
             invalidateTopicsCache();
@@ -476,9 +479,9 @@ export function useViewPost({
             console.error('[ViewPostView] Community membership toggle error:', e);
             // Revert on error
             if (wasSubscribed) {
-                setFollowedTopicsSet(prev => new Set([...prev, t]));
+                setJoinedCommunitiesSet(prev => new Set([...prev, t]));
             } else {
-                setFollowedTopicsSet(prev => {
+                setJoinedCommunitiesSet(prev => {
                     const next = new Set(prev);
                     next.delete(t);
                     return next;
@@ -765,7 +768,7 @@ export function useViewPost({
         setConfirmBlockUser(null);
         clearBlockMessages();
     };
-    const handleBlockTopic = (topicName, postId) => {
+    const handleBlockCommunity = (topicName, postId) => {
         const t = (topicName || "").trim().toLowerCase();
         if (!t) {
             showBlockError("Invalid community");
@@ -777,17 +780,17 @@ export function useViewPost({
         setConfirmReportPost(null);
         setConfirmDeletePost(null);
         setConfirmDonate(null);
-        setConfirmBlockTopic({
-            topic: t,
+        setConfirmBlockCommunity({
+            community: t,
             postId
         });
     };
-    const confirmBlockTopicAction = async () => {
-        const topicName = confirmBlockTopic?.topic;
-        setConfirmBlockTopic(null);
+    const confirmBlockCommunityAction = async () => {
+        const communityName = confirmBlockCommunity?.community;
+        setConfirmBlockCommunity(null);
         setIsBlocking(true);
         try {
-            const result = await tx.blockTopic(topicName);
+            const result = await tx.blockCommunity(communityName);
             if (result.success) {
                 showBlockSuccess("Community blocked successfully!");
             } else {
@@ -800,8 +803,8 @@ export function useViewPost({
             setIsBlocking(false);
         }
     };
-    const cancelBlockTopic = () => {
-        setConfirmBlockTopic(null);
+    const cancelBlockCommunity = () => {
+        setConfirmBlockCommunity(null);
         clearBlockMessages();
     };
     const handleReport = postId => {
@@ -2683,7 +2686,7 @@ export function useViewPost({
         isBlocking,
         confirmBlockPost,
         confirmBlockUser,
-        confirmBlockTopic,
+        confirmBlockCommunity,
         confirmDeletePost,
         isDeleting,
         deleteMessages,
@@ -2721,9 +2724,9 @@ export function useViewPost({
         viewerAddress,
         topicFollowHover,
         setTopicFollowHover,
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
         isSendPending,
         formatSendStatus,
@@ -2737,8 +2740,8 @@ export function useViewPost({
         menuDropdownRef,
         isFollowingAuthor,
         handleFollowToggle,
-        isSubscribedTopic,
-        handleTopicFollowToggle,
+        isJoinedCommunity,
+        handleCommunityJoinToggle,
         replyUploadProgress,
         setReplyUploadProgress,
         replyEditorUpload,
@@ -2765,9 +2768,9 @@ export function useViewPost({
         handleBlockUser,
         confirmBlockUserAction,
         cancelBlockUser,
-        handleBlockTopic,
-        confirmBlockTopicAction,
-        cancelBlockTopic,
+        handleBlockCommunity,
+        confirmBlockCommunityAction,
+        cancelBlockCommunity,
         handleReport,
         confirmReportAction,
         cancelReport,

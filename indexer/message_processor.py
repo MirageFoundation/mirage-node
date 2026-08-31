@@ -2474,6 +2474,14 @@ class MessageProcessor:
                             """,
                             (owner, community, mode, team_id, int(height)),
                         )
+                logger.info(
+                    "[curation] projected preference owner=%s community=%s mode=%s team_id=%s height=%s",
+                    owner,
+                    community,
+                    mode,
+                    team_id,
+                    height,
+                )
                 continue
 
             moderation_events = {

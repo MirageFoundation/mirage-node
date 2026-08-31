@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
-import { subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { useLocation } from "react-router-dom";
 import { requireAccount } from "../utils/openBrowsing";
@@ -82,11 +82,11 @@ export function useDiscover({
     const [isSearching, setIsSearching] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
-    const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
+    const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
     const [hoverTopic, setHoverTopic] = useState(null);
     const {
-        isTopicPending,
-        formatTopicStatus
+        isCommunityPending,
+        formatCommunityStatus
     } = usePendingFollows();
     const mountedRef = useRef(true);
     const searchRequestId = useRef(0);
@@ -187,47 +187,47 @@ export function useDiscover({
     }, [searchTerm, topics]);
     useEffect(() => {
         let cancelled = false;
-        const loadFollowedTopics = async () => {
+        const loadJoinedCommunities = async () => {
             if (!viewerAddress || viewerAddress === 'guest') return;
             try {
-                const list = await fetchFollowedTopics(viewerAddress);
+                const list = await fetchJoinedCommunities(viewerAddress);
                 if (!cancelled && mountedRef.current) {
-                    setFollowedTopicsSet(new Set(list.map(t => t.toLowerCase())));
+                    setJoinedCommunitiesSet(new Set(list.map(t => t.toLowerCase())));
                 }
             } catch (_) { }
         };
-        loadFollowedTopics();
+        loadJoinedCommunities();
         return () => {
             cancelled = true;
         };
     }, [viewerAddress]);
-    const isSubscribedTopic = useCallback(topic => {
-        return followedTopicsSet.has(String(topic || '').toLowerCase());
-    }, [followedTopicsSet]);
+    const isJoinedCommunity = useCallback(topic => {
+        return joinedCommunitiesSet.has(String(topic || '').toLowerCase());
+    }, [joinedCommunitiesSet]);
     const handleSubscribeToggle = useCallback(async topic => {
         const t = String(topic || '').toLowerCase();
-        if (!t || isTopicPending(t)) return;
+        if (!t || isCommunityPending(t)) return;
         if (!requireAccount('join a community')) return;
-        const wasSubscribed = isSubscribedTopic(topic);
+        const wasSubscribed = isJoinedCommunity(topic);
         try {
             if (wasSubscribed) {
-                await unsubscribe(viewerAddress, topic);
+                await leaveCommunity(viewerAddress, topic);
                 if (mountedRef.current) {
-                    setFollowedTopicsSet(prev => {
+                    setJoinedCommunitiesSet(prev => {
                         const next = new Set(prev);
                         next.delete(t);
                         return next;
                     });
                 }
             } else {
-                await subscribe(viewerAddress, topic);
+                await joinCommunity(viewerAddress, topic);
                 if (mountedRef.current) {
-                    setFollowedTopicsSet(prev => new Set([...prev, t]));
+                    setJoinedCommunitiesSet(prev => new Set([...prev, t]));
                 }
             }
             invalidateTopicsCache();
         } catch (_) { }
-    }, [viewerAddress, isTopicPending, isSubscribedTopic]);
+    }, [viewerAddress, isCommunityPending, isJoinedCommunity]);
     const location = useLocation();
     return {
         filteredTopics,
@@ -240,9 +240,9 @@ export function useDiscover({
         error,
         hoverTopic,
         setHoverTopic,
-        isTopicPending,
-        formatTopicStatus,
-        isSubscribedTopic,
+        isCommunityPending,
+        formatCommunityStatus,
+        isJoinedCommunity,
         handleSubscribeToggle,
         location
     };

@@ -267,6 +267,23 @@ def test_curation_backend(backend: str) -> None:
     else:
         _fail("curation.backend_hidden_users_curator_only", f"code={code} body={forbidden}")
 
+    free_join = _do_follow_topic(backend, free, slug, follow=True, skip_pow=False)
+    free_join_tx = _tx_ok(free_join)
+    if not free_join_tx or not _wait_tx_status(
+        backend, free_join_tx, expect_type="join_community", require_details=False
+    ):
+        _fail("curation.backend_banned_user_join", f"resp={free_join}")
+        return
+    free_pin = _do_set_curation_preference(
+        backend, free, slug, mode=1, pinned_team_id=team_id, skip_pow=False
+    )
+    free_pin_tx = _tx_ok(free_pin)
+    if not free_pin_tx or not _wait_tx_status(
+        backend, free_pin_tx, expect_type="set_curation_preference", require_details=False
+    ):
+        _fail("curation.backend_banned_user_pin", f"resp={free_pin}")
+        return
+
     hide_user = _do_set_curation_user_hidden(backend, sub, slug, team_id, free_addr, hidden=True, skip_pow=True)
     hide_user_tx = _tx_ok(hide_user)
     if not hide_user_tx:
@@ -276,6 +293,42 @@ def test_curation_backend(backend: str) -> None:
         _fail("curation.backend_hide_user_indexed", f"tx={hide_user_tx}")
         return
     _pass("curation.backend_hide_user")
+
+    rerouted = False
+    last_detail: dict | None = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        code, last_detail = _get(f"{backend}/api/communities/{slug}", {"viewer": free_addr})
+        rerouted = (
+            code == 200
+            and isinstance(last_detail, dict)
+            and int(last_detail.get("stored_mode", -1)) == 2
+            and int(last_detail.get("effective_mode", -1)) == 2
+            and last_detail.get("stored_team_id") is None
+            and last_detail.get("effective_team_id") is None
+        )
+        if rerouted:
+            break
+        time.sleep(0.5)
+    if rerouted:
+        _pass("curation.backend_banned_user_falls_back_to_uncensored")
+    else:
+        _fail("curation.backend_banned_user_falls_back_to_uncensored", f"detail={last_detail}")
+
+    repin = _do_set_curation_preference(
+        backend, free, slug, mode=1, pinned_team_id=team_id, skip_pow=False
+    )
+    repin_tx = _tx_ok(repin)
+    if repin.get("error"):
+        _pass("curation.backend_banned_user_cannot_repin")
+    elif repin_tx:
+        status = _wait_tx_status(backend, repin_tx, require_details=False)
+        if status and status.get("success") is False:
+            _pass("curation.backend_banned_user_cannot_repin")
+        else:
+            _fail("curation.backend_banned_user_cannot_repin", f"resp={repin} status={status}")
+    else:
+        _fail("curation.backend_banned_user_cannot_repin", f"resp={repin}")
 
     listed = False
     last_list_code = 0

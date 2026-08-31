@@ -344,6 +344,13 @@ func (k Keeper) SetCurationPreference(ctx sdk.Context, owner, slug string, mode 
 		if !ok || !k.teamLive(team) {
 			return fmt.Errorf("cannot pin deleted or unknown team")
 		}
+		hidden, err := k.storeHas(ctx, types.KeyHiddenUser(slug, teamID, owner))
+		if err != nil {
+			return err
+		}
+		if hidden {
+			return fmt.Errorf("cannot pin a team that banned this user")
+		}
 	case types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT,
 		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW:
 		if teamID != 0 {

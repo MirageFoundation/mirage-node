@@ -301,13 +301,13 @@ export default function BlocksView({ state }) {
         blockedUsernames,
         listsLoading: listsLoadingRaw,
         listsError: listsErrorRaw,
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
         isPostPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
         formatPostStatus,
-        handleUnblockTopic,
+        handleUnblockCommunity,
         handleUnblockUser,
         handleUnblockPost,
     } = useBlocks({ state });
@@ -433,8 +433,8 @@ export default function BlocksView({ state }) {
             {showTopics && visibleTopics.length > 0 && (
                 <List>
                     {visibleTopics.map(topic => {
-                        const isPending = isTopicPending(topic);
-                        const status = formatTopicStatus(topic);
+                        const isPending = isCommunityPending(topic);
+                        const status = formatCommunityStatus(topic);
                         const topicUrl = communityPath(topic);
                         return (
                             <Row
@@ -461,7 +461,7 @@ export default function BlocksView({ state }) {
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            handleUnblockTopic(e, topic);
+                                            handleUnblockCommunity(e, topic);
                                         }}
                                     >
                                         {status || 'Unblock'}

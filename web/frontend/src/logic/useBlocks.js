@@ -23,10 +23,10 @@ export function useBlocks({
   const [listsLoading, setListsLoading] = useState(false);
   const [listsError, setListsError] = useState('');
   const {
-    isTopicPending,
+    isCommunityPending,
     isUserPending,
     isPostPending,
-    formatTopicStatus,
+    formatCommunityStatus,
     formatUserStatus,
     formatPostStatus
   } = usePendingBlocks();
@@ -93,12 +93,12 @@ export function useBlocks({
       cancelled = true;
     };
   }, [blockedUsers]);
-  const handleUnblockTopic = async (e, topic) => {
+  const handleUnblockCommunity = async (e, topic) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     const topicTrimmed = String(topic || '').trim().toLowerCase();
     if (!topicTrimmed) return;
     try {
-      const result = await tx.unblockTopic(topicTrimmed);
+      const result = await tx.unblockCommunity(topicTrimmed);
       if (result && result.success) {
         setBlockedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
       } else {
@@ -147,13 +147,13 @@ export function useBlocks({
     blockedUsernames,
     listsLoading,
     listsError,
-    isTopicPending,
+    isCommunityPending,
     isUserPending,
     isPostPending,
-    formatTopicStatus,
+    formatCommunityStatus,
     formatUserStatus,
     formatPostStatus,
-    handleUnblockTopic,
+    handleUnblockCommunity,
     handleUnblockUser,
     handleUnblockPost
   };

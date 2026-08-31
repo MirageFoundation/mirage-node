@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { HiTrash, HiChevronLeft, HiChevronRight, HiChevronDown, HiArrowUpTray } from "react-icons/hi2";
@@ -1434,7 +1434,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                 />
 
                                 <CommunityHint>
-                                    Don&apos;t see yours? <Link to="/communities/new">Create a community</Link>
+                                    Any valid slug is a community. Type one that is not listed yet.
                                 </CommunityHint>
 
                                 <Field>

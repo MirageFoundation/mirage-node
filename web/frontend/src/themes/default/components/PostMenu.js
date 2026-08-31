@@ -20,7 +20,7 @@ import {
 
 import * as tx from "../../../utils/tx";
 import { follow, unfollow, isFollowing } from "../../../utils/FollowUsers";
-import { subscribe, unsubscribe, isSubscribed } from "../../../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, isJoinedCommunity } from "../../../utils/Subscriptions";
 import Storage from "../../../utils/Storage";
 import { communityLabel } from "../../../utils/community";
 import ConfirmDialog from "./ConfirmDialog";
@@ -254,7 +254,9 @@ function usePostIdentity(post, state) {
     const postId = post && post.post_id ? String(post.post_id) : '';
     const topic = post && typeof post.topic === 'string' ? post.topic : '';
     const authorAddress = (post && (post.user_id || post.author)) || '';
-    const isOwnPost = isLoggedIn && post && post.user_id === viewerAddress;
+    const isOwnPost = isLoggedIn
+        && !!authorAddress
+        && String(authorAddress).toLowerCase() === String(viewerAddress).toLowerCase();
     const authorLabel = (post && typeof post.username === 'string' && post.username.trim())
         ? `@${post.username.trim()}`
         : (authorAddress ? `${String(authorAddress).slice(0, 10)}…` : 'this user');
@@ -299,21 +301,21 @@ export function MoreMenuChip({
     const [copied, setCopied] = useState(false);
     const [textCopied, setTextCopied] = useState(false);
     const [followOverride, setFollowOverride] = useState(null);
-    const [topicFollowOverride, setTopicFollowOverride] = useState(null);
+    const [communityJoinOverride, setCommunityJoinOverride] = useState(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [networkDeleteOpen, setNetworkDeleteOpen] = useState(false);
     const [deletePending, setDeletePending] = useState(false);
 
     const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
     const {
-        isTopicPending,
+        isCommunityPending,
         isUserPending,
-        formatTopicStatus,
+        formatCommunityStatus,
         formatUserStatus,
     } = usePendingFollows();
     const isAdminVisible = isNetworkAdmin(isLoggedIn, isOwnPost);
     const linkTarget = postId ? `/p/${postId}` : '#';
-    const topicFollowPending = isTopicPending(topic);
+    const communityJoinPending = isCommunityPending(topic);
     const userFollowPending = isUserPending(authorAddress);
 
     const computedFollowingUser = (() => {
@@ -323,12 +325,12 @@ export function MoreMenuChip({
     })();
     const followingUser = followOverride !== null ? followOverride : computedFollowingUser;
 
-    const computedFollowingTopic = (() => {
+    const computedJoinedCommunity = (() => {
         if (!isLoggedIn || !topic) return false;
-        try { return isSubscribed(viewerAddress, topic); }
+        try { return isJoinedCommunity(viewerAddress, topic); }
         catch (_) { return false; }
     })();
-    const followingTopic = topicFollowOverride !== null ? topicFollowOverride : computedFollowingTopic;
+    const joinedCommunity = communityJoinOverride !== null ? communityJoinOverride : computedJoinedCommunity;
 
     const close = useCallback(() => setOpen(false), []);
     useOutsidePopover(rootRef, open, close);
@@ -423,17 +425,17 @@ export function MoreMenuChip({
         } catch (_) { setFollowOverride(!next); }
     }, [authorAddress, followingUser, viewerAddress]);
 
-    const handleFollowTopic = useCallback(async e => {
+    const handleJoinCommunity = useCallback(async e => {
         stop(e); setOpen(false);
         if (!topic) return;
         if (!requireAccount('join communities')) return;
-        const next = !followingTopic;
-        setTopicFollowOverride(next);
+        const next = !joinedCommunity;
+        setCommunityJoinOverride(next);
         try {
-            if (next) await subscribe(viewerAddress, topic);
-            else await unsubscribe(viewerAddress, topic);
-        } catch (_) { setTopicFollowOverride(!next); }
-    }, [topic, followingTopic, viewerAddress]);
+            if (next) await joinCommunity(viewerAddress, topic);
+            else await leaveCommunity(viewerAddress, topic);
+        } catch (_) { setCommunityJoinOverride(!next); }
+    }, [topic, joinedCommunity, viewerAddress]);
 
     /* Gift Mirage / Gift Subscription / Give Award — open in-place via
      * `usePostGifts` so the viewer stays on the current feed (previously
@@ -534,9 +536,9 @@ export function MoreMenuChip({
                                     {followingUser ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
                                     <span>{formatUserStatus(authorAddress) || (followingUser ? 'Unfollow user' : 'Follow user')}</span>
                                 </MenuItemBtn>
-                                <MenuItemBtn type="button" disabled={topicFollowPending} onClick={handleFollowTopic}>
+                                <MenuItemBtn type="button" disabled={communityJoinPending} onClick={handleJoinCommunity}>
                                     <HiOutlineHashtag />
-                                    <span>{formatTopicStatus(topic) || (followingTopic ? 'Leave community' : 'Join community')}</span>
+                                    <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleGiveAward}>
                                     <HiOutlineSparkles />
@@ -668,7 +670,7 @@ function renderCurateItem(item, close) {
 export function BlockChip({ post, state, updatePost, align = 'right' }) {
     const rootRef = useRef(null);
     const [open, setOpen] = useState(false);
-    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_topic' | 'report'
+    const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_community' | 'report'
     const [pending, setPending] = useState(false);
 
     const { isLoggedIn, postId, topic, authorAddress, isOwnPost, authorLabel } = usePostIdentity(post, state);
@@ -724,10 +726,10 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
         closeDialog();
     }, [postId, updatePost, closeDialog]);
 
-    const confirmBlockTopic = useCallback(async () => {
+    const confirmBlockCommunity = useCallback(async () => {
         if (!topic) { closeDialog(); return; }
         setPending(true);
-        try { await tx.blockTopic(topic); } catch (_) { /* noop */ }
+        try { await tx.blockCommunity(topic); } catch (_) { /* noop */ }
         closeDialog();
     }, [topic, closeDialog]);
 
@@ -741,8 +743,6 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
 
     if (!post || !postId) return null;
     if (!isLoggedIn) return null;
-    // Curators still need this chip on their own posts; everyone else only
-    // sees it on other users' posts (block / report).
     if (isOwnPost && !curateVisible) return null;
 
     const chipLabel = curateVisible ? 'Curation menu' : 'Block or report';
@@ -789,7 +789,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
                                     <HiOutlineEyeSlash />
                                     <span>Block post</span>
                                 </MenuItemBtn>
-                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_topic')}>
+                                <MenuItemBtn type="button" $danger onClick={(e) => openDialog(e, 'block_community')}>
                                     <HiOutlineNoSymbol />
                                     <span>Block community</span>
                                 </MenuItemBtn>
@@ -823,13 +823,13 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
                 onCancel={closeDialog}
             />
             <ConfirmDialog
-                open={activeDialog === 'block_topic'}
+                open={activeDialog === 'block_community'}
                 title={`Block ${communityLabel(topic || 'community')}?`}
                 message="Posts in this community will stop appearing in your Home and discovery feeds."
                 confirmLabel="Block community"
                 confirmVariant="danger"
                 pending={pending}
-                onConfirm={confirmBlockTopic}
+                onConfirm={confirmBlockCommunity}
                 onCancel={closeDialog}
             />
             <ConfirmDialog

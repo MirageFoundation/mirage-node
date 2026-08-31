@@ -5,7 +5,7 @@ import { Helmet } from 'react-helmet-async';
 import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
 import * as tx from '../../../utils/tx';
-import { invalidateCache as invalidateTopicsCache, notifyTopicsUpdated } from '../../../utils/Subscriptions';
+import { invalidateCache as invalidateTopicsCache, notifyJoinedCommunitiesUpdated } from '../../../utils/Subscriptions';
 import { communityLabel, sanitizeCommunitySlug, isValidCommunitySlug } from '../../../utils/community';
 import {
     CURATION_TEAM_DESCRIPTION_EXAMPLE,
@@ -369,7 +369,7 @@ export default function CurationTeamsView() {
             // the state we are replacing.
             invalidateCurationReads(nextSlug);
             invalidateTopicsCache();
-            notifyTopicsUpdated({ added: nextSlug });
+            notifyJoinedCommunitiesUpdated({ added: nextSlug });
             const visibleId = Number(visible.team_id);
             console.debug('[curation] opening created team', {
                 community: nextSlug,

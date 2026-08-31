@@ -110,7 +110,7 @@ export async function fetchProfile(viewerAddress, force = false) {
     return request;
 }
 
-export function getFollowedTopics() {
+export function getJoinedCommunities() {
     const cached = loadFromStorage();
     if (!cached || !cached.profile) return [];
     const topics = cached.profile.joined_communities || [];

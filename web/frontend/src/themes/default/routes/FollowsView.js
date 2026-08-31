@@ -343,11 +343,11 @@ export default function FollowsView({ state }) {
         followedUsernames,
         listsLoading: listsLoadingRaw,
         listsError: listsErrorRaw,
-        isFollowTopicPending,
+        isCommunityPending,
         isFollowUserPending,
-        formatFollowTopicStatus,
+        formatCommunityStatus,
         formatFollowUserStatus,
-        handleUnfollowTopic,
+        handleLeaveCommunity,
         handleUnfollowUser,
     } = useFollows({ state });
 
@@ -470,8 +470,8 @@ export default function FollowsView({ state }) {
             {showTopics && !topicsEmpty && (
                 <List>
                     {visibleTopics.map(topic => {
-                        const isPending = isFollowTopicPending(topic);
-                        const status = formatFollowTopicStatus(topic);
+                        const isPending = isCommunityPending(topic);
+                        const status = formatCommunityStatus(topic);
                         const topicUrl = communityPath(topic);
                         return (
                             <Row
@@ -498,7 +498,7 @@ export default function FollowsView({ state }) {
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            handleUnfollowTopic(e, topic);
+                                            handleLeaveCommunity(e, topic);
                                         }}
                                     >
                                         <JoinedLabel status={status} />

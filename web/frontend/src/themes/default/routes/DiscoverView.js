@@ -335,9 +335,9 @@ export default function DiscoverView({ state }) {
         isSearching,
         loading,
         error,
-        isTopicPending,
-        formatTopicStatus,
-        isSubscribedTopic,
+        isCommunityPending,
+        formatCommunityStatus,
+        isJoinedCommunity,
         handleSubscribeToggle,
     } = useDiscover({ state });
 
@@ -433,8 +433,8 @@ export default function DiscoverView({ state }) {
 
     const renderRow = (t, keyPrefix) => {
         const topicLower = t.topic.toLowerCase();
-        const isJoined = isSubscribedTopic(t.topic);
-        const pending = isTopicPending(topicLower);
+        const isJoined = isJoinedCommunity(t.topic);
+        const pending = isCommunityPending(topicLower);
         const tag = t.dominant_tag ? normalizeTag(t.dominant_tag) : null;
         const meta = formatRowMeta(t);
 
@@ -451,7 +451,7 @@ export default function DiscoverView({ state }) {
                     <CommunityMembershipButton
                         joined={isJoined}
                         pending={pending}
-                        statusLabel={formatTopicStatus(topicLower)}
+                        statusLabel={formatCommunityStatus(topicLower)}
                         onToggle={() => handleSubscribeToggle(t.topic)}
                     />
                 </RowActions>

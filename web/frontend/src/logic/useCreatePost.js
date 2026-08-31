@@ -40,31 +40,31 @@ export function useCreatePost({
     const params = React.useMemo(() => new URLSearchParams(locationSearch || ''), [locationSearch]);
     const isEditMode = params.get('edit') === 'true' && !!params.get('post_id');
     const overrideId = params.get('post_id') || '';
-    const getCurrentTopic = () => {
+    const getCurrentCommunity = () => {
         try {
             const referrer = document.referrer || '';
-            const topicMatch = referrer.match(/\/t\/([^/?]+)/);
-            if (topicMatch && topicMatch[1] && topicMatch[1] !== 'all') {
-                return topicMatch[1];
+            const match = referrer.match(/\/c\/([^/?]+)/);
+            if (match && match[1] && match[1] !== 'all') {
+                return match[1];
             }
         } catch (_) { }
         return null;
     };
     const getPreferredTopic = React.useCallback(() => {
         try {
-            const st = locationState && locationState.fromTopic;
+            const st = locationState && locationState.fromCommunity;
             if (st && st !== 'all') {
                 return String(st).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
             }
         } catch (_) { }
         try {
             const params = new URLSearchParams(locationSearch || '');
-            const qp = params.get('topic');
+            const qp = params.get('community');
             if (qp && qp !== 'all') {
                 return String(qp).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
             }
         } catch (_) { }
-        const ref = getCurrentTopic();
+        const ref = getCurrentCommunity();
         if (ref && ref !== 'all') {
             return String(ref).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         }
@@ -182,8 +182,8 @@ export function useCreatePost({
     }, [preferredTopic]);
 
     // Auto-populate the content tag when the composer opens with a pre-filled
-    // topic (via referrer like `/t/gore` → "Create Post", URL `?topic=foo`,
-    // or nav state `fromTopic`). `handleTopicChange` already covers this for
+    // community (via referrer like `/c/gore` → "Create Post", URL `?community=foo`,
+    // or nav state `fromCommunity`). `handleTopicChange` already covers this for
     // user-picked topics via `meta.dominant_tag` from `TopicSelector`, but
     // pre-filled topics never go through that path — `topicValue` lands in
     // state directly without any meta. We do an explicit one-shot lookup so

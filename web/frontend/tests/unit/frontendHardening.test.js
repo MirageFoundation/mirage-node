@@ -217,7 +217,7 @@ describe('sub-threshold: protocol-relative markdown links', () => {
     });
 
     it('still allows ordinary internal and external links', () => {
-        expect(markdownUrlTransform('/t/mirage')).toBe('/t/mirage');
+        expect(markdownUrlTransform('/c/mirage')).toBe('/c/mirage');
         expect(markdownUrlTransform('https://example.com/x')).toBe('https://example.com/x');
         expect(markdownUrlTransform('mailto:a@example.com')).toBe('mailto:a@example.com');
         expect(markdownUrlTransform('#anchor')).toBe('#anchor');

@@ -45,9 +45,9 @@ import {
     fetchFollowedUsers,
 } from "../../../utils/FollowUsers";
 import {
-    subscribe as subscribeTopic,
-    unsubscribe as unsubscribeTopic,
-    fetchFollowedTopics,
+    joinCommunity,
+    leaveCommunity,
+    fetchJoinedCommunities,
 } from "../../../utils/Subscriptions";
 import { usePendingFollows } from "../../../logic/useFollowState.js";
 
@@ -643,18 +643,18 @@ export default function SearchResultsView({ state }) {
         () => String(viewerAddress || "").trim().toLowerCase(),
         [viewerAddress]
     );
-    const [followedTopicsSet, setFollowedTopicsSet] = useState(() => new Set());
+    const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(() => new Set());
     const [followedUsersSet, setFollowedUsersSet] = useState(() => new Set());
     const {
-        isTopicPending: isFollowTopicPending,
+        isCommunityPending: isCommunityPending,
         isUserPending: isFollowUserPending,
-        formatTopicStatus: formatFollowTopicStatus,
+        formatCommunityStatus: formatCommunityStatus,
         formatUserStatus: formatFollowUserStatus,
     } = usePendingFollows();
 
     useEffect(() => {
         if (!isLoggedIn || !viewerAddressLower) {
-            setFollowedTopicsSet(new Set());
+            setJoinedCommunitiesSet(new Set());
             setFollowedUsersSet(new Set());
             return undefined;
         }
@@ -662,11 +662,11 @@ export default function SearchResultsView({ state }) {
         (async () => {
             try {
                 const [topicsList, usersList] = await Promise.all([
-                    fetchFollowedTopics(viewerAddressLower),
+                    fetchJoinedCommunities(viewerAddressLower),
                     fetchFollowedUsers(viewerAddressLower),
                 ]);
                 if (cancelled) return;
-                setFollowedTopicsSet(
+                setJoinedCommunitiesSet(
                     new Set(
                         (topicsList || [])
                             .map((t) => String(t || "").trim().toLowerCase())
@@ -687,16 +687,16 @@ export default function SearchResultsView({ state }) {
         };
     }, [isLoggedIn, viewerAddressLower]);
 
-    const isTopicFollowed = useCallback(
-        (topic) => followedTopicsSet.has(String(topic || "").trim().toLowerCase()),
-        [followedTopicsSet]
+    const isCommunityJoined = useCallback(
+        (topic) => joinedCommunitiesSet.has(String(topic || "").trim().toLowerCase()),
+        [joinedCommunitiesSet]
     );
     const isUserFollowed = useCallback(
         (addr) => followedUsersSet.has(String(addr || "").trim().toLowerCase()),
         [followedUsersSet]
     );
 
-    const handleTopicFollowToggle = useCallback(
+    const handleCommunityJoinToggle = useCallback(
         async (e, topic) => {
             if (e) {
                 if (typeof e.preventDefault === "function") e.preventDefault();
@@ -707,19 +707,19 @@ export default function SearchResultsView({ state }) {
             if (!requireAccount('join communities')) return;
             if (!viewerAddressLower) return;
             const lower = t.toLowerCase();
-            if (isFollowTopicPending(lower)) return;
-            const wasFollowing = isTopicFollowed(t);
+            if (isCommunityPending(lower)) return;
+            const wasFollowing = isCommunityJoined(t);
             try {
                 if (wasFollowing) {
-                    await unsubscribeTopic(viewerAddressLower, t);
-                    setFollowedTopicsSet((prev) => {
+                    await leaveCommunity(viewerAddressLower, t);
+                    setJoinedCommunitiesSet((prev) => {
                         const next = new Set(prev);
                         next.delete(lower);
                         return next;
                     });
                 } else {
-                    await subscribeTopic(viewerAddressLower, t);
-                    setFollowedTopicsSet((prev) => new Set([...prev, lower]));
+                    await joinCommunity(viewerAddressLower, t);
+                    setJoinedCommunitiesSet((prev) => new Set([...prev, lower]));
                 }
             } catch (err) {
                 alert(
@@ -728,7 +728,7 @@ export default function SearchResultsView({ state }) {
                 );
             }
         },
-        [viewerAddressLower, isFollowTopicPending, isTopicFollowed]
+        [viewerAddressLower, isCommunityPending, isCommunityJoined]
     );
 
     const handleUserFollowToggle = useCallback(
@@ -1149,9 +1149,9 @@ export default function SearchResultsView({ state }) {
             <List>
                 {topics.map((topic) => {
                     const topicName = topic.topic;
-                    const followed = isTopicFollowed(topicName);
-                    const pending = isFollowTopicPending(topicName);
-                    const status = formatFollowTopicStatus(topicName);
+                    const followed = isCommunityJoined(topicName);
+                    const pending = isCommunityPending(topicName);
+                    const status = formatCommunityStatus(topicName);
                     return (
                         <RowItem
                             key={`topic-${topicName}`}
@@ -1177,7 +1177,7 @@ export default function SearchResultsView({ state }) {
                                         joined={followed}
                                         pending={pending}
                                         statusLabel={status}
-                                        onToggle={() => handleTopicFollowToggle(null, topicName)}
+                                        onToggle={() => handleCommunityJoinToggle(null, topicName)}
                                     />
                                 </RowActions>
                             )}

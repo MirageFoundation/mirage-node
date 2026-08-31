@@ -695,6 +695,107 @@ func (k Keeper) GetCurationPostTag(ctx sdk.Context, slug string, teamID uint64, 
 	return &record, true, nil
 }
 
+func (k Keeper) bestCurationTeamForUser(ctx sdk.Context, slug, target string, allowHiddenTeamID uint64) (*types.CurationTeam, bool, error) {
+	if target != "" {
+		if _, err := types.CanonicalAccBytes(target); err != nil {
+			return nil, false, err
+		}
+	}
+	var best *types.CurationTeam
+	if err := k.iterPrefixKeys(ctx, types.KeyCurationTeamPrefix(slug), 0, func(_, value []byte) error {
+		var team types.CurationTeam
+		if err := k.cdc.Unmarshal(value, &team); err != nil {
+			return err
+		}
+		if !k.teamLive(&team) {
+			return nil
+		}
+		if target != "" && team.TeamId != allowHiddenTeamID {
+			hidden, err := k.storeHas(ctx, types.KeyHiddenUser(slug, team.TeamId, target))
+			if err != nil {
+				return err
+			}
+			if hidden {
+				return nil
+			}
+		}
+		if best == nil ||
+			team.SubscriberCount > best.SubscriberCount ||
+			(team.SubscriberCount == best.SubscriberCount && team.CreatedOrder < best.CreatedOrder) ||
+			(team.SubscriberCount == best.SubscriberCount && team.CreatedOrder == best.CreatedOrder && team.TeamId < best.TeamId) {
+			copyTeam := team
+			best = &copyTeam
+		}
+		return nil
+	}); err != nil {
+		return nil, false, err
+	}
+	return best, best != nil, nil
+}
+
+func (k Keeper) RerouteBannedUserPreference(ctx sdk.Context, slug string, bannedTeamID uint64, target string) error {
+	pref, joined, err := k.GetPreference(ctx, target, slug)
+	if err != nil || !joined {
+		return err
+	}
+	if pref.Mode == types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW {
+		return nil
+	}
+
+	var currentTeamID uint64
+	if pref.Mode == types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED {
+		team, found, err := k.GetCurationTeam(ctx, slug, pref.PinnedTeamId)
+		if err != nil {
+			return err
+		}
+		if found && k.teamLive(team) {
+			currentTeamID = pref.PinnedTeamId
+		}
+	}
+	if currentTeamID == 0 {
+		current, found, err := k.bestCurationTeamForUser(ctx, slug, target, bannedTeamID)
+		if err != nil {
+			return err
+		}
+		if found {
+			currentTeamID = current.TeamId
+		}
+	}
+	if currentTeamID != bannedTeamID {
+		return nil
+	}
+
+	core, found, err := k.loadProfile(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("profile not found for joined user %s", target)
+	}
+	next, found, err := k.bestCurationTeamForUser(ctx, slug, target, 0)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return k.SetCurationPreference(
+			ctx,
+			target,
+			slug,
+			types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW,
+			0,
+			types.CanCurate(core),
+		)
+	}
+	return k.SetCurationPreference(
+		ctx,
+		target,
+		slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED,
+		next.TeamId,
+		types.CanCurate(core),
+	)
+}
+
 func (k Keeper) SetCurationActionHiddenUser(ctx sdk.Context, slug string, teamID uint64, target, actor string, hidden bool) error {
 	if _, err := types.CanonicalAccBytes(target); err != nil {
 		return err
