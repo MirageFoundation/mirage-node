@@ -48,14 +48,18 @@ func ValidateCurationTeamName(name string, maxLen uint64) error {
 	return nil
 }
 
-func ValidateCurationTeamDescription(description string, maxLen uint64) error {
-	if description != "" && description != strings.TrimSpace(description) {
-		return fmt.Errorf("team description must not have surrounding whitespace")
-	}
+// NormalizeCurationTeamDescription trims surrounding whitespace rather than
+// rejecting it: it is invisible in the UI, a pasted paragraph ending in a
+// newline is not a mistake, and refusing the write teaches nobody anything. The
+// caller must store the returned value, which is why this hands the text back
+// instead of only reporting on it. The limit applies to the trimmed text, so
+// trailing blanks cannot eat the budget.
+func NormalizeCurationTeamDescription(description string, maxLen uint64) (string, error) {
+	description = strings.TrimSpace(description)
 	if uint64(utf8.RuneCountInString(description)) > maxLen {
-		return fmt.Errorf("description exceeds max_curation_team_description_length")
+		return "", fmt.Errorf("description exceeds max_curation_team_description_length")
 	}
-	return nil
+	return description, nil
 }
 
 func NormalizeTeamNameKey(name string) string {

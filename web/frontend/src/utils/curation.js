@@ -51,10 +51,9 @@ export function requireCurationTeamName(value, max = MAX_CURATION_TEAM_NAME_LENG
 }
 
 export function requireCurationTeamDescription(value, max = MAX_CURATION_TEAM_DESCRIPTION_LENGTH) {
-    const description = String(value ?? '');
-    if (description && description !== description.trim()) {
-        throw new Error('team description must not have surrounding whitespace');
-    }
+    // Trimmed, not rejected, and trimmed before the length check so trailing
+    // blanks cannot eat the budget. Mirrors NormalizeCurationTeamDescription.
+    const description = String(value ?? '').trim();
     if (runeLength(description) > max) {
         throw new Error(`description exceeds limit: ${runeLength(description)} > ${max}`);
     }

@@ -496,18 +496,15 @@ func TestCurationTeamProfileValidationAndNoPolicy(t *testing.T) {
 		require.Error(t, err, "name %q must be rejected", name)
 	}
 
-	_, err := mk.CreateCurationTeam(ctx, leader, slug, "Whitespace", "   ")
-	require.ErrorContains(t, err, "surrounding whitespace")
-	_, err = mk.CreateCurationTeam(ctx, leader, slug, "Trailing", "guidance ")
-	require.ErrorContains(t, err, "surrounding whitespace")
-
 	over := strings.Repeat("🙂", int(params.MaxCurationTeamDescriptionLength)+1)
-	_, err = mk.CreateCurationTeam(ctx, leader, slug, "Long", over)
+	_, err := mk.CreateCurationTeam(ctx, leader, slug, "Long", over)
 	require.ErrorContains(t, err, "description exceeds")
 
 	exactName := strings.Repeat("N", int(params.MaxCurationTeamNameLength))
 	exactDescription := strings.Repeat("🙂", int(params.MaxCurationTeamDescriptionLength))
-	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, exactName, exactDescription)
+	// Padded going in: the chain trims, so a description already at the limit
+	// still fits and comes back stored without the padding.
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, exactName, "  "+exactDescription+"\n")
 	require.NoError(t, err)
 	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
@@ -531,15 +528,17 @@ func TestCurationTeamProfileValidationAndNoPolicy(t *testing.T) {
 		mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, strings.Repeat("x", 801)),
 		"description exceeds",
 	)
-	require.ErrorContains(
-		t,
-		mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, "updated guidance "),
-		"surrounding whitespace",
-	)
 	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, exactDescription, team.Description, "rejected updates must not mutate the profile")
+
+	// Trimmed on update as well, and the trimmed text is what is stored.
+	require.NoError(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, "  updated guidance\n"))
+	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "updated guidance", team.Description)
 
 	require.NoError(t, mk.UpdateCurationTeamProfile(ctx, leader, slug, teamID, exactName, ""))
 	team, found, err = mk.GetCurationTeam(ctx, slug, teamID)

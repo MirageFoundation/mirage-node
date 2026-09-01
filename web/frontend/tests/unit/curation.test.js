@@ -263,10 +263,15 @@ describe('v1.39 curation UI contracts', () => {
         }
     });
 
-    it('allows optional descriptions but rejects whitespace and rune overflow', () => {
+    it('allows optional descriptions, trims whitespace, and rejects rune overflow', () => {
         expect(requireCurationTeamDescription('')).toBe('');
         expect(requireCurationTeamDescription('🙂'.repeat(800))).toBe('🙂'.repeat(800));
-        for (const invalid of ['   ', ' leading', 'trailing\n', 'x'.repeat(801), '🙂'.repeat(801)]) {
+        expect(requireCurationTeamDescription('   ')).toBe('');
+        expect(requireCurationTeamDescription(' leading')).toBe('leading');
+        expect(requireCurationTeamDescription('trailing\n')).toBe('trailing');
+        // The limit applies after trimming, matching the chain.
+        expect(requireCurationTeamDescription(` ${'x'.repeat(800)} `)).toBe('x'.repeat(800));
+        for (const invalid of ['x'.repeat(801), '🙂'.repeat(801)]) {
             expect(() => requireCurationTeamDescription(invalid)).toThrow();
         }
     });

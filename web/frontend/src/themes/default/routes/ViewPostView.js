@@ -2441,10 +2441,10 @@ function ViewPostView({
             </MenuDropdown>, document.body)}
         </MenuContainer>;
     };
-    const renderHeaderLensPicker = communityLabel => {
-        if (!communityLabel) return null;
+    const renderHeaderLensPicker = community => {
+        if (!community) return null;
         return <PostLensPicker
-            community={communityLabel}
+            community={community}
             viewer={viewerAddress}
             hintLens={mergedRoot?.lens || root?.lens}
             onChange={handleThreadLensChange}
@@ -3087,9 +3087,9 @@ function ViewPostView({
                                                     <MobileRootMetaTop>
                                                         <MobileRootMetaPrimary>
                                                             {(() => {
-                                                                const communityLabel = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
-                                                                return communityLabel ? <>
-                                                                    <StyledCommunityLink to={communityPath(encodeURIComponent(communityLabel.toLowerCase()))}>{communityLabel(communityLabel)}</StyledCommunityLink>
+                                                                const postCommunity = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
+                                                                return postCommunity ? <>
+                                                                    <StyledCommunityLink to={communityPath(encodeURIComponent(postCommunity.toLowerCase()))}>{communityLabel(postCommunity)}</StyledCommunityLink>
                                                                     <MetaSeparator>·</MetaSeparator>
                                                                 </> : null;
                                                             })()}
@@ -3165,9 +3165,9 @@ function ViewPostView({
                                                          * [community] · @author · time. Comments
                                                          * have no community chip (inherited). */}
                                                         {isRoot && (() => {
-                                                            const communityLabel = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
-                                                            return communityLabel ? <>
-                                                                <StyledCommunityLink to={communityPath(encodeURIComponent(communityLabel.toLowerCase()))}>{communityLabel(communityLabel)}</StyledCommunityLink>
+                                                            const postCommunity = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
+                                                            return postCommunity ? <>
+                                                                <StyledCommunityLink to={communityPath(encodeURIComponent(postCommunity.toLowerCase()))}>{communityLabel(postCommunity)}</StyledCommunityLink>
                                                                 <MetaSeparator>·</MetaSeparator>
                                                             </> : null;
                                                         })()}

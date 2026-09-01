@@ -41,28 +41,37 @@ func TestValidateCurationTeamName(t *testing.T) {
 	}
 }
 
-func TestValidateCurationTeamDescription(t *testing.T) {
-	valid := []string{
-		"",
-		"Moderation guidance",
-		strings.Repeat("x", 800),
-		strings.Repeat("🙂", 800),
+func TestNormalizeCurationTeamDescription(t *testing.T) {
+	// Surrounding whitespace is stripped and the trimmed text is what the
+	// caller must store, so each case pins the returned value.
+	normalized := []struct {
+		description string
+		want        string
+	}{
+		{"", ""},
+		{"Moderation guidance", "Moderation guidance"},
+		{"   ", ""},
+		{" guidance", "guidance"},
+		{"guidance\n", "guidance"},
+		{"  spaced out  ", "spaced out"},
+		{strings.Repeat("x", 800), strings.Repeat("x", 800)},
+		{strings.Repeat("🙂", 800), strings.Repeat("🙂", 800)},
+		// The limit applies after trimming, so padding cannot push a legal
+		// description over the edge.
+		{" " + strings.Repeat("x", 800) + " ", strings.Repeat("x", 800)},
 	}
-	for _, description := range valid {
-		require.NoError(t, ValidateCurationTeamDescription(description, 800))
+	for _, tc := range normalized {
+		got, err := NormalizeCurationTeamDescription(tc.description, 800)
+		require.NoError(t, err, "description %q", tc.description)
+		require.Equal(t, tc.want, got, "description %q", tc.description)
 	}
 
-	invalid := []struct {
-		description string
-		err         string
-	}{
-		{"   ", "surrounding whitespace"},
-		{" guidance", "surrounding whitespace"},
-		{"guidance\n", "surrounding whitespace"},
-		{strings.Repeat("x", 801), "description exceeds"},
-		{strings.Repeat("🙂", 801), "description exceeds"},
+	tooLong := []string{
+		strings.Repeat("x", 801),
+		strings.Repeat("🙂", 801),
 	}
-	for _, tc := range invalid {
-		require.ErrorContains(t, ValidateCurationTeamDescription(tc.description, 800), tc.err)
+	for _, description := range tooLong {
+		_, err := NormalizeCurationTeamDescription(description, 800)
+		require.ErrorContains(t, err, "description exceeds")
 	}
 }

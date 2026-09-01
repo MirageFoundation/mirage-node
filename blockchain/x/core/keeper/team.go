@@ -20,7 +20,8 @@ func (k Keeper) CreateCurationTeam(ctx sdk.Context, owner, slug, name, descripti
 	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
 		return 0, err
 	}
-	if err := types.ValidateCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength); err != nil {
+	description, err := types.NormalizeCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength)
+	if err != nil {
 		return 0, err
 	}
 	core, found, err := k.loadProfile(ctx, owner)
@@ -310,7 +311,8 @@ func (k Keeper) UpdateCurationTeamProfile(ctx sdk.Context, actor, slug string, t
 	if err := types.ValidateCurationTeamName(name, params.MaxCurationTeamNameLength); err != nil {
 		return err
 	}
-	if err := types.ValidateCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength); err != nil {
+	description, err = types.NormalizeCurationTeamDescription(description, params.MaxCurationTeamDescriptionLength)
+	if err != nil {
 		return err
 	}
 	oldNorm := types.NormalizeTeamNameKey(team.Name)
