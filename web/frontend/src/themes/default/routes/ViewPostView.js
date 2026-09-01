@@ -2397,7 +2397,7 @@ function ViewPostView({
                             </MenuItem>
                             {isRootPost && post?.community && <MenuItem disabled={isCommunityPending(communityLower)} onClick={() => {
                                 setOpenMenuId(null);
-                                handleCommunityJoinToggle(post.community);
+                                handleCommunityJoinToggle(post.community, threadLens);
                             }}>
                                 <HiOutlineHashtag />
                                 <span>{isCommunityPending(communityLower) ? formatCommunityStatus(communityLower) : joinedCommunity ? 'Leave community' : 'Join community'}</span>
@@ -3019,7 +3019,7 @@ function ViewPostView({
                                                     joined={isJoined}
                                                     pending={isCommunityInProgress}
                                                     statusLabel={formatCommunityStatus(communityLower)}
-                                                    onToggle={() => handleCommunityJoinToggle(displayCommunity)}
+                                                    onToggle={() => handleCommunityJoinToggle(displayCommunity, threadLens)}
                                                 />}
                                                 {renderHeaderLensPicker(displayCommunity)}
                                             </CommunityHeroMobileActions>
@@ -3050,7 +3050,7 @@ function ViewPostView({
                                                 pending={isCommunityInProgress}
                                                 statusLabel={formatCommunityStatus(communityLower)}
                                                 communityLabel={communityLabel(displayCommunity)}
-                                                onToggle={() => handleCommunityJoinToggle(displayCommunity)}
+                                                onToggle={() => handleCommunityJoinToggle(displayCommunity, threadLens)}
                                             />}
                                             {renderHeaderLensPicker(displayCommunity)}
                                         </CommunityAction>

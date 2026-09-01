@@ -83,6 +83,14 @@ const defaultDarkColors = {
     buttonSuccessHoverBg: 'rgba(22, 163, 74, 0.28)',
     navActiveBg: '#1c2026',
 
+    // Canonical warning palette. Identical in both modes, matching the amber
+    // already inlined by SettingsView, WelcomeView, CreatePostView and
+    // SubscriptionView; those raw rgba literals should migrate onto these.
+    warningBg: 'rgba(245, 158, 11, 0.08)',
+    warningBorder: 'rgba(245, 158, 11, 0.25)',
+    warningHoverBg: 'rgba(245, 158, 11, 0.15)',
+    warningText: '#f59e0b',
+
     // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
     // Used for primary CTAs and accent borders.
     gradientStart: '#667eea',
@@ -240,6 +248,13 @@ const defaultLightColors = {
     buttonSuccessBorder: '#16A34A',
     buttonSuccessHoverBg: 'rgba(22, 163, 74, 0.2)',
     navActiveBg: '#EFF1F5',
+
+    // Canonical warning palette (light-mode pair — the amber is deliberately
+    // shared across both modes, like `link` and `focusBlue`).
+    warningBg: 'rgba(245, 158, 11, 0.08)',
+    warningBorder: 'rgba(245, 158, 11, 0.25)',
+    warningHoverBg: 'rgba(245, 158, 11, 0.15)',
+    warningText: '#f59e0b',
 
     // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
     gradientStart: '#667eea',

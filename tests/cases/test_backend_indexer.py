@@ -902,6 +902,51 @@ def test_indexer_hardening(backend: str):
     except RuntimeError:
         _pass("indexer_hardening.membership_event_fails_hard")
 
+    # ── A join that locks in a lens emits joined + preference_changed ────
+    #
+    # The chain resolves the joiner's lens to a concrete pin inside the same
+    # message, so the pair arrives together. The join insert must not clobber
+    # the pin that lands with it, in either arrival order, or every new member
+    # shows up in the API as an unpinned LIVE_DEFAULT floater.
+
+    for order in ("joined_first", "preference_first"):
+        joined_event = {
+            "type": "community_joined",
+            "attributes": [
+                {"key": "address", "value": "mirage1locker"},
+                {"key": "community", "value": "photography"},
+            ],
+        }
+        preference_event = {
+            "type": "community_preference_changed",
+            "attributes": [
+                {"key": "owner", "value": "mirage1locker"},
+                {"key": "community", "value": "photography"},
+                {"key": "old_mode", "value": "0"},
+                {"key": "old_team_id", "value": "0"},
+                {"key": "new_mode", "value": "1"},
+                {"key": "new_team_id", "value": "7"},
+            ],
+        }
+        events = (
+            [joined_event, preference_event]
+            if order == "joined_first"
+            else [preference_event, joined_event]
+        )
+        lock_db = _StubCurationDB()
+        MessageProcessor(lock_db, None, lambda *a, **k: None, lambda t: "").process_curation_events(events, 4244)
+        writes = [
+            p for s, p in lock_db.statements
+            if "INSERT INTO community_curation_preferences" in s and len(p) == 5
+        ]
+        if writes == [("mirage1locker", "photography", 1, 7, 4244)]:
+            _pass(f"indexer_hardening.join_lens_lock_projected.{order}")
+        else:
+            _fail(
+                f"indexer_hardening.join_lens_lock_projected.{order}",
+                f"statements={lock_db.statements}",
+            )
+
     # ── Creator payouts must reach the public indexer projection ─────────
 
     class _CreatorChain:

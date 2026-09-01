@@ -658,7 +658,11 @@ def _build_pool():
         ("community", 100, STRING, False),
         ("new_founder", 101, STRING, False),
     ])
-    add_msg_fields("MsgJoinCommunity", [("community", 100, STRING, False)])
+    add_msg_fields("MsgJoinCommunity", [
+        ("community", 100, STRING, False),
+        ("mode", 101, UINT32, False),
+        ("pinned_team_id", 102, UINT64, False),
+    ])
     add_msg_fields("MsgLeaveCommunity", [("community", 100, STRING, False)])
     add_msg_fields("MsgBlockCommunity", [
         ("target", 100, STRING, False),

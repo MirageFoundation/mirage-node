@@ -10,6 +10,7 @@ import {
     curationPendingKey,
     formatPinCount,
     formatSubscriberCount,
+    joinPreferenceForLens,
     lensCacheKey,
     lensHintLabel,
     lensPicksParam,
@@ -40,9 +41,54 @@ import {
     isOptimisticallyCurationHidden,
     setOptimisticCurationVisibility,
 } from '../../src/utils/curationVisibility.js';
+import { TransactionHandler } from '../../src/utils/TransactionHandler.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendSrc = join(here, '../../src');
+
+describe('join locks in the lens on screen', () => {
+    it('maps every pickable lens to the preference the join stores', () => {
+        expect(joinPreferenceForLens(LENS.TEAM, 7)).toEqual({ mode: 1, pinnedTeamId: 7 });
+        expect(joinPreferenceForLens(LENS.RAW)).toEqual({ mode: 2, pinnedTeamId: 0 });
+        // Default and effective both defer to the chain, which resolves the
+        // community default to a concrete pin at join height.
+        expect(joinPreferenceForLens(LENS.DEFAULT)).toEqual({ mode: 0, pinnedTeamId: 0 });
+        expect(joinPreferenceForLens(LENS.EFFECTIVE)).toEqual({ mode: 0, pinnedTeamId: 0 });
+        expect(joinPreferenceForLens(undefined)).toEqual({ mode: 0, pinnedTeamId: 0 });
+    });
+
+    it('refuses a team lens without a team, rather than joining on the wrong lens', () => {
+        expect(() => joinPreferenceForLens(LENS.TEAM, 0)).toThrow(/team_id/);
+        expect(() => joinPreferenceForLens('nonsense')).toThrow(/Cannot join with lens/);
+    });
+
+    // The browser, the backend and the chain each build the signed preimage
+    // independently; one byte of disagreement makes every join unverifiable.
+    // Expected values come from shared/canon.py, which is itself pinned to Go
+    // by blockchain/app/ante_canon_v139_parity_test.go.
+    it('encodes the lens fields exactly as shared/canon.py does', () => {
+        const envelope = {
+            pub_bytes: Uint8Array.from({ length: 32 }, (_, i) => i),
+            last_block_hash: 'aa'.repeat(32),
+            difficulty: 21,
+            proof: 3,
+            timestamp: 1750000000,
+            nonce: 7,
+            community: 'technology',
+        };
+        const toHex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+        const canon = (mode, pinned_team_id) => toHex(
+            TransactionHandler.prototype.canonicalJoinCommunity({ ...envelope, mode, pinned_team_id }),
+        );
+        const prefix = '6d69726167652e636f72652e76313a4d73674a6f696e436f6d6d756e69747900'
+            + '0220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'
+            + '0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+            + '041505030680c3bbc2060707640a746563686e6f6c6f6779';
+        expect(canon(0, 0)).toBe(`${prefix}65006600`);
+        expect(canon(1, 4)).toBe(`${prefix}65016604`);
+        expect(canon(2, 0)).toBe(`${prefix}65026600`);
+    });
+});
 
 describe('curation lenses', () => {
     it('keeps viewer, scope, lens, team, and community in feed cache identity', () => {

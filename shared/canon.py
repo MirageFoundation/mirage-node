@@ -636,9 +636,11 @@ def _canon_envelope(name: str, pubkey: bytes, last_block_hash: bytes, difficulty
     return out
 
 
-def canon_base_join_community(pubkey, last_block_hash, difficulty, timestamp, community, nonce=0):
+def canon_base_join_community(pubkey, last_block_hash, difficulty, timestamp, community, mode=0, pinned_team_id=0, nonce=0):
     out = _canon_envelope("MsgJoinCommunity", pubkey, last_block_hash, difficulty, timestamp, nonce)
     out += _enc_str(100, community)
+    out += _enc_u64(101, int(mode))
+    out += _enc_u64(102, int(pinned_team_id))
     return bytes(out)
 
 

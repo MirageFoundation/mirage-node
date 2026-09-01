@@ -357,16 +357,18 @@ def unfollow_user(user_addr: str):
         "target": ADDRESS, "user": user_addr,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def join_community(community: str):
+def join_community(community: str, mode: int = 0, pinned_team_id: int = 0):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
     base = (canon_prefix("MsgJoinCommunity")
           + envelope(bh, diff, ts, nonce)
-          + enc_str(100, community))
+          + enc_str(100, community)
+          + enc_u64(101, mode)
+          + enc_u64(102, pinned_team_id))
     return submit("/core/join_community", base, {
-        "community": community,
+        "community": community, "mode": mode, "pinned_team_id": pinned_team_id,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 def leave_community(community: str):
@@ -709,6 +711,7 @@ A community is a slug, not an object with an owner. There is no create step: pos
 - Slug format: `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$` with no `--`, length between `min_community_size` and `max_community_size` from `get_chain_config`.
 - In post bodies a community is written `[name]` and renders as a link to `/c/name`. `@name` still means a user.
 - Joining a community is `MsgJoinCommunity`; it is a hard cap, so once `max_joined_communities` is reached the chain rejects the join until you leave one.
+- A join carries the lens you were reading under and the chain locks it in as your stored preference: `mode=0` pins whichever team is the community's default at that height, `mode=1` pins `pinned_team_id`, `mode=2` locks the uncensored view. A community with no live team locks to uncensored, since there is nothing to pin. Change it afterwards with `MsgSetCurationPreference`.
 - Blocking a community is a deque: past the tier cap the chain evicts your oldest blocked entry rather than rejecting the write. A cap of `0` disables the list entirely and the handler rejects the write.
 
 ### Curation
@@ -1195,7 +1198,7 @@ The response also carries `registration_invite_code_required`. Ignore it. Invite
 | Set Biography | `MsgSetBiography` | `/core/set_biography` | 100=target (own addr), 101=biography |
 | Follow User | `MsgFollowUser` | `/core/follow_user` | 100=target (own addr), 101=user |
 | Unfollow User | `MsgUnfollowUser` | `/core/unfollow_user` | 100=target (own addr), 101=user |
-| Join Community | `MsgJoinCommunity` | `/core/join_community` | 100=community |
+| Join Community | `MsgJoinCommunity` | `/core/join_community` | 100=community, 101=mode, 102=pinned_team_id |
 | Leave Community | `MsgLeaveCommunity` | `/core/leave_community` | 100=community |
 | Block Community | `MsgBlockCommunity` | `/core/block_community` | 100=target (own addr), 101=community |
 | Unblock Community | `MsgUnblockCommunity` | `/core/unblock_community` | 100=target (own addr), 101=community |

@@ -510,8 +510,19 @@ def _do_follow_user_with_nonce(
     return resp
 
 
-def _do_follow_topic(backend: str, wallet, community: str, follow: bool = True, skip_pow: bool = False) -> dict:
-    """Join or leave a community (legacy helper name used by existing tests)."""
+def _do_follow_topic(
+    backend: str,
+    wallet,
+    community: str,
+    follow: bool = True,
+    skip_pow: bool = False,
+    mode: int = 0,
+    pinned_team_id: int = 0,
+) -> dict:
+    """Join or leave a community (legacy helper name used by existing tests).
+
+    A join carries the lens the joiner was shown; the chain locks it in.
+    """
     slug = (community or "").strip().lower()
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -519,10 +530,14 @@ def _do_follow_topic(backend: str, wallet, community: str, follow: bool = True, 
     ts = _now_ms()
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
-    canon_fn = _canon_base_join_community_raw if follow else _canon_base_leave_community_raw
     endpoint = "join_community" if follow else "leave_community"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, slug, nonce)
+    if follow:
+        base = _canon_base_join_community_raw(
+            pub, _lb_bytes(lb), d, ts, slug, int(mode), int(pinned_team_id), nonce
+        )
+    else:
+        base = _canon_base_leave_community_raw(pub, _lb_bytes(lb), d, ts, slug, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -538,6 +553,9 @@ def _do_follow_topic(backend: str, wallet, community: str, follow: bool = True, 
         "pow_difficulty": d,
         "community": slug,
     }
+    if follow:
+        payload["mode"] = int(mode)
+        payload["pinned_team_id"] = int(pinned_team_id)
     payload["pow"] = int(proof)
     _, resp = _post(f"{backend}/api/core/{endpoint}", payload)
     return resp

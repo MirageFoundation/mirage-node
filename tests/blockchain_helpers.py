@@ -1323,11 +1323,15 @@ def _build_msg_join_community(
     community: str,
     pow_val: int = 0,
     nonce: int = 0,
+    mode: int = 0,
+    pinned_team_id: int = 0,
 ) -> MsgJoinCommunity:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
     slug = str(community or "").strip().lower()
-    base = _canon_base_join_community_raw(pub, lb_bytes, diff, ts, slug, nonce=nonce)
+    base = _canon_base_join_community_raw(
+        pub, lb_bytes, diff, ts, slug, int(mode), int(pinned_team_id), nonce
+    )
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgJoinCommunity()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1339,6 +1343,8 @@ def _build_msg_join_community(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.community = slug
+    msg.mode = int(mode)
+    msg.pinned_team_id = int(pinned_team_id)
     return msg
 
 

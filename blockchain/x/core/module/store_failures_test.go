@@ -1023,7 +1023,10 @@ func TestFollowTopicFailsWhenUnblockFails(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NotNil(t, pref)
-	require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, pref.Mode)
+	// The join locks in the lens it was shown, and an uncurated community has
+	// no team to pin, so the membership settles on RAW rather than floating on
+	// LIVE_DEFAULT. See JoinCommunityWithLens.
+	require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, pref.Mode)
 
 	_, err = am.JoinCommunity(ctx, &types.MsgJoinCommunity{
 		EnvelopePubkey: pub,

@@ -119,6 +119,12 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 				w.writeUvarint(101, u64(fields, "team_id"))
 				w.writeString(102, str(fields, "new_owner"))
 			}
+		case "MsgJoinCommunity":
+			fill = func(w *canonWriter) {
+				w.writeString(100, str(fields, "community"))
+				w.writeUvarint(101, u64(fields, "mode"))
+				w.writeUvarint(102, u64(fields, "pinned_team_id"))
+			}
 		case "MsgSetCurationPreference":
 			fill = func(w *canonWriter) {
 				w.writeString(100, str(fields, "community"))

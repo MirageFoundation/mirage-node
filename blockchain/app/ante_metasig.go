@@ -676,6 +676,8 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 		case *coretypes.MsgJoinCommunity:
 			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgJoinCommunity", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeString(100, m.Community)
+				w.writeUvarint(101, uint64(m.Mode))
+				w.writeUvarint(102, m.PinnedTeamId)
 			}); err != nil {
 				return ctx, err
 			}

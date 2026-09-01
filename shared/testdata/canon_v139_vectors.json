@@ -249,6 +249,33 @@
                 "clear": true
             },
             "canon_hex": "6d69726167652e636f72652e76313a4d73675365744375726174696f6e506f7374546167000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f67796503660661626331323367006801"
+        },
+        {
+            "msg": "MsgJoinCommunity",
+            "fields": {
+                "community": "technology",
+                "mode": 0,
+                "pinned_team_id": 0
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674a6f696e436f6d6d756e697479000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965006600"
+        },
+        {
+            "msg": "MsgJoinCommunity",
+            "fields": {
+                "community": "technology",
+                "mode": 1,
+                "pinned_team_id": 4
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674a6f696e436f6d6d756e697479000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965016604"
+        },
+        {
+            "msg": "MsgJoinCommunity",
+            "fields": {
+                "community": "technology",
+                "mode": 2,
+                "pinned_team_id": 0
+            },
+            "canon_hex": "6d69726167652e636f72652e76313a4d73674a6f696e436f6d6d756e697479000220000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680c3bbc2060707640a746563686e6f6c6f677965026600"
         }
     ]
 }

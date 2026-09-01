@@ -479,9 +479,9 @@ export async function unfollowUser(address) {
     return h.unfollowUser(address);
 }
 
-export async function joinCommunity(community) {
+export async function joinCommunity(community, mode = 0, pinnedTeamId = 0) {
     const h = await getHandler();
-    return h.joinCommunity(community);
+    return h.joinCommunity(community, mode, pinnedTeamId);
 }
 
 export async function leaveCommunity(community) {

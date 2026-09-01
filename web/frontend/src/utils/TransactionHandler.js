@@ -1599,7 +1599,7 @@ class TransactionHandler {
         });
     }
 
-    joinCommunity(community) {
+    joinCommunity(community, mode = 0, pinnedTeamId = 0) {
         const publicKey = Storage.load("publicKey", "");
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
@@ -1611,6 +1611,11 @@ class TransactionHandler {
         if (!slug) {
             return Promise.resolve(this._fail("empty community"));
         }
+        const joinMode = Number(mode);
+        if (![0, 1, 2].includes(joinMode)) {
+            return Promise.resolve(this._fail("invalid curation mode"));
+        }
+        const joinTeamId = joinMode === 1 ? requireTeamId(pinnedTeamId) : 0;
 
         const key = `community:${slug}`;
         if (this.pendingFollows.has(key)) {
@@ -1625,6 +1630,8 @@ class TransactionHandler {
             action: 'join_community',
             userId: publicKey,
             community: slug,
+            mode: joinMode,
+            pinned_team_id: joinTeamId,
         };
 
         return new Promise((resolve) => {
@@ -3124,7 +3131,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgJoinCommunity (community at tag 100, no target)
-    canonicalJoinCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, community, nonce }) {
+    canonicalJoinCommunity({ pub_bytes, last_block_hash, difficulty, proof, timestamp, community, nonce, mode, pinned_team_id }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3173,6 +3180,8 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(community || ""),
+            Uint8Array.from([101]), uvarint64(mode || 0),
+            Uint8Array.from([102]), uvarint64(pinned_team_id || 0),
         );
     }
 
@@ -3946,6 +3955,8 @@ class TransactionHandler {
             } else if (msgName === 'MsgJoinCommunity') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const communityLower = (transaction.community || "").toLowerCase();
+                const joinMode = Number(transaction.mode || 0);
+                const joinTeamId = Number(transaction.pinned_team_id || 0);
                 const canon = this.canonicalJoinCommunity({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -3954,6 +3965,8 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     community: communityLower,
                     nonce: envelopeNonce,
+                    mode: joinMode,
+                    pinned_team_id: joinTeamId,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3964,6 +3977,8 @@ class TransactionHandler {
                     signature: sigB64,
                     timestamp: transaction.timestamp,
                     community: communityLower,
+                    mode: joinMode,
+                    pinned_team_id: joinTeamId,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),

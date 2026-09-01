@@ -73,13 +73,13 @@ function removeFromCache(community, address) {
     updateCacheCommunities(current.filter(x => x.toLowerCase() !== t), address);
 }
 
-export async function joinCommunity(address, community) {
+export async function joinCommunity(address, community, mode = 0, pinnedTeamId = 0) {
     const t = String(community || '').trim();
     if (!t) return [];
     const lower = t.toLowerCase();
     if (lower === 'all' || lower === 'home') return [];
 
-    const result = await transactionHandler.joinCommunity(t);
+    const result = await transactionHandler.joinCommunity(t, mode, pinnedTeamId);
 
     if (result.success) {
         scheduleRefresh(address);

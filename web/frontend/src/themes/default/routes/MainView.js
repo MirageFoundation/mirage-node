@@ -25,6 +25,7 @@ import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import AccountStatusNotices from "../components/AccountStatusNotices";
 import { usePendingBlocks } from "../../../logic/usePendingBlocks";
 import { isOptimisticallyCurationHidden } from "../../../utils/curationVisibility";
+import { joinPreferenceForLens } from "../../../utils/curation";
 
 // Mobile header branding for home/following feeds
 
@@ -985,6 +986,7 @@ const MainView = ({
         handleNsfwChoice,
         bottomSentinelRef,
         loadMore,
+        feedLens,
         setFeedLens,
     } = useMain({
         state,
@@ -1266,7 +1268,15 @@ const MainView = ({
                                                                     return next;
                                                                 });
                                                             } else {
-                                                                await joinCommunity(viewerAddress || 'guest', communityName);
+                                                                // The lens on screen is what the join locks in.
+                                                                const { mode, pinnedTeamId } = joinPreferenceForLens(feedLens.lens, feedLens.teamId);
+                                                                console.debug('[lens] joining with lens', {
+                                                                    community: key,
+                                                                    lens: feedLens.lens,
+                                                                    mode,
+                                                                    pinnedTeamId,
+                                                                });
+                                                                await joinCommunity(viewerAddress || 'guest', communityName, mode, pinnedTeamId);
                                                                 setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                                                             }
                                                             invalidateCommunitiesCache();

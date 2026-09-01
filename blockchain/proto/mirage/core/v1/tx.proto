@@ -909,6 +909,13 @@ message MsgJoinCommunity {
   uint64 envelope_nonce = 7;
   bytes envelope_signature = 10;
   string community = 100;
+  // The lens the joiner was looking at, locked in as their membership
+  // preference. LIVE_DEFAULT is resolved to a pin on the community's current
+  // default team at join height, so a member is always recorded against the
+  // team they actually saw rather than floating to whichever team later wins
+  // the subscriber count.
+  CurationPreferenceMode mode = 101;
+  uint64 pinned_team_id = 102;
 }
 
 message MsgJoinCommunityResponse {}

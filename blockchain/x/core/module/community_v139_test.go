@@ -547,6 +547,184 @@ func TestCurationTeamProfileValidationAndNoPolicy(t *testing.T) {
 	require.Empty(t, team.Description, "description remains optional")
 }
 
+// joinWithLens is the user-facing join path: whatever lens the joiner was
+// shown is what gets stored.
+func joinWithLens(t *testing.T, mk *mockKeeper, ctx sdk.Context, owner, slug string, mode types.CurationPreferenceMode, teamID uint64, paid bool) error {
+	t.Helper()
+	tier := mk.GetParams(ctx).GetTierConfig(types.LevelSubscriber)
+	require.NotNil(t, tier)
+	return mk.JoinCommunityWithLens(ctx, owner, slug, uint32(tier.MaxJoinedCommunities), mode, teamID, paid)
+}
+
+func requireStoredPreference(t *testing.T, mk *mockKeeper, ctx sdk.Context, owner, slug string, mode types.CurationPreferenceMode, teamID uint64) {
+	t.Helper()
+	pref, found, err := mk.GetPreference(ctx, owner, slug)
+	require.NoError(t, err)
+	require.True(t, found, "%s must be joined to %s", owner, slug)
+	require.Equal(t, mode, pref.Mode)
+	require.Equal(t, teamID, pref.PinnedTeamId)
+}
+
+func TestJoinLocksInSelectedTeamLens(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(60)
+	joiner := genAddr(61)
+	slug := "lens-lock"
+	setPaidProfile(t, mk, ctx, leader)
+	setPaidProfile(t, mk, ctx, joiner)
+
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "")
+	require.NoError(t, err)
+
+	require.NoError(t, joinWithLens(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, teamID, true))
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, teamID)
+
+	team, found, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(2), team.SubscriberCount, "founder + the joiner who picked this team")
+}
+
+func TestJoinLocksInRawLens(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(62)
+	joiner := genAddr(63)
+	slug := "lens-raw"
+	setPaidProfile(t, mk, ctx, leader)
+	setPaidProfile(t, mk, ctx, joiner)
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "")
+	require.NoError(t, err)
+
+	require.NoError(t, joinWithLens(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, 0, true))
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, 0)
+
+	team, _, err := mk.GetCurationTeam(ctx, slug, teamID)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), team.SubscriberCount, "an uncensored joiner backs no team")
+}
+
+// The whole point of the lock-in: a member recorded against the team they saw
+// does not migrate when a rival team later buys the top of the subscriber
+// ranking, so the default audience cannot be captured wholesale.
+func TestJoinSnapshotsDefaultTeamAndSurvivesRankingFlip(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	incumbentOwner := genAddr(64)
+	rivalOwner := genAddr(65)
+	joiner := genAddr(66)
+	backer := genAddr(67)
+	secondBacker := genAddr(79)
+	slug := "lens-snapshot"
+	for _, addr := range []string{incumbentOwner, rivalOwner, joiner, backer, secondBacker} {
+		setPaidProfile(t, mk, ctx, addr)
+	}
+
+	incumbent, err := mk.CreateCurationTeam(ctx, incumbentOwner, slug, "Incumbent", "")
+	require.NoError(t, err)
+	rival, err := mk.CreateCurationTeam(ctx, rivalOwner, slug, "Rival", "")
+	require.NoError(t, err)
+
+	// Tie on subscriber_count (one founder each) breaks to the older team.
+	require.NoError(t, joinWithLens(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, 0, true))
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, incumbent)
+	t.Logf("[debug] default lens snapshot pinned team_id=%d", incumbent)
+
+	// Rival overtakes the incumbent on subscriber_count.
+	require.NoError(t, joinWithLens(t, mk, ctx, backer, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, rival, true))
+	require.NoError(t, joinWithLens(t, mk, ctx, secondBacker, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, rival, true))
+	rivalTeam, _, err := mk.GetCurationTeam(ctx, slug, rival)
+	require.NoError(t, err)
+	incumbentTeam, _, err := mk.GetCurationTeam(ctx, slug, incumbent)
+	require.NoError(t, err)
+	require.Greater(t, rivalTeam.SubscriberCount, incumbentTeam.SubscriberCount, "rival now leads the ranking")
+
+	// The earlier joiner is unmoved — no floating audience to capture.
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, incumbent)
+	_, _, effective, _, effectiveTeam, err := mk.ResolveEffectivePreference(ctx, joiner, slug)
+	require.NoError(t, err)
+	require.Equal(t, types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, effective)
+	require.Equal(t, incumbent, effectiveTeam)
+}
+
+// Nothing to pin in an uncurated community, and RAW is what the picker shows
+// there, so that is what gets locked in.
+func TestJoinWithoutLiveTeamLocksRaw(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	joiner := genAddr(68)
+	slug := "lens-uncurated"
+	setPaidProfile(t, mk, ctx, joiner)
+
+	require.NoError(t, joinWithLens(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, 0, true))
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, 0)
+}
+
+func TestJoinDefaultLensSkipsTeamThatBannedTheJoiner(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leadOwner := genAddr(69)
+	secondOwner := genAddr(70)
+	joiner := genAddr(71)
+	backer := genAddr(72)
+	slug := "lens-banned"
+	for _, addr := range []string{leadOwner, secondOwner, joiner, backer} {
+		setPaidProfile(t, mk, ctx, addr)
+	}
+	lead, err := mk.CreateCurationTeam(ctx, leadOwner, slug, "Lead", "")
+	require.NoError(t, err)
+	second, err := mk.CreateCurationTeam(ctx, secondOwner, slug, "Second", "")
+	require.NoError(t, err)
+	require.NoError(t, joinWithLens(t, mk, ctx, backer, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, lead, true))
+
+	require.NoError(t, mk.SetCurationActionHiddenUser(ctx, slug, lead, joiner, leadOwner, true))
+	require.NoError(t, joinWithLens(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, 0, true))
+	requireStoredPreference(t, mk, ctx, joiner, slug,
+		types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, second)
+}
+
+func TestJoinLensValidationRejectsInconsistentRequests(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	leader := genAddr(73)
+	slug := "lens-validation"
+	setPaidProfile(t, mk, ctx, leader)
+	teamID, err := mk.CreateCurationTeam(ctx, leader, slug, "Signal", "")
+	require.NoError(t, err)
+
+	cases := []struct {
+		name    string
+		addr    string
+		mode    types.CurationPreferenceMode
+		teamID  uint64
+		wantErr string
+	}{
+		{"pinned without team", genAddr(74), types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, 0, "requires a team_id"},
+		{"raw with team", genAddr(75), types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, teamID, "requires team_id 0"},
+		{"default with team", genAddr(76), types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT, teamID, "requires team_id 0"},
+		{"unknown mode", genAddr(77), types.CurationPreferenceMode(9), 0, "invalid join lens mode"},
+		{"unknown team", genAddr(78), types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, 999, "deleted or unknown team"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setPaidProfile(t, mk, ctx, tc.addr)
+			err := joinWithLens(t, mk, ctx, tc.addr, slug, tc.mode, tc.teamID, true)
+			require.ErrorContains(t, err, tc.wantErr)
+			_, found, err := mk.GetPreference(ctx, tc.addr, slug)
+			require.NoError(t, err)
+			require.False(t, found, "a rejected join must not leave a membership behind")
+		})
+	}
+}
+
 func TestRetiredCommunityOwnershipHandlersReject(t *testing.T) {
 	_, ctx, am := setupModule(t)
 	_, err := am.CreateCommunity(ctx, &types.MsgCreateCommunity{})

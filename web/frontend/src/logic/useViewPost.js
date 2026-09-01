@@ -20,7 +20,7 @@ import useBalance from "./useBalance.js";
 import { formatMirageCompact } from "../utils/formatters";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
 import { communityLabel } from "../utils/community";
-import { LENS, lensQuery } from "../utils/curation";
+import { LENS, lensQuery, joinPreferenceForLens } from "../utils/curation";
 import { signPlainPayload } from "../utils/signPlain";
 export const pickCard = requireThemeColor;
 
@@ -450,7 +450,8 @@ export function useViewPost({
     const isJoinedCommunity = community => {
         return joinedCommunitiesSet.has(String(community || '').toLowerCase());
     };
-    const handleCommunityJoinToggle = async community => {
+    // lensSelection is the thread's current lens, which a join locks in.
+    const handleCommunityJoinToggle = async (community, lensSelection = null) => {
         const t = String(community || '').trim().toLowerCase();
         if (!t || isCommunityPending(t)) return;
         if (!requireAccount('join communities')) return;
@@ -470,7 +471,12 @@ export function useViewPost({
                 await leaveCommunity(viewerAddress, community);
                 updateNotification(`Left ${communityLabel(t)}`);
             } else {
-                await joinCommunity(viewerAddress, community);
+                const { mode, pinnedTeamId } = joinPreferenceForLens(
+                    lensSelection?.lens,
+                    lensSelection?.teamId,
+                );
+                console.debug('[lens] joining with lens', { community: t, lens: lensSelection?.lens, mode, pinnedTeamId });
+                await joinCommunity(viewerAddress, community, mode, pinnedTeamId);
                 updateNotification(`Joined ${communityLabel(t)}`);
             }
             invalidateCommunitiesCache();

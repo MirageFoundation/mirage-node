@@ -278,6 +278,29 @@ def test_curation_backend(backend: str) -> None:
     ):
         _fail("curation.backend_banned_user_join", f"resp={free_join}")
         return
+
+    # Joining on the default lens locks the member to the team that lens named
+    # at join height. Without it every new member sits on LIVE_DEFAULT and
+    # migrates to whichever team later leads the subscriber count.
+    locked = False
+    last_join_detail: dict | None = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        code, last_join_detail = _get(f"{backend}/api/communities/{slug}", {"viewer": free_addr})
+        locked = (
+            code == 200
+            and isinstance(last_join_detail, dict)
+            and int(last_join_detail.get("stored_mode", -1)) == 1
+            and int(last_join_detail.get("stored_team_id") or 0) == team_id
+        )
+        if locked:
+            break
+        time.sleep(0.5)
+    if locked:
+        _pass("curation.backend_join_locks_default_lens", team_id=team_id)
+    else:
+        _fail("curation.backend_join_locks_default_lens", f"detail={last_join_detail}")
+
     free_pin = _do_set_curation_preference(
         backend, free, slug, mode=1, pinned_team_id=team_id, skip_pow=False
     )

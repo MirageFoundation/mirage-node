@@ -62,6 +62,30 @@ export function requireCurationTeamDescription(value, max = MAX_CURATION_TEAM_DE
 
 const VALID_LENSES = new Set(Object.values(LENS));
 
+/**
+ * The curation preference a join should lock in for the lens on screen.
+ *
+ * `effective` and `default` both mean "the community's default team", which the
+ * chain resolves to a concrete pin at join height — the client never picks the
+ * team itself, so a ranking change between render and block cannot pin the
+ * wrong one.
+ */
+export function joinPreferenceForLens(lens, teamId = null) {
+    switch (lens) {
+        case LENS.TEAM:
+            return { mode: CURATION_MODE.PINNED, pinnedTeamId: requireTeamId(teamId) };
+        case LENS.RAW:
+            return { mode: CURATION_MODE.RAW, pinnedTeamId: 0 };
+        case LENS.EFFECTIVE:
+        case LENS.DEFAULT:
+        case undefined:
+        case null:
+            return { mode: CURATION_MODE.LIVE_DEFAULT, pinnedTeamId: 0 };
+        default:
+            throw new Error(`Cannot join with lens: ${lens}`);
+    }
+}
+
 export function requireCommunitySlug(value) {
     const slug = String(value || '').trim().toLowerCase();
     if (!slug) throw new Error('community is required');

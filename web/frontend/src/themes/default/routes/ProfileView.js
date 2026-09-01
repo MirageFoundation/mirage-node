@@ -298,7 +298,7 @@ const ProfilePostsTabGutter = styled.div`
     }
 `;
 
-/** Shared details grid. The label width also matches AccountStatusNotices. */
+/** Shared details grid. */
 const ProfileFieldRow = styled.div`
     display: grid;
     grid-template-columns: 150px minmax(0, 1fr);

@@ -3999,12 +3999,24 @@ def core_join_community():
         community = str(data.get("community", "")).strip().lower()
         if not community:
             return jsonify({"error": "community required"}), 400
-        pow_err = _maybe_pow_precheck(rid, "join_community", env, canon_base_join_community, community)
+        try:
+            mode = int(data.get("mode", 0))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid mode"}), 400
+        try:
+            pinned_team_id = int(data.get("pinned_team_id", 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid pinned_team_id"}), 400
+        pow_err = _maybe_pow_precheck(
+            rid, "join_community", env, canon_base_join_community, community, mode, pinned_team_id
+        )
         if pow_err:
             return pow_err
         msg = MsgJoinCommunity()
         _fill_envelope(msg, env, require_runtime().validator_payer_addr)
         msg.community = community
+        msg.mode = mode
+        msg.pinned_team_id = pinned_team_id
         return _broadcast_core_msg(
             rid, "join_community", "/mirage.core.v1.MsgJoinCommunity", msg, len(community), env["user_addr"]
         )

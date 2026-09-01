@@ -76,7 +76,15 @@ func (am AppModule) JoinCommunity(ctx context.Context, req *types.MsgJoinCommuni
 	if err := types.ValidateCommunitySlug(slug, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 		return nil, err
 	}
-	if err := am.k.JoinCommunity(sdkCtx, owner, slug, uint32(tier.MaxJoinedCommunities)); err != nil {
+	if err := am.k.JoinCommunityWithLens(
+		sdkCtx,
+		owner,
+		slug,
+		uint32(tier.MaxJoinedCommunities),
+		req.GetMode(),
+		req.GetPinnedTeamId(),
+		types.CanCurate(core),
+	); err != nil {
 		return nil, err
 	}
 	return &types.MsgJoinCommunityResponse{}, nil

@@ -14,6 +14,7 @@ import Storage from '../../src/utils/Storage.js';
 import { buildCanonical } from '../../src/utils/canonicalEncoding.js';
 import { markdownUrlTransform } from '../../src/utils/markdownUrl.js';
 import { getSessionGeneration, onSessionReset, resetClientSession } from '../../src/utils/sessionLifecycle.js';
+import { formatCountdown } from '../../src/themes/default/components/AccountStatusNotices.js';
 
 const PASSWORD = 'correct-horse-battery-staple';
 
@@ -244,5 +245,27 @@ describe('sub-threshold: protocol-relative markdown links', () => {
     it('keeps rejecting script-bearing schemes', () => {
         expect(markdownUrlTransform('javascript:alert(1)')).toBe('');
         expect(markdownUrlTransform('data:text/html,<script>alert(1)</script>')).toBe('');
+    });
+});
+
+describe('renewal countdown below a day', () => {
+    const now = 1788298557000;
+    const at = (seconds) => Math.floor(now / 1000) + seconds;
+
+    it('reports minutes and hours instead of rounding up to a day', () => {
+        expect(formatCountdown(at(60), now)).toBe('1 minute');
+        expect(formatCountdown(at(57 * 60), now)).toBe('57 minutes');
+        expect(formatCountdown(at(3600), now)).toBe('1 hour');
+        expect(formatCountdown(at(20 * 3600), now)).toBe('20 hours');
+    });
+
+    it('still reports whole days once a day is left', () => {
+        expect(formatCountdown(at(86400), now)).toBe('1 day');
+        expect(formatCountdown(at(6 * 86400), now)).toBe('6 days');
+    });
+
+    it('does not render a negative countdown once expired', () => {
+        expect(formatCountdown(at(-1), now)).toBe('any moment');
+        expect(formatCountdown(at(0), now)).toBe('any moment');
     });
 });

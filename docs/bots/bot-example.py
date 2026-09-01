@@ -475,16 +475,27 @@ def unfollow_user(user_addr: str) -> dict:
     )
 
 
-def join_community(community: str) -> dict:
+def join_community(community: str, mode: int = 0, pinned_team_id: int = 0) -> dict:
+    """Join a community, locking in the lens you were shown.
+
+    mode 0 (default) pins the community's current default team, 1 pins
+    pinned_team_id, 2 locks the uncensored view.
+    """
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
-    base = canon_prefix("MsgJoinCommunity") + envelope(bh, diff, ts, nonce) + enc_str(100, community)
+    base = (
+        canon_prefix("MsgJoinCommunity")
+        + envelope(bh, diff, ts, nonce)
+        + enc_str(100, community)
+        + enc_u64(101, mode)
+        + enc_u64(102, pinned_team_id)
+    )
     return submit(
         "/core/join_community",
         base,
-        {"community": community},
+        {"community": community, "mode": mode, "pinned_team_id": pinned_team_id},
         block_hash,
         diff,
         pow_base_bits,

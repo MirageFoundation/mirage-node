@@ -281,6 +281,87 @@ func (k Keeper) JoinCommunity(ctx sdk.Context, owner, slug string, cap uint32) e
 	return nil
 }
 
+// JoinCommunityWithLens joins and locks the joiner's lens in the same message.
+//
+// A plain JoinCommunity lands on LIVE_DEFAULT, which is not a choice — it is a
+// standing subscription to whichever team currently leads the subscriber count.
+// Everyone who joined and never touched the picker therefore forms a floating
+// audience that transfers wholesale the moment a rival team overtakes the
+// incumbent, so a handful of paid pins can capture a whole community's
+// moderation view. Recording the lens the joiner actually saw removes that pool:
+// LIVE_DEFAULT is resolved here, at join height, to a pin on the team it names.
+//
+// A community with no live team has nothing to pin, so the joiner is locked to
+// RAW — the view they were shown. They keep it if the community is curated
+// later, which is the same "what you saw is what you get" contract.
+func (k Keeper) JoinCommunityWithLens(ctx sdk.Context, owner, slug string, cap uint32, mode types.CurationPreferenceMode, teamID uint64, paid bool) error {
+	if _, found, err := k.GetPreference(ctx, owner, slug); err != nil {
+		return err
+	} else if found {
+		return nil
+	}
+	lockMode, lockTeam, err := k.resolveJoinLens(ctx, owner, slug, mode, teamID)
+	if err != nil {
+		return err
+	}
+	if err := k.JoinCommunity(ctx, owner, slug, cap); err != nil {
+		return err
+	}
+	// SetCurationPreference re-validates the pin (live team, joiner not banned)
+	// and owns the subscriber-count bookkeeping. The join above stored
+	// LIVE_DEFAULT, which contributes to no team, so this only ever adds.
+	return k.SetCurationPreference(ctx, owner, slug, lockMode, lockTeam, paid)
+}
+
+// resolveJoinLens turns a requested join lens into the preference to store.
+func (k Keeper) resolveJoinLens(ctx sdk.Context, owner, slug string, mode types.CurationPreferenceMode, teamID uint64) (types.CurationPreferenceMode, uint64, error) {
+	switch mode {
+	case types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW:
+		if teamID != 0 {
+			return 0, 0, fmt.Errorf("raw join lens requires team_id 0")
+		}
+		return types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, 0, nil
+	case types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED:
+		if teamID == 0 {
+			return 0, 0, fmt.Errorf("pinned join lens requires a team_id")
+		}
+		// Checked here rather than left to SetCurationPreference so a bad pin
+		// fails before the membership is written, instead of relying on the tx
+		// revert to undo a half-applied join.
+		team, ok, err := k.GetCurationTeam(ctx, slug, teamID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !ok || !k.teamLive(team) {
+			return 0, 0, fmt.Errorf("cannot pin deleted or unknown team")
+		}
+		hidden, err := k.storeHas(ctx, types.KeyHiddenUser(slug, teamID, owner))
+		if err != nil {
+			return 0, 0, err
+		}
+		if hidden {
+			return 0, 0, fmt.Errorf("cannot pin a team that banned this user")
+		}
+		return types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, teamID, nil
+	case types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_LIVE_DEFAULT:
+		if teamID != 0 {
+			return 0, 0, fmt.Errorf("default join lens requires team_id 0")
+		}
+		// Same ranking the default lens resolves to, and it already skips teams
+		// that banned this user, so the snapshot matches what they were shown.
+		best, found, err := k.bestCurationTeamForUser(ctx, slug, owner, 0)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !found {
+			return types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_RAW, 0, nil
+		}
+		return types.CurationPreferenceMode_CURATION_PREFERENCE_MODE_PINNED, best.TeamId, nil
+	default:
+		return 0, 0, fmt.Errorf("invalid join lens mode %d", mode)
+	}
+}
+
 func (k Keeper) LeaveCommunity(ctx sdk.Context, owner, slug string, paid bool) error {
 	pref, found, err := k.GetPreference(ctx, owner, slug)
 	if err != nil {

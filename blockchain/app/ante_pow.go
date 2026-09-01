@@ -752,7 +752,11 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			}
 
 		case *coretypes.MsgJoinCommunity:
-			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgJoinCommunity", buildCanonV139("MsgJoinCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) { w.writeString(100, m.Community) }), verifyPoW)
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgJoinCommunity", buildCanonV139("MsgJoinCommunity", m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopeTimestamp, m.EnvelopeNonce, func(w *canonWriter) {
+				w.writeString(100, m.Community)
+				w.writeUvarint(101, uint64(m.Mode))
+				w.writeUvarint(102, m.PinnedTeamId)
+			}), verifyPoW)
 			if err != nil {
 				return ctx, err
 			}
