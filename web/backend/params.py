@@ -207,9 +207,15 @@ def expect_creator_schedule() -> Dict[str, Any]:
     if not row or not row[0]:
         raise RuntimeError("creator_schedule missing from indexer DB")
     value = row[0] if isinstance(row[0], dict) else {}
-    origin_epoch = int(value["origin_epoch"])
-    origin_unix = int(value["origin_unix"])
-    epoch_seconds = int(value["epoch_seconds"])
+    try:
+        origin_epoch = int(value["origin_epoch"])
+        origin_unix = int(value["origin_unix"])
+        epoch_seconds = int(value["epoch_seconds"])
+        current_epoch = int(value["current_epoch"])
+        pending_epoch_seconds = int(value["pending_epoch_seconds"])
+        reset_in_progress = bool(value["reset_in_progress"])
+    except (KeyError, TypeError, ValueError) as err:
+        raise RuntimeError(f"creator_schedule is invalid: {value!r}") from err
     if origin_epoch < 0 or origin_unix < 0:
         raise RuntimeError(f"creator_schedule origin is invalid: {value!r}")
     if epoch_seconds < 300 or 86400 % epoch_seconds != 0:
@@ -218,14 +224,17 @@ def expect_creator_schedule() -> Dict[str, Any]:
         "origin_epoch": origin_epoch,
         "origin_unix": origin_unix,
         "epoch_seconds": epoch_seconds,
-        "current_epoch": int(value["current_epoch"]),
-        "pending_epoch_seconds": int(value.get("pending_epoch_seconds") or 0),
-        "reset_in_progress": bool(value.get("reset_in_progress")),
+        "current_epoch": current_epoch,
+        "pending_epoch_seconds": pending_epoch_seconds,
+        "reset_in_progress": reset_in_progress,
     }
 
 
 def creator_epoch_unix(epoch_id: int, schedule: Dict[str, Any]) -> int:
-    return int(schedule["origin_unix"]) + (int(epoch_id) - int(schedule["origin_epoch"])) * int(schedule["epoch_seconds"])
+    origin_epoch = int(schedule["origin_epoch"])
+    if int(epoch_id) < origin_epoch:
+        raise RuntimeError(f"creator epoch {epoch_id} precedes schedule origin {origin_epoch}")
+    return int(schedule["origin_unix"]) + (int(epoch_id) - origin_epoch) * int(schedule["epoch_seconds"])
 
 
 __all__ = ["load_params", "expect_params", "expect_creator_schedule", "creator_epoch_unix"]

@@ -2819,7 +2819,7 @@ class MessageProcessor:
                 "origin_unix": int(attrs["origin_unix"]),
                 "epoch_seconds": int(attrs["epoch_seconds"]),
                 "current_epoch": current_epoch,
-                "pending_epoch_seconds": int(attrs["pending_epoch_seconds"]) if attrs.get("pending_epoch_seconds") else 0,
+                "pending_epoch_seconds": 0,
                 "reset_in_progress": False,
             }
         else:

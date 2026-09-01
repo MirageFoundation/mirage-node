@@ -346,6 +346,18 @@ func TestUpdateParamsSchedulesCreatorIntervalReset(t *testing.T) {
 		),
 	})
 	require.ErrorContains(t, err, "while a reset is in progress")
+
+	current := mk.GetParams(ctx)
+	_, err = am.UpdateParams(ctx, &types.MsgUpdateParams{
+		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		Params:    types.Params{CreatorClaimWindowDays: current.CreatorClaimWindowDays + 1},
+		UpdateMask: mask("creator_claim_window_days"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, current.CreatorClaimWindowDays+1, mk.GetParams(ctx).CreatorClaimWindowDays)
+	inProgress, err = mk.CreatorResetInProgress(ctx)
+	require.NoError(t, err)
+	require.True(t, inProgress)
 }
 
 func TestCreatorIntervalStateGuardCoversEveryStateClass(t *testing.T) {
@@ -355,10 +367,13 @@ func TestCreatorIntervalStateGuardCoversEveryStateClass(t *testing.T) {
 		value []byte
 	}{
 		{"liability", types.PfxCreatorLiability, []byte("1")},
-		{"epoch", string(types.KeyCreatorEpoch(1)), []byte{1}},
-		{"tranche", string(types.KeyTranche(1)), []byte{1}},
-		{"engagement", types.PfxEngagement + "present", []byte{1}},
-		{"accrual", types.PfxEpochCreatorAccrual + "present", []byte{1}},
+	}
+	for _, prefix := range types.CreatorResetPrefixes() {
+		tests = append(tests, struct {
+			name  string
+			key   string
+			value []byte
+		}{prefix, prefix + "present", []byte{1}})
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

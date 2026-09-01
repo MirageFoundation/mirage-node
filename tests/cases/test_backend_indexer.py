@@ -1034,6 +1034,10 @@ def test_indexer_hardening(backend: str):
         and len(schedule_writes) == 1
         and schedule_writes[0][0]["epoch_seconds"] == 300
         and schedule_writes[0][0]["origin_epoch"] == 19676
+        and schedule_writes[0][0]["origin_unix"] == 1700000000
+        and schedule_writes[0][0]["current_epoch"] == 19676
+        and schedule_writes[0][0]["pending_epoch_seconds"] == 0
+        and schedule_writes[0][0]["reset_in_progress"] is False
     ):
         _pass("indexer_hardening.creator_reset_clears_projection")
     else:

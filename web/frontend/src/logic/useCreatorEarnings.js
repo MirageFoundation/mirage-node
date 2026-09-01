@@ -65,6 +65,8 @@ export function useCreatorEarnings(creator) {
     const address = String(creator || '').trim().toLowerCase();
     const [items, setItems] = useState([]);
     const [creatorEpochSeconds, setCreatorEpochSeconds] = useState(null);
+    const [originEpoch, setOriginEpoch] = useState(null);
+    const [originUnix, setOriginUnix] = useState(null);
     const [selected, setSelected] = useState([]);
     const [loading, setLoading] = useState(Boolean(address));
     const [error, setError] = useState('');
@@ -75,6 +77,8 @@ export function useCreatorEarnings(creator) {
         if (!address) {
             setItems([]);
             setCreatorEpochSeconds(null);
+            setOriginEpoch(null);
+            setOriginUnix(null);
             setLoading(false);
             return [];
         }
@@ -84,11 +88,15 @@ export function useCreatorEarnings(creator) {
             const next = validateEarnings(await Api.get('creator/earnings', { creator: address, _cb: Date.now() }));
             setItems(next.items);
             setCreatorEpochSeconds(next.creatorEpochSeconds);
+            setOriginEpoch(next.originEpoch);
+            setOriginUnix(next.originUnix);
             setSelected((current) => current.filter((id) => next.items.some((item) => Number(item.epoch_id) === id)));
             console.debug('[earnings] loaded', {
                 creator: address,
                 epochs: next.items.length,
                 creatorEpochSeconds: next.creatorEpochSeconds,
+                originEpoch: next.originEpoch,
+                originUnix: next.originUnix,
             });
             return next.items;
         } catch (err) {
@@ -140,6 +148,8 @@ export function useCreatorEarnings(creator) {
     return {
         items,
         creatorEpochSeconds,
+        originEpoch,
+        originUnix,
         claimable,
         selected,
         toggleEpoch,

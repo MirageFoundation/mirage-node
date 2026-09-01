@@ -61,16 +61,7 @@ func (k Keeper) HasCreatorRewardState(ctx sdk.Context) (bool, error) {
 	if !liability.IsZero() {
 		return true, nil
 	}
-	prefixes := []string{
-		types.PfxCreatorEpoch,
-		types.PfxCreatorEpochOpen,
-		types.PfxCreatorEpochSettle,
-		types.PfxCreatorEpochDeadline,
-		types.PfxCreatorEpochPrune,
-		types.PfxEngagement,
-		types.PfxEpochCreatorAccrual,
-		types.PfxTranche,
-	}
+	prefixes := types.CreatorResetPrefixes()
 	for _, prefix := range prefixes {
 		found := false
 		if err := k.iterPrefixKeys(ctx, []byte(prefix), 1, func(_, _ []byte) error {

@@ -91,10 +91,17 @@ func (k Keeper) processCreatorReset(ctx sdk.Context, params types.Params) (bool,
 		return true, nil
 	}
 
+	if reset.ToSeconds != params.CreatorEpochSeconds {
+		return true, fmt.Errorf(
+			"creator reset to_seconds=%d disagrees with params.creator_epoch_seconds=%d",
+			reset.ToSeconds,
+			params.CreatorEpochSeconds,
+		)
+	}
 	if err := k.ClearCreatorReset(ctx); err != nil {
 		return true, err
 	}
-	if err := k.activateCreatorSchedule(ctx, params.CreatorEpochSeconds, reset.SavedClock, ctx.BlockTime().Unix(), true); err != nil {
+	if err := k.activateCreatorSchedule(ctx, reset.ToSeconds, reset.SavedClock, ctx.BlockTime().Unix(), true); err != nil {
 		return true, err
 	}
 	sched, err := k.GetCreatorSchedule(ctx)
@@ -120,7 +127,7 @@ func (k Keeper) processCreatorReset(ctx sdk.Context, params types.Params) (bool,
 		sdk.NewAttribute("from_seconds", fmt.Sprintf("%d", reset.FromSeconds)),
 		sdk.NewAttribute("to_seconds", fmt.Sprintf("%d", reset.ToSeconds)),
 	))
-	return true, nil
+	return false, nil
 }
 
 func (k Keeper) burnCreatorPoolBalance(ctx sdk.Context) (sdkmath.Int, error) {
