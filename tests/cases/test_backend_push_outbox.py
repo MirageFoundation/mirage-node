@@ -360,7 +360,7 @@ def test_push_outbox_retry(backend: str):
         "push_listener._process_outbox(now_ts=TICK)\n"
         "state = row(k)\n"
         "drop(k)\n"
-        "emit({'status': state[0], 'attempts': state[1], 'deliveries': len(seen)})\n"
+        "emit({'status': state[0], 'attempts': state[1], 'deliveries': seen.count(k)})\n"
     )
     if aged["status"] == "failed" and aged["attempts"] == 1 and aged["deliveries"] == 0:
         _pass("push_outbox_retry.stale_event_is_dropped")
