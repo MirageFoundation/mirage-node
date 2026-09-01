@@ -671,10 +671,12 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     const rootRef = useRef(null);
     const [open, setOpen] = useState(false);
     const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_community' | 'report'
+    const [curationConfirmation, setCurationConfirmation] = useState(null);
     const [pending, setPending] = useState(false);
 
     const { isLoggedIn, postId, community, authorAddress, isOwnPost, authorLabel } = usePostIdentity(post, state);
-    const { visible: curateVisible } = usePostCurateActions(post);
+    const curateActions = usePostCurateActions(post, { active: open, updatePost });
+    const { visible: curateVisible } = curateActions;
     const canReport = isLoggedIn && !isOwnPost;
 
     const close = useCallback(() => setOpen(false), []);
@@ -703,8 +705,26 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
 
     const closeDialog = useCallback(() => {
         setActiveDialog(null);
+        setCurationConfirmation(null);
         setPending(false);
     }, []);
+
+    const openCurationConfirmation = useCallback((item) => {
+        setOpen(false);
+        setPending(false);
+        setCurationConfirmation(item);
+    }, []);
+
+    const confirmCurationAction = useCallback(async () => {
+        if (!curationConfirmation || pending) return;
+        setPending(true);
+        console.debug('[curation] confirmation accepted', { key: curationConfirmation.key });
+        try {
+            await curationConfirmation.run();
+        } finally {
+            closeDialog();
+        }
+    }, [closeDialog, curationConfirmation, pending]);
 
     const confirmBlockUser = useCallback(async () => {
         if (!authorAddress) { closeDialog(); return; }
@@ -765,10 +785,10 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
                     <Menu role="menu" aria-label={chipLabel} $align={align}>
                         {curateVisible && (
                             <CurateMenuItems
-                                post={post}
+                                actions={curateActions}
                                 active={open}
                                 onDone={close}
-                                updatePost={updatePost}
+                                onConfirm={openCurationConfirmation}
                                 renderItem={(item) => renderCurateItem(item, close)}
                             />
                         )}
@@ -802,6 +822,16 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
                     </Menu>
                 )}
             </PopoverRoot>
+            <ConfirmDialog
+                open={!!curationConfirmation}
+                title={curationConfirmation?.confirm?.title}
+                message={curationConfirmation?.confirm?.message}
+                confirmLabel={curationConfirmation?.confirm?.label}
+                confirmVariant="danger"
+                pending={pending}
+                onConfirm={confirmCurationAction}
+                onCancel={closeDialog}
+            />
             <ConfirmDialog
                 open={activeDialog === 'block_user'}
                 title={`Block ${authorLabel}?`}

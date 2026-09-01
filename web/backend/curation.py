@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -280,6 +281,22 @@ def resolve_lens(
     return result
 
 
+def _requested_lens_for(
+    community: str,
+    requested_lens: str,
+    requested_team_id: int | None,
+    community_lenses: Mapping[str, tuple[str, int | None]] | None,
+) -> tuple[str, int | None]:
+    if not community_lenses:
+        return requested_lens, requested_team_id
+    override = community_lenses.get(community)
+    if override is None:
+        return requested_lens, requested_team_id
+    lens, team_id = override
+    log.debug("[lens] community override community=%s lens=%s team=%s", community, lens, team_id)
+    return lens, team_id
+
+
 def resolve_effective_tags(
     cur,
     posts: list[dict],
@@ -372,8 +389,15 @@ def filter_posts(
     requested_team_id: int | None,
     scope: str,
     direct: bool = False,
+    community_lenses: Mapping[str, tuple[str, int | None]] | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Apply protocol scope and curator-team rules to serialized posts."""
+    """Apply protocol scope and curator-team rules to serialized posts.
+
+    ``community_lenses`` overrides ``requested_lens`` for the communities it
+    names. An aggregated feed carries posts from many communities, so one
+    request-wide lens cannot express a viewer who reads one community
+    uncensored and the rest through their curators.
+    """
     if scope not in ("current", "legacy"):
         raise ValueError("scope must be current or legacy")
     if not posts:
@@ -445,18 +469,24 @@ def filter_posts(
             visible.append(post)
             continue
         if community not in lenses:
+            community_lens, community_team_id = _requested_lens_for(
+                community,
+                requested_lens,
+                requested_team_id,
+                community_lenses,
+            )
             lenses[community] = resolve_lens(
                 cur,
                 viewer=address,
                 community=community,
-                requested_lens=requested_lens,
-                requested_team_id=requested_team_id,
+                requested_lens=community_lens,
+                requested_team_id=community_team_id,
             )
         resolved = lenses[community]
         team_id = resolved["effective_team_id"]
         if team_id is None:
             post["lens"] = {
-                "requested": requested_lens,
+                "requested": resolved["requested_lens"],
                 "effective_mode": MODE_RAW,
                 "effective_team_id": None,
             }
@@ -544,7 +574,7 @@ def filter_posts(
                 bool(meta["was_subscriber_at_creation"]),
             )
         post["lens"] = {
-            "requested": requested_lens,
+            "requested": resolved["requested_lens"],
             "effective_mode": visibility["effective_mode"],
             "effective_team_id": visibility["effective_team_id"],
         }

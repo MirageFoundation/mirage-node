@@ -6,13 +6,16 @@ import {
     LENS,
     MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
     MAX_CURATION_TEAM_NAME_LENGTH,
+    clearLensPick,
     curationPendingKey,
     formatPinCount,
     formatSubscriberCount,
     lensCacheKey,
     lensHintLabel,
+    lensPicksParam,
     lensQuery,
     normalizeLens,
+    readLensPick,
     requireCurationTeamDescription,
     requireCurationTeamName,
     runeLength,
@@ -20,6 +23,7 @@ import {
     teamIdWithMostSubscribers,
     viewingTeamId,
     waitForOwnCurationTeam,
+    writeLensPick,
 } from '../../src/utils/curation.js';
 import {
     currentCreatorEpoch,
@@ -47,6 +51,95 @@ describe('curation lenses', () => {
         const team = lensCacheKey({ ...base, lens: LENS.TEAM, teamId: 7 });
         const otherViewer = lensCacheKey({ ...base, viewer: 'mirage1other', lens: LENS.RAW });
         expect(new Set([raw, team, otherViewer]).size).toBe(3);
+    });
+
+    it('refetches instead of restoring another lens from community-wide post state', () => {
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        expect(main).toMatch(/shouldRestoreFeedState && showsCurrentLens/);
+        expect(main).toMatch(/if \(hasPostsForOrder\)/);
+        expect(main).not.toMatch(/hasAnyCachedPostsForCommunity/);
+    });
+
+    it('ties restore and cache writes to the lens the on-screen posts came from', () => {
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        // The identity may only advance when a page-1 response is applied,
+        // otherwise a lens switch restores (or saves) the previous feed.
+        expect(main).toMatch(/const showsCurrentLens = feedDataIdentityRef\.current === feedCacheCommunity/);
+        expect(main).toMatch(/if \(feedDataIdentityRef\.current !== feedCacheCommunity\) \{/);
+        expect(main).toMatch(/feedDataIdentityRef\.current = feedCacheCommunity;/);
+        expect(main).toMatch(/posts belong to another lens/);
+    });
+
+    it('ignores a repeated lens pick so the pending fetch is not cancelled', () => {
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        expect(main).toMatch(/setStoredFeedLens\(\(prev\) => \(/);
+        expect(main).toMatch(/prev\.lens === lens && prev\.teamId === teamId/);
+    });
+
+    it('keeps a picked lens for the tab, scoped to viewer and community', () => {
+        sessionStorage.clear();
+        const viewer = 'mirage1viewer';
+        expect(readLensPick({ viewer, community: 'tech' })).toBeNull();
+
+        writeLensPick({ viewer, community: 'tech', lens: LENS.RAW });
+        expect(readLensPick({ viewer, community: 'tech' })).toEqual({ lens: LENS.RAW, teamId: null });
+        expect(readLensPick({ viewer, community: 'other' })).toBeNull();
+        expect(readLensPick({ viewer: 'mirage1other', community: 'tech' })).toBeNull();
+
+        writeLensPick({ viewer, community: 'tech', lens: LENS.TEAM, teamId: 4 });
+        expect(readLensPick({ viewer, community: 'tech' })).toEqual({ lens: LENS.TEAM, teamId: 4 });
+
+        // Never the device: a pick that outlived the visit would keep overriding
+        // the community's live default here, including a later curation team.
+        expect(Object.keys(localStorage).filter((key) => key.startsWith('lens_pick_'))).toEqual([]);
+        sessionStorage.clear();
+        expect(readLensPick({ viewer, community: 'tech' })).toBeNull();
+
+        writeLensPick({ viewer, community: 'tech', lens: LENS.TEAM, teamId: 4 });
+        clearLensPick({ viewer, community: 'tech' });
+        expect(readLensPick({ viewer, community: 'tech' })).toBeNull();
+    });
+
+    it('rejects an unusable pick instead of storing it', () => {
+        sessionStorage.clear();
+        expect(() => writeLensPick({ viewer: 'v', community: 'c', lens: 'sideways' })).toThrow('invalid lens');
+        expect(() => writeLensPick({ viewer: 'v', community: 'c', lens: LENS.TEAM })).toThrow('team_id');
+        expect(readLensPick({ viewer: 'v', community: 'c' })).toBeNull();
+    });
+
+    it('mounts the feed and the picker into the lens picked in this tab', () => {
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        const picker = readFileSync(join(frontendSrc, 'themes/default/components/CurationLensPicker.js'), 'utf8');
+        expect(main).toMatch(/const pick = readLensPick\(\{ viewer: viewerAddress, community \}\)/);
+        expect(main).toMatch(/useState\(\(\) => initialLensFor\(urlCommunity\)\)/);
+        expect(picker).toMatch(/useState\(\(\) => readStoredPick\(community\)\)/);
+        expect(picker).toMatch(/if \(applyOnLoad\) writeLensPick\(/);
+        // A thread picker follows the ?lens= in its URL, not the feed's pick.
+        expect(picker).toMatch(/const readStoredPick = \(slug\) => \(applyOnLoad/);
+    });
+
+    it('sends every picked lens per community on an aggregated feed', () => {
+        sessionStorage.clear();
+        const viewer = 'mirage1viewer';
+        expect(lensPicksParam({ viewer })).toBe('');
+
+        writeLensPick({ viewer, community: 'tech', lens: LENS.RAW });
+        writeLensPick({ viewer, community: 'news', lens: LENS.TEAM, teamId: 4 });
+        writeLensPick({ viewer: 'mirage1other', community: 'sports', lens: LENS.RAW });
+        expect(lensPicksParam({ viewer })).toBe('news:team:4,tech:raw');
+        expect(lensPicksParam({ viewer: 'mirage1other' })).toBe('sports:raw');
+
+        clearLensPick({ viewer, community: 'news' });
+        expect(lensPicksParam({ viewer })).toBe('tech:raw');
+    });
+
+    it('keys the aggregated feed and its cold-start stash on the picks it sent', () => {
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        // A home feed fetched under one set of picks must not be restored, or
+        // painted from the launch payload, under another.
+        expect(main).toMatch(/feedLensPicks \? `\|\$\{feedLensPicks\}` : ''/);
+        expect(main).toMatch(/params\.lens_picks = feedLensPicks/);
+        expect(main).toMatch(/feedLens\.lens === LENS\.EFFECTIVE && !feedLensPicks/);
     });
 
     it('requires a team ID only for the explicit team lens', () => {
@@ -135,7 +228,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/OptionMeta>Currently \{defaultTeamName\}/);
         // Rapid switches: only roll back the failed pick, never a newer one.
         expect(pickerSrc).toMatch(
-            /setOptimisticSelection\(\(current\) => \(current === selection \? null : current\)\)/,
+            /setOptimisticSelection\(\(current\) => \{\s*if \(current !== selection\) return current;\s*clearLensPick\(\{ viewer: viewerAddr, community \}\);\s*return null;/,
         );
         expect(pickerSrc).toMatch(/optimistic confirmed by detail/);
     });
@@ -500,7 +593,9 @@ describe('v1.39 curation UI contracts', () => {
         expect(picker).not.toMatch(/variant="secondary"/);
         expect(membership).toMatch(/function CommunityMembershipButton/);
         expect(membership).toMatch(/MembershipLabel/);
-        expect(membership).toMatch(/<span>Join\{suffix\}<\/span>\s*<span>Joined\{suffix\}<\/span>/);
+        expect(membership).toMatch(/<MembershipLabel>\s*<span>Joined\{suffix\}<\/span>\s*<span>Leave\{suffix\}<\/span>/);
+        expect(membership).toMatch(/\) : \(\s*<span>Join\{suffix\}<\/span>/);
+        expect(membership).not.toMatch(/<span>Join\{suffix\}<\/span>\s*<span>Joined\{suffix\}<\/span>/);
         expect(membership).toMatch(/buttonDangerBg/);
         expect(membership).not.toMatch(/aria-haspopup/);
         expect(main).toMatch(/import CommunityMembershipButton/);
@@ -615,8 +710,12 @@ describe('v1.39 curation UI contracts', () => {
         expect(viewPost).toMatch(/BlockChip/);
         expect(listFeed).toMatch(/BlockChip/);
         expect(curateItems).not.toMatch(/Curate · /);
-        expect(curateItems).toMatch(/usePostCurateActions/);
-        expect(curateItems).toMatch(/updatePost/);
+        expect(postMenu).toMatch(/usePostCurateActions\(post, \{ active: open, updatePost \}\)/);
+        expect(postMenu).toMatch(/open=\{!!curationConfirmation\}/);
+        expect(postMenu).toMatch(/onConfirm=\{openCurationConfirmation\}/);
+        expect(curateItems).toMatch(/confirmation requested/);
+        expect(actions).toMatch(/title: 'Ban this post\?'/);
+        expect(actions).toMatch(/title: 'Ban this user\?'/);
         expect(actions).toMatch(/viewingAsCuratorTeam/);
         expect(actions).toMatch(/viewingTeamId === teamId/);
         expect(actions).toMatch(/const isOwnContent = !!author && author === viewer/);
@@ -818,7 +917,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/_optimisticLock/);
         expect(postMenu).toMatch(/item\.type === 'select'/);
         expect(postMenu).toMatch(/MenuSelect/);
-        expect(postMenu).toMatch(/updatePost=\{updatePost\}/);
+        expect(postMenu).toMatch(/usePostCurateActions\(post, \{ active: open, updatePost \}\)/);
         expect(app).toMatch(/existing\._optimisticTag !== undefined/);
         expect(app).toMatch(/existing\._optimisticLock !== undefined/);
     });

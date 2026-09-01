@@ -328,6 +328,11 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
                 danger: true,
                 disabled: pending('set_curation_post_hidden', postId),
                 icon: <HiOutlineEyeSlash />,
+                confirm: {
+                    title: 'Ban this post?',
+                    message: "This post will be hidden from this curation team's feed. You can unban it later from the team's Banned posts tab.",
+                    label: 'Ban post',
+                },
                 run: () => run(
                     'Ban post',
                     () => tx.moderateCurationPost(community, teamId, postId, true),
@@ -356,6 +361,11 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
                 danger: true,
                 disabled: !author || pending('set_curation_user_hidden', author),
                 icon: <HiOutlineNoSymbol />,
+                confirm: {
+                    title: 'Ban this user?',
+                    message: "Content from this user will be hidden from this curation team's feed. You can unban them later from the team's Banned users tab.",
+                    label: 'Ban user',
+                },
                 run: () => run(
                     'Ban user',
                     () => tx.moderateCurationUser(community, teamId, author, true),

@@ -58,11 +58,11 @@ const MembershipLabel = styled.span`
     }
 
     ${Button}:hover:not(:disabled) & > span:first-child {
-        visibility: ${({ $joined }) => ($joined ? 'hidden' : 'visible')};
+        visibility: hidden;
     }
 
     ${Button}:hover:not(:disabled) & > span:last-child {
-        visibility: ${({ $joined }) => ($joined ? 'visible' : 'hidden')};
+        visibility: visible;
     }
 `;
 
@@ -96,15 +96,12 @@ export default function CommunityMembershipButton({
             onClick={handleClick}
         >
             {pending ? (statusLabel || (joined ? 'Leaving…' : 'Joining…')) : joined ? (
-                <MembershipLabel $joined>
+                <MembershipLabel>
                     <span>Joined{suffix}</span>
                     <span>Leave{suffix}</span>
                 </MembershipLabel>
             ) : (
-                <MembershipLabel $joined={false}>
-                    <span>Join{suffix}</span>
-                    <span>Joined{suffix}</span>
-                </MembershipLabel>
+                <span>Join{suffix}</span>
             )}
         </Button>
     );

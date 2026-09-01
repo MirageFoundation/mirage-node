@@ -200,6 +200,16 @@ ERRORS = {
     "community_and_name_required": "community and name required",
     "invalid_curation_mode": "invalid mode",
     "invalid_pinned_team_id": "invalid pinned_team_id",
+    # Lens arguments. Unregistered, a rejected argument surfaces as a 500
+    # instead of the 400 the parser raised, which reads as a broken endpoint.
+    "invalid_scope": "invalid scope",
+    "invalid_lens": "invalid lens",
+    "invalid_team_id": "invalid team_id",
+    "team_lens_requires_team_and_community": "team lens requires team_id and community",
+    "team_id_requires_team_lens": "team_id is only valid with team lens",
+    "legacy_scope_requires_raw_lens": "legacy scope requires raw lens",
+    "invalid_lens_picks": "invalid lens_picks",
+    "too_many_lens_picks": "too many lens_picks",
     "epoch_ids_required": "epoch_ids required",
     "too_many_epoch_ids": "at most 30 epoch_ids",
     "epoch_ids_not_increasing": "epoch_ids must be strictly increasing",

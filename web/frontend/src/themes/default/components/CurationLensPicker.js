@@ -8,8 +8,11 @@ import { useViewerCuratorMembership } from '../../../logic/useViewerCuratorMembe
 import {
     CURATION_MODE,
     LENS,
+    clearLensPick,
     formatPinCount,
     lensHintLabel,
+    readLensPick,
+    writeLensPick,
 } from '../../../utils/curation';
 import { requireThemeColor } from '../../../utils/themeColor';
 import FeedControlButton from './FeedControlButton';
@@ -151,6 +154,12 @@ function pickAuthoritativeSelection(detail) {
     return LENS.DEFAULT;
 }
 
+function selectionFromPick(pick) {
+    if (!pick) return null;
+    if (pick.lens === LENS.TEAM) return `${LENS.TEAM}:${pick.teamId}`;
+    return pick.lens;
+}
+
 function pickRequestedSelection(hintLens) {
     const requested = hintLens?.requested;
     if (requested === LENS.RAW || requested === LENS.DEFAULT) return requested;
@@ -193,10 +202,14 @@ export default function CurationLensPicker({
 }) {
     const navigate = useNavigate();
     const rootRef = useRef(null);
+    const viewerAddr = viewer && viewer !== 'guest' ? String(viewer).toLowerCase() : '';
+    // Post pickers take their selection from the thread's ?lens= instead.
+    const readStoredPick = (slug) => (applyOnLoad
+        ? selectionFromPick(readLensPick({ viewer: viewerAddr, community: slug }))
+        : null);
     const [open, setOpen] = useState(false);
     const [activated, setActivated] = useState(!lazy);
-    const [optimisticSelection, setOptimisticSelection] = useState(null);
-    const viewerAddr = viewer && viewer !== 'guest' ? String(viewer).toLowerCase() : '';
+    const [optimisticSelection, setOptimisticSelection] = useState(() => readStoredPick(community));
     const hooksEnabled = Boolean(community) && activated;
     const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr, hooksEnabled);
     const { teams, loading: teamsLoading } = useCurationTeams(community, { viewer: viewerAddr, enabled: hooksEnabled });
@@ -232,7 +245,7 @@ export default function CurationLensPicker({
 
     useEffect(() => {
         setOpen(false);
-        setOptimisticSelection(null);
+        setOptimisticSelection(readStoredPick(community));
         setActivated(!lazy);
         onOpenChange?.(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -261,8 +274,9 @@ export default function CurationLensPicker({
                 selection: optimisticSelection,
             });
             setOptimisticSelection(null);
+            if (applyOnLoad) clearLensPick({ viewer: viewerAddr, community });
         }
-    }, [authoritativeSelection, community, optimisticSelection, requestedSelection]);
+    }, [applyOnLoad, authoritativeSelection, community, optimisticSelection, requestedSelection, viewerAddr]);
 
     useEffect(() => {
         // Community header syncs the feed when stored preference loads.
@@ -289,6 +303,7 @@ export default function CurationLensPicker({
         const [lens, rawTeamId] = selection.split(':');
         const teamId = rawTeamId ? Number(rawTeamId) : null;
         setOptimisticSelection(selection);
+        if (applyOnLoad) writeLensPick({ viewer: viewerAddr, community, lens, teamId });
         console.debug('[lens] user selected', { community, lens, teamId, persist: joined });
         onChange?.(lens, teamId, null);
         if (!joined) {
@@ -299,7 +314,11 @@ export default function CurationLensPicker({
         selectLens(lens, teamId).catch((err) => {
             console.error('[lens] selection failed', { community, lens, teamId, error: String(err?.message || err) });
             // Only roll back this pick — a newer optimistic choice must stick.
-            setOptimisticSelection((current) => (current === selection ? null : current));
+            setOptimisticSelection((current) => {
+                if (current !== selection) return current;
+                clearLensPick({ viewer: viewerAddr, community });
+                return null;
+            });
         });
     };
 

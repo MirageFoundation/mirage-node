@@ -25,6 +25,7 @@ from db import connect_backend_db, connect_db
 
 logger = logging.getLogger(__name__)
 
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -146,6 +147,56 @@ def _lens_request_args(
     if scope == "legacy" and (lens != "raw" or team_id is not None):
         raise ValueError("legacy scope requires raw lens")
     return lens, team_id, scope
+
+
+_LENS_PICKS_MAX = 20
+_LENS_PICK_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
+
+def _lens_picks_arg() -> dict[str, tuple[str, int | None]]:
+    """Parse ``lens_picks=slug:lens[,slug:team:id]`` into per-community lenses.
+
+    An aggregated feed mixes communities, so the single ``lens`` argument cannot
+    say "this one community uncensored, the rest as curated". Each entry names a
+    community and the lens the viewer chose for it.
+    """
+    raw = (request.args.get("lens_picks") or "").strip()
+    if not raw:
+        return {}
+
+    def reject(why: str) -> ValueError:
+        logger.debug("[lens] rejected lens_picks=%s why=%s", raw[:200], why)
+        return ValueError("invalid lens_picks")
+
+    picks: dict[str, tuple[str, int | None]] = {}
+    for chunk in raw.split(","):
+        fields = chunk.strip().split(":")
+        if len(fields) not in (2, 3):
+            raise reject("entry is not slug:lens or slug:team:id")
+        community = fields[0].strip().lower()
+        lens = fields[1].strip().lower()
+        if not _LENS_PICK_SLUG_RE.fullmatch(community) or "--" in community:
+            raise reject("community is not a slug")
+        if lens not in ("default", "raw", "team"):
+            raise reject("lens is not one of default, raw, team")
+        team_id = None
+        if lens == "team":
+            if len(fields) != 3:
+                raise reject("team lens without a team_id")
+            try:
+                team_id = int(fields[2])
+            except (TypeError, ValueError) as e:
+                raise reject("team_id is not an integer") from e
+            if team_id <= 0:
+                raise reject("team_id is not positive")
+        elif len(fields) != 2:
+            raise reject("team_id given without the team lens")
+        if community in picks:
+            raise reject("community named twice")
+        picks[community] = (lens, team_id)
+    if len(picks) > _LENS_PICKS_MAX:
+        raise ValueError("too many lens_picks")
+    return picks
 
 
 def _get_balance(address) -> int:
@@ -3779,11 +3830,15 @@ def _guest_feed_cache_key(
     scope: str,
     lens: str,
     team_id: int | None,
+    lens_picks: Mapping[str, tuple[str, int | None]],
 ) -> str:
     # allowed_tags is clamped to empty for guests today, but it stays in the key
     # so a future policy change cannot serve one tag policy's posts under another.
+    # Per-community lenses change which posts the feed contains, so two viewers
+    # with different picks must never share an entry.
+    picks = ";".join(f"{slug}:{lens_name}:{team or 0}" for slug, (lens_name, team) in sorted(lens_picks.items()))
     return (
-        f"{viewer}|{feed}|{community}|{scope}|{lens}|{team_id or 0}|"
+        f"{viewer}|{feed}|{community}|{scope}|{lens}|{team_id or 0}|{picks}|"
         f"{sort_mode}|{page}|{limit}|{','.join(sorted(allowed_tags))}"
     )
 
@@ -5469,6 +5524,7 @@ def get_posts():
     address = request.args.get("address", default="", type=str)
     try:
         lens, team_id, scope = _lens_request_args(community)
+        lens_picks = _lens_picks_arg()
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -5499,6 +5555,7 @@ def get_posts():
             scope=scope,
             lens=lens,
             team_id=team_id,
+            lens_picks=lens_picks,
         )
         if feed in ("home", "following") and _is_guest(address) and (scope == "legacy" or lens == "raw")
         else None
@@ -5595,6 +5652,7 @@ def get_posts():
                     requested_lens=lens,
                     requested_team_id=team_id,
                     scope=scope,
+                    community_lenses=lens_picks,
                 )
                 _resolve_effective_tags(cur, resp["posts"])
                 resp["posts"] = _filter_posts_by_allowed_tags(
@@ -5950,6 +6008,7 @@ def get_posts():
                 requested_lens=lens,
                 requested_team_id=team_id,
                 scope=scope,
+                community_lenses=lens_picks,
             )
             _resolve_effective_tags(cur, result)
             result = _filter_posts_by_allowed_tags(

@@ -9,7 +9,7 @@ import { fetchFollowedUsers } from "../utils/FollowUsers";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStashAfterBootstrap } from "../utils/bootstrapStash";
 import { usePendingFollows } from "./useFollowState.js";
 import { onSessionReset } from "../utils/sessionLifecycle";
-import { LENS, lensCacheKey, lensQuery } from "../utils/curation";
+import { LENS, lensCacheKey, lensPicksParam, lensQuery, readLensPick } from "../utils/curation";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -105,27 +105,6 @@ export const isTopLevelPostForFeed = p => {
     const isReserved = ['all', 'home', 'following'].includes(communityVal);
     return !isReserved;
 };
-export const hasAnyCachedPostsForCommunity = (community, postsObj) => {
-    try {
-        if (!postsObj || typeof postsObj !== 'object') return false;
-        const ids = Object.keys(postsObj);
-        if (ids.length === 0) return false;
-        const t = String(community || '').trim();
-        const tLower = t.toLowerCase();
-        const values = Object.values(postsObj);
-
-        // "all", "home", "following" all render top-level posts across communities.
-        if (tLower === 'all' || tLower === 'home' || tLower === 'following') {
-            return values.some(isTopLevelPostForFeed);
-        }
-        return values.some(p => {
-            if (!isTopLevelPostForFeed(p)) return false;
-            return String(p.community || '').trim().toLowerCase() === tLower;
-        });
-    } catch (_) {
-        return false;
-    }
-};
 export const checkRestoreFeedIntent = community => {
     try {
         const raw = sessionStorage.getItem('mirage_restore_feed');
@@ -213,25 +192,50 @@ export function useMain({
     const theme = useTheme();
     const mapHomeSortMode = theme.caps.mapHomeSortMode;
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
-    const [storedFeedLens, setStoredFeedLens] = useState({
-        community: urlCommunity,
-        lens: LENS.EFFECTIVE,
-        teamId: null,
-    });
+    // A lens the viewer picked in this tab is the lens they expect back when they
+    // return from a post, so mount into it instead of asking for the effective
+    // one and then correcting course once the picker has loaded.
+    const initialLensFor = useCallback((community) => {
+        const pick = readLensPick({ viewer: viewerAddress, community });
+        if (pick) {
+            console.debug('[lens] mounting into stored pick', { community, ...pick });
+            return { community, lens: pick.lens, teamId: pick.teamId };
+        }
+        return { community, lens: LENS.EFFECTIVE, teamId: null };
+    }, [viewerAddress]);
+    const [storedFeedLens, setStoredFeedLens] = useState(() => initialLensFor(urlCommunity));
     const feedLens = useMemo(() => (
         storedFeedLens.community === urlCommunity
             ? storedFeedLens
-            : { community: urlCommunity, lens: LENS.EFFECTIVE, teamId: null }
-    ), [storedFeedLens, urlCommunity]);
+            : initialLensFor(urlCommunity)
+    ), [initialLensFor, storedFeedLens, urlCommunity]);
     const setFeedLens = useCallback((next) => {
-        setStoredFeedLens({ community: urlCommunity, lens: next.lens, teamId: next.teamId ?? null });
+        const lens = next.lens;
+        const teamId = next.teamId ?? null;
+        // The picker calls this twice per pick (user click + its apply effect).
+        // A fresh object each time re-runs the fetch effect, and that re-run
+        // cancelled the pending request for the lens the user just chose.
+        setStoredFeedLens((prev) => (
+            prev.community === urlCommunity && prev.lens === lens && prev.teamId === teamId
+                ? prev
+                : { community: urlCommunity, lens, teamId }
+        ));
     }, [urlCommunity]);
+    // Home, following and all resolve every community they carry through the
+    // viewer's picks, so those picks are part of the request and part of what
+    // identifies the cached feed. A single community sends its own `lens`.
+    const aggregatedFeed = ['home', 'following', 'all'].includes(String(urlCommunity || '').trim().toLowerCase());
+    const feedLensPicks = aggregatedFeed ? lensPicksParam({ viewer: viewerAddress }) : '';
     const feedCacheCommunity = lensCacheKey({
         viewer: viewerAddress,
         community: urlCommunity,
         lens: feedLens.lens,
         teamId: feedLens.teamId,
-    });
+    }) + (feedLensPicks ? `|${feedLensPicks}` : '');
+    // Cache identity the posts currently on screen were fetched under. A lens
+    // switch leaves this stale until the new response lands, which is what
+    // keeps the old feed from being restored (or saved) under the new lens.
+    const feedDataIdentityRef = useRef(feedCacheCommunity);
     const currentCommunityRef = useRef(urlCommunity); // Track current community to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlCommunity));
     // For browser back button: only restore if we came from a post view that was opened from the feed
@@ -290,7 +294,6 @@ export function useMain({
             const memOrder = readMemFeedState(feedCacheCommunity)?.order;
             const order = readSavedOrder(feedCacheCommunity) || (Array.isArray(memOrder) ? memOrder : null);
             if (order && order.length > 0 && state.posts && order.some(id => state.posts[id])) return false;
-            if (hasAnyCachedPostsForCommunity(urlCommunity, state.posts)) return false;
         } catch (_) { }
         return true;
     });
@@ -911,6 +914,15 @@ export function useMain({
             try {
                 currentCommunityRef.current = community;
             } catch (_) { }
+            if (page === 1) {
+                feedDataIdentityRef.current = feedCacheCommunity;
+                console.debug('[Feed] posts applied for lens', {
+                    community,
+                    lens: feedLens.lens,
+                    teamId: feedLens.teamId,
+                    posts: sortedOrder.length,
+                });
+            }
             // Only clear isLoading if we set it (not during pagination)
             if (page === 1) {
                 if (!silent) setIsLoading(false);
@@ -967,26 +979,32 @@ export function useMain({
             by: mode,
             allowed_tags: getAllowedTagsParam(),
         };
+        // An aggregated feed carries posts from many communities, so the lenses
+        // the viewer picked travel per community instead of as one `lens`.
         if (isHomeFeed || isFollowingFeed) {
             params.feed = community;
+            if (feedLensPicks) params.lens_picks = feedLensPicks;
         } else if (community && community !== 'all') {
             // Guest home/following remaps to the unscoped catalog (`all`); that
             // query takes no community filter. A real slug is `community`.
             // `community` is retired — the backend 400s it.
             params.community = community;
             Object.assign(params, lensQuery(feedLens.lens, feedLens.teamId, 'current'));
+        } else if (feedLensPicks) {
+            params.lens_picks = feedLensPicks;
         }
         console.debug('[Feed] get_posts', {
             feed: params.feed,
             community: params.community,
             lens: params.lens,
             teamId: params.team_id,
+            lensPicks: params.lens_picks,
             page,
             guest: isGuest,
         });
         Api.get('get_posts', params).then(handleResponse).catch(onError);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.community, state.lastFetched, setCommunity, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
+    }, [state.community, state.lastFetched, setCommunity, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens, feedCacheCommunity, feedLensPicks]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback(allowNsfw => {
@@ -1317,14 +1335,22 @@ export function useMain({
         window.getPosts = getPosts; // Expose getPosts globally
         let cancelled = false;
         let timeoutId = null;
+        const showsCurrentLens = feedDataIdentityRef.current === feedCacheCommunity;
+        if (!showsCurrentLens) {
+            console.debug('[Feed] lens awaiting fetch', {
+                onScreen: feedDataIdentityRef.current,
+                requested: feedCacheCommunity,
+                lens: feedLens.lens,
+                teamId: feedLens.teamId,
+            });
+        }
 
         // On back navigation (POP), restore from cache if available
-        if (shouldRestoreFeedState) {
+        if (shouldRestoreFeedState && showsCurrentLens) {
             const memOrder = readMemFeedState(feedCacheCommunity)?.order;
             const order = readSavedOrder(feedCacheCommunity) || (Array.isArray(memOrder) ? memOrder : null);
             const hasPostsForOrder = !!(order && order.length > 0 && state.posts && order.some(id => state.posts[id]));
-            const hasPostsForCommunity = hasAnyCachedPostsForCommunity(urlCommunity, state.posts);
-            if (hasPostsForOrder || hasPostsForCommunity) {
+            if (hasPostsForOrder) {
                 // Back navigation with cached data - don't fetch
                 if (!cancelled && isMountedRef.current) {
                     setIsLoading(false);
@@ -1332,7 +1358,12 @@ export function useMain({
                     loadMoreLockRef.current = false;
                 }
                 try {
-                    console.log('[Feed] POP restore from cache:', urlCommunity);
+                    console.log('[Feed] POP restore from cache:', {
+                        community: urlCommunity,
+                        lens: feedLens.lens,
+                        teamId: feedLens.teamId,
+                        cacheKey: feedCacheCommunity,
+                    });
                 } catch (_) { }
                 return;
             }
@@ -1347,7 +1378,20 @@ export function useMain({
                     isLoggedIn ? viewerAddress : null,
                 );
                 if (cancelled || !isMountedRef.current) return;
-                if (bootstrapFeedMatchesCommunity(stashed, urlCommunity)) {
+                const stashMatches = bootstrapFeedMatchesCommunity(stashed, urlCommunity);
+                // The launch payload is built with the viewer's effective lens and
+                // carries no per-community picks, so any lens picked in this tab
+                // has to fetch its own feed rather than paint that one under the
+                // picked lens's name.
+                const stashUsable = feedLens.lens === LENS.EFFECTIVE && !feedLensPicks;
+                if (stashMatches && !stashUsable) {
+                    console.debug('[Bootstrap] feed stash ignored for picked lens', {
+                        lens: feedLens.lens,
+                        teamId: feedLens.teamId,
+                        lensPicks: feedLensPicks,
+                    });
+                }
+                if (stashMatches && stashUsable) {
                     // The open-browsing gate is only meaningful once node config
                     // has landed. On a cold load it is still null here, so hold the
                     // stash and let the re-run (nodeConfigLoaded flips) decide —
@@ -1416,7 +1460,7 @@ export function useMain({
             if (timeoutId) clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlCommunity, location.pathname, openBrowsingEnabled, nodeConfigLoaded, feedLens]);
+    }, [urlCommunity, location.pathname, openBrowsingEnabled, nodeConfigLoaded, feedLens, feedLensPicks]);
 
     // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
@@ -1499,6 +1543,13 @@ export function useMain({
     // Save feed state to sessionStorage when values change (for back button restoration)
     // Each community gets its own cache keys so we can restore any feed independently
     useEffect(() => {
+        if (feedDataIdentityRef.current !== feedCacheCommunity) {
+            console.debug('[Feed] cache write skipped, posts belong to another lens', {
+                onScreen: feedDataIdentityRef.current,
+                requested: feedCacheCommunity,
+            });
+            return;
+        }
         try {
             const orderKey = getFeedKey(feedCacheCommunity, 'order');
             if (stableOrder.length > 0) sessionStorage.setItem(orderKey, JSON.stringify(stableOrder)); else sessionStorage.removeItem(orderKey);

@@ -1,11 +1,15 @@
-import { usePostCurateActions } from '../../../logic/usePostCurateActions';
-
 /**
- * Pass `active` when the menu is open so hide/show state is loaded then.
+ * Render the curate actions loaded by the parent menu.
  * Callers supply `renderItem(item)`. No section headers.
  */
-export default function CurateMenuItems({ post, onDone, renderItem, active = false, updatePost }) {
-    const { visible, items, loading, modError } = usePostCurateActions(post, { active, updatePost });
+export default function CurateMenuItems({
+    actions,
+    onDone,
+    onConfirm,
+    renderItem,
+    active = false,
+}) {
+    const { visible, items, loading, modError } = actions;
     if (!visible || typeof renderItem !== 'function') return null;
     if (!active) return null;
     if (loading && items.length === 0) return null;
@@ -22,6 +26,14 @@ export default function CurateMenuItems({ post, onDone, renderItem, active = fal
                     if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
                     if (event && typeof event.preventDefault === 'function') event.preventDefault();
                     console.debug('[curation] curate menu item', { key: item.key });
+                    if (item.confirm) {
+                        console.debug('[curation] confirmation requested', { key: item.key });
+                        if (typeof onConfirm !== 'function') {
+                            throw new Error('Curation confirmation handler is required');
+                        }
+                        onConfirm(item);
+                        return;
+                    }
                     item.run();
                     // Close after this click finishes so a unmount mid-click cannot
                     // retarget onto Back / Home underneath the menu.

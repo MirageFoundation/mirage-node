@@ -1517,18 +1517,64 @@ def test_anon_visibility(backend: str) -> None:
         "anon_visibility.guest_feed_cache_isolated",
         "import routes.public as rp\n"
         "rp._guest_feed_cache.clear()\n"
-        "base = dict(viewer='', community='', scope='all', lens='default', team_id=None)\n"
+        "base = dict(viewer='', community='', scope='all', lens='default', team_id=None, lens_picks={})\n"
         "k1 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **base)\n"
         "k2 = rp._guest_feed_cache_key('home', 'newest', 1, 25, set(), **base)\n"
         "k3 = rp._guest_feed_cache_key('home', 'magic', 2, 25, set(), **base)\n"
         "k4 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens='team', team_id=7))\n"
         "k5 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens='team', team_id=8))\n"
+        "k6 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens_picks={'tech': ('raw', None)}))\n"
+        "k7 = rp._guest_feed_cache_key('home', 'magic', 1, 25, set(), **dict(base, lens_picks={'tech': ('team', 3)}))\n"
         "rp._guest_feed_cache_put(k1, {'posts': [{'post_id': 'a'}], 'total': 1})\n"
         "hit = rp._guest_feed_cache_get(k1)\n"
         "hit['posts'][0]['post_id'] = 'mutated'\n"
         "again = rp._guest_feed_cache_get(k1)\n"
-        "ok = (again['posts'][0]['post_id'] == 'a' and len({k1, k2, k3, k4, k5}) == 5\n"
-        "      and all(rp._guest_feed_cache_get(k) is None for k in (k2, k3, k4, k5)))\n"
+        "ok = (again['posts'][0]['post_id'] == 'a' and len({k1, k2, k3, k4, k5, k6, k7}) == 7\n"
+        "      and all(rp._guest_feed_cache_get(k) is None for k in (k2, k3, k4, k5, k6, k7)))\n"
         "rp._guest_feed_cache.clear()\n"
         "print('OK' if ok else ('BAD', hit, again))\n",
+    )
+
+    # ── An aggregated feed honours a per-community lens pick ─────────────
+    # Home mixes communities, so one `lens` cannot say "this community
+    # uncensored, the rest as curated". The picks arrive per community and only
+    # override the communities they name; everything else keeps the viewer's
+    # stored preference. Malformed input is a 400, never a silent default.
+    _visibility_probe(
+        "anon_visibility.lens_picks_parsed",
+        "import routes.public as rp\n"
+        "import curation\n"
+        "from flask import Flask\n"
+        "app = Flask('probe')\n"
+        "def parse(qs):\n"
+        "    with app.test_request_context('/api/get_posts?' + qs):\n"
+        "        return rp._lens_picks_arg()\n"
+        "def rejects(qs):\n"
+        "    try:\n"
+        "        parse(qs)\n"
+        "    except ValueError:\n"
+        "        return True\n"
+        "    return False\n"
+        "parsed = (parse('') == {}\n"
+        "          and parse('lens_picks=tech:raw') == {'tech': ('raw', None)}\n"
+        "          and parse('lens_picks=tech:team:4,news:default') == {'tech': ('team', 4), 'news': ('default', None)})\n"
+        "refused = all(rejects(q) for q in (\n"
+        "    'lens_picks=tech',\n"
+        "    'lens_picks=tech:sideways',\n"
+        "    'lens_picks=tech:team',\n"
+        "    'lens_picks=tech:team:0',\n"
+        "    'lens_picks=tech:raw:4',\n"
+        "    'lens_picks=tech:raw,tech:default',\n"
+        "    'lens_picks=Tech!:raw',\n"
+        "    'lens_picks=tech:effective',\n"
+        "))\n"
+        "import error_utils\n"
+        "coded = all(error_utils.get_error_code(m) for m in ('invalid lens_picks', 'too many lens_picks',\n"
+        "                                                   'invalid lens', 'invalid scope', 'invalid team_id'))\n"
+        "picks = {'tech': ('raw', None)}\n"
+        "named = curation._requested_lens_for('tech', 'effective', None, picks)\n"
+        "other = curation._requested_lens_for('news', 'effective', None, picks)\n"
+        "none = curation._requested_lens_for('tech', 'default', None, None)\n"
+        "scoped = named == ('raw', None) and other == ('effective', None) and none == ('default', None)\n"
+        "print('OK' if (parsed and refused and scoped and coded) else ('BAD', parsed, refused, coded, named, other, none))\n",
     )

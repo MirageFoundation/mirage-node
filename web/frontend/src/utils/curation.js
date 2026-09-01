@@ -163,6 +163,72 @@ export function lensCacheKey({ viewer, community, scope = 'current', lens = LENS
     ].map(encodeURIComponent).join(':');
 }
 
+// A lens the viewer picked but did not persist on chain (they have not joined
+// the community) only lives in picker state, so leaving the feed for a post and
+// coming back used to drop it and snap the view back to the default team. Hold
+// the pick for the tab instead, alongside the feed order/scroll caches.
+//
+// Deliberately not local storage: a pick that outlived the visit would keep
+// overriding the community's live default on that one device forever, including
+// a curation team that arrives later, with no screen to review or clear it.
+// Durability belongs on chain — a member's stored preference, which follows
+// them to every device and wins here as soon as it is set.
+const LENS_PICK_PREFIX = 'lens_pick_';
+const lensPickKey = (viewer, community) => `${LENS_PICK_PREFIX}${lensCacheKey({ viewer, community })}`;
+
+export function readLensPick({ viewer, community }) {
+    try {
+        const stored = sessionStorage.getItem(lensPickKey(viewer, community));
+        if (!stored) return null;
+        const parsed = JSON.parse(stored);
+        return normalizeLens(parsed?.lens, parsed?.teamId ?? null);
+    } catch (_) {
+        return null;
+    }
+}
+
+export function writeLensPick({ viewer, community, lens, teamId = null }) {
+    const normalized = normalizeLens(lens, teamId);
+    try {
+        sessionStorage.setItem(lensPickKey(viewer, community), JSON.stringify(normalized));
+    } catch (_) { }
+}
+
+/**
+ * Every lens this viewer picked in this tab, encoded for `get_posts`.
+ *
+ * An aggregated feed (home, following, all) mixes communities, so it cannot be
+ * asked for one lens. The backend takes `slug:lens` (or `slug:team:id`) per
+ * community and resolves the rest from the viewer's stored preference.
+ */
+export function lensPicksParam({ viewer }) {
+    const mine = String(viewer || 'guest').trim().toLowerCase();
+    const entries = [];
+    try {
+        for (let i = 0; i < sessionStorage.length; i += 1) {
+            const key = sessionStorage.key(i);
+            if (!key || !key.startsWith(LENS_PICK_PREFIX)) continue;
+            const parts = key.slice(LENS_PICK_PREFIX.length).split(':').map(decodeURIComponent);
+            if (parts[0] !== mine) continue;
+            const community = parts[1];
+            const pick = readLensPick({ viewer, community });
+            if (!pick) continue;
+            entries.push(pick.lens === LENS.TEAM
+                ? `${community}:${LENS.TEAM}:${pick.teamId}`
+                : `${community}:${pick.lens}`);
+        }
+    } catch (_) {
+        return '';
+    }
+    return entries.sort().join(',');
+}
+
+export function clearLensPick({ viewer, community }) {
+    try {
+        sessionStorage.removeItem(lensPickKey(viewer, community));
+    } catch (_) { }
+}
+
 export function curationPendingKey(messageType, community, teamId = 0, target = '') {
     const action = String(messageType || '').trim();
     if (!action) throw new Error('message type is required');
