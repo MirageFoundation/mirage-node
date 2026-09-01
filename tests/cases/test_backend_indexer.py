@@ -773,6 +773,9 @@ class _StubCurationDB:
     def executemany(self, sql, params):
         self.statements.append((" ".join(str(sql).split()), tuple(tuple(row) for row in params)))
 
+    def set_chain_stat(self, key, value, updated_at):
+        self.statements.append((f"set_chain_stat {key}", (value, updated_at)))
+
     def __enter__(self):
         return self
 
@@ -986,6 +989,57 @@ def test_indexer_hardening(backend: str):
         _fail(
             "indexer_hardening.creator_earnings_exports_interval",
             f"status={code} response={earnings!r}",
+        )
+    origin_epoch = earnings.get("origin_epoch") if isinstance(earnings, dict) else None
+    origin_unix = earnings.get("origin_unix") if isinstance(earnings, dict) else None
+    if (
+        code == 200
+        and isinstance(origin_epoch, int)
+        and origin_epoch >= 0
+        and isinstance(origin_unix, int)
+        and origin_unix >= 0
+    ):
+        _pass("indexer_hardening.creator_earnings_exports_origin", origin_epoch=origin_epoch, origin_unix=origin_unix)
+    else:
+        _fail(
+            "indexer_hardening.creator_earnings_exports_origin",
+            f"status={code} response={earnings!r}",
+        )
+
+    reset_db = _StubCurationDB()
+    MessageProcessor(reset_db, None, lambda *a, **k: None, lambda t: "").process_creator_events(
+        [
+            {
+                "type": "creator_epoch_reset_completed",
+                "attributes": [
+                    {"key": "origin_epoch", "value": "19676"},
+                    {"key": "origin_unix", "value": "1700000000"},
+                    {"key": "epoch_seconds", "value": "300"},
+                    {"key": "clock", "value": "19676"},
+                ],
+            }
+        ],
+        5000,
+    )
+    deleted = [s for s, _ in reset_db.statements if s.startswith("DELETE FROM")]
+    schedule_writes = [p for s, p in reset_db.statements if s == "set_chain_stat creator_schedule"]
+    if (
+        deleted == [
+            "DELETE FROM creator_epochs",
+            "DELETE FROM creator_accruals",
+            "DELETE FROM creator_claims",
+            "DELETE FROM creator_target_earnings",
+            "DELETE FROM subscription_tranches",
+        ]
+        and len(schedule_writes) == 1
+        and schedule_writes[0][0]["epoch_seconds"] == 300
+        and schedule_writes[0][0]["origin_epoch"] == 19676
+    ):
+        _pass("indexer_hardening.creator_reset_clears_projection")
+    else:
+        _fail(
+            "indexer_hardening.creator_reset_clears_projection",
+            f"deleted={deleted} schedule={schedule_writes!r}",
         )
 
     # ── A curator's empty tag is a decision; only `cleared` removes the row ──

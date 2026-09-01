@@ -390,3 +390,31 @@ func (am AppModule) CreatorLiability(ctx context.Context, req *types.QueryCreato
 		ActivationSurplus: surplus.String(),
 	}, nil
 }
+
+func (am AppModule) CreatorSchedule(ctx context.Context, req *types.QueryCreatorScheduleRequest) (*types.QueryCreatorScheduleResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	sched, err := am.k.GetCreatorSchedule(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	clock, err := am.k.GetCreatorClock(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	reset, found, err := am.k.GetCreatorReset(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	pending := uint64(0)
+	if found {
+		pending = reset.ToSeconds
+	}
+	return &types.QueryCreatorScheduleResponse{
+		OriginEpoch:         sched.OriginEpoch,
+		OriginUnix:          sched.OriginUnix,
+		EpochSeconds:        sched.EpochSeconds,
+		CurrentEpoch:        clock,
+		PendingEpochSeconds: pending,
+		ResetInProgress:     found,
+	}, nil
+}

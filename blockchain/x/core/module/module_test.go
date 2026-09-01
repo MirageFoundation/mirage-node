@@ -299,10 +299,11 @@ func TestUpdateParamsRebasesEmptyCreatorClock(t *testing.T) {
 	require.Equal(t, uint64(300), mk.GetParams(ctx).CreatorEpochSeconds)
 }
 
-func TestUpdateParamsRejectsCreatorIntervalAfterRewardStateExists(t *testing.T) {
+func TestUpdateParamsSchedulesCreatorIntervalReset(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
 	mk.storeService.store[string(types.KeyCreatorEpoch(1))] = []byte{1}
+	require.NoError(t, mk.SetCreatorClock(ctx, 19675))
 	updates := types.Params{
 		CreatorEpochSeconds:               300,
 		SubscriptionPeriod:                60,
@@ -320,8 +321,31 @@ func TestUpdateParamsRejectsCreatorIntervalAfterRewardStateExists(t *testing.T) 
 			"max_subscription_periods_per_purchase",
 		),
 	})
-	require.ErrorContains(t, err, "cannot change after creator reward state exists")
-	require.Equal(t, uint64(types.SecondsPerUTCDay), mk.GetParams(ctx).CreatorEpochSeconds)
+	require.NoError(t, err)
+	require.Equal(t, uint64(300), mk.GetParams(ctx).CreatorEpochSeconds)
+	inProgress, err := mk.CreatorResetInProgress(ctx)
+	require.NoError(t, err)
+	require.True(t, inProgress)
+	clock, err := mk.GetCreatorClock(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(19675), clock)
+
+	_, err = am.UpdateParams(ctx, &types.MsgUpdateParams{
+		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		Params: types.Params{
+			CreatorEpochSeconds:               600,
+			SubscriptionPeriod:                60,
+			SubscriptionEarlyRenewalDays:      0,
+			MaxSubscriptionPeriodsPerPurchase: 1,
+		},
+		UpdateMask: mask(
+			"creator_epoch_seconds",
+			"subscription_period",
+			"subscription_early_renewal_days",
+			"max_subscription_periods_per_purchase",
+		),
+	})
+	require.ErrorContains(t, err, "while a reset is in progress")
 }
 
 func TestCreatorIntervalStateGuardCoversEveryStateClass(t *testing.T) {

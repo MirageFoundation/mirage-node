@@ -1388,21 +1388,7 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 	if current.CreatorEpochSeconds != updated.CreatorEpochSeconds {
-		hasState, err := am.k.HasCreatorRewardState(sdkCtx)
-		if err != nil {
-			return nil, err
-		}
-		if hasState {
-			return nil, fmt.Errorf("creator_epoch_seconds cannot change after creator reward state exists")
-		}
-		creatorEpoch, err := types.CreatorEpochFromUnix(
-			sdkCtx.BlockTime().Unix(),
-			updated.CreatorEpochSeconds,
-		)
-		if err != nil {
-			return nil, err
-		}
-		if err := am.k.SetCreatorClock(sdkCtx, creatorEpoch); err != nil {
+		if err := am.k.ApplyCreatorEpochSeconds(sdkCtx, updated.CreatorEpochSeconds); err != nil {
 			return nil, err
 		}
 	}
@@ -1551,7 +1537,7 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	if err != nil {
 		return nil, err
 	}
-	creatorEpoch, err := types.CreatorEpochFromUnix(sdkCtx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	creatorEpoch, err := am.k.GetCreatorClock(sdkCtx)
 	if err != nil {
 		return nil, err
 	}
@@ -2564,8 +2550,7 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		if authority != govAuthority && meta.Author != owner {
 			return nil, fmt.Errorf("only the author can delete this post")
 		}
-		params := am.k.GetParams(sdkCtx)
-		creatorEpoch, err := types.CreatorEpochFromUnix(sdkCtx.BlockTime().Unix(), params.CreatorEpochSeconds)
+		creatorEpoch, err := am.k.GetCreatorClock(sdkCtx)
 		if err != nil {
 			return nil, err
 		}

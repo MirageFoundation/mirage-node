@@ -1979,6 +1979,7 @@ class MessageProcessor:
             if raw:
                 self.db.set_chain_stat("chain_params", raw, int(ts))
                 logger.info("Params updated via MsgUpdateParams: chain_params stored")
+            self._store_creator_schedule(int(ts))
         except Exception as e:
             logger.error("Error handling update_params: %s", e, exc_info=True)
 
@@ -2786,7 +2787,11 @@ class MessageProcessor:
         """Project terminal creator epoch snapshots emitted during finalization."""
         terminal_events = {"creator_epoch_claimable", "creator_epoch_expired"}
         epochs: set[int] = set()
+        reset_attrs = None
         for event_type, attrs in self.decode_events(events):
+            if event_type == "creator_epoch_reset_completed":
+                reset_attrs = attrs
+                continue
             if event_type not in terminal_events:
                 continue
             raw_epoch = attrs.get("epoch")
@@ -2796,8 +2801,56 @@ class MessageProcessor:
             if epoch < 0:
                 raise RuntimeError(f"{event_type} event has negative epoch {epoch}")
             epochs.add(epoch)
+        if reset_attrs is not None:
+            self._reset_creator_projection(reset_attrs, height)
         for epoch in sorted(epochs):
             self.sync_creator_epoch(epoch, height)
+
+    def _store_creator_schedule(self, ts: int, attrs: dict | None = None) -> None:
+        if self.chain is not None:
+            schedule = self.chain.query_creator_schedule()
+        elif attrs is not None:
+            if "clock" in attrs:
+                current_epoch = int(attrs["clock"])
+            else:
+                current_epoch = int(attrs["current_epoch"])
+            schedule = {
+                "origin_epoch": int(attrs["origin_epoch"]),
+                "origin_unix": int(attrs["origin_unix"]),
+                "epoch_seconds": int(attrs["epoch_seconds"]),
+                "current_epoch": current_epoch,
+                "pending_epoch_seconds": int(attrs["pending_epoch_seconds"]) if attrs.get("pending_epoch_seconds") else 0,
+                "reset_in_progress": False,
+            }
+        else:
+            raise RuntimeError("creator schedule query has no chain client or event attributes")
+        self.db.set_chain_stat("creator_schedule", schedule, int(ts))
+        logger.info(
+            "creator schedule stored origin_epoch=%s origin_unix=%s epoch_seconds=%s clock=%s",
+            schedule["origin_epoch"],
+            schedule["origin_unix"],
+            schedule["epoch_seconds"],
+            schedule["current_epoch"],
+        )
+
+    def _reset_creator_projection(self, attrs: dict, height: int) -> None:
+        for field in ("origin_epoch", "origin_unix", "epoch_seconds"):
+            if field not in attrs:
+                raise RuntimeError(f"creator_epoch_reset_completed missing {field} at height {height}")
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM creator_epochs")
+                cur.execute("DELETE FROM creator_accruals")
+                cur.execute("DELETE FROM creator_claims")
+                cur.execute("DELETE FROM creator_target_earnings")
+                cur.execute("DELETE FROM subscription_tranches")
+        self._store_creator_schedule(int(time.time()), attrs)
+        logger.info(
+            "creator projection reset origin_epoch=%s epoch_seconds=%s height=%s",
+            attrs["origin_epoch"],
+            attrs["epoch_seconds"],
+            height,
+        )
 
     def _handle_create_community(self, type_url: str, value: bytes, ts: int, height: int):
         parsed = MsgCreateCommunity()

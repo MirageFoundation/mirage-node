@@ -569,6 +569,35 @@ class ChainClient:
                     return out
         raise RuntimeError(f"CreatorEpochAccruals exceeded 1001 pages for epoch {epoch}")
 
+    def query_creator_schedule(self, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Read the live creator-epoch grid, including a pending destructive reset."""
+        from shared.datatypes import QueryCreatorScheduleRequest, QueryCreatorScheduleResponse
+
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CreatorSchedule",
+                request_serializer=QueryCreatorScheduleRequest.SerializeToString,
+                response_deserializer=QueryCreatorScheduleResponse.FromString,
+            )
+            try:
+                resp = method(QueryCreatorScheduleRequest(), timeout=timeout)
+            except grpc.RpcError as e:
+                raise RuntimeError(f"CreatorSchedule gRPC failed: {e}") from e
+        epoch_seconds = int(resp.epoch_seconds)
+        if epoch_seconds < 300 or 86400 % epoch_seconds != 0:
+            raise RuntimeError(f"CreatorSchedule returned invalid epoch_seconds={epoch_seconds}")
+        pending = int(resp.pending_epoch_seconds)
+        if pending and (pending < 300 or 86400 % pending != 0):
+            raise RuntimeError(f"CreatorSchedule returned invalid pending_epoch_seconds={pending}")
+        return {
+            "origin_epoch": int(resp.origin_epoch),
+            "origin_unix": int(resp.origin_unix),
+            "epoch_seconds": epoch_seconds,
+            "current_epoch": int(resp.current_epoch),
+            "pending_epoch_seconds": pending,
+            "reset_in_progress": bool(resp.reset_in_progress),
+        }
+
     def query_subscription_runtime(self, address: str, timeout: int = GRPC_TIMEOUT) -> dict:
         """Read quota and renewal-warning state required by bootstrap."""
         from shared.datatypes import (

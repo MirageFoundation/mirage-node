@@ -10,6 +10,14 @@ function validateEarnings(data) {
     if (!Number.isSafeInteger(creatorEpochSeconds) || creatorEpochSeconds < 300) {
         throw new Error('Creator reward interval is required');
     }
+    const originEpoch = Number(data.origin_epoch);
+    const originUnix = Number(data.origin_unix);
+    if (!Number.isSafeInteger(originEpoch) || originEpoch < 0) {
+        throw new Error('Creator schedule origin epoch is required');
+    }
+    if (!Number.isSafeInteger(originUnix) || originUnix < 0) {
+        throw new Error('Creator schedule origin unix is required');
+    }
     for (const item of data.items) {
         if (!Number.isSafeInteger(Number(item.epoch_id))) throw new Error('Invalid creator earnings epoch');
         if (typeof item.earned !== 'string' || typeof item.claimed !== 'string') {
@@ -24,7 +32,7 @@ function validateEarnings(data) {
             }
         }
     }
-    return { items: data.items, creatorEpochSeconds };
+    return { items: data.items, creatorEpochSeconds, originEpoch, originUnix };
 }
 
 export function normalizeClaimEpochs(values) {
@@ -35,10 +43,14 @@ export function normalizeClaimEpochs(values) {
     return ids;
 }
 
-export function currentCreatorEpoch(epochSeconds, now = Date.now()) {
+export function currentCreatorEpoch(epochSeconds, now = Date.now(), originEpoch = 0, originUnix = 0) {
     const seconds = Number(epochSeconds);
     if (!Number.isSafeInteger(seconds) || seconds <= 0) throw new Error('Invalid creator reward interval');
-    return Math.floor(now / (seconds * 1000));
+    const origin = Number(originEpoch);
+    const originAt = Number(originUnix);
+    if (!Number.isSafeInteger(origin) || origin < 0) throw new Error('Invalid creator schedule origin epoch');
+    if (!Number.isSafeInteger(originAt) || originAt < 0) throw new Error('Invalid creator schedule origin unix');
+    return origin + Math.floor((Math.floor(now / 1000) - originAt) / seconds);
 }
 
 export function isCreatorEarningClaimable(item, now = Date.now()) {

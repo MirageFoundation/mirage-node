@@ -204,6 +204,9 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := k.SetCreatorSchedule(ctx, types.CreatorSchedule{EpochSeconds: params.CreatorEpochSeconds}); err != nil {
+		return err
+	}
 	if err := k.SetCreatorClock(ctx, creatorEpoch); err != nil {
 		return err
 	}
@@ -518,6 +521,16 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 		return err
 	}
 	params := k.GetParams(ctx)
+	resetting, err := k.processCreatorReset(ctx, params)
+	if err != nil {
+		return err
+	}
+	if resetting {
+		if err := k.processSubscriptionExpiries(ctx, params); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := k.advanceCreatorClock(ctx, params); err != nil {
 		return err
 	}
@@ -540,7 +553,7 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 }
 
 func (k Keeper) advanceCreatorClock(ctx sdk.Context, params types.Params) error {
-	epoch, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	epoch, err := k.CreatorEpochAt(ctx, ctx.BlockTime().Unix())
 	if err != nil {
 		return err
 	}

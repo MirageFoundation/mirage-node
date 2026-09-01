@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 from error_utils import api_error_code
 from logging_utils import log_event, next_request_id
 from db import connect_db
-from params import expect_params
+from params import expect_params, expect_creator_schedule, creator_epoch_unix
 from curation import MODE_RAW, get_default_team, resolve_lens
 
 communities_bp = Blueprint("communities", __name__)
@@ -748,16 +748,17 @@ def creator_earnings():
                 (creator,),
             )
             rows = cur.fetchall() or []
-        creator_epoch_seconds = int(expect_params()["creator_epoch_seconds"])
+        schedule = expect_creator_schedule()
+        creator_epoch_seconds = int(schedule["epoch_seconds"])
         items = [
             {
                 "epoch_id": r[0],
                 "earned": str(r[1]),
                 "claimed": str(r[2]),
                 "claim_deadline_epoch": r[3],
-                "epoch_start_unix": int(r[0]) * creator_epoch_seconds,
-                "epoch_end_unix": (int(r[0]) + 1) * creator_epoch_seconds,
-                "claim_deadline_unix": int(r[3]) * creator_epoch_seconds,
+                "epoch_start_unix": creator_epoch_unix(int(r[0]), schedule),
+                "epoch_end_unix": creator_epoch_unix(int(r[0]) + 1, schedule),
+                "claim_deadline_unix": creator_epoch_unix(int(r[3]), schedule),
                 "claimed_height": r[4],
             }
             for r in rows
@@ -766,6 +767,8 @@ def creator_earnings():
             {
                 "items": items,
                 "creator_epoch_seconds": creator_epoch_seconds,
+                "origin_epoch": int(schedule["origin_epoch"]),
+                "origin_unix": int(schedule["origin_unix"]),
                 "next_cursor": None,
                 "has_more": False,
             }

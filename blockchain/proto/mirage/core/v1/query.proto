@@ -81,6 +81,9 @@ service Query {
   rpc CreatorLiability(QueryCreatorLiabilityRequest) returns (QueryCreatorLiabilityResponse) {
     option (google.api.http).get = "/mirage/core/v1/creator/liability";
   }
+  rpc CreatorSchedule(QueryCreatorScheduleRequest) returns (QueryCreatorScheduleResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/schedule";
+  }
 }
 
 // QueryParamsRequest is request type for the Query/Params RPC method.
@@ -299,5 +302,15 @@ message QueryCreatorLiabilityResponse {
   string liability = 1;
   string module_balance = 2;
   string activation_surplus = 3;
+}
+
+message QueryCreatorScheduleRequest {}
+message QueryCreatorScheduleResponse {
+  int64 origin_epoch = 1;
+  int64 origin_unix = 2;
+  uint64 epoch_seconds = 3;
+  int64 current_epoch = 4;
+  uint64 pending_epoch_seconds = 5;
+  bool reset_in_progress = 6;
 }
 

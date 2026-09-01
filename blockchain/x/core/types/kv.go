@@ -69,6 +69,8 @@ const (
 	PfxCreatorClock         = "creator_clock"
 	PfxCreatorLiability     = "creator_liability"
 	PfxCreatorSurplus       = "creator_activation_surplus"
+	PfxCreatorSchedule      = "creator_schedule"
+	PfxCreatorReset         = "creator_reset"
 	PfxTrancheSeq           = "trancheseq"
 	PfxTranche              = "tranche|"
 	PfxTranchePayer         = "tranchepayer|"
@@ -464,4 +466,30 @@ func UTCEpoch(unix int64) int64 {
 
 func InvertedSupport(count uint64) uint64 {
 	return ^uint64(0) - count
+}
+
+// CreatorResetPrefixes is the deterministic wipe order for a destructive
+// creator-epoch interval change. Profiles, votes, posts, and active
+// subscription status are not in this list.
+func CreatorResetPrefixes() []string {
+	return []string{
+		PfxCreatorEpochOpen,
+		PfxCreatorEpochSettle,
+		PfxCreatorEpochDeadline,
+		PfxCreatorEpochPrune,
+		PfxEngagement,
+		PfxEngagementCount,
+		PfxEpochTarget,
+		PfxTargetEpoch,
+		PfxTargetTotal,
+		PfxEpochCreatorAccrual,
+		PfxCreatorEpochIdx,
+		PfxEpochClaim,
+		PfxUpvoteReserved,
+		PfxReplyReserved,
+		PfxTranche,
+		PfxTranchePayer,
+		PfxTrancheRecipient,
+		PfxCreatorEpoch,
+	}
 }

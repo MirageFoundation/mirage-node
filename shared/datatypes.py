@@ -1027,6 +1027,17 @@ def _build_pool():
     add_f(query_quota_resp, "remaining", 4, UINT64)
     add_f(query_quota_resp, "reset_at", 5, INT64)
 
+    query_schedule_req = file_proto.message_type.add()
+    query_schedule_req.name = "QueryCreatorScheduleRequest"
+    query_schedule_resp = file_proto.message_type.add()
+    query_schedule_resp.name = "QueryCreatorScheduleResponse"
+    add_f(query_schedule_resp, "origin_epoch", 1, INT64)
+    add_f(query_schedule_resp, "origin_unix", 2, INT64)
+    add_f(query_schedule_resp, "epoch_seconds", 3, UINT64)
+    add_f(query_schedule_resp, "current_epoch", 4, INT64)
+    add_f(query_schedule_resp, "pending_epoch_seconds", 5, UINT64)
+    add_f(query_schedule_resp, "reset_in_progress", 6, BOOL)
+
     # QueryProfilesRequest
     msg_profiles_req = file_proto.message_type.add()
     msg_profiles_req.name = "QueryProfilesRequest"
@@ -1181,3 +1192,5 @@ QuerySubscriptionRenewalRequest = _get_message_class("mirage.core.v1.QuerySubscr
 QuerySubscriptionRenewalResponse = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalResponse")
 QuerySubscriberQuotaRequest = _get_message_class("mirage.core.v1.QuerySubscriberQuotaRequest")
 QuerySubscriberQuotaResponse = _get_message_class("mirage.core.v1.QuerySubscriberQuotaResponse")
+QueryCreatorScheduleRequest = _get_message_class("mirage.core.v1.QueryCreatorScheduleRequest")
+QueryCreatorScheduleResponse = _get_message_class("mirage.core.v1.QueryCreatorScheduleResponse")

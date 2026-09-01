@@ -93,6 +93,16 @@ func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, di
 	if direction != 1 {
 		return k.clearOpenUpvote(ctx, voter, target)
 	}
+	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
+		return err
+	} else if resetting {
+		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_engagement_paused",
+			sdk.NewAttribute("kind", "upvote"),
+			sdk.NewAttribute("actor", voter),
+			sdk.NewAttribute("target", target),
+		))
+		return nil
+	}
 	if has, err := k.storeHas(ctx, types.KeyUpvoteReserved(types.MustAcc(voter), mustHash(target))); err != nil {
 		return err
 	} else if has {
@@ -137,6 +147,16 @@ func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, di
 }
 
 func (k Keeper) RecordDirectReplyEngagement(ctx sdk.Context, commenter, parent, sourceHash string) error {
+	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
+		return err
+	} else if resetting {
+		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_engagement_paused",
+			sdk.NewAttribute("kind", "direct_reply"),
+			sdk.NewAttribute("actor", commenter),
+			sdk.NewAttribute("target", parent),
+		))
+		return nil
+	}
 	parentH := mustHash(parent)
 	key := types.KeyReplyReserved(types.MustAcc(commenter), parentH)
 	if has, err := k.storeHas(ctx, key); err != nil {
@@ -260,6 +280,11 @@ func mustHash(h string) []byte {
 }
 
 func (k Keeper) ClaimCreatorRewards(ctx sdk.Context, creator string, epochs []int64) error {
+	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
+		return err
+	} else if resetting {
+		return fmt.Errorf("creator reward reset in progress")
+	}
 	params := k.GetParams(ctx)
 	if len(epochs) < 1 || uint64(len(epochs)) > params.MaxCreatorClaimEpochs {
 		return fmt.Errorf("epoch count must be in [1,%d]", params.MaxCreatorClaimEpochs)

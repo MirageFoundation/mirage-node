@@ -1359,6 +1359,10 @@ class Indexer:
         logger.info("Startup resync: refreshing chain stats, params, balances...")
 
         self.db.set_chain_stat("chain_params", get_raw_params(), now)
+        try:
+            self.db.set_chain_stat("creator_schedule", self.chain.query_creator_schedule(), now)
+        except Exception as err:
+            raise RuntimeError(f"creator schedule query failed during startup: {err}") from err
 
         supply = self.chain.get_total_supply()
         self.db.set_chain_stat("total_supply", supply, now)
@@ -1380,17 +1384,14 @@ class Indexer:
         if self.db.get_indexer_state(marker) == "1":
             return
         height = self.chain.get_current_height()
-        block = self.chain.get_block(height)
-        header = (((block.get("result") or {}).get("block") or {}).get("header") or {})
         raw_params = get_raw_params()
-        creator_epoch_seconds = int(raw_params["creator_epoch_seconds"])
-        current_epoch = (
-            self.chain.parse_header_time(str(header.get("time", "")))
-            // creator_epoch_seconds
-        )
+        schedule = self.chain.query_creator_schedule()
+        creator_epoch_seconds = int(schedule["epoch_seconds"])
+        current_epoch = int(schedule["current_epoch"])
+        origin_epoch = int(schedule["origin_epoch"])
         claim_window_days = int(raw_params["creator_claim_window_days"])
         claim_window_epochs = claim_window_days * 86400 // creator_epoch_seconds
-        first_epoch = max(0, current_epoch - claim_window_epochs - 1)
+        first_epoch = max(origin_epoch, current_epoch - claim_window_epochs - 1)
         projected = 0
         with self.db.transaction(label="creator-backfill", height=height):
             for epoch_id in range(first_epoch, current_epoch):

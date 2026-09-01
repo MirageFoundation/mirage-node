@@ -198,4 +198,35 @@ def expect_params() -> Dict[str, Any]:
     return _PARAMS_CACHE
 
 
-__all__ = ["load_params", "expect_params"]
+def expect_creator_schedule() -> Dict[str, Any]:
+    """Read the live creator epoch grid from indexer chain_stats."""
+    with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value FROM chain_stats WHERE key = 'creator_schedule'")
+        row = cur.fetchone()
+    if not row or not row[0]:
+        raise RuntimeError("creator_schedule missing from indexer DB")
+    value = row[0] if isinstance(row[0], dict) else {}
+    origin_epoch = int(value["origin_epoch"])
+    origin_unix = int(value["origin_unix"])
+    epoch_seconds = int(value["epoch_seconds"])
+    if origin_epoch < 0 or origin_unix < 0:
+        raise RuntimeError(f"creator_schedule origin is invalid: {value!r}")
+    if epoch_seconds < 300 or 86400 % epoch_seconds != 0:
+        raise RuntimeError(f"creator_schedule epoch_seconds is invalid: {epoch_seconds}")
+    return {
+        "origin_epoch": origin_epoch,
+        "origin_unix": origin_unix,
+        "epoch_seconds": epoch_seconds,
+        "current_epoch": int(value["current_epoch"]),
+        "pending_epoch_seconds": int(value.get("pending_epoch_seconds") or 0),
+        "reset_in_progress": bool(value.get("reset_in_progress")),
+    }
+
+
+def creator_epoch_unix(epoch_id: int, schedule: Dict[str, Any]) -> int:
+    return int(schedule["origin_unix"]) + (int(epoch_id) - int(schedule["origin_epoch"])) * int(schedule["epoch_seconds"])
+
+
+__all__ = ["load_params", "expect_params", "expect_creator_schedule", "creator_epoch_unix"]
+

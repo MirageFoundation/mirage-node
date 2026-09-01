@@ -12,6 +12,11 @@ import (
 )
 
 func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source types.SubscriptionTrancheSource, periodCount uint32, txhash string) error {
+	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
+		return err
+	} else if resetting {
+		return fmt.Errorf("creator reward reset in progress")
+	}
 	params := k.GetParams(ctx)
 	if periodCount < 1 || uint64(periodCount) > params.MaxSubscriptionPeriodsPerPurchase {
 		return fmt.Errorf("period_count must be in [1,%d]", params.MaxSubscriptionPeriodsPerPurchase)
@@ -120,22 +125,26 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if err := k.storeSet(ctx, types.KeyTrancheRecipient(recipient, id), []byte{1}); err != nil {
 		return err
 	}
-	first, err := types.CreatorEpochFromUnix(start, params.CreatorEpochSeconds)
+	sched, err := k.GetCreatorSchedule(ctx)
 	if err != nil {
 		return err
 	}
-	last, err := types.CreatorEpochFromUnix(end-1, params.CreatorEpochSeconds)
+	first, err := sched.EpochAt(start)
+	if err != nil {
+		return err
+	}
+	last, err := sched.EpochAt(end - 1)
 	if err != nil {
 		return err
 	}
 	remaining := sdkmath.NewIntFromUint64(creatorAmt)
 	dur := sdkmath.NewIntFromUint64(duration)
 	for epoch := first; epoch <= last; epoch++ {
-		epochStart, err := types.CreatorEpochStart(epoch, params.CreatorEpochSeconds)
+		epochStart, err := sched.EpochStart(epoch)
 		if err != nil {
 			return err
 		}
-		epochEnd, err := types.CreatorEpochEnd(epoch, params.CreatorEpochSeconds)
+		epochEnd, err := sched.EpochEnd(epoch)
 		if err != nil {
 			return err
 		}

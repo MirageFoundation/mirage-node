@@ -1033,6 +1033,8 @@ describe('creator reward claims', () => {
         const now = Date.UTC(2026, 7, 27, 23, 59, 59);
         expect(currentCreatorEpoch(86400, now)).toBe(20692);
         expect(currentCreatorEpoch(300, now)).toBe(5959583);
+        expect(currentCreatorEpoch(300, now, 19676, Math.floor(now / 1000))).toBe(19676);
+        expect(currentCreatorEpoch(300, now + 300000, 19676, Math.floor(now / 1000))).toBe(19677);
     });
 
     it('uses the API deadline timestamp for claimability', () => {
