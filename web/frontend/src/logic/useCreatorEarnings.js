@@ -6,6 +6,10 @@ import { usePendingCuration } from './usePendingCuration';
 
 function validateEarnings(data) {
     if (!data || !Array.isArray(data.items)) throw new Error('Invalid creator earnings response');
+    const creatorEpochSeconds = Number(data.creator_epoch_seconds);
+    if (!Number.isSafeInteger(creatorEpochSeconds) || creatorEpochSeconds < 300) {
+        throw new Error('Creator reward interval is required');
+    }
     for (const item of data.items) {
         if (!Number.isSafeInteger(Number(item.epoch_id))) throw new Error('Invalid creator earnings epoch');
         if (typeof item.earned !== 'string' || typeof item.claimed !== 'string') {
@@ -14,8 +18,13 @@ function validateEarnings(data) {
         if (!Number.isSafeInteger(Number(item.claim_deadline_epoch))) {
             throw new Error('Creator earnings deadline is required');
         }
+        for (const field of ['epoch_start_unix', 'epoch_end_unix', 'claim_deadline_unix']) {
+            if (!Number.isSafeInteger(Number(item[field])) || Number(item[field]) <= 0) {
+                throw new Error(`Creator earnings ${field} is required`);
+            }
+        }
     }
-    return data.items;
+    return { items: data.items, creatorEpochSeconds };
 }
 
 export function normalizeClaimEpochs(values) {
@@ -26,13 +35,24 @@ export function normalizeClaimEpochs(values) {
     return ids;
 }
 
-export function currentCreatorEpoch(now = Date.now()) {
-    return Math.floor(now / 86400000);
+export function currentCreatorEpoch(epochSeconds, now = Date.now()) {
+    const seconds = Number(epochSeconds);
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) throw new Error('Invalid creator reward interval');
+    return Math.floor(now / (seconds * 1000));
+}
+
+export function isCreatorEarningClaimable(item, now = Date.now()) {
+    return (
+        BigInt(item.earned) > BigInt(item.claimed)
+        && Math.floor(now / 1000) < Number(item.claim_deadline_unix)
+        && item.claimed_height == null
+    );
 }
 
 export function useCreatorEarnings(creator) {
     const address = String(creator || '').trim().toLowerCase();
     const [items, setItems] = useState([]);
+    const [creatorEpochSeconds, setCreatorEpochSeconds] = useState(null);
     const [selected, setSelected] = useState([]);
     const [loading, setLoading] = useState(Boolean(address));
     const [error, setError] = useState('');
@@ -42,6 +62,7 @@ export function useCreatorEarnings(creator) {
     const refresh = useCallback(async () => {
         if (!address) {
             setItems([]);
+            setCreatorEpochSeconds(null);
             setLoading(false);
             return [];
         }
@@ -49,10 +70,15 @@ export function useCreatorEarnings(creator) {
         setError('');
         try {
             const next = validateEarnings(await Api.get('creator/earnings', { creator: address, _cb: Date.now() }));
-            setItems(next);
-            setSelected((current) => current.filter((id) => next.some((item) => Number(item.epoch_id) === id)));
-            console.debug('[earnings] loaded', { creator: address, epochs: next.length });
-            return next;
+            setItems(next.items);
+            setCreatorEpochSeconds(next.creatorEpochSeconds);
+            setSelected((current) => current.filter((id) => next.items.some((item) => Number(item.epoch_id) === id)));
+            console.debug('[earnings] loaded', {
+                creator: address,
+                epochs: next.items.length,
+                creatorEpochSeconds: next.creatorEpochSeconds,
+            });
+            return next.items;
         } catch (err) {
             const message = String(err?.message || err);
             setError(message);
@@ -71,12 +97,7 @@ export function useCreatorEarnings(creator) {
     }, [refresh]);
 
     const claimable = useMemo(() => {
-        const currentEpoch = currentCreatorEpoch();
-        return items.filter((item) => (
-            BigInt(item.earned) > BigInt(item.claimed)
-            && currentEpoch < Number(item.claim_deadline_epoch)
-            && item.claimed_height == null
-        ));
+        return items.filter((item) => isCreatorEarningClaimable(item));
     }, [items]);
 
     const toggleEpoch = useCallback((epochId) => {
@@ -106,6 +127,7 @@ export function useCreatorEarnings(creator) {
 
     return {
         items,
+        creatorEpochSeconds,
         claimable,
         selected,
         toggleEpoch,

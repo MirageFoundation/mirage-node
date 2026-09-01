@@ -41,8 +41,8 @@ const MUTATIONS = [
     {
         name: 'L-2 attribution: nonce dropped from the signed payload',
         file: 'src/utils/canonicalEncoding.js',
-        from: 'String(nonce || 0),',
-        to: "'0',",
+        from: 'tag7, uvarint64(nonce),',
+        to: 'tag7, uvarint64(0),',
         expect: 'binds the nonce',
     },
     {
@@ -104,8 +104,8 @@ try {
             survived += 1;
             console.error(
                 `SURVIVED  ${m.name}\n` +
-                    `          suite ${failed ? 'failed but not on' : 'passed despite the mutation; nothing covers'} ` +
-                    `"${m.expect}"`,
+                `          suite ${failed ? 'failed but not on' : 'passed despite the mutation; nothing covers'} ` +
+                `"${m.expect}"`,
             );
         }
     }

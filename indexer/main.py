@@ -1382,10 +1382,15 @@ class Indexer:
         height = self.chain.get_current_height()
         block = self.chain.get_block(height)
         header = (((block.get("result") or {}).get("block") or {}).get("header") or {})
-        current_epoch = self.chain.parse_header_time(str(header.get("time", ""))) // 86400
         raw_params = get_raw_params()
+        creator_epoch_seconds = int(raw_params["creator_epoch_seconds"])
+        current_epoch = (
+            self.chain.parse_header_time(str(header.get("time", "")))
+            // creator_epoch_seconds
+        )
         claim_window_days = int(raw_params["creator_claim_window_days"])
-        first_epoch = max(0, current_epoch - claim_window_days - 1)
+        claim_window_epochs = claim_window_days * 86400 // creator_epoch_seconds
+        first_epoch = max(0, current_epoch - claim_window_epochs - 1)
         projected = 0
         with self.db.transaction(label="creator-backfill", height=height):
             for epoch_id in range(first_epoch, current_epoch):
@@ -1485,7 +1490,16 @@ class Indexer:
             if not ip or ip in seen_ips:
                 continue
             node_info = peer.get("node_info") or {}
-            peers.append({"ip": ip, "moniker": str(node_info.get("moniker", "") or "").strip()})
+            # The node ID is authenticated by the p2p handshake, so it is the one
+            # thing about a peer that is proved rather than claimed. The backend
+            # uses it to decide whether a domain really is this peer.
+            peers.append(
+                {
+                    "ip": ip,
+                    "moniker": str(node_info.get("moniker", "") or "").strip(),
+                    "node_id": str(node_info.get("id", "") or "").strip().lower(),
+                }
+            )
             seen_ips.add(ip)
         self.db.set_chain_stat("connected_peers", peers, int(time.time()))
 

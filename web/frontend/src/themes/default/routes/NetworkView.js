@@ -858,6 +858,8 @@ export default function NetworkView({ state }) {
         handleTabChange,
         toHttpUrl,
         getDisplayName,
+        getNickname,
+        isReachable,
     } = useNetwork({ state });
 
     const activeTabIndex = Math.max(0, TABS.findIndex(t => t.id === activeTab));
@@ -899,14 +901,20 @@ export default function NetworkView({ state }) {
             <ListBody>
                 {peers.map((peer, idx) => {
                     const p = typeof peer === 'string' ? { ip: peer, moniker: null } : peer;
-                    if (!p.ip && !p.moniker && !p.site) return null;
+                    if (!p.ip && !p.moniker && !p.api_base && !p.site) return null;
+                    const nickname = getNickname(p);
                     return (
                         <PeerRow key={`peer-${idx}`}>
                             <PeerLink href={toHttpUrl(p)} target="_blank" rel="noopener noreferrer">
                                 {getDisplayName(p)}
                             </PeerLink>
-                            {p.verified === false && (
-                                <PeerMeta title="This address has not proved it belongs to the validator that published it.">
+                            {nickname && (
+                                <PeerMeta title="The name this node's operator chose. It is not an address and nothing verifies it.">
+                                    {nickname}
+                                </PeerMeta>
+                            )}
+                            {!isReachable(p) && (
+                                <PeerMeta title="No address has proved it belongs to this node, so it is listed but not offered as a server to connect to.">
                                     unconfirmed
                                 </PeerMeta>
                             )}

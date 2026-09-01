@@ -203,30 +203,38 @@ export function useNetwork({
             replace: true
         });
     };
-    const siteOf = peer => {
-        const url = peer.site || peer.moniker;
+    // A moniker is free text its operator edits, so it is never the link. The
+    // clickable text is always the destination itself — either an address that
+    // proved it is this node, or the IP we are actually connected to — because a
+    // label that reads one way and navigates another is how a list of servers
+    // becomes a phishing page.
+    const provenBase = peer => {
+        const url = peer.api_base || peer.site;
         if (url && (url.startsWith('http://') || url.startsWith('https://'))) return url;
         return '';
     };
+    const peerAddress = peer => {
+        if (!peer.ip || typeof peer.ip !== 'string') return '';
+        return peer.ip.includes(':') ? `http://[${peer.ip}]` : `http://${peer.ip}`;
+    };
     const toHttpUrl = peer => {
         try {
-            const url = siteOf(peer);
-            if (url) return url.endsWith('/') ? url : `${url}/`;
-            if (peer.ip) {
-                const formattedHost = typeof peer.ip === 'string' && peer.ip.includes(':') ? `[${peer.ip}]` : peer.ip;
-                return `http://${formattedHost}/`;
-            }
-            return '#';
+            const url = provenBase(peer) || peerAddress(peer);
+            if (!url) return '#';
+            return url.endsWith('/') ? url : `${url}/`;
         } catch (_) {
             return '#';
         }
     };
-    const getDisplayName = peer => {
-        const url = siteOf(peer);
-        if (url) return url;
-        if (peer.ip) return `http://${peer.ip}`;
-        return '(unknown)';
+    const getDisplayName = peer => provenBase(peer) || peerAddress(peer) || '(unknown)';
+    // Shown beside the link as plain text, never as the link itself, and only
+    // when it says something the destination does not already say.
+    const getNickname = peer => {
+        const moniker = typeof peer.moniker === 'string' ? peer.moniker.trim() : '';
+        if (!moniker || moniker === getDisplayName(peer)) return '';
+        return moniker;
     };
+    const isReachable = peer => Boolean(peer.reachable ?? peer.verified);
     return {
         location,
         navigate,
@@ -241,6 +249,8 @@ export function useNetwork({
         supplyHistory,
         handleTabChange,
         toHttpUrl,
-        getDisplayName
+        getDisplayName,
+        getNickname,
+        isReachable
     };
 }

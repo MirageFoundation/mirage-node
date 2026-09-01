@@ -36,8 +36,9 @@ describe('profile voting', () => {
         expect(profile).not.toMatch(/activeTab === 'earnings' && isOwnProfile/);
         expect(earnings).toMatch(/\{canClaim && <input/);
         expect(earnings).toMatch(/\{canClaim && earnings\.items\.length > 0 && <Actions>/);
-        expect(earnings).toMatch(/Claim before \$\{deadline\} UTC/);
-        expect(earnings).toMatch(/formatRewardDate\(item\.epoch_id\)/);
+        expect(earnings).toMatch(/Claim before \$\{deadline\}/);
+        expect(earnings).toMatch(/formatCreatorRewardTime\(item\.epoch_start_unix/);
+        expect(earnings).not.toMatch(/Daily MIRAGE rewards/);
         expect(earnings).not.toMatch(/Claim by epoch/);
     });
 });

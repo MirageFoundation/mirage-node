@@ -1727,23 +1727,27 @@ def test_fleet_url_validation(backend):
 
 
 def _check_active_node_sites():
-    """Listing a node and trusting it with a credential are separate questions.
+    """Being listed, being reachable, and being trusted are three different things.
 
-    /network lists every reachable node, http included: a node reached by IP can
-    hold no certificate, so requiring https there hid real nodes and had the page
-    reporting two servers while four ran. A node whose operator published no
-    address at all is found from this node's P2P connections, but an address
-    nobody put on chain is listed only once a challenge proves a bonded
-    validator answers there -- otherwise peering would be enough to appear.
+    Every node this one is peered with is listed, unconditionally: the P2P
+    connection is the membership fact, so an operator who wrote a nickname
+    instead of a URL can no longer disappear from /network while signing every
+    block. That is the completeness half.
 
-    The fan-out list is the one that decides who is handed the admin's signed
-    proof, and it stays narrow -- https, and a name rather than a bare address,
-    since no certificate proves an IP. A host that resolves inside the network is
-    dropped from both. Called with the caller's stubbed resolver still installed,
-    so `evil.example` resolves privately here.
+    An address is only offered as somewhere to *point an app* once a challenge
+    proves it answers as the very node ID we are connected to. An unproved
+    address leaves the node listed with no destination rather than hiding it.
+
+    The fan-out list is narrower still, and deliberately does not follow the
+    other two: it decides who is handed the admin's replayable proof, so it
+    needs both a certificate that can prove the name (https, not a bare address)
+    and a bonded operator behind it. Peering plus a domain must never be enough.
+    Called with the caller's stubbed resolver installed, so `evil.example`
+    resolves privately here.
     """
     try:
         import fleet
+        from node_identity import IdentityProof
     except Exception as e:
         _fail("fleet.importable", f"fleet not importable: {e}")
         return
@@ -1751,133 +1755,216 @@ def _check_active_node_sites():
     original_lookup = fleet.get_active_validators
     original_peers = fleet.get_connected_peers
     original_probe = fleet._probe
-    original_local = fleet._local_operator
+    original_self = fleet._self_node
 
-    def _stub(monikers, peer_ips=(), proves=None):
+    NODE_A = "a" * 40
+    NODE_B = "b" * 40
+
+    def _stub(peers, proves=None, bonded=()):
         proved = dict(proves or {})
-        fleet.get_active_validators = lambda: [
-            {"moniker": m, "operator_address": f"miragevaloper{i}"} for i, m in enumerate(monikers)
+        fleet.get_connected_peers = lambda: [
+            {"ip": ip, "moniker": moniker, "node_id": node_id} for ip, moniker, node_id in peers
         ]
-        fleet.get_connected_peers = lambda: [{"ip": ip, "moniker": ""} for ip in peer_ips]
-        fleet._local_operator = lambda: ""
-        fleet._probe = lambda url: proved.get(url)
-        fleet._sites_cache = []
-        fleet._sites_cached_at = 0.0
-        fleet._sites_cache_ttl = 0.0
+        fleet.get_active_validators = lambda: [{"moniker": "", "operator_address": op} for op in bonded]
+        # This node has no domain of its own here, so it contributes a row and
+        # no destination -- keeping every expectation below about the peers.
+        fleet._self_node = lambda: fleet.NetworkNode(
+            node_id="0" * 40, ip="", moniker="", api_base="", operator_address="", is_self=True
+        )
+        fleet._probe = lambda url, node_id: proved.get(url)
+        fleet._nodes_cache = []
+        fleet._nodes_cached_at = 0.0
+        fleet._nodes_cache_ttl = 0.0
 
-    def _sites(monikers, peer_ips=(), proves=None):
-        _stub(monikers, peer_ips, proves)
+    def _sites(peers, proves=None, bonded=()):
+        _stub(peers, proves, bonded)
         return fleet.active_node_sites()
 
-    def _fanout(monikers):
-        _stub(monikers)
+    def _listed(peers, proves=None):
+        _stub(peers, proves)
+        return sorted(n.display_name for n in fleet.active_node_entries() if not n.is_self)
+
+    def _fanout(peers, proves=None, bonded=()):
+        _stub(peers, proves, bonded)
         return fleet.authenticated_node_sites()
 
+    proof = IdentityProof(node_id=NODE_A, addresses=[], operator_address="miragevaloper0")
+
     try:
-        cases = {
-            # (monikers) -> displayed sites
-            ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
-            # Shown. A validator serving plain http is still a real node.
-            ("http://mirage.talk",): ["http://mirage.talk"],
-            # A global IP is a place a visitor can go; schemeless still means https.
-            ("93.184.216.34",): ["https://93.184.216.34"],
-            ("http://93.184.216.34",): ["http://93.184.216.34"],
-            # Resolves inside the network: dropped, listed or not.
-            ("evil.example",): [],
-            # Names nowhere reachable. The chain offers no link, and nothing was
-            # discovered elsewhere, so there is still nothing to show.
-            ("frankfurt-node", "", "no-dot"): [],
-            ("mirage.talk", "MIRAGE.TALK", "https://mirage.talk"): ["https://mirage.talk"],
-        }
-        wrong = {monikers: got for monikers, want in cases.items() if (got := _sites(monikers)) != want}
-        if not wrong:
-            _pass("fleet.sites_include_reachable_http_nodes", checked=len(cases))
-        else:
-            _fail("fleet.sites_include_reachable_http_nodes", f"mismatches: {wrong}")
-
-        # A nickname moniker no longer hides a running node: the address comes
-        # from the P2P connection and the node proves the address is its own.
-        nickname = _sites(
-            ("EuroServer",), peer_ips=("93.184.216.34",), proves={"http://93.184.216.34": "miragevaloper0"}
-        )
-        if nickname == ["http://93.184.216.34"]:
-            _pass("fleet.peer_discovered_node_listed_on_proof")
-        else:
-            _fail("fleet.peer_discovered_node_listed_on_proof", f"got {nickname}")
-
-        # ...but peering alone must not be enough, or anyone who connects to this
-        # node lands on /network. Both of these have a live P2P connection.
-        unproved = [
-            # nothing answered the challenge
-            ("silent", {}),
-            # something answered, for a validator that is not in the active set
-            ("stranger", {"http://93.184.216.34": "miragevaloper_stranger"}),
+        # Completeness. Every one of these is listed, proof or not, address or
+        # not -- a nickname, an empty moniker and a name that goes nowhere.
+        everyone = [
+            ("93.184.216.34", "EuroServer", NODE_A),
+            ("93.184.216.35", "", NODE_B),
+            ("93.184.216.36", "frankfurt-node", "c" * 40),
         ]
-        leaked = {
-            label: got
-            for label, proves in unproved
-            if (got := _sites(("EuroServer",), ("93.184.216.34",), proves)) != []
-        }
-        if not leaked:
-            _pass("fleet.unproved_peer_not_listed", checked=len(unproved))
+        listed = _listed(everyone)
+        want = ["EuroServer", "frankfurt-node", "http://93.184.216.35"]
+        if listed == want:
+            _pass("fleet.every_peer_is_listed", checked=len(everyone))
         else:
-            _fail("fleet.unproved_peer_not_listed", f"listed without proof: {leaked}")
+            _fail("fleet.every_peer_is_listed", f"got {listed}, want {want}")
 
-        # A node already listed from its moniker must not appear a second time as
-        # a bare IP just because it is also a peer -- including when the published
-        # address is not answering, or a blip would swap a domain for an IP.
-        dupes = {
-            "published address confirmed": {
-                "https://mirage.talk": "miragevaloper0",
-                "http://93.184.216.34": "miragevaloper0",
+        # ...but listing is not a destination. None of them proved anything.
+        if _sites(everyone) == []:
+            _pass("fleet.unproved_peer_gets_no_destination")
+        else:
+            _fail("fleet.unproved_peer_gets_no_destination", f"got {_sites(everyone)}")
+
+        cases = [
+            # A moniker naming a host is tried first, and stands once proved.
+            (
+                "moniker names a domain",
+                (("93.184.216.34", "mirage.talk", NODE_A),),
+                {"https://mirage.talk": proof},
+                ["https://mirage.talk"],
+            ),
+            # A validator serving plain http is still a real node.
+            (
+                "moniker names an http host",
+                (("93.184.216.34", "http://mirage.talk", NODE_A),),
+                {"http://mirage.talk": proof},
+                ["http://mirage.talk"],
+            ),
+            # A nickname moniker no longer hides a node: the address comes from
+            # the P2P connection, and the node proves the address is its own.
+            (
+                "nickname moniker, proved at its address",
+                (("93.184.216.34", "EuroServer", NODE_A),),
+                {"http://93.184.216.34": proof},
+                ["http://93.184.216.34"],
+            ),
+            # Resolves inside the network: never dialed, never offered.
+            (
+                "moniker resolves privately",
+                (("93.184.216.34", "evil.example", NODE_A),),
+                {"https://evil.example": proof},
+                [],
+            ),
+            # A peer with no node ID cannot be checked against anything, so no
+            # answer from it can count.
+            (
+                "peer without a node id",
+                (("93.184.216.34", "mirage.talk", ""),),
+                {"https://mirage.talk": proof},
+                [],
+            ),
+        ]
+        wrong = {
+            label: got for label, peers, proves, want in cases if (got := _sites(peers, proves)) != want
+        }
+        if not wrong:
+            _pass("fleet.destination_requires_proof", checked=len(cases))
+        else:
+            _fail("fleet.destination_requires_proof", f"mismatches: {wrong}")
+
+        # A node reached at its bare address can name the domain it serves, and
+        # the better destination wins -- this is how a node that published
+        # nothing on chain still ends up offered over https.
+        declared = _sites(
+            (("93.184.216.34", "EuroServer", NODE_A),),
+            {
+                "http://93.184.216.34": IdentityProof(
+                    node_id=NODE_A, addresses=["https://mirage.talk"], operator_address=""
+                ),
+                "https://mirage.talk": proof,
             },
-            "published address silent": {"http://93.184.216.34": "miragevaloper0"},
+        )
+        if declared == ["https://mirage.talk"]:
+            _pass("fleet.declared_address_upgrades_destination")
+        else:
+            _fail("fleet.declared_address_upgrades_destination", f"got {declared}")
+
+        # A declared address that does not itself answer must not be adopted --
+        # otherwise a node could name someone else's domain into its own entry.
+        unbacked = _sites(
+            (("93.184.216.34", "EuroServer", NODE_A),),
+            {
+                "http://93.184.216.34": IdentityProof(
+                    node_id=NODE_A, addresses=["https://mirage.talk"], operator_address=""
+                )
+            },
+        )
+        if unbacked == ["http://93.184.216.34"]:
+            _pass("fleet.declared_address_must_answer_for_itself")
+        else:
+            _fail("fleet.declared_address_must_answer_for_itself", f"got {unbacked}")
+
+        # One row per node, even when a node proves several of its addresses.
+        _stub(
+            (("93.184.216.34", "mirage.talk", NODE_A),),
+            {"https://mirage.talk": proof, "http://93.184.216.34": proof},
+        )
+        rows = [n for n in fleet.active_node_entries() if not n.is_self]
+        if len(rows) == 1 and rows[0].api_base == "https://mirage.talk":
+            _pass("fleet.one_entry_per_node")
+        else:
+            _fail("fleet.one_entry_per_node", f"got {[(r.display_name, r.api_base) for r in rows]}")
+
+        # The credential boundary. Proved https name AND bonded operator.
+        peer_a = (("93.184.216.34", "mirage.talk", NODE_A),)
+        fanout_cases = {
+            "authenticated and bonded": (
+                peer_a,
+                {"https://mirage.talk": proof},
+                ("miragevaloper0",),
+                ["https://mirage.talk"],
+            ),
+            # The regression that peer-driven listing could have introduced: a
+            # node that peers with us and owns a domain is reachable, and still
+            # must not be handed the admin's proof.
+            "authenticated but not bonded": (
+                peer_a,
+                {"https://mirage.talk": proof},
+                (),
+                [],
+            ),
+            # No certificate can prove a bare address, bonded or not.
+            "bonded but only an address": (
+                (("93.184.216.34", "EuroServer", NODE_A),),
+                {"http://93.184.216.34": proof},
+                ("miragevaloper0",),
+                [],
+            ),
+            # A node that proved itself but not its validator speaks for no stake.
+            "no validator proof": (
+                peer_a,
+                {"https://mirage.talk": IdentityProof(node_id=NODE_A, addresses=[], operator_address="")},
+                ("miragevaloper0",),
+                [],
+            ),
         }
         wrong = {
             label: got
-            for label, proves in dupes.items()
-            if (got := _sites(("https://mirage.talk",), ("93.184.216.34",), proves)) != ["https://mirage.talk"]
+            for label, (peers, proves, bonded, want) in fanout_cases.items()
+            if (got := _fanout(peers, proves, bonded)) != want
         }
         if not wrong:
-            _pass("fleet.one_entry_per_validator", checked=len(dupes))
+            _pass("fleet.fanout_needs_certificate_and_stake", checked=len(fanout_cases))
         else:
-            _fail("fleet.one_entry_per_validator", f"mismatches: {wrong}")
+            _fail("fleet.fanout_needs_certificate_and_stake", f"mismatches: {wrong}")
 
-        # The credential boundary must not have moved with the display list.
-        fanout_cases = {
-            ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
-            ("http://mirage.talk",): [],
-            ("93.184.216.34",): [],
-            ("http://93.184.216.34",): [],
-            ("evil.example",): [],
-        }
-        wrong = {m: got for m, want in fanout_cases.items() if (got := _fanout(m)) != want}
-        if not wrong:
-            _pass("fleet.fanout_stays_authenticated_only", checked=len(fanout_cases))
-        else:
-            _fail("fleet.fanout_stays_authenticated_only", f"mismatches: {wrong}")
+        # The list is cached, so a page view cannot turn into a probe of every
+        # node in the network.
+        calls = {"peers": 0, "probes": 0}
 
-        # The list is cached, so a page view cannot turn into a fan of lookups
-        # and a probe of every node in the network.
-        calls = {"chain": 0, "probes": 0}
+        def _counting_peers():
+            calls["peers"] += 1
+            return [{"ip": "93.184.216.34", "moniker": "mirage.vote", "node_id": NODE_A}]
 
-        def _counting():
-            calls["chain"] += 1
-            return [{"moniker": "mirage.vote", "operator_address": "v"}]
-
-        def _counting_probe(url):
+        def _counting_probe(url, node_id):
             calls["probes"] += 1
-            return "v"
+            return proof
 
         _stub(())
-        fleet.get_active_validators = _counting
+        fleet.get_connected_peers = _counting_peers
         fleet._probe = _counting_probe
-        fleet._sites_cache = []
-        fleet._sites_cached_at = 0.0
-        fleet._sites_cache_ttl = 0.0
+        fleet._nodes_cache = []
+        fleet._nodes_cached_at = 0.0
+        fleet._nodes_cache_ttl = 0.0
         fleet.active_node_sites()
         fleet.active_node_sites()
-        if calls == {"chain": 1, "probes": 1}:
+        if calls == {"peers": 1, "probes": 1}:
             _pass("fleet.sites_cached")
         else:
             _fail("fleet.sites_cached", f"{calls} for two calls, expected one of each")
@@ -1885,10 +1972,10 @@ def _check_active_node_sites():
         fleet.get_active_validators = original_lookup
         fleet.get_connected_peers = original_peers
         fleet._probe = original_probe
-        fleet._local_operator = original_local
-        fleet._sites_cache = []
-        fleet._sites_cached_at = 0.0
-        fleet._sites_cache_ttl = 0.0
+        fleet._self_node = original_self
+        fleet._nodes_cache = []
+        fleet._nodes_cached_at = 0.0
+        fleet._nodes_cache_ttl = 0.0
 
 
 def test_analytics_identity_trust(backend):

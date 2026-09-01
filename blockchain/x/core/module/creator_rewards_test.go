@@ -22,7 +22,7 @@ type settledCreatorReward struct {
 	deadline int64
 }
 
-func settleCreatorReward(t *testing.T, directReply bool) settledCreatorReward {
+func settleCreatorReward(t *testing.T, directReply bool, epochSeconds uint64, deleteInEpoch bool) settledCreatorReward {
 	t.Helper()
 	mk, ctx, am := setupModule(t)
 	_, payer := curationSigner(0x61)
@@ -33,11 +33,19 @@ func settleCreatorReward(t *testing.T, directReply bool) settledCreatorReward {
 	ensureUsername(t, mk, ctx, creator, "reward-creator")
 
 	params := mk.GetParams(ctx)
+	params.CreatorEpochSeconds = epochSeconds
+	if epochSeconds < types.SecondsPerUTCDay {
+		params.SubscriptionPeriod = 60
+		params.SubscriptionEarlyRenewalDays = 0
+		params.MaxSubscriptionPeriodsPerPurchase = 1
+	}
+	require.NoError(t, mk.SetParams(ctx, params))
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
 	fundAccount(mk, payer, tier.PeriodFee)
 
-	epoch := types.UTCEpoch(ctx.BlockTime().Unix())
+	epoch, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), epochSeconds)
+	require.NoError(t, err)
 	require.NoError(t, mk.SetCreatorClock(ctx, epoch))
 	require.NoError(t, mk.CreateTranche(
 		ctx,
@@ -64,16 +72,36 @@ func settleCreatorReward(t *testing.T, directReply bool) settledCreatorReward {
 	} else {
 		require.NoError(t, mk.RecordUpvoteEngagement(ctx, subscriber, target, 1))
 	}
+	if deleteInEpoch {
+		meta, found, err := mk.GetPostMetadata(ctx, target)
+		require.NoError(t, err)
+		require.True(t, found)
+		meta.DeletedEpoch = epoch
+		require.NoError(t, mk.SetPostMetadata(ctx, target, meta))
+	}
 
 	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	settlementTime, err := types.CreatorEpochEnd(epoch, epochSeconds)
+	require.NoError(t, err)
 	settledCtx := ctx.
 		WithBlockHeight(ctx.BlockHeight() + 1).
-		WithBlockTime(time.Unix((epoch+1)*86400+1, 0)).
+		WithBlockTime(time.Unix(settlementTime+1, 0)).
 		WithEventManager(sdk.NewEventManager())
 	require.NoError(t, mk.ProcessBeginBlockV139(settledCtx))
 
 	epochResponse, err := am.CreatorEpoch(settledCtx, &types.QueryCreatorEpochRequest{EpochId: epoch})
 	require.NoError(t, err)
+	if deleteInEpoch {
+		require.Equal(t, types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_EXPIRED, epochResponse.Epoch.Status)
+		require.Equal(t, "0", epochResponse.Epoch.AllocatedTotal)
+		accruals, err := am.CreatorAccruals(
+			settledCtx,
+			&types.QueryCreatorAccrualsRequest{Creator: creator},
+		)
+		require.NoError(t, err)
+		require.Empty(t, accruals.Accruals)
+		return settledCreatorReward{mk: mk, am: am, ctx: settledCtx, creator: creator, target: target, epoch: epoch}
+	}
 	require.Equal(t, types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE, epochResponse.Epoch.Status)
 	require.Equal(t, epochResponse.Epoch.Pool, epochResponse.Epoch.AllocatedTotal)
 
@@ -115,7 +143,7 @@ func settleCreatorReward(t *testing.T, directReply bool) settledCreatorReward {
 }
 
 func TestCreatorRewardDailySettlementAndClaim(t *testing.T) {
-	reward := settleCreatorReward(t, false)
+	reward := settleCreatorReward(t, false, types.SecondsPerUTCDay, false)
 	liabilityBefore, err := reward.mk.GetCreatorLiability(reward.ctx)
 	require.NoError(t, err)
 
@@ -144,11 +172,24 @@ func TestCreatorRewardDailySettlementAndClaim(t *testing.T) {
 	)
 }
 
+func TestCreatorRewardFiveMinuteSettlementAndClaim(t *testing.T) {
+	reward := settleCreatorReward(t, false, 300, false)
+	require.NoError(t, reward.mk.ClaimCreatorRewards(reward.ctx, reward.creator, []int64{reward.epoch}))
+	require.Equal(
+		t,
+		reward.earned,
+		reward.mk.bank.sentModuleToAccount.AmountOf(types.MintDenom),
+	)
+}
+
 func TestCreatorRewardDirectReplyExpiresAfterClaimWindow(t *testing.T) {
-	reward := settleCreatorReward(t, true)
+	reward := settleCreatorReward(t, true, 300, false)
+	require.Equal(t, reward.epoch+2+(30*288), reward.deadline)
+	expiryTime, err := types.CreatorEpochStart(reward.deadline, 300)
+	require.NoError(t, err)
 	expiryCtx := reward.ctx.
 		WithBlockHeight(reward.ctx.BlockHeight() + 1).
-		WithBlockTime(time.Unix(reward.deadline*86400, 0)).
+		WithBlockTime(time.Unix(expiryTime, 0)).
 		WithEventManager(sdk.NewEventManager())
 	require.NoError(t, reward.mk.ProcessBeginBlockV139(expiryCtx))
 
@@ -164,4 +205,8 @@ func TestCreatorRewardDirectReplyExpiresAfterClaimWindow(t *testing.T) {
 		"is not claimable",
 	)
 	require.True(t, reward.mk.bank.sentModuleToAccount.Empty())
+}
+
+func TestFiveMinuteCreatorRewardExcludesContentDeletedInEngagementEpoch(t *testing.T) {
+	settleCreatorReward(t, false, 300, true)
 }

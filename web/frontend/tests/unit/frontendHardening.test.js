@@ -11,10 +11,28 @@ import { generateMnemonic } from 'bip39';
 
 import seedVault from '../../src/utils/SeedVault.js';
 import Storage from '../../src/utils/Storage.js';
+import { buildCanonical } from '../../src/utils/canonicalEncoding.js';
 import { markdownUrlTransform } from '../../src/utils/markdownUrl.js';
 import { getSessionGeneration, onSessionReset, resetClientSession } from '../../src/utils/sessionLifecycle.js';
 
 const PASSWORD = 'correct-horse-battery-staple';
+
+describe('L-2: transaction attribution', () => {
+    it('binds the nonce into the signed payload', () => {
+        const envelope = {
+            msgType: 'MsgVote',
+            pub_bytes: new Uint8Array(33),
+            last_block_hash: '00'.repeat(32),
+            difficulty: 1,
+            proof: 2,
+            timestamp: 3,
+            fields: [],
+        };
+        const first = buildCanonical({ ...envelope, nonce: 4 });
+        const second = buildCanonical({ ...envelope, nonce: 5 });
+        expect(first).not.toEqual(second);
+    });
+});
 
 describe('H-1: recovery-phrase fallback leaves a usable session', () => {
     beforeEach(() => {

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { deriveKeysFromSeed, requireValidMnemonic } from "../utils/CryptoUtils.js";
 import Api from "../utils/api";
@@ -14,7 +14,7 @@ export function useLogin({
     const [seedPhrase, setSeedPhrase] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const afterLoginPath = () => readReturnTo(location.search) || '/';
+    const afterLoginPath = useCallback(() => readReturnTo(location.search) || '/', [location.search]);
 
     // If user is already signed in, honor ?next= then fall back to home
     useEffect(() => {
@@ -25,7 +25,7 @@ export function useLogin({
                 replace: true
             });
         }
-    }, [state.publicKey, navigate, location.search]);
+    }, [state.publicKey, navigate, afterLoginPath]);
     useEffect(() => {
         mountedRef.current = true;
         return () => {

@@ -93,6 +93,7 @@ scripts/*
 !scripts/reset_statesync.sh
 !scripts/reset_local_testnet.sh
 !scripts/reset_local_testnet.py
+!scripts/enable_five_minute_creator_rewards.py
 !scripts/test_upgrade.sh
 !scripts/list_validators.sh
 !scripts/show_balances.py
@@ -115,6 +116,9 @@ scripts/*
 # The re-include above is the last matching rule for this subtree, so it also
 # defeats the global __pycache__ ignore. Restate it here.
 scripts/tests/**/__pycache__/
+
+web/frontend/.repro-build-*/
+web/frontend/test-results/
 
 cursor.md
 .cursor/

@@ -231,7 +231,7 @@ function remarkCommunities() {
             if (!node.value || typeof node.value !== 'string') return;
             if (!node.value.includes('[') && !node.value.includes('c/')) return;
 
-            const regex = /(?<![!\[])\[([a-z0-9]+(?:-[a-z0-9]+)*)\](?![\(:\]])|(?<![a-zA-Z0-9/])c\/([a-z0-9]+(?:-[a-z0-9]+)*)(?![a-zA-Z0-9-])/g;
+            const regex = /(?<![![])\[([a-z0-9]+(?:-[a-z0-9]+)*)\](?![(:\]])|(?<![a-zA-Z0-9/])c\/([a-z0-9]+(?:-[a-z0-9]+)*)(?![a-zA-Z0-9-])/g;
             const parts = [];
             let lastIndex = 0;
             let match;

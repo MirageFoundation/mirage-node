@@ -461,6 +461,38 @@ func TestValidateUsernameFormat(t *testing.T) {
 	}
 }
 
+func TestFiveMinuteCreatorEpochParams(t *testing.T) {
+	p := DefaultParams()
+	p.CreatorEpochSeconds = 300
+	p.SubscriptionPeriod = 60
+	p.SubscriptionEarlyRenewalDays = 0
+	p.MaxSubscriptionPeriodsPerPurchase = 1
+	require.NoError(t, p.ValidateV139())
+
+	p.CreatorEpochSeconds = 301
+	require.ErrorContains(t, p.ValidateV139(), "must divide")
+
+	p = DefaultParams()
+	p.CreatorEpochSeconds = 300
+	p.SubscriptionPeriod = MaxSubscriptionPeriodMinutes
+	p.SubscriptionEarlyRenewalDays = 0
+	p.MaxSubscriptionPeriodsPerPurchase = 1
+	require.ErrorContains(t, p.ValidateV139(), "creator epochs")
+}
+
+func TestCreatorEpochClockDoesNotChangeDailyRelayEpoch(t *testing.T) {
+	unix := int64(1_777_777_777)
+	creatorEpoch, err := CreatorEpochFromUnix(unix, 300)
+	require.NoError(t, err)
+	require.Equal(t, unix/300, creatorEpoch)
+	require.Equal(t, unix/SecondsPerUTCDay, UTCEpoch(unix))
+	require.NotEqual(t, creatorEpoch, UTCEpoch(unix))
+
+	deadline, err := CreatorClaimDeadline(creatorEpoch, 30, 300)
+	require.NoError(t, err)
+	require.Equal(t, creatorEpoch+30*288+1, deadline)
+}
+
 func TestC1BugCondition(t *testing.T) {
 	// Reproduce the C-1 bug condition: the old code used
 	//   if core.Level <= 0 || int(core.Level) >= len(params.Tiers)

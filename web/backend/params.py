@@ -54,6 +54,7 @@ _REQUIRED_INT_PARAMS = [
     "subscriber_daily_relay_limit",
     "max_subscription_periods_per_purchase",
     "subscription_early_renewal_days",
+    "creator_epoch_seconds",
 ]
 
 _REQUIRED_FLOAT_PARAMS = [

@@ -272,6 +272,87 @@ func TestUpdateParamsRejectsMissingMask(t *testing.T) {
 	require.ErrorContains(t, err, "update_mask is required")
 }
 
+func TestUpdateParamsRebasesEmptyCreatorClock(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	updates := types.Params{
+		CreatorEpochSeconds:               300,
+		SubscriptionPeriod:                60,
+		SubscriptionEarlyRenewalDays:      0,
+		MaxSubscriptionPeriodsPerPurchase: 1,
+	}
+
+	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
+		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		Params:    updates,
+		UpdateMask: mask(
+			"creator_epoch_seconds",
+			"subscription_period",
+			"subscription_early_renewal_days",
+			"max_subscription_periods_per_purchase",
+		),
+	})
+	require.NoError(t, err)
+	clock, err := mk.GetCreatorClock(ctx)
+	require.NoError(t, err)
+	require.Equal(t, ctx.BlockTime().Unix()/300, clock)
+	require.Equal(t, uint64(300), mk.GetParams(ctx).CreatorEpochSeconds)
+}
+
+func TestUpdateParamsRejectsCreatorIntervalAfterRewardStateExists(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	mk.storeService.store[string(types.KeyCreatorEpoch(1))] = []byte{1}
+	updates := types.Params{
+		CreatorEpochSeconds:               300,
+		SubscriptionPeriod:                60,
+		SubscriptionEarlyRenewalDays:      0,
+		MaxSubscriptionPeriodsPerPurchase: 1,
+	}
+
+	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
+		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+		Params:    updates,
+		UpdateMask: mask(
+			"creator_epoch_seconds",
+			"subscription_period",
+			"subscription_early_renewal_days",
+			"max_subscription_periods_per_purchase",
+		),
+	})
+	require.ErrorContains(t, err, "cannot change after creator reward state exists")
+	require.Equal(t, uint64(types.SecondsPerUTCDay), mk.GetParams(ctx).CreatorEpochSeconds)
+}
+
+func TestCreatorIntervalStateGuardCoversEveryStateClass(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value []byte
+	}{
+		{"liability", types.PfxCreatorLiability, []byte("1")},
+		{"epoch", string(types.KeyCreatorEpoch(1)), []byte{1}},
+		{"tranche", string(types.KeyTranche(1)), []byte{1}},
+		{"engagement", types.PfxEngagement + "present", []byte{1}},
+		{"accrual", types.PfxEpochCreatorAccrual + "present", []byte{1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mk, ctx, _ := setupModule(t)
+			mk.storeService.store[tt.key] = tt.value
+			hasState, err := mk.HasCreatorRewardState(ctx)
+			require.NoError(t, err)
+			require.True(t, hasState)
+		})
+	}
+
+	mk, ctx, _ := setupModule(t)
+	require.NoError(t, mk.SetCreatorClock(ctx, 123))
+	hasState, err := mk.HasCreatorRewardState(ctx)
+	require.NoError(t, err)
+	require.False(t, hasState, "the empty creator clock is the state governance rebases")
+}
+
 func TestGetProfilesReturnsCorruptProfileError(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()

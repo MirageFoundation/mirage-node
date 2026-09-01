@@ -1,34 +1,30 @@
-"""Which nodes are in the fleet, where to reach them, and which addresses proved it.
+"""Which nodes the network runs on, where to reach them, and which addresses proved it.
 
-Membership is a chain fact, not operator configuration: a fleet member is a
-bonded validator. Nobody maintains a list, so a node that joins the active set
-shows up on its own and a node that dies is gone once the chain jails it.
+Membership comes from this node's own P2P connections. Every peer arrives with
+an IP and a node ID that the CometBFT handshake already authenticated, so the
+list needs nothing published and nothing maintained: a node that joins shows up
+on its own, and one that dies drops out when the connection does. This is what
+makes an operator who chose a nickname visible at all -- the previous source was
+the on-chain moniker, so a validator that wrote anything other than a URL had
+published no address and vanished from /network while signing every block.
 
-Finding a member's *address* is the harder half, and reading it off the moniker
-alone was never enough. The moniker is free text, so an operator who wrote a
-nickname had published no address and dropped off /network entirely even while
-signing every block -- and an operator who wrote a domain was believed without
-anything checking that the domain agreed. Two sources answer that now:
+An IP is enough to *list* a node and never enough to *reach* one: no certificate
+authority issues for a bare address, so an app pointed at `http://<ip>` has no
+way to tell it is still talking to the same machine, and both mobile platforms
+block cleartext by default. Reaching a node means having a name, and a name is
+worth nothing unless something ties it to the node that claimed it. That is what
+`node_identity` settles: an address is reported as reachable only after whoever
+answers there signs a challenge with the p2p key behind the node ID we are
+already connected to. Anything unproved is still listed -- with its IP, and its
+moniker as written -- it simply is not offered as a destination.
 
-- the moniker, when it names a host. The validator itself put it on chain, so
-  the claim costs a signed transaction and a bonded stake.
-- the address a node is actually peered from, taken from this node's own P2P
-  connections. This is what makes an operator who chose a nickname visible: it
-  needs nothing published, and the address is the TCP peer, not a claim.
-
-A peer address is only a hint that something is there, so it is listed only once
-a challenge proves a bonded validator is answering at it (see `node_identity`).
-A moniker is chain-attested and stays listed on its own, with the same challenge
-deciding whether the entry is marked confirmed. So the page shows every node
-that is genuinely reachable, and says which of those addresses were proved to
-belong to the validator that named them, rather than presenting both alike.
-
-Being listed and being trusted with a credential remain separate questions. The
-stats fan-out forwards the admin's signed proof, which is replayable for its
-lifetime, so it may only send where a certificate proves the name claimed:
-``authenticated_node_sites`` is that subset -- https, and a name rather than a
-bare address. Widening what gets *listed* must never widen what gets *trusted*,
-which is why these are separate functions over one cache.
+Listing and trusting stay separate questions, and they now rest on separate
+proofs. The stats fan-out forwards the admin's signed proof, which is replayable
+for its lifetime, so it may only send where two things hold at once: a
+certificate can prove the name (https, and a name rather than an address), and
+the validator signature in the same document proves a *bonded* operator is
+behind it. Being reachable is about a node ID, which anyone can have; being
+trusted is about stake. `authenticated_node_sites` is that narrower subset.
 
 The cache is why probing every candidate is affordable. `/api/get_peers` is
 public and unauthenticated, and a page view must not become a fan of outbound
@@ -44,12 +40,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from chain import get_active_validators, get_connected_peers
 from fleet_url import get_json, validate_fleet_endpoint
 from logging_utils import logger
-from node_identity import announced_site, new_nonce, verify_identity
+from node_identity import IdentityProof, local_addresses, new_nonce, verify_identity
 
 # A confirmed address is a durable fact -- it changes when an operator moves a
 # node, not between page views. A failure is not durable, so it is retried on a
@@ -57,19 +53,27 @@ from node_identity import announced_site, new_nonce, verify_identity
 ACTIVE_SITES_TTL = 6 * 3600.0
 ACTIVE_SITES_FAILURE_TTL = 300.0
 
-# Probes run concurrently against a handful of hosts. The timeout is what bounds
-# the first uncached request, and an unreachable node must not hold the page.
+# Probes run concurrently across peers. The timeout is what bounds the first
+# uncached request, and an unreachable node must not hold the page.
 PROBE_TIMEOUT = 3.0
 PROBE_WORKERS = 8
 
 
 @dataclass(frozen=True)
-class NodeSite:
-    """A node a visitor can open, and what is actually known about it."""
+class NetworkNode:
+    """A node on the network, and what is actually known about it."""
 
-    url: str
+    node_id: str
+    ip: str
+    moniker: str
+    api_base: str
     operator_address: str
-    verified: bool
+    is_self: bool = False
+
+    @property
+    def reachable(self) -> bool:
+        """Whether an app can be pointed at this node."""
+        return bool(self.api_base)
 
     @property
     def authenticated(self) -> bool:
@@ -77,37 +81,35 @@ class NodeSite:
 
         Requires https, and a name rather than an address: no certificate
         authority issues for a bare IP, so pinning the handshake to one proves
-        nothing. Both conditions have to hold before this node forwards the
-        admin's proof.
+        nothing.
         """
-        if not self.url.startswith("https://"):
+        if not self.api_base.startswith("https://"):
             return False
-        host = self.url[len("https://") :].split(":")[0].strip("[]")
+        host = self.api_base[len("https://") :].split(":")[0].strip("[]")
         try:
             ipaddress.ip_address(host)
         except ValueError:
             return True
         return False
 
-
-_sites_cache: List[NodeSite] = []
-_sites_cached_at: float = 0.0
-_sites_cache_ttl: float = 0.0
-_sites_lock = threading.Lock()
-
-
-def _local_operator() -> str:
-    """This node's own validator operator address."""
-    from node import require_runtime
-
-    return require_runtime().validator_operator_address
+    @property
+    def display_name(self) -> str:
+        """What to call this node: its moniker if it set one, else its address."""
+        return self.moniker or self.api_base or (f"http://{self.ip}" if self.ip else self.node_id)
 
 
-def _probe(url: str) -> Optional[str]:
-    """Challenge the node at `url`; return the operator address it proved, or None.
+_nodes_cache: List[NetworkNode] = []
+_nodes_cached_at: float = 0.0
+_nodes_cache_ttl: float = 0.0
+_nodes_lock = threading.Lock()
 
-    The nonce and the origin are both chosen here and both signed, so a reply
-    captured from another node, or from this one earlier, does not verify.
+
+def _probe(url: str, expect_node_id: str) -> Optional[IdentityProof]:
+    """Challenge whoever answers at `url`; return what they proved, or None.
+
+    The nonce is chosen here and signed there, so a reply captured from this
+    node earlier does not verify. `expect_node_id` comes from the caller's peer
+    table, which is what stops the answer of a relayed challenge from counting.
     """
     endpoint = validate_fleet_endpoint(url, allow_ip_literal=True)
     if endpoint is None or endpoint.url != url:
@@ -116,145 +118,207 @@ def _probe(url: str) -> Optional[str]:
     from node import require_runtime
 
     nonce = new_nonce()
-    doc = get_json(endpoint, "/api/node_identity", {"origin": url, "nonce": nonce}, PROBE_TIMEOUT)
+    doc = get_json(endpoint, "/api/node_identity", {"nonce": nonce}, PROBE_TIMEOUT)
     if doc is None:
         return None
 
-    operator = verify_identity(
+    proof = verify_identity(
         doc,
-        expect_origin=url,
         expect_nonce=nonce,
         expect_chain_id=require_runtime().chain_id,
+        expect_node_id=expect_node_id,
     )
-    if operator is None:
-        logger().debug("fleet.probe_unverified url=%s", url)
+    if proof is None:
+        logger().debug("fleet.probe_unverified url=%s node_id=%s", url, expect_node_id)
         return None
-    logger().debug("fleet.probe_verified url=%s operator=%s site=%s", url, operator, announced_site(doc))
-    return operator
+    logger().debug(
+        "fleet.probe_verified url=%s node_id=%s operator=%s declared=%s",
+        url,
+        expect_node_id,
+        proof.operator_address or "-",
+        proof.addresses,
+    )
+    return proof
 
 
-def _moniker_candidates(validators: List[Dict[str, str]]) -> Dict[str, str]:
-    """url -> operator address, for every moniker that names a host.
+def _rank(url: str) -> int:
+    """How good a destination a proved URL is. Lower is better.
 
-    IP literals are accepted. A validator with no domain can still be browsed at
-    its address, and refusing to name it does not make it any less part of the
-    network -- it only hides it. The literal must still be a global address, so
-    this cannot point the node at its own network.
+    An https name is the only thing a client can authenticate on its own, so it
+    outranks everything. A bare address still works for a node that has no
+    domain, and beats having nowhere to send anyone.
     """
-    out: Dict[str, str] = {}
-    for validator in validators:
-        moniker = validator["moniker"]
-        endpoint = validate_fleet_endpoint(moniker, allow_ip_literal=True)
-        if endpoint is None:
-            logger().debug(
-                "fleet.moniker_names_nowhere operator=%s moniker=%r",
-                validator["operator_address"],
-                moniker,
-            )
-            continue
-        out.setdefault(endpoint.url, validator["operator_address"])
-    return out
+    if not url.startswith("https://"):
+        return 3
+    host = url[len("https://") :].split(":")[0].strip("[]")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return 0
+    return 1
 
 
-def _peer_candidates(exclude: set) -> List[str]:
-    """`http://<ip>` for every peer this node is connected to, minus known addresses.
+def _candidate_urls(peer: Dict[str, str]) -> List[str]:
+    """Where to look for a peer, best first.
 
-    Plain http on purpose: a node with no domain holds no certificate, and this
-    source exists precisely for the operator who published nothing. A node that
-    does have a domain answers :80 with a redirect, the probe declines to follow
-    it, and the node is listed from its moniker instead.
+    The moniker is tried before the address because an operator who wrote one is
+    naming where they want to be reached. The address needs nothing published,
+    which is the whole point of it -- but plain http, since a node with no domain
+    holds no certificate.
     """
     out: List[str] = []
-    for peer in get_connected_peers():
-        ip = peer["ip"]
-        if not ip:
-            continue
+    endpoint = validate_fleet_endpoint(peer["moniker"], allow_ip_literal=True)
+    if endpoint is not None:
+        out.append(endpoint.url)
+
+    ip = peer["ip"]
+    if ip:
         try:
-            if not ipaddress.ip_address(ip).is_global:
-                continue
+            if ipaddress.ip_address(ip).is_global:
+                url = f"http://[{ip}]" if ipaddress.ip_address(ip).version == 6 else f"http://{ip}"
+                if url not in out:
+                    out.append(url)
         except ValueError:
-            continue
-        url = f"http://{ip}"
-        if url in exclude or url in out:
-            continue
-        out.append(url)
+            pass
     return out
 
 
-def _discover_active_sites() -> List[NodeSite]:
-    validators = get_active_validators()
-    bonded = {v["operator_address"] for v in validators if v["operator_address"]}
-    local_operator = _local_operator()
-
-    from_moniker = _moniker_candidates(validators)
-    from_peers = _peer_candidates(set(from_moniker))
-
-    # This node's own entry is settled without a request. Asking itself would be
-    # a loopback through the public URL served by the very worker pool handling
-    # the page, so a burst of cold requests could starve the workers of the
-    # capacity needed to answer their own probes.
-    candidates = [url for url, operator in from_moniker.items() if operator != local_operator] + from_peers
-
-    proved: Dict[str, Optional[str]] = {
-        url: local_operator for url, operator in from_moniker.items() if operator == local_operator
-    }
-    if candidates:
-        with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
-            proved.update(zip(candidates, pool.map(_probe, candidates)))
-
-    sites: List[NodeSite] = []
-    listed: set = set()
-
-    for url, operator in from_moniker.items():
-        confirmed = proved.get(url) == operator and operator in bonded
-        sites.append(NodeSite(url=url, operator_address=operator, verified=confirmed))
-        listed.add(operator)
-
-    for url in from_peers:
-        operator = proved.get(url)
-        # An address nobody published is listed only on proof, and only for a
-        # validator that published none -- an operator who did name an address is
-        # represented by the one they chose, confirmed or not, rather than being
-        # shown twice or having a transient failure swap it for a bare IP.
-        if not operator or operator not in bonded or operator in listed:
-            continue
-        sites.append(NodeSite(url=url, operator_address=operator, verified=True))
-        listed.add(operator)
-
-    sites.sort(key=lambda s: s.url)
-    logger().debug(
-        "fleet.sites_discovered count=%d verified=%d sites=%s",
-        len(sites),
-        sum(1 for s in sites if s.verified),
-        [(s.url, s.verified) for s in sites],
+def _resolve_peer(peer: Dict[str, str]) -> NetworkNode:
+    """Probe a peer's candidate addresses and settle on the best proved one."""
+    node_id = peer["node_id"]
+    base = NetworkNode(
+        node_id=node_id,
+        ip=peer["ip"],
+        moniker=peer["moniker"],
+        api_base="",
+        operator_address="",
     )
-    return sites
+    if not node_id:
+        # Nothing to check an answer against, so nothing here can be proved. The
+        # node is still listed from its IP.
+        logger().debug("fleet.peer_without_node_id ip=%s", peer["ip"])
+        return base
+
+    proved: List[Tuple[str, IdentityProof]] = []
+    tried: set = set()
+
+    def run(urls: List[str]) -> None:
+        for url in urls:
+            # An authenticated https name is the best a destination can be, so
+            # once one answers there is nothing left to look for. Without this a
+            # node that names its domain is still dialled a second time at its
+            # bare address on every cache miss, for an answer that could not win.
+            if any(_rank(url_) == 0 for url_, _ in proved):
+                return
+            if url in tried:
+                continue
+            tried.add(url)
+            proof = _probe(url, node_id)
+            if proof is not None:
+                proved.append((url, proof))
+
+    run(_candidate_urls(peer))
+    # A node reached at its bare address can still name the domain it serves, so
+    # a second round follows what it declared. This is how a node whose operator
+    # published nothing on chain still ends up offered over https.
+    run([url for _, proof in list(proved) for url in proof.addresses])
+
+    if not proved:
+        return base
+
+    best_url, best_proof = min(proved, key=lambda item: _rank(item[0]))
+    return NetworkNode(
+        node_id=node_id,
+        ip=peer["ip"],
+        moniker=peer["moniker"],
+        api_base=best_url,
+        operator_address=best_proof.operator_address,
+    )
 
 
-def _cached_sites() -> List[NodeSite]:
-    global _sites_cache, _sites_cached_at, _sites_cache_ttl
+def _self_node() -> NetworkNode:
+    """This node's own entry, settled without a request.
+
+    Asking itself would be a loopback through the public URL served by the very
+    worker pool handling the page, so a burst of cold requests could starve the
+    workers of the capacity needed to answer their own probes.
+    """
+    from node import require_runtime
+
+    rt = require_runtime()
+    addresses = local_addresses()
+    return NetworkNode(
+        node_id=rt.node_id,
+        ip="",
+        moniker=addresses[0] if addresses else "",
+        api_base=addresses[0] if addresses else "",
+        operator_address=rt.validator_operator_address,
+        is_self=True,
+    )
+
+
+def _discover_network() -> List[NetworkNode]:
+    peers = [p for p in get_connected_peers() if p["ip"] or p["node_id"]]
+
+    nodes: List[NetworkNode] = [_self_node()]
+    if peers:
+        with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+            nodes.extend(pool.map(_resolve_peer, peers))
+
+    seen: set = set()
+    unique: List[NetworkNode] = []
+    for node in nodes:
+        key = node.node_id or node.ip
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(node)
+
+    unique.sort(key=lambda n: (not n.is_self, n.display_name))
+    logger().debug(
+        "fleet.network_discovered count=%d reachable=%d nodes=%s",
+        len(unique),
+        sum(1 for n in unique if n.reachable),
+        [(n.display_name, n.api_base, n.operator_address) for n in unique],
+    )
+    return unique
+
+
+def _cached_nodes() -> List[NetworkNode]:
+    global _nodes_cache, _nodes_cached_at, _nodes_cache_ttl
     now = time.monotonic()
-    with _sites_lock:
-        if _sites_cache and now - _sites_cached_at < _sites_cache_ttl:
-            return list(_sites_cache)
-    sites = _discover_active_sites()
-    with _sites_lock:
-        _sites_cache = sites
-        _sites_cached_at = now
-        _sites_cache_ttl = ACTIVE_SITES_TTL if all(s.verified for s in sites) else ACTIVE_SITES_FAILURE_TTL
-    return list(sites)
+    with _nodes_lock:
+        if _nodes_cache and now - _nodes_cached_at < _nodes_cache_ttl:
+            return list(_nodes_cache)
+    nodes = _discover_network()
+    with _nodes_lock:
+        _nodes_cache = nodes
+        _nodes_cached_at = now
+        _nodes_cache_ttl = ACTIVE_SITES_TTL if all(n.reachable for n in nodes) else ACTIVE_SITES_FAILURE_TTL
+    return list(nodes)
 
 
-def active_node_entries() -> List[NodeSite]:
-    """Every active node a visitor can open, with whether its address was proved."""
-    return _cached_sites()
+def active_node_entries() -> List[NetworkNode]:
+    """Every node on the network, reachable or not."""
+    return _cached_nodes()
 
 
 def active_node_sites() -> List[str]:
-    """Base URL of every active node, http included, for display."""
-    return [site.url for site in _cached_sites()]
+    """Base URL of every node that proved one, http included, for display."""
+    return [node.api_base for node in _cached_nodes() if node.reachable]
 
 
 def authenticated_node_sites() -> List[str]:
-    """The subset whose certificate proves the name, for forwarding a credential."""
-    return [site.url for site in _cached_sites() if site.authenticated]
+    """The subset a credential may be forwarded to: authenticated name, bonded stake.
+
+    Both halves are required and they come from different proofs. Without the
+    certificate the destination cannot be pinned to the name; without a bonded
+    operator, any node that peers with us could stand in line for the admin's
+    replayable proof simply by owning a domain.
+    """
+    bonded = {v["operator_address"] for v in get_active_validators() if v["operator_address"]}
+    return [
+        node.api_base
+        for node in _cached_nodes()
+        if node.authenticated and node.operator_address in bonded
+    ]

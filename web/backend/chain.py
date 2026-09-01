@@ -444,9 +444,10 @@ def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
                 raise RuntimeError("connected_peers entry invalid")
             ip = str(p.get("ip", "") or "").strip()
             moniker = str(p.get("moniker", "") or "").strip()
+            node_id = str(p.get("node_id", "") or "").strip().lower()
             if not ip and not moniker:
                 continue
-            peers.append({"ip": ip, "moniker": moniker})
+            peers.append({"ip": ip, "moniker": moniker, "node_id": node_id})
         return peers
 
 

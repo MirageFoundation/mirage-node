@@ -748,17 +748,28 @@ def creator_earnings():
                 (creator,),
             )
             rows = cur.fetchall() or []
+        creator_epoch_seconds = int(expect_params()["creator_epoch_seconds"])
         items = [
             {
                 "epoch_id": r[0],
                 "earned": str(r[1]),
                 "claimed": str(r[2]),
                 "claim_deadline_epoch": r[3],
+                "epoch_start_unix": int(r[0]) * creator_epoch_seconds,
+                "epoch_end_unix": (int(r[0]) + 1) * creator_epoch_seconds,
+                "claim_deadline_unix": int(r[3]) * creator_epoch_seconds,
                 "claimed_height": r[4],
             }
             for r in rows
         ]
-        return jsonify({"items": items, "next_cursor": None, "has_more": False})
+        return jsonify(
+            {
+                "items": items,
+                "creator_epoch_seconds": creator_epoch_seconds,
+                "next_cursor": None,
+                "has_more": False,
+            }
+        )
     except Exception as e:
         log_event(rid, "creator.earnings.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)

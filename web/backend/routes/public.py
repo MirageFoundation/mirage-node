@@ -4489,43 +4489,43 @@ def bootstrap():
 
 @public_bp.route("/api/get_peers")
 def get_peers():
-    """Every active node's site, for the Sites list on /network.
+    """Every node on the network, for /network and for the app's server switcher.
 
-    The active set from the chain, not this node's P2P connections. Both were
-    called "peers", but only one of them answers the question the page is
-    actually asking: a node you can open in a browser. A P2P connection may be a
-    validator with no web presence, and the same fleet member could appear twice
-    under two addresses, while a node that is genuinely part of the network but
-    not currently gossiping with this one never appeared at all.
+    Sourced from this node's own P2P connections, so a node is listed for being
+    connected rather than for having published anything. That is what makes an
+    operator who wrote a nickname instead of a URL visible: the previous source
+    was the on-chain moniker, so a validator naming anything else had no address
+    and disappeared from the page while signing every block.
 
-    Every reachable node, http included. Requiring https here conflated being
-    listed with being trusted to receive a credential: a node reached by IP can
-    hold no certificate, so it served plain http and was hidden, and this page
-    reported two servers while four were running. The stats fan-out still
-    forwards the admin proof only to destinations it can authenticate — see
-    `fleet.authenticated_node_sites`.
+    Every node appears, always, with `ip` and `moniker` exactly as observed.
+    `api_base` is the separate question of where an app may be *pointed*, and is
+    filled in only once that address has answered a signed challenge as the very
+    node ID we are peered with — see `node_identity` for why a relayed answer
+    cannot satisfy it. An entry with no `api_base` is listed and not offered as
+    a destination, which is the honest reading of an address nobody proved.
 
-    A node whose operator published no address at all is found from this node's
-    own P2P connections and listed once it proves itself, so choosing a nickname
-    no longer makes a running node invisible.
-
-    `verified` says the address answered a signed challenge as the validator it
-    is listed under. An unverified entry is a claim the chain carries but the
-    address has not backed, and the page says so rather than presenting the two
-    as equivalent.
+    `operator_address` is present when the same document also carried a valid
+    validator signature. It is display only here; the stats fan-out applies its
+    own bonded-stake check — see `fleet.authenticated_node_sites`.
     """
     try:
         return jsonify(
             {
                 "peers": [
                     {
-                        "ip": "",
-                        "moniker": site.url,
-                        "site": site.url,
-                        "operator_address": site.operator_address,
-                        "verified": site.verified,
+                        "ip": node.ip,
+                        "moniker": node.moniker,
+                        "node_id": node.node_id,
+                        "api_base": node.api_base,
+                        "operator_address": node.operator_address,
+                        "reachable": node.reachable,
+                        "is_self": node.is_self,
+                        # Kept so a cached frontend bundle from before this shape
+                        # still renders a name instead of an empty row.
+                        "site": node.api_base,
+                        "verified": node.reachable,
                     }
-                    for site in active_node_entries()
+                    for node in active_node_entries()
                 ]
             }
         )
@@ -4535,30 +4535,29 @@ def get_peers():
 
 @public_bp.route("/api/node_identity")
 def node_identity():
-    """Prove this node is the validator it claims, at the address the caller dialed.
+    """Prove which node is answering here, and which validator it runs.
 
-    Public and unauthenticated on purpose: it is how any node, or anyone at all,
-    checks that a site on /network belongs to the validator named beside it. The
-    response commits to a caller-chosen nonce and origin, so it is worthless
-    replayed at another address or at another time.
+    Public and unauthenticated on purpose: it is how anyone checks that an
+    address on /network is the node it is listed as, before an app is pointed at
+    it. The response commits to a caller-chosen nonce, so it is worthless
+    replayed later.
 
-    See `node_identity` for why signing a caller-supplied origin is safe: both
-    inputs are validated against narrow grammars first, and the framed payload
-    cannot be read as a transaction.
+    The nonce is the only thing a caller contributes, and it cannot name a
+    subject. Everything signed is this node's own — its chain, its node ID, its
+    validator, its addresses — so a response cannot be induced to vouch for
+    anywhere else, which is what makes forwarding one useless. See
+    `node_identity` for the full argument.
     """
     rid = next_request_id()
     try:
-        doc = build_local_identity(
-            request.args.get("origin", default="", type=str),
-            request.args.get("nonce", default="", type=str),
-        )
+        doc = build_local_identity(request.args.get("nonce", default="", type=str))
     except ValueError as e:
         log_event(rid, "node_identity.bad_challenge", error=str(e))
         return api_error_code("invalid_identity_challenge", 400)
     except Exception as e:
         log_event(rid, "node_identity.err", error=str(e))
         return safe_error(e)
-    log_event(rid, "node_identity.ok", origin=doc["origin"])
+    log_event(rid, "node_identity.ok", node_id=doc["node_id"], addresses=doc["addresses"])
     return jsonify(doc)
 
 

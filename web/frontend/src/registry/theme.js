@@ -86,12 +86,6 @@ export function normalizeThemeId(_id) {
     // to default so a leftover `onyx` / `bluemoon` / `oldreddit` value
     // cannot reach getThemeFamily and blow up first paint.
     return DEFAULT_THEME_ID;
-    const t = id.trim();
-    if (Object.prototype.hasOwnProperty.call(LEGACY_THEME_IDS, t)) {
-        return LEGACY_THEME_IDS[t];
-    }
-    if (THEMES[t]) return t;
-    return DEFAULT_THEME_ID;
 }
 
 /**

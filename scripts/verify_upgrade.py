@@ -167,6 +167,10 @@ def check_params() -> None:
         ok("max_curation_team_description_length=800")
     else:
         fail(f"max_curation_team_description_length={params.get('max_curation_team_description_length')!r}")
+    if str(params.get("creator_epoch_seconds")) == "86400":
+        ok("creator_epoch_seconds=86400")
+    else:
+        fail(f"creator_epoch_seconds={params.get('creator_epoch_seconds')!r}")
 
 
 def check_params_reach_backend() -> None:
@@ -190,7 +194,10 @@ def check_params_reach_backend() -> None:
     if str(stored.get("subscription_creator_bps")) != "5000":
         fail(f"indexed subscription_creator_bps={stored.get('subscription_creator_bps')!r}")
         return
-    ok("indexed chain_params carries v1.39.0 subscription params")
+    if str(stored.get("creator_epoch_seconds")) != "86400":
+        fail(f"indexed creator_epoch_seconds={stored.get('creator_epoch_seconds')!r}")
+        return
+    ok("indexed chain_params carries v1.39.0 subscription and creator epoch params")
 
 
 def check_gone_routes() -> None:

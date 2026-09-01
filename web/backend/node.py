@@ -56,6 +56,9 @@ class Runtime:
     validator_operator_address: str
     validator_consensus_address: str
     min_gas_price_umirage: float
+    node_id: str
+    node_privkey_bytes: bytes
+    node_pubkey_bytes: bytes
 
 
 _RUNTIME: Optional[Runtime] = None
@@ -350,6 +353,47 @@ def resolve_chain_id() -> str:
     return chain_id
 
 
+def resolve_node_identity() -> tuple:
+    """This node's CometBFT node ID and the p2p key it is derived from.
+
+    The node ID is `sha256(pubkey)[:20]` in hex, so possession of this key is
+    exactly what "being that node ID" means. Peers learn each other's node IDs
+    through the authenticated p2p handshake, which makes it the one identifier
+    about a peer this node did not have to take anyone's word for -- and so the
+    only useful thing for a remote address to prove it is.
+
+    Returns (node_id, private_seed_32, public_32).
+    """
+    import hashlib as _hl
+
+    cfg = get_config()
+    home = cfg.get_node_config()["home"]
+    path = os.path.join(home, "config", "node_key.json")
+    with open(path, "rb") as f:
+        data = json.load(f)
+
+    priv = (data or {}).get("priv_key") or {}
+    key_type = str(priv.get("type", "")).strip()
+    if key_type != "tendermint/PrivKeyEd25519":
+        raise RuntimeError(f"node_key.json must hold an ed25519 key, got {key_type!r}")
+    raw = base64.b64decode(str(priv.get("value", "")))
+    if len(raw) != 64:
+        raise RuntimeError(f"node_key.json private key must be 64 bytes, got {len(raw)}")
+
+    seed, pub = raw[:32], raw[32:]
+    from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
+
+    derived_pub = (
+        _ed.Ed25519PrivateKey.from_private_bytes(seed)
+        .public_key()
+        .public_bytes_raw()
+    )
+    if derived_pub != pub:
+        raise RuntimeError("node_key.json private/public halves disagree")
+
+    return _hl.sha256(pub).hexdigest()[:40], seed, pub
+
+
 def startup_grace_seconds() -> float:
     """How long chain-dependent startup work may wait for the node to serve queries.
 
@@ -448,6 +492,7 @@ def initialize_runtime() -> Runtime:
     validator_operator_address = _derive_valoper_from_account(validator_payer_addr)
     validator_consensus_address = _derive_valcons_from_pubkey(_get_node_consensus_pubkey_bytes())
     min_gas_price = _load_min_gas_price_umirage()
+    node_id, node_privkey_bytes, node_pubkey_bytes = resolve_node_identity()
 
     _RUNTIME = Runtime(
         rpc_url=rpc_url,
@@ -462,6 +507,9 @@ def initialize_runtime() -> Runtime:
         validator_operator_address=validator_operator_address,
         validator_consensus_address=validator_consensus_address,
         min_gas_price_umirage=min_gas_price,
+        node_id=node_id,
+        node_privkey_bytes=node_privkey_bytes,
+        node_pubkey_bytes=node_pubkey_bytes,
     )
     return _RUNTIME
 
@@ -486,6 +534,7 @@ __all__ = [
     "resolve_validator_payer_address",
     "resolve_validator_pubkey_bytes",
     "resolve_validator_privkey_bytes",
+    "resolve_node_identity",
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",

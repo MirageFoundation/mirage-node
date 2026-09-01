@@ -975,6 +975,18 @@ def test_indexer_hardening(backend: str):
             "indexer_hardening.creator_begin_block_events_included",
             f"merged={merged_events!r}",
         )
+    code, earnings = _get(
+        f"{backend}/api/creator/earnings",
+        {"creator": "mirage1creatorprojectionprobe"},
+    )
+    interval = earnings.get("creator_epoch_seconds") if isinstance(earnings, dict) else None
+    if code == 200 and isinstance(interval, int) and interval >= 300 and 86400 % interval == 0:
+        _pass("indexer_hardening.creator_earnings_exports_interval", interval=interval)
+    else:
+        _fail(
+            "indexer_hardening.creator_earnings_exports_interval",
+            f"status={code} response={earnings!r}",
+        )
 
     # ── A curator's empty tag is a decision; only `cleared` removes the row ──
     #

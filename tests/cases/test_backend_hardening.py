@@ -524,33 +524,42 @@ def test_backend_hardening(backend: str):
     )
 
     # ── H-2: the fan-out only ever addresses an authenticated active node ─
-    # The operator-configured roster this replaced could not answer "who is in
-    # the fleet" on a chain anyone can join, so membership is the bonded
-    # validator set again. The destination filter still has to hold, and it is
-    # now deliberately narrower than what /network lists: a moniker becomes a
-    # destination only as a named https host, so an http name or a bare IP is
-    # displayed but never handed the admin's proof. Asserting the fan-out is a
-    # strict subset is the point -- widening the page must not widen the
-    # credential. DNS is stubbed so the probe asserts policy, not the resolver.
+    # Membership on /network is now the P2P peer set, which is wider than the
+    # bonded validator set and always will be -- anyone may connect to us. The
+    # destination filter therefore has to hold on its own, and it is narrower
+    # than what the page lists in two independent ways: only a named https host
+    # can be authenticated by a certificate, and only a proved bonded operator
+    # has stake behind it. Here `b.example` is reachable over https and belongs
+    # to no validator, so it must be shown and never handed the admin's proof.
+    # Asserting the fan-out is a strict subset is the point -- widening the page
+    # must not widen the credential. DNS is stubbed so the probe asserts policy,
+    # not the resolver.
     _probe(
         "backend_hardening.fanout_targets_authenticated_active_nodes_only",
         "import socket, fleet, fleet_url\n"
+        "from node_identity import IdentityProof\n"
         "fleet_url.socket.getaddrinfo = lambda h, p, *a, **k: "
         "[(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, '', ('93.184.216.34', p))]\n"
-        "monikers = ['http://a.example', '93.184.216.34', 'not-a-host', '', 'a.example']\n"
-        "fleet.get_active_validators = lambda: "
-        "[{'moniker': m, 'operator_address': 'v'} for m in monikers]\n"
-        "fleet.get_connected_peers = lambda: []\n"
-        "fleet._local_operator = lambda: ''\n"
-        "fleet._probe = lambda url: None\n"
-        "fleet._sites_cache = []\n"
-        "fleet._sites_cached_at = 0.0\n"
-        "fleet._sites_cache_ttl = 0.0\n"
+        "peers = [('93.184.216.34', 'http://a.example', 'a' * 40),\n"
+        "         ('93.184.216.35', 'b.example', 'b' * 40),\n"
+        "         ('93.184.216.36', 'c.example', 'c' * 40),\n"
+        "         ('93.184.216.37', 'not-a-host', 'd' * 40)]\n"
+        "proved = {'http://a.example': IdentityProof('a' * 40, [], 'v'),\n"
+        "          'https://b.example': IdentityProof('b' * 40, [], 'stranger'),\n"
+        "          'https://c.example': IdentityProof('c' * 40, [], 'v')}\n"
+        "fleet.get_active_validators = lambda: [{'moniker': '', 'operator_address': 'v'}]\n"
+        "fleet.get_connected_peers = lambda: "
+        "[{'ip': i, 'moniker': m, 'node_id': n} for i, m, n in peers]\n"
+        "fleet._self_node = lambda: fleet.NetworkNode('0' * 40, '', '', '', '', True)\n"
+        "fleet._probe = lambda url, node_id: proved.get(url)\n"
+        "fleet._nodes_cache = []\n"
+        "fleet._nodes_cached_at = 0.0\n"
+        "fleet._nodes_cache_ttl = 0.0\n"
         "sites = fleet.active_node_sites()\n"
         "import stats\n"
         "targets = stats.fleet_fanout_targets()\n"
-        "shown = sites == ['http://a.example', 'https://93.184.216.34', 'https://a.example']\n"
-        "narrow = targets == ['https://a.example']\n"
+        "shown = sites == ['https://b.example', 'https://c.example', 'http://a.example']\n"
+        "narrow = targets == ['https://c.example']\n"
         "subset = set(targets) <= set(sites)\n"
         "print('OK' if shown and narrow and subset else ('BAD', sites, targets))\n",
     )

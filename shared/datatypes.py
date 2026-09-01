@@ -538,6 +538,7 @@ def _build_pool():
     add_f(msg4, "subscription_renewal_attempts_per_block", 75, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "subscriber_daily_relay_limit", 76, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_subscription_periods_per_purchase", 77, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "creator_epoch_seconds", 78, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # MsgUpdateParams (authority + Params + update_mask)
     #

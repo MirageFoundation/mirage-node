@@ -21,7 +21,12 @@ import {
     viewingTeamId,
     waitForOwnCurationTeam,
 } from '../../src/utils/curation.js';
-import { currentCreatorEpoch, normalizeClaimEpochs } from '../../src/logic/useCreatorEarnings.js';
+import {
+    currentCreatorEpoch,
+    isCreatorEarningClaimable,
+    normalizeClaimEpochs,
+} from '../../src/logic/useCreatorEarnings.js';
+import { formatCreatorRewardTime } from '../../src/themes/default/components/CreatorEarningsPanel.js';
 import Api from '../../src/utils/api.js';
 import {
     registerCommunityLeaveConfirmationHandler,
@@ -822,7 +827,7 @@ describe('v1.39 curation UI contracts', () => {
         const listeners = [];
         const addSpy = vi
             .spyOn(window, 'addEventListener')
-            .mockImplementation((type, handler) => {
+            .mockImplementation((type, _handler) => {
                 listeners.push(type);
                 return undefined;
             });
@@ -920,7 +925,26 @@ describe('creator reward claims', () => {
             .toThrow('at most 30');
     });
 
-    it('uses UTC day epochs for claim deadlines', () => {
-        expect(currentCreatorEpoch(Date.UTC(2026, 7, 27, 23, 59, 59))).toBe(20692);
+    it('uses the configured creator reward interval', () => {
+        const now = Date.UTC(2026, 7, 27, 23, 59, 59);
+        expect(currentCreatorEpoch(86400, now)).toBe(20692);
+        expect(currentCreatorEpoch(300, now)).toBe(5959583);
+    });
+
+    it('uses the API deadline timestamp for claimability', () => {
+        const item = {
+            earned: '100',
+            claimed: '0',
+            claimed_height: null,
+            claim_deadline_unix: 1800,
+        };
+        expect(isCreatorEarningClaimable(item, 1799999)).toBe(true);
+        expect(isCreatorEarningClaimable(item, 1800000)).toBe(false);
+    });
+
+    it('shows UTC time for sub-daily creator rewards', () => {
+        const unix = Date.UTC(2026, 7, 27, 12, 5, 0) / 1000;
+        expect(formatCreatorRewardTime(unix, 300)).toMatch(/12:05.*UTC/);
+        expect(formatCreatorRewardTime(unix, 86400)).not.toMatch(/12:05/);
     });
 });

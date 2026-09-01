@@ -1,5 +1,5 @@
 import styled from 'styled-components';
-import { currentCreatorEpoch, useCreatorEarnings } from '../../../logic/useCreatorEarnings';
+import { useCreatorEarnings } from '../../../logic/useCreatorEarnings';
 import Button from './Button';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -97,15 +97,23 @@ function formatMirage(umirage) {
     return `${whole}${fraction ? `.${fraction}` : ''} MIRAGE`;
 }
 
-function formatRewardDate(epoch) {
-    const day = Number(epoch);
-    if (!Number.isSafeInteger(day) || day <= 0) throw new Error(`Invalid reward day: ${epoch}`);
-    return new Intl.DateTimeFormat(undefined, {
+export function formatCreatorRewardTime(unixSeconds, epochSeconds) {
+    const timestamp = Number(unixSeconds);
+    const interval = Number(epochSeconds);
+    if (!Number.isSafeInteger(timestamp) || timestamp <= 0) throw new Error(`Invalid reward time: ${unixSeconds}`);
+    if (!Number.isSafeInteger(interval) || interval <= 0) throw new Error(`Invalid reward interval: ${epochSeconds}`);
+    const options = {
         month: 'short',
         day: 'numeric',
         year: 'numeric',
         timeZone: 'UTC',
-    }).format(new Date(day * 86400000));
+    };
+    if (interval < 86400) {
+        options.hour = 'numeric';
+        options.minute = '2-digit';
+        options.timeZoneName = 'short';
+    }
+    return new Intl.DateTimeFormat(undefined, options).format(new Date(timestamp * 1000));
 }
 
 export default function CreatorEarningsPanel({ creator, canClaim = false }) {
@@ -113,7 +121,7 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
     return <Panel>
         <Header>
             <Title>Creator earnings</Title>
-            <Subtitle>Daily MIRAGE rewards allocated to this creator. Each row shows the day earned and the claim deadline.</Subtitle>
+            <Subtitle>MIRAGE rewards allocated to this creator. Each row shows when they were earned and when they expire.</Subtitle>
         </Header>
         <List>
             {earnings.loading && <State>Loading earnings…</State>}
@@ -124,11 +132,11 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
                 const claimable = earnings.claimable.some((entry) => Number(entry.epoch_id) === Number(item.epoch_id));
                 const remaining = BigInt(item.earned) - BigInt(item.claimed);
                 const claimed = item.claimed_height != null || remaining <= 0n;
-                const expired = currentCreatorEpoch() >= Number(item.claim_deadline_epoch);
-                const deadline = formatRewardDate(item.claim_deadline_epoch);
+                const expired = Math.floor(Date.now() / 1000) >= Number(item.claim_deadline_unix);
+                const deadline = formatCreatorRewardTime(item.claim_deadline_unix, earnings.creatorEpochSeconds);
                 const status = claimed
                     ? (item.claimed_height == null ? 'Claimed' : `Claimed at height ${item.claimed_height}`)
-                    : expired ? `Expired ${deadline}` : `Claim before ${deadline} UTC`;
+                    : expired ? `Expired ${deadline}` : `Claim before ${deadline}`;
                 return <Row key={item.epoch_id} $canClaim={canClaim}>
                     {canClaim && <input
                         type="checkbox"
@@ -137,7 +145,7 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
                         onChange={() => earnings.toggleEpoch(item.epoch_id)}
                     />}
                     <Epoch>
-                        {formatRewardDate(item.epoch_id)}
+                        {formatCreatorRewardTime(item.epoch_start_unix, earnings.creatorEpochSeconds)}
                         <Meta>{status}</Meta>
                     </Epoch>
                     <Amount>{formatMirage(remaining)}</Amount>
@@ -151,7 +159,7 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
                 disabled={!earnings.selected.length || earnings.pending}
                 onClick={() => earnings.claim().catch(() => { })}
             >
-                {earnings.pendingStatus || `Claim ${earnings.selected.length || ''} epoch${earnings.selected.length === 1 ? '' : 's'}`}
+                {earnings.pendingStatus || `Claim ${earnings.selected.length || ''} reward${earnings.selected.length === 1 ? '' : 's'}`}
             </Button>
         </Actions>}
     </Panel>;
