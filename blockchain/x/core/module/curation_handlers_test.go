@@ -506,6 +506,22 @@ func TestCurationCannotBanCommunityCuratorsOrTheirPosts(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// A legacy post has no metadata to read, and nearly the whole history is
+	// legacy. The curator has to be able to ban it rather than be told the
+	// metadata is missing, which is a fact about the chain and not an answer.
+	legacyPost := genTxHash(32)
+	_, found, err := mk.GetPostMetadata(ctx, legacyPost)
+	require.NoError(t, err)
+	require.False(t, found, "the fixture post must have no metadata to be legacy")
+	legacyCtx := ctx.WithEventManager(sdk.NewEventManager())
+	_, err = am.SetCurationPostHidden(legacyCtx, &types.MsgSetCurationPostHidden{
+		EnvelopePubkey: f.curatorPub, Community: f.slug, TeamId: f.teamID, Target: legacyPost, Hidden: true,
+	})
+	require.NoError(t, err, "a legacy post must be bannable")
+	got, ok := eventAttr(t, legacyCtx, "curation_post_hidden", "hidden")
+	require.True(t, ok, "the legacy ban must emit curation_post_hidden")
+	require.Equal(t, "true", got)
+
 	// Existing bans must remain removable after this protection activates.
 	protectedPost := genTxHash(31)
 	require.NoError(t, mk.SetPostMetadata(ctx, protectedPost, &types.PostMetadata{

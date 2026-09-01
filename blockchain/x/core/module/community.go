@@ -414,18 +414,23 @@ func (am AppModule) SetCurationPostHidden(ctx context.Context, req *types.MsgSet
 		if err != nil {
 			return nil, err
 		}
-		if !found {
-			return nil, fmt.Errorf("post metadata not found")
-		}
-		if meta.GetCommunity() != slug {
-			return nil, fmt.Errorf("post does not belong to community")
-		}
-		protected, err := am.k.IsCommunityCurator(sdkCtx, meta.GetAuthor(), slug)
-		if err != nil {
-			return nil, err
-		}
-		if protected {
-			return nil, fmt.Errorf("cannot ban a curator's post in this community")
+		// Legacy posts carry no metadata, so the community and curator checks
+		// have nothing to read. Refusing the ban outright would leave a curator
+		// unable to moderate the entire pre-v1.39 history, which is nearly all
+		// of it. Delete already degrades this way for the same reason. The row
+		// is keyed by community, so one written for a post that lives elsewhere
+		// is never read back.
+		if found {
+			if meta.GetCommunity() != slug {
+				return nil, fmt.Errorf("post does not belong to community")
+			}
+			protected, err := am.k.IsCommunityCurator(sdkCtx, meta.GetAuthor(), slug)
+			if err != nil {
+				return nil, err
+			}
+			if protected {
+				return nil, fmt.Errorf("cannot ban a curator's post in this community")
+			}
 		}
 	}
 	if err := am.k.SetCurationActionHiddenPost(sdkCtx, slug, req.GetTeamId(), target, actor, req.GetHidden()); err != nil {

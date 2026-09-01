@@ -25,7 +25,6 @@ def resolve_visibility(
     viewer_blocks_author: bool,
     viewer_blocks_post: bool,
     viewer_blocks_community: bool,
-    viewer_follows_author: bool,
     stored_mode: int | None,
     stored_team_id: int | None,
     default_team_id: int | None,
@@ -50,7 +49,12 @@ def resolve_visibility(
 
     if team_hidden_post:
         return _result(False, True, "team_hidden_post", effective_mode, effective_team)
-    if team_hidden_author and not viewer_follows_author:
+    # Following the author does not survive the ban. A follow carve-out here kept
+    # the banned user visible to everyone who followed them — including the
+    # curator who issued the ban, since curators follow the people they curate —
+    # which makes the control useless to the person holding it. Raw is the
+    # deliberate escape hatch: a viewer who wants the ban ignored switches lens.
+    if team_hidden_author:
         return _result(False, True, "team_hidden_author", effective_mode, effective_team)
     if team_subscriber_only and not was_subscriber_at_creation:
         return _result(False, True, "subscriber_only", effective_mode, effective_team)
@@ -482,10 +486,6 @@ def filter_posts(
                 (
                     SELECT lock_windows FROM curation_locks
                     WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
-                ),
-                EXISTS(
-                    SELECT 1 FROM followed_users
-                    WHERE LOWER(owner)=%s AND LOWER(target)=%s
                 )
             """,
             (
@@ -503,8 +503,6 @@ def filter_posts(
                 community,
                 team_id,
                 meta["root_txhash"],
-                address,
-                meta["author"],
             ),
         )
         (
@@ -513,7 +511,6 @@ def filter_posts(
             subscriber_only,
             lock_sequence,
             lock_windows,
-            follows_author,
         ) = cur.fetchone()
         windows = _lock_windows(lock_sequence, lock_windows)
         visibility = resolve_visibility(
@@ -528,7 +525,6 @@ def filter_posts(
             viewer_blocks_author=False,
             viewer_blocks_post=False,
             viewer_blocks_community=False,
-            viewer_follows_author=bool(follows_author),
             stored_mode=resolved["effective_mode"],
             stored_team_id=team_id,
             default_team_id=team_id,
