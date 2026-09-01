@@ -209,7 +209,7 @@ export function useNetwork({
     // label that reads one way and navigates another is how a list of servers
     // becomes a phishing page.
     const provenBase = peer => {
-        const url = peer.api_base || peer.site;
+        const url = peer.api_base;
         if (url && (url.startsWith('http://') || url.startsWith('https://'))) return url;
         return '';
     };
@@ -234,7 +234,7 @@ export function useNetwork({
         if (!moniker || moniker === getDisplayName(peer)) return '';
         return moniker;
     };
-    const isReachable = peer => Boolean(peer.reachable ?? peer.verified);
+    const isReachable = peer => Boolean(peer.reachable);
     return {
         location,
         navigate,

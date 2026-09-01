@@ -901,7 +901,7 @@ export default function NetworkView({ state }) {
             <ListBody>
                 {peers.map((peer, idx) => {
                     const p = typeof peer === 'string' ? { ip: peer, moniker: null } : peer;
-                    if (!p.ip && !p.moniker && !p.api_base && !p.site) return null;
+                    if (!p.ip && !p.moniker && !p.api_base) return null;
                     const nickname = getNickname(p);
                     return (
                         <PeerRow key={`peer-${idx}`}>

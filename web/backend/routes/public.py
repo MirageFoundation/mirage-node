@@ -4520,10 +4520,6 @@ def get_peers():
                         "operator_address": node.operator_address,
                         "reachable": node.reachable,
                         "is_self": node.is_self,
-                        # Kept so a cached frontend bundle from before this shape
-                        # still renders a name instead of an empty row.
-                        "site": node.api_base,
-                        "verified": node.reachable,
                     }
                     for node in active_node_entries()
                 ]
