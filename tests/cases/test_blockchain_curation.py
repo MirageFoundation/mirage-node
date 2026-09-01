@@ -127,7 +127,6 @@ def test_curation_chain(backend: str) -> None:
         ("blank_name", "   ", ""),
         ("oversize_name", "n" * (max_name + 1), ""),
         ("invalid_name_characters", "Bad!", ""),
-        ("blank_description", "BlankDescription", "   "),
         ("oversize_description", "LongDescription", "x" * (max_desc + 1)),
     )
     for label, invalid_name, invalid_description in invalid_profiles:
@@ -156,6 +155,20 @@ def test_curation_chain(backend: str) -> None:
     )
     _check_deliver_accept("curation.exact_profile_limits_accepted", ccode, dcode, dlog)
 
+    # Surrounding whitespace is trimmed rather than rejected, and the trim runs
+    # before the length check, so padding a description already at the limit
+    # must still fit instead of tipping it over.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        sub,
+        _build_msg_create_curation_team,
+        "/mirage.core.v1.MsgCreateCurationTeam",
+        f"c{_rand_str(8)}",
+        "PaddedDescription",
+        f"  {'x' * max_desc}\n",
+    )
+    _check_deliver_accept("curation.padded_description_accepted", ccode, dcode, dlog)
+
     ccode, dcode, dlog = _submit_curation(
         backend,
         sub,
@@ -168,9 +181,21 @@ def test_curation_chain(backend: str) -> None:
     )
     _check_deliver_accept("curation.exact_update_limits_accepted", ccode, dcode, dlog)
 
+    # A whitespace-only description trims to empty, which is a legal description.
+    ccode, dcode, dlog = _submit_curation(
+        backend,
+        sub,
+        _build_msg_set_curation_team_profile,
+        "/mirage.core.v1.MsgSetCurationTeamProfile",
+        boundary_slug,
+        1,
+        exact_name,
+        "   ",
+    )
+    _check_deliver_accept("curation.blank_description_accepted", ccode, dcode, dlog)
+
     for label, invalid_name, invalid_description in (
         ("update_invalid_name", "Bad!", ""),
-        ("update_blank_description", exact_name, "   "),
         ("update_oversize_description", exact_name, "x" * (max_desc + 1)),
     ):
         ccode, dcode, dlog = _submit_curation(
