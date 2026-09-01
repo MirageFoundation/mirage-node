@@ -1273,6 +1273,9 @@ var paramFieldSetters = map[string]func(dst *types.Params, src types.Params){
 	"max_subscription_periods_per_purchase": func(d *types.Params, s types.Params) {
 		d.MaxSubscriptionPeriodsPerPurchase = s.MaxSubscriptionPeriodsPerPurchase
 	},
+	"creator_epoch_seconds": func(d *types.Params, s types.Params) {
+		d.CreatorEpochSeconds = s.CreatorEpochSeconds
+	},
 	"tiers": func(d *types.Params, s types.Params) {
 		d.Tiers = s.Tiers
 		if len(d.Tiers) > 1 && d.Tiers[1] != nil {

@@ -39,9 +39,9 @@ const (
 	// MaxMintInterval is roughly one year at the documented 3s block time.
 	MaxMintInterval = 10_512_000
 	// MaxSubscriptionPeriodMinutes is one year.
-	MaxSubscriptionPeriodMinutes = 525_600
-	SecondsPerUTCDay             = 86_400
-	MinCreatorEpochSeconds       = 300
+	MaxSubscriptionPeriodMinutes     = 525_600
+	SecondsPerUTCDay                 = 86_400
+	MinCreatorEpochSeconds           = 300
 	MaxCreatorEpochBucketsPerTranche = 1_024
 	// MaxEnvelopeAgeSeconds is one day.
 	MaxEnvelopeAgeSeconds = 86_400
