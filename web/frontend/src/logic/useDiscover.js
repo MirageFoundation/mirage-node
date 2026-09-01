@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Storage from "../utils/Storage";
 import Api from "../utils/api";
-import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateCommunitiesCache } from "../utils/Subscriptions";
 import { usePendingFollows } from "./useFollowState.js";
 import { useLocation } from "react-router-dom";
 import { requireAccount } from "../utils/openBrowsing";
@@ -23,7 +23,7 @@ function mapCommunity(item) {
         throw new Error('Curated community is missing its default team');
     }
     return {
-        topic: item.community,
+        community: item.community,
         curated: item.curated,
         live_team_count: item.live_team_count,
         post_count: item.post_count,
@@ -35,7 +35,7 @@ function sortByPostCount(list) {
     return [...list].sort((a, b) => {
         const diff = b.post_count - a.post_count;
         if (diff !== 0) return diff;
-        return String(a.topic).localeCompare(String(b.topic));
+        return String(a.community).localeCompare(String(b.community));
     });
 }
 export const tagColors = {
@@ -74,16 +74,16 @@ export function useDiscover({
     state
 }) {
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
-    const [topics, setTopics] = useState([]);
-    const [filteredTopics, setFilteredTopics] = useState([]);
-    const [smallTopicsCount, setSmallTopicsCount] = useState(0);
+    const [communities, setCommunities] = useState([]);
+    const [filteredCommunities, setFilteredCommunities] = useState([]);
+    const [smallCommunitiesCount, setSmallCommunitiesCount] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
-    const [hoverTopic, setHoverTopic] = useState(null);
+    const [hoverCommunity, setHoverCommunity] = useState(null);
     const {
         isCommunityPending,
         formatCommunityStatus
@@ -105,19 +105,19 @@ export function useDiscover({
         }).then(data => {
             if (!alive || !mountedRef.current) return;
             if (data && Array.isArray(data.items)) {
-                const topicsList = sortByPostCount(data.items.map(mapCommunity));
-                setTopics(topicsList);
-                setFilteredTopics(topicsList);
-                setSmallTopicsCount(0);
+                const communitiesList = sortByPostCount(data.items.map(mapCommunity));
+                setCommunities(communitiesList);
+                setFilteredCommunities(communitiesList);
+                setSmallCommunitiesCount(0);
                 console.debug('[DiscoverView] loaded communities', {
-                    count: topicsList.length,
-                    first: topicsList[0]?.topic,
-                    firstPosts: topicsList[0]?.post_count,
+                    count: communitiesList.length,
+                    first: communitiesList[0]?.community,
+                    firstPosts: communitiesList[0]?.post_count,
                 });
             } else {
-                setTopics([]);
-                setFilteredTopics([]);
-                setSmallTopicsCount(0);
+                setCommunities([]);
+                setFilteredCommunities([]);
+                setSmallCommunitiesCount(0);
             }
             setLoading(false);
         }).catch(error => {
@@ -131,24 +131,24 @@ export function useDiscover({
         };
     }, [viewerAddress]);
 
-    // Filter local topics and search API for more results
+    // Filter local communities and search API for more results
     useEffect(() => {
         const term = stripCommunityPrefix(searchTerm).toLowerCase();
         if (!term) {
-            setFilteredTopics(topics);
+            setFilteredCommunities(communities);
             setSearchResults([]);
             setIsSearching(false);
             return;
         }
 
-        // Filter local topics immediately
-        const filtered = topics.filter(t => {
-            const topicName = String(t.topic || '').toLowerCase();
-            return topicName.includes(term);
+        // Filter local communities immediately
+        const filtered = communities.filter(t => {
+            const communityName = String(t.community || '').toLowerCase();
+            return communityName.includes(term);
         });
-        setFilteredTopics(filtered);
+        setFilteredCommunities(filtered);
 
-        // Also search API for topics with < 10 posts (debounced)
+        // Also search API for communities with < 10 posts (debounced)
         if (term.length < 2) {
             setSearchResults([]);
             setIsSearching(false);
@@ -167,13 +167,13 @@ export function useDiscover({
                 });
                 if (searchRequestId.current !== requestId || !mountedRef.current) return;
                 const results = Array.isArray(data?.items) ? data.items : [];
-                const existingLower = new Set(topics.map(t => t.topic.toLowerCase()));
-                const newTopics = sortByPostCount(
+                const existingLower = new Set(communities.map(t => t.community.toLowerCase()));
+                const newCommunities = sortByPostCount(
                     results
                         .filter(t => t && t.community && !existingLower.has(String(t.community).toLowerCase()))
                         .map(mapCommunity)
                 );
-                setSearchResults(newTopics);
+                setSearchResults(newCommunities);
             } catch (_) {
                 if (searchRequestId.current === requestId) setSearchResults([]);
             } finally {
@@ -184,7 +184,7 @@ export function useDiscover({
             searchRequestId.current += 1;
             clearTimeout(handle);
         };
-    }, [searchTerm, topics]);
+    }, [searchTerm, communities]);
     useEffect(() => {
         let cancelled = false;
         const loadJoinedCommunities = async () => {
@@ -201,17 +201,17 @@ export function useDiscover({
             cancelled = true;
         };
     }, [viewerAddress]);
-    const isJoinedCommunity = useCallback(topic => {
-        return joinedCommunitiesSet.has(String(topic || '').toLowerCase());
+    const isJoinedCommunity = useCallback(community => {
+        return joinedCommunitiesSet.has(String(community || '').toLowerCase());
     }, [joinedCommunitiesSet]);
-    const handleSubscribeToggle = useCallback(async topic => {
-        const t = String(topic || '').toLowerCase();
+    const handleSubscribeToggle = useCallback(async community => {
+        const t = String(community || '').toLowerCase();
         if (!t || isCommunityPending(t)) return;
         if (!requireAccount('join a community')) return;
-        const wasSubscribed = isJoinedCommunity(topic);
+        const wasSubscribed = isJoinedCommunity(community);
         try {
             if (wasSubscribed) {
-                await leaveCommunity(viewerAddress, topic);
+                await leaveCommunity(viewerAddress, community);
                 if (mountedRef.current) {
                     setJoinedCommunitiesSet(prev => {
                         const next = new Set(prev);
@@ -220,26 +220,26 @@ export function useDiscover({
                     });
                 }
             } else {
-                await joinCommunity(viewerAddress, topic);
+                await joinCommunity(viewerAddress, community);
                 if (mountedRef.current) {
                     setJoinedCommunitiesSet(prev => new Set([...prev, t]));
                 }
             }
-            invalidateTopicsCache();
+            invalidateCommunitiesCache();
         } catch (_) { }
     }, [viewerAddress, isCommunityPending, isJoinedCommunity]);
     const location = useLocation();
     return {
-        filteredTopics,
-        smallTopicsCount,
+        filteredCommunities,
+        smallCommunitiesCount,
         searchTerm,
         setSearchTerm,
         searchResults,
         isSearching,
         loading,
         error,
-        hoverTopic,
-        setHoverTopic,
+        hoverCommunity,
+        setHoverCommunity,
         isCommunityPending,
         formatCommunityStatus,
         isJoinedCommunity,

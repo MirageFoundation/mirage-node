@@ -200,7 +200,11 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	if err := k.SetCreatorActivationSurplus(ctx, surplus); err != nil {
 		return err
 	}
-	if err := k.SetCreatorClock(ctx, types.UTCEpoch(ctx.BlockTime().Unix())); err != nil {
+	creatorEpoch, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	if err != nil {
+		return err
+	}
+	if err := k.SetCreatorClock(ctx, creatorEpoch); err != nil {
 		return err
 	}
 	if err := k.storeSet(ctx, []byte(types.UpgradeV139CompleteKey), []byte{1}); err != nil {
@@ -536,7 +540,10 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 }
 
 func (k Keeper) advanceCreatorClock(ctx sdk.Context, params types.Params) error {
-	epoch := types.UTCEpoch(ctx.BlockTime().Unix())
+	epoch, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	if err != nil {
+		return err
+	}
 	cur, err := k.GetCreatorClock(ctx)
 	if err != nil {
 		return err

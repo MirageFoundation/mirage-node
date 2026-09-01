@@ -14,8 +14,8 @@ Plan 06 is too broad to ship in one PR. This folder splits it into focused one-P
 | 2 | Component restyle pass | Button, Toast, Tooltip, UnlockPrompt (globals only) | ✅ Done | [`02-component-restyle.md`](./02-component-restyle.md) |
 | 3 | Social routes | Follows, Blocks, Reports (list-row pattern) | ✅ Done | [`03-social-routes.md`](./03-social-routes.md) |
 | 4 | Network + Stats | Node info + chart containers (info-panel pattern) | ✅ Done | [`04-network-stats.md`](./04-network-stats.md) |
-| 5 | Subscription + Referrals | Plan/tier summary + invite share block | ✅ Done | [`05-subscription-referrals.md`](./05-subscription-referrals.md) |
-| 7 | Agents + Discover + NotFound | List + empty-state styling | ✅ Done | [`07-agents-discover-notfound.md`](./07-agents-discover-notfound.md) |
+| 5 | Subscription | Plan/tier summary | ✅ Done | [`05-subscription-referrals.md`](./05-subscription-referrals.md) (referrals section trimmed in v1.39.0) |
+| 7 | Discover + NotFound | List + empty-state styling | ✅ Done | [`07-agents-discover-notfound.md`](./07-agents-discover-notfound.md) (agents section trimmed in v1.39.0) |
 | 8 | MobileBottomNav | Full restyle (deferred from Plan 02) | ✅ Done | [`08-mobile-bottom-nav.md`](./08-mobile-bottom-nav.md) |
 | 9 | Polish + QA | Spacing / typography / state / responsive / a11y + QA + optional default-theme switch | ✅ Done | [`09-polish-and-qa.md`](./09-polish-and-qa.md) |
 | 10 | Loading states + skeletons | Tokenized `Skeleton` primitive + per-route skeleton loaders; remove `Loading…` strings | ✅ Done | [`10-loading-states-skeletons.md`](./10-loading-states-skeletons.md) |

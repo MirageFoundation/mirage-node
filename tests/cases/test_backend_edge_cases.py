@@ -14,37 +14,92 @@ from typing import Optional, Tuple
 import requests
 
 from tests.common import (
-    _pass, _fail, _skip, _debug, _get, _post, _b64, _rand_str, _now_ms,
-    _fresh_nonce, _lb_bytes,
-    WALLETS, FAUCET_AMOUNTS, INDEX_TIMEOUT_SEC,
-    _COLOR_GREEN, _COLOR_RED, _COLOR_YELLOW, _COLOR_RESET, _COLOR_BOLD,
-    _fetch_params, _do_subscribe, _docker_exec, _run_miraged, _miraged_cmd,
-    _keyring_backend, _INSIDE_CONTAINER, _check_local_docker,
+    _pass,
+    _fail,
+    _skip,
+    _debug,
+    _get,
+    _post,
+    _b64,
+    _rand_str,
+    _now_ms,
+    _fresh_nonce,
+    _lb_bytes,
+    WALLETS,
+    FAUCET_AMOUNTS,
+    INDEX_TIMEOUT_SEC,
+    _COLOR_GREEN,
+    _COLOR_RED,
+    _COLOR_YELLOW,
+    _COLOR_RESET,
+    _COLOR_BOLD,
+    _fetch_params,
+    _do_subscribe,
+    _docker_exec,
+    _run_miraged,
+    _miraged_cmd,
+    _keyring_backend,
+    _INSIDE_CONTAINER,
+    _check_local_docker,
     DEFAULT_BACKEND,
-    get_status, get_user_status, get_username_from_address, get_address_from_username,
-    sign_canonical, compute_pow, check_pow_target, _difficulty_factor, _BASE_DIFFICULTY_FACTOR,
-    _canon_base_subscribe_raw, _canon_base_send_tokens_raw, _canon_base_award_raw,
-    _canon_base_post_raw, _canon_base_vote_raw, _canon_base_edit_raw,
-    _canon_base_set_username_raw, _canon_base_set_biography_raw,
-    _canon_base_annotate_raw, _canon_base_report_raw,
+    get_status,
+    get_user_status,
+    get_username_from_address,
+    get_address_from_username,
+    sign_canonical,
+    compute_pow,
+    check_pow_target,
+    _difficulty_factor,
+    _BASE_DIFFICULTY_FACTOR,
+    _canon_base_subscribe_raw,
+    _canon_base_send_tokens_raw,
+    _canon_base_award_raw,
+    _canon_base_post_raw,
+    _canon_base_vote_raw,
+    _canon_base_edit_raw,
+    _canon_base_set_username_raw,
+    _canon_base_set_biography_raw,
+    _canon_base_report_raw,
     canon_signed_with_pow,
-    _generate_wallet, _faucet, _resolve_validator_key_addr,
-    _get_spendable_balance, _required_sub1_spend_budget_umirage,
+    _generate_wallet,
+    _faucet,
+    _resolve_validator_key_addr,
+    _get_spendable_balance,
+    _required_sub1_spend_budget_umirage,
 )
 from tests.backend_helpers import (
-    _do_post, _do_post_with_nonce, _do_post_with_media,
-    _do_vote, _do_vote_with_nonce,
-    _do_edit, _do_annotate, _do_delete, _do_delete_user,
-    _do_follow_user, _do_follow_topic, _do_block, _do_block_topic,
-    _do_set_username_raw, _do_set_biography, _do_report,
+    _do_post,
+    _do_post_with_nonce,
+    _do_post_with_media,
+    _do_vote,
+    _do_vote_with_nonce,
+    _do_edit,
+    _do_delete,
+    _do_delete_user,
+    _do_follow_user,
+    _do_follow_topic,
+    _do_block,
+    _do_block_topic,
+    _do_set_username_raw,
+    _do_set_biography,
+    _do_report,
     _do_set_auto_renewal,
-    _do_send_tokens, _do_award,
-    _wait_indexed, _wait_username, _wait_list_count,
-    _wait_tx_status, _wait_tx_status_failure, _wait_tx_deliver,
-    _wait_followed_user, _wait_followed_topic,
-    _wait_blocked_user, _wait_blocked_topic, _wait_blocked_topic_state,
+    _do_send_tokens,
+    _do_award,
+    _wait_indexed,
+    _wait_username,
+    _wait_list_count,
+    _wait_tx_status,
+    _wait_tx_status_failure,
+    _wait_tx_deliver,
+    _wait_followed_user,
+    _wait_followed_community,
+    _wait_blocked_user,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
-    _rpc_latest_height, _wait_next_block,
+    _rpc_latest_height,
+    _wait_next_block,
 )
 
 
@@ -85,14 +140,14 @@ def test_edge_cases(backend: str):
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
 
-    def _try_post(topic, title, content, tag="", target="") -> Tuple[int, dict]:
+    def _try_post(community, title, content, tag="", target="") -> Tuple[int, dict]:
         # Reject-path posts go through the subscriber relay so we don't
         # spend ~1s of PoW on payloads the backend drops before CheckTx.
         ts = _now_ms()
         nonce = _fresh_nonce()
         lb_sub, *_ = _fetch_params(backend, sub_addr)
         base = _canon_base_post_raw(
-            sub_pub, _lb_bytes(lb_sub), 0, ts, target, topic, title, content, tag, 0, None, nonce
+            sub_pub, _lb_bytes(lb_sub), 0, ts, target, community, title, content, tag, 0, None, nonce
         )
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(sub, signed)
@@ -104,7 +159,7 @@ def test_edge_cases(backend: str):
             "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "target": target,
-            "topic": topic,
+            "community": community,
             "title": title,
             "content": content,
             "tag": tag,
@@ -149,22 +204,22 @@ def test_edge_cases(backend: str):
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
-    # 9.4 Invalid topic format rejected
-    code, resp = _try_post("INVALID TOPIC!!!", "Title", "body")
+    # 9.4 Invalid community format rejected
+    code, resp = _try_post("INVALID COMMUNITY!!!", "Title", "body")
     _expect_reject_or_submit(
-        "edge.invalid_topic_rejected",
-        "edge.invalid_topic submitted (chain may reject)",
+        "edge.invalid_community_rejected",
+        "edge.invalid_community submitted (chain may reject)",
         code,
         resp,
     )
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
-    # 9.5 Missing topic for root post rejected
+    # 9.5 Missing community for root post rejected
     code, resp = _try_post("", "Title", "body")
     _expect_reject_or_submit(
-        "edge.missing_topic_rejected",
-        "edge.missing_topic submitted (chain may reject)",
+        "edge.missing_community_rejected",
+        "edge.missing_community submitted (chain may reject)",
         code,
         resp,
     )
@@ -187,7 +242,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_old),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "Old ts",
         "content": "body",
         "protocol_version": 1,
@@ -220,7 +275,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_fut),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "future ts",
         "content": "body",
         "protocol_version": 1,
@@ -264,7 +319,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "bad pk",
         "content": "body",
         "protocol_version": 1,
@@ -294,7 +349,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_mis),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "mismatch",
         "content": "body",
         "protocol_version": 1,
@@ -323,7 +378,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_stale),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "stale lb",
         "content": "body",
         "protocol_version": 1,
@@ -350,7 +405,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_legacy),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "legacy no nonce",
         "content": "body",
         "protocol_version": 1,
@@ -373,7 +428,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_z),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "zero nonce",
         "content": "body",
         "protocol_version": 1,
@@ -406,7 +461,7 @@ def test_edge_cases(backend: str):
             "pow_difficulty": diff,
             "pow": 0,
             "target": "",
-            "topic": "test",
+            "community": "test",
             "title": "bad nonce",
             "content": "body",
             "protocol_version": 1,
@@ -437,7 +492,7 @@ def test_edge_cases(backend: str):
             "pow_difficulty": diff,
             "pow": 0,
             "target": "",
-            "topic": "test",
+            "community": "test",
             "title": "coercible nonce",
             "content": "body",
             "protocol_version": 1,
@@ -470,7 +525,7 @@ def test_edge_cases(backend: str):
         "pow_difficulty": diff,
         "pow": int(proof_new),
         "target": "",
-        "topic": "test",
+        "community": "test",
         "title": "nonce present",
         "content": "body",
         "protocol_version": 1,
@@ -498,7 +553,7 @@ def test_edge_cases(backend: str):
             "pow_difficulty": diff,
             "pow": 0,
             "target": "",
-            "topic": "test",
+            "community": "test",
             "title": "field test",
             "content": "body",
             "protocol_version": 1,
@@ -613,19 +668,19 @@ def test_edge_cases(backend: str):
         code_pw, resp_pw = _post(f"{backend}/api/core/post", p)
         _expect_reject_4xx(test_name, code_pw, resp_pw)
 
-    # --- 9.20g: topic ---
-    topic_cases_reject = [
-        ("too_short", "ab", "edge.topic_too_short_rejected"),
-        ("too_long", "a" * 60, "edge.topic_too_long_rejected"),
-        ("uppercase", "INVALID", "edge.topic_uppercase_rejected"),
-        ("spaces", "has spaces", "edge.topic_spaces_rejected"),
-        ("special", "top!@#$", "edge.topic_special_rejected"),
-        ("unicode", "\u00e9\u00e8\u00ea", "edge.topic_unicode_rejected"),
-        ("null", None, "edge.topic_null_rejected"),
+    # --- 9.20g: community ---
+    community_cases_reject = [
+        ("too_short", "ab", "edge.community_too_short_rejected"),
+        ("too_long", "a" * 60, "edge.community_too_long_rejected"),
+        ("uppercase", "INVALID", "edge.community_uppercase_rejected"),
+        ("spaces", "has spaces", "edge.community_spaces_rejected"),
+        ("special", "top!@#$", "edge.community_special_rejected"),
+        ("unicode", "\u00e9\u00e8\u00ea", "edge.community_unicode_rejected"),
+        ("null", None, "edge.community_null_rejected"),
     ]
-    for label, bad_val, test_name in topic_cases_reject:
+    for label, bad_val, test_name in community_cases_reject:
         p = _make_valid_payload()
-        p["topic"] = bad_val
+        p["community"] = bad_val
         code_tp, resp_tp = _post(f"{backend}/api/core/post", p)
         _expect_reject_4xx(test_name, code_tp, resp_tp)
 
@@ -775,8 +830,8 @@ def test_edge_cases(backend: str):
     for tag in valid_tags:
         label = tag if tag else "empty"
         try:
-            topic = f"vtag{_rand_str(4)}"
-            txh = _do_post(backend, sub, topic, "Valid tag", "body", tag=tag, skip_pow=True)
+            community = f"vtag{_rand_str(4)}"
+            txh = _do_post(backend, sub, community, "Valid tag", "body", tag=tag, skip_pow=True)
             if txh:
                 _pass(f"edge.valid_tag_{label}_accepted")
             else:
@@ -784,11 +839,11 @@ def test_edge_cases(backend: str):
         except Exception as e:
             _fail(f"edge.valid_tag_{label}_accepted", str(e))
 
-    # 9.18 Duplicate post (same topic+title in quick succession)
+    # 9.18 Duplicate post (same community+title in quick succession)
     try:
-        dup_topic = f"dup{_rand_str(4)}"
-        txh1 = _do_post(backend, sub, dup_topic, "Dup title", "body 1", skip_pow=True)
-        txh2 = _do_post(backend, sub, dup_topic, "Dup title", "body 2", skip_pow=True)
+        dup_community = f"dup{_rand_str(4)}"
+        txh1 = _do_post(backend, sub, dup_community, "Dup title", "body 1", skip_pow=True)
+        txh2 = _do_post(backend, sub, dup_community, "Dup title", "body 2", skip_pow=True)
         if txh1 and txh2:
             _pass("edge.duplicate_post_both_accepted")
         elif txh1:
@@ -805,26 +860,29 @@ def test_edge_cases(backend: str):
 
     malicious_cases = [
         # NUL byte (\x00)
-        ("nul_in_content", {"topic": f"nul{_rand_str(4)}", "title": "Normal", "content": "has\x00nul"}),
-        ("nul_in_title", {"topic": f"nul{_rand_str(4)}", "title": "Nul\x00Title", "content": "body"}),
-        ("nul_in_topic", {"topic": f"nul\x00tp", "title": "Title", "content": "body"}),
-        ("only_nul_content", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "\x00\x00\x00"}),
-        ("nul_in_tag", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "body", "tag": "gore\x00"}),
-        ("embedded_nul", {"topic": f"nul{_rand_str(4)}", "title": "Normal Title", "content": "Looks normal\x00hidden"}),
+        ("nul_in_content", {"community": f"nul{_rand_str(4)}", "title": "Normal", "content": "has\x00nul"}),
+        ("nul_in_title", {"community": f"nul{_rand_str(4)}", "title": "Nul\x00Title", "content": "body"}),
+        ("nul_in_community", {"community": f"nul\x00tp", "title": "Title", "content": "body"}),
+        ("only_nul_content", {"community": f"nul{_rand_str(4)}", "title": "Title", "content": "\x00\x00\x00"}),
+        ("nul_in_tag", {"community": f"nul{_rand_str(4)}", "title": "Title", "content": "body", "tag": "gore\x00"}),
+        (
+            "embedded_nul",
+            {"community": f"nul{_rand_str(4)}", "title": "Normal Title", "content": "Looks normal\x00hidden"},
+        ),
         # Other C0 control characters
-        ("ctrl_bel", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x07 bell"}),
-        ("ctrl_backspace", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x08 bs"}),
-        ("ctrl_escape", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x1b escape"}),
-        ("ctrl_vtab", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0b vtab"}),
-        ("ctrl_formfeed", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0c ff"}),
+        ("ctrl_bel", {"community": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x07 bell"}),
+        ("ctrl_backspace", {"community": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x08 bs"}),
+        ("ctrl_escape", {"community": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x1b escape"}),
+        ("ctrl_vtab", {"community": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0b vtab"}),
+        ("ctrl_formfeed", {"community": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0c ff"}),
         # DEL character
-        ("del_in_content", {"topic": f"del{_rand_str(4)}", "title": "Title", "content": "has \x7f del"}),
-        ("del_in_title", {"topic": f"del{_rand_str(4)}", "title": "Del\x7fTitle", "content": "body"}),
+        ("del_in_content", {"community": f"del{_rand_str(4)}", "title": "Title", "content": "has \x7f del"}),
+        ("del_in_title", {"community": f"del{_rand_str(4)}", "title": "Del\x7fTitle", "content": "body"}),
     ]
     for label, fields in malicious_cases:
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
         code, resp = _try_post(
-            fields.get("topic", ""),
+            fields.get("community", ""),
             fields.get("title", ""),
             fields.get("content", ""),
             tag=fields.get("tag", ""),
@@ -841,9 +899,9 @@ def test_edge_cases(backend: str):
         lb_sub, *_ = _fetch_params(backend, sub_addr)
         ts = _now_ms()
         nonce = _fresh_nonce()
-        topic = f"med{_rand_str(4)}"
+        community = f"med{_rand_str(4)}"
         base = _canon_base_post_raw(
-            sub_pub, _lb_bytes(lb_sub), 0, ts, "", topic, "Title", "body", "", 0, bad_media, nonce
+            sub_pub, _lb_bytes(lb_sub), 0, ts, "", community, "Title", "body", "", 0, bad_media, nonce
         )
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(sub, signed)
@@ -855,7 +913,7 @@ def test_edge_cases(backend: str):
             "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "target": "",
-            "topic": topic,
+            "community": community,
             "title": "Title",
             "content": "body",
             "media": bad_media,
@@ -882,21 +940,22 @@ def test_edge_cases(backend: str):
             _debug(f"edge.unicode_{label}_accepted failed code={code} resp={resp}")
             _fail(f"edge.unicode_{label}_accepted", f"code={code}")
 
-    # ── Unicode topics should be rejected ─────────────────────────
-    bad_unicode_topics = [
+    # ── Unicode communities should be rejected ─────────────────────────
+    bad_unicode_communities = [
         ("accented", "tést"),
         ("cyrillic", "тема"),
         ("zero_width", "te\u200bst"),
     ]
-    for label, topic in bad_unicode_topics:
+    for label, community in bad_unicode_communities:
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-        code, resp = _try_post(topic, "Title", "body")
-        _expect_reject_4xx(f"edge.unicode_topic_{label}_rejected", code, resp)
+        code, resp = _try_post(community, "Title", "body")
+        _expect_reject_4xx(f"edge.unicode_community_{label}_rejected", code, resp)
 
 
 # =========================================================================
 # Category 10: Security & Attack Vectors
 # =========================================================================
+
 
 def test_frontend_bypass(backend: str):
     """Test all cases where frontend-only validation could be bypassed."""
@@ -937,8 +996,8 @@ def test_frontend_bypass(backend: str):
         except Exception as e:
             _pass(f"bypass.username_{label} handled")
 
-    # ─── Topic bypass ────────────────────────────────────────────────
-    bypass_topics = [
+    # ─── Community bypass ────────────────────────────────────────────────
+    bypass_communities = [
         ("UPPERCASE", "uppercase"),
         ("with spaces", "spaces"),
         ("special!@#", "special_chars"),
@@ -946,15 +1005,15 @@ def test_frontend_bypass(backend: str):
         ("a", "min_boundary"),
         ("a" * 200, "over_max"),
     ]
-    for topic, label in bypass_topics:
+    for community, label in bypass_communities:
         try:
-            txh = _do_post(backend, sub1, topic, f"Bypass {label}", "body", skip_pow=True)
+            txh = _do_post(backend, sub1, community, f"Bypass {label}", "body", skip_pow=True)
             if not txh:
-                _pass(f"bypass.topic_{label}_rejected")
+                _pass(f"bypass.community_{label}_rejected")
             else:
-                _pass(f"bypass.topic_{label} submitted (chain may reject)")
+                _pass(f"bypass.community_{label} submitted (chain may reject)")
         except Exception as e:
-            _pass(f"bypass.topic_{label} handled")
+            _pass(f"bypass.community_{label} handled")
 
     # ─── Tag bypass ──────────────────────────────────────────────────
     bypass_tags = [
@@ -973,8 +1032,10 @@ def test_frontend_bypass(backend: str):
             pub = sub1.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
-            topic = f"tag{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
+            community = f"tag{_rand_str(4)}"
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), 0, ts, "", community, "Tag test", "body", tag, 0, None, nonce
+            )
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub1, signed)
             payload = {
@@ -985,7 +1046,7 @@ def test_frontend_bypass(backend: str):
                 "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "target": "",
-                "topic": topic,
+                "community": community,
                 "title": "Tag test",
                 "content": "body",
                 "tag": tag,
@@ -1102,25 +1163,27 @@ def test_frontend_bypass(backend: str):
 
     # ─── Comment bypass ──────────────────────────────────────────────
     if vote_target:
-        # Comment with topic set (should be empty for comments)
+        # Comment with community set (should be empty for comments)
         try:
-            txh = _do_post(backend, sub1, "shouldbeempty", "", "Comment with topic", target=vote_target, skip_pow=True)
+            txh = _do_post(
+                backend, sub1, "shouldbeempty", "", "Comment with community", target=vote_target, skip_pow=True
+            )
             if not txh:
-                _pass("bypass.comment_with_topic_rejected")
+                _pass("bypass.comment_with_community_rejected")
             else:
-                _pass("bypass.comment_with_topic submitted (chain may reject)")
+                _pass("bypass.comment_with_community submitted (chain may reject)")
         except Exception as e:
-            _pass("bypass.comment_with_topic handled")
+            _pass("bypass.comment_with_community handled")
 
-    # Root post with empty topic
+    # Root post with empty community
     try:
-        txh = _do_post(backend, sub1, "", "No topic post", "body", skip_pow=True)
+        txh = _do_post(backend, sub1, "", "No community post", "body", skip_pow=True)
         if not txh:
-            _pass("bypass.root_empty_topic_rejected")
+            _pass("bypass.root_empty_community_rejected")
         else:
-            _pass("bypass.root_empty_topic submitted (chain may reject)")
+            _pass("bypass.root_empty_community submitted (chain may reject)")
     except Exception as e:
-        _pass("bypass.root_empty_topic handled")
+        _pass("bypass.root_empty_community handled")
 
     # Comment with nonexistent parent
     try:
@@ -1136,7 +1199,7 @@ def test_frontend_bypass(backend: str):
     # Edit with invalid override hash
     try:
         resp = _do_edit(
-            backend, sub1, override_hash="not_a_hash", topic="test", title="Bad edit", content="body", skip_pow=True
+            backend, sub1, override_hash="not_a_hash", community="test", title="Bad edit", content="body", skip_pow=True
         )
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower()
@@ -1150,7 +1213,7 @@ def test_frontend_bypass(backend: str):
     # Edit with nonexistent override
     try:
         resp = _do_edit(
-            backend, sub1, override_hash="ee" * 32, topic="test", title="Ghost edit", content="body", skip_pow=True
+            backend, sub1, override_hash="ee" * 32, community="test", title="Ghost edit", content="body", skip_pow=True
         )
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
@@ -1208,7 +1271,6 @@ def test_frontend_bypass(backend: str):
                 _pass(f"bypass.subscribe_{label} submitted (chain may reject)")
         except Exception as e:
             _pass(f"bypass.subscribe_{label} handled")
-
 
 
 def test_rate_limit(backend: str):

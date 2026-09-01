@@ -57,7 +57,6 @@ from shared.datatypes import (
     MsgPost,
     MsgVote,
     MsgEdit,
-    MsgAnnotate,
     MsgSubscribe,
     MsgSetAutoRenewal,
     MsgAward,
@@ -89,7 +88,7 @@ from logging_utils import log_event, next_request_id, logger
 from error_utils import IndexerUnavailable, api_error_code, get_message
 from node import derive_address_from_pubkey as _derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params
-from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards
+from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards
 from db import connect_db, connect_backend_db
 from user_last_seen import update_user_last_seen
 
@@ -98,7 +97,6 @@ from pow import (
     argon2_digest,
     canon_base_post,
     canon_base_edit,
-    canon_base_annotate,
     canon_base_vote,
     canon_base_set_username,
     canon_base_set_biography,
@@ -387,7 +385,7 @@ def _pow_factor() -> float:
 def _client_timestamp(rid: str, action: str, data: Dict[str, Any]) -> int:
     """Return the envelope timestamp exactly as the client sent it.
 
-    follow_topic and unfollow_topic used to substitute `now` when the field was
+    follow_community and unfollow_community used to substitute `now` when the field was
     absent, which forwards to the chain an envelope_timestamp the user never
     signed. The ante covers the timestamp (canon field 6), so the chain rejected
     it as `invalid relay signature` and the real cause — the missing field — was
@@ -2273,13 +2271,13 @@ def core_edit():
         if err is not None:
             return err[0], err[1]
         target = str(data.get("target", "")).strip()
-        topic = str(data.get("community") or data.get("topic") or "").strip()
+        community = str(data.get("community") or "").strip()
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
         tag = _normalize_tag(data.get("tag", ""))
 
-        if _has_unsafe_chars(topic, title, content, target, tag):
+        if _has_unsafe_chars(community, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
 
         if tag not in ALLOWED_TAGS:
@@ -2312,24 +2310,24 @@ def core_edit():
             return jsonify({"error": "missing required fields"}), 400
         if not override or len(override) != 64 or not all(c in "0123456789abcdef" for c in override.lower()):
             return jsonify({"error": "invalid override"}), 400
-        # Topic/target invariants must be respected on edit as well
+        # Community/target invariants must be respected on edit as well
         is_comment = bool(target)
         if is_comment:
             if not _is_hex64(target):
                 return jsonify({"error": "invalid target"}), 400
-            if topic:
-                return jsonify({"error": "comments must not include topic"}), 400
+            if community:
+                return jsonify({"error": "comments must not include community"}), 400
         else:
-            if not topic:
-                return jsonify({"error": "topic required for root posts"}), 400
+            if not community:
+                return jsonify({"error": "community required for root posts"}), 400
             try:
-                max_topic = int(expect_params()["max_topic_size"])
+                max_community = int(expect_params()["max_community_size"])
             except Exception:
                 return jsonify({"error": "backend not initialized"}), 503
-            if len(topic) > max_topic:
-                return jsonify({"error": "topic too long"}), 400
-            if not _is_valid_community_slug(topic):
-                return jsonify({"error": "invalid topic format"}), 400
+            if len(community) > max_community:
+                return jsonify({"error": "community too long"}), 400
+            if not _is_valid_community_slug(community):
+                return jsonify({"error": "invalid community format"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -2375,7 +2373,7 @@ def core_edit():
         if not is_relay_exempt(user_addr):
             if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
-            topic_for_canon = topic if (topic and not is_comment) else ""
+            community_for_canon = community if (community and not is_comment) else ""
             try:
                 base = canon_base_edit(
                     pub_dec,
@@ -2383,7 +2381,7 @@ def core_edit():
                     int(difficulty),
                     timestamp,
                     target,
-                    topic_for_canon,
+                    community_for_canon,
                     title,
                     content,
                     tag,
@@ -2401,7 +2399,7 @@ def core_edit():
         else:
             _log_subscriber_pow_ignored(rid, "edit", difficulty, proof, has_difficulty, has_pow)
         # Verify signature over canonical signed bytes
-        topic_for_canon = topic if (topic and not is_comment) else ""
+        community_for_canon = community if (community and not is_comment) else ""
         try:
             base = canon_base_edit(
                 pub_dec,
@@ -2409,7 +2407,7 @@ def core_edit():
                 int(difficulty),
                 timestamp,
                 target,
-                topic_for_canon,
+                community_for_canon,
                 title,
                 content,
                 tag,
@@ -2434,8 +2432,8 @@ def core_edit():
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
-        log_event(rid, "edit.debug", is_comment=is_comment, topic=topic, target=target, media_count=len(media))
-        msg.community = topic_for_canon
+        log_event(rid, "edit.debug", is_comment=is_comment, community=community, target=target, media_count=len(media))
+        msg.community = community_for_canon
         msg.title = title
         msg.content = content
         msg.tag = tag
@@ -2449,7 +2447,7 @@ def core_edit():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         media_len = sum(len(m) for m in media)
-        content_len = len(target) + len(topic) + len(title) + len(content) + len(tag) + media_len
+        content_len = len(target) + len(community) + len(title) + len(content) + len(tag) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
@@ -2462,7 +2460,7 @@ def core_edit():
                 "height": height,
                 "user_addr": user_addr,
                 "target": target,
-                "topic": topic,
+                "community": community,
                 "title": title,
                 "content": content,
                 "tag": tag,
@@ -2476,211 +2474,6 @@ def core_edit():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "edit.err", error=str(e))
-        msg, status = _classify_exception(str(e))
-        return jsonify({"error": msg}), status
-
-
-def _is_agent(addr: str) -> bool:
-    """Check if user is agent tier (level >= 10) via the indexer database."""
-    addr_lc = (addr or "").strip().lower()
-    if not addr_lc:
-        return False
-    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (addr_lc,))
-        row = cur.fetchone()
-        level = int(row[0]) if row and row[0] is not None else 0
-        return level >= 10
-
-
-ANNOTATE_SENTINEL = "."
-
-
-@core_bp.route("/api/core/annotate", methods=["POST"])
-def core_annotate():
-    """Agent-only endpoint to create an overlay edit on an existing post."""
-    rid = next_request_id()
-    log_event(rid, "annotate.begin")
-    try:
-        if is_node_catching_up():
-            return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
-        pub_b64 = str(data.get("pubkey", "")).strip()
-        sig_b64 = str(data.get("signature", "")).strip()
-        last_block_hash = str(data.get("last_block_hash", "")).strip()
-        difficulty = int(data.get("pow_difficulty", 0))
-        proof = int(data.get("pow", 0))
-        if "timestamp" not in data:
-            return jsonify({"error": "timestamp required"}), 400
-        try:
-            timestamp = int(data.get("timestamp"))
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid timestamp"}), 400
-        nonce, err = _parse_envelope_nonce(data)
-        if err is not None:
-            return err[0], err[1]
-        topic = str(data.get("topic", "")).strip()
-        title = str(data.get("title", "")).strip()
-        content = str(data.get("content", "")).strip()
-        override = str(data.get("override", "")).strip().lower()
-        raw_tag = str(data.get("tag", "")).strip()
-        tag = _normalize_tag(raw_tag) if raw_tag != ANNOTATE_SENTINEL else raw_tag
-        appendix = str(data.get("appendix", "")).strip()
-
-        # Media: list of strings or omitted
-        media_raw = data.get("media", [])
-        if not isinstance(media_raw, list):
-            return jsonify({"error": "media must be a list"}), 400
-        media = [str(m) for m in media_raw]
-
-        # Validate non-sentinel fields for unsafe chars
-        non_sentinel_vals = [v for v in [topic, title, content, tag, appendix] if v != ANNOTATE_SENTINEL]
-        if _has_unsafe_chars(*non_sentinel_vals):
-            return jsonify({"error": "fields contain invalid control characters"}), 400
-
-        # Validate tag if not sentinel
-        if tag != ANNOTATE_SENTINEL and tag not in ALLOWED_TAGS:
-            return jsonify({"error": "invalid tag", "tag": tag}), 400
-
-        # Validate media if not sentinel ["."]
-        is_sentinel_media = len(media) == 1 and media[0] == ANNOTATE_SENTINEL
-        if not is_sentinel_media:
-            if len(media) > 10:
-                return jsonify({"error": "media exceeds limit", "count": len(media), "max": 10}), 400
-            for i, media_item in enumerate(media):
-                if len(media_item) > 2048:
-                    return (
-                        jsonify(
-                            {
-                                "error": "media item exceeds length limit",
-                                "index": i,
-                                "length": len(media_item),
-                                "max": 2048,
-                            }
-                        ),
-                        400,
-                    )
-                if media_item and not media_item.startswith("https://"):
-                    return jsonify({"error": "media must use https", "index": i}), 400
-                if _has_unsafe_chars(media_item):
-                    return jsonify({"error": "media contains invalid control characters", "index": i}), 400
-
-        if not (pub_b64 and sig_b64 and override):
-            return jsonify({"error": "missing required fields"}), 400
-        if not override or len(override) != 64 or not all(c in "0123456789abcdef" for c in override.lower()):
-            return jsonify({"error": "invalid override"}), 400
-
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-        if len(sig_dec) == 65:
-            sig_dec = sig_dec[:64]
-        if len(pub_dec) != 33 or len(sig_dec) != 64:
-            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
-
-        user_addr = derive_address_from_pubkey(pub_dec)
-        if not user_addr:
-            return jsonify({"error": "invalid pubkey"}), 400
-
-        # Enforce agent tier
-        if not _is_agent(user_addr):
-            return jsonify({"error": "agent tier required"}), 403
-
-        # Verify the override post exists
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (override,))
-            row = cur.fetchone()
-            if not row or not row[0]:
-                # Same as edit route: avoid false negatives during indexer lag.
-                log_event(rid, "annotate.override_precheck_miss", override=override, user_addr=user_addr)
-
-        validator_addr = require_runtime().validator_payer_addr
-
-        # Agents are subscribers — no PoW
-        if int(difficulty) > 0 or int(proof) > 0:
-            log_event(rid, "annotate.pow_rejected", difficulty=int(difficulty), pow=int(proof))
-            return jsonify({"error": "pow not allowed for agents"}), 400
-
-        # Verify signature over canonical signed bytes
-        try:
-            base = canon_base_annotate(
-                pub_dec,
-                last_block_hash,
-                int(difficulty),
-                timestamp,
-                topic,
-                title,
-                content,
-                tag,
-                override,
-                media=media,
-                appendix=appendix,
-                nonce=nonce,
-            )
-            signed = canon_signed_with_pow(base, int(proof))
-            if not _verify_signature(pub_dec, sig_dec, signed):
-                return jsonify({"error": "invalid signature"}), 400
-        except Exception:
-            return jsonify({"error": "invalid signature"}), 400
-
-        log_event(
-            rid,
-            "annotate.debug",
-            override=override,
-            topic=topic,
-            tag=tag,
-            appendix_len=len(appendix),
-            media_count=len(media),
-        )
-
-        msg = MsgAnnotate()
-        msg.authority = validator_addr
-        msg.envelope_pubkey = pub_dec
-        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
-        msg.envelope_difficulty = int(difficulty)
-        msg.envelope_pow = int(proof)
-        msg.envelope_timestamp = timestamp
-        msg.envelope_nonce = nonce
-        msg.envelope_signature = sig_dec
-        msg.topic = topic
-        msg.title = title
-        msg.content = content
-        msg.tag = tag
-        msg.override = override
-        for m in media:
-            msg.media.append(m)
-        msg.appendix = appendix
-
-        any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgAnnotate"
-        any_msg.value = msg.SerializeToString()
-        body = TxBody(messages=[any_msg], memo="")
-        body_bytes = body.SerializeToString()
-        media_len = sum(len(m) for m in media)
-        content_len = len(topic) + len(title) + len(content) + len(tag) + len(appendix) + media_len
-        gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
-        tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
-        gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
-        tx_hash, code, height, raw_log = build_and_broadcast_tx(
-            body_bytes, gas_limit, zero_fee=is_relay_exempt(user_addr)
-        )
-        if code != 0:
-            extra = {
-                "height": height,
-                "user_addr": user_addr,
-                "topic": topic,
-                "title": title,
-                "content": content,
-                "tag": tag,
-                "override": override,
-                "appendix_len": len(appendix),
-                "media_count": len(media),
-            }
-            return _tx_error(rid, "core/annotate", "MsgAnnotate", code, tx_hash, raw_log, extra)
-        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
-    except Exception as e:
-        log_event(rid, "annotate.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 
@@ -2762,7 +2555,7 @@ def core_post():
             log_event(rid, "post.invalid_nonce", envelope_nonce=data.get("envelope_nonce"))
             return err[0], err[1]
         target = str(data.get("target", ""))
-        topic = str(data.get("community") or data.get("topic") or "").strip()
+        community = str(data.get("community") or "").strip()
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
         tag = _normalize_tag(data.get("tag", ""))
@@ -2773,7 +2566,7 @@ def core_post():
         if protocol_version != 1:
             return api_error_code("upgrade_required", 426)
 
-        if _has_unsafe_chars(topic, title, content, target, tag):
+        if _has_unsafe_chars(community, title, content, target, tag):
             return jsonify({"error": "fields contain invalid control characters"}), 400
 
         # Validate tag
@@ -2805,35 +2598,35 @@ def core_post():
         # Basic fields must be present; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
-        # Topic/target invariants
+        # Community/target invariants
         is_comment = bool(target.strip())
         if is_comment:
             if not _is_hex64(target.strip()):
                 return jsonify({"error": "invalid target"}), 400
-            if topic:
-                return jsonify({"error": "comments must not include topic"}), 400
+            if community:
+                return jsonify({"error": "comments must not include community"}), 400
             if not content.strip():
                 return jsonify({"error": "comment content required"}), 400
         else:
-            if not topic:
-                return jsonify({"error": "topic required for root posts"}), 400
+            if not community:
+                return jsonify({"error": "community required for root posts"}), 400
             try:
                 p = expect_params()
-                max_topic = int(p["max_topic_size"])
-                min_topic = int(p["min_topic_size"])
+                max_community = int(p["max_community_size"])
+                min_community = int(p["min_community_size"])
             except Exception:
                 # Both keys are in _REQUIRED_INT_PARAMS, so the previous fallback
                 # was unreachable by construction — and wrong anyway: it used 50
                 # where the chain default is 35, so had it ever fired it would have
-                # accepted topics the chain rejects. Fail to 503 like the username
+                # accepted communities the chain rejects. Fail to 503 like the username
                 # bounds immediately above.
                 return jsonify({"error": "backend not initialized"}), 503
-            if len(topic) < min_topic:
-                return jsonify({"error": "topic too short"}), 400
-            if len(topic) > max_topic:
-                return jsonify({"error": "topic too long"}), 400
-            if not _is_valid_community_slug(topic):
-                return jsonify({"error": "invalid topic format"}), 400
+            if len(community) < min_community:
+                return jsonify({"error": "community too short"}), 400
+            if len(community) > max_community:
+                return jsonify({"error": "community too long"}), 400
+            if not _is_valid_community_slug(community):
+                return jsonify({"error": "invalid community format"}), 400
 
         try:
             pub_dec = base64.b64decode(pub_b64)
@@ -2921,7 +2714,7 @@ def core_post():
                     int(difficulty),
                     timestamp,
                     target,
-                    topic,
+                    community,
                     title,
                     content,
                     tag,
@@ -2947,7 +2740,7 @@ def core_post():
                 int(difficulty),
                 timestamp,
                 target,
-                topic,
+                community,
                 title,
                 content,
                 tag,
@@ -2971,7 +2764,7 @@ def core_post():
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
-        msg.community = topic
+        msg.community = community
         msg.title = title
         msg.content = content
         msg.tag = tag
@@ -2985,7 +2778,7 @@ def core_post():
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
         media_len = sum(len(m) for m in media)
-        content_len = len(target) + len(topic) + len(title) + len(content) + media_len
+        content_len = len(target) + len(community) + len(title) + len(content) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est, zero_fee=is_relay_exempt(user_addr))
         gas_used = int(simulate_gas(tx_bytes_est))
@@ -2998,7 +2791,7 @@ def core_post():
                 "height": height,
                 "user_addr": user_addr,
                 "target": target,
-                "topic": topic,
+                "community": community,
                 "title": title,
                 "content": content,
                 "tag": tag,
@@ -4007,7 +3800,7 @@ def core_register_push_token():
                     log_event(rid, "register_push_token.evicted", owner=user_addr.lower(), evicted=cur.rowcount)
 
                 # First push token for this account on this node: defer the
-                # lively-topic push by ~24h. Each node tracks trending state in
+                # lively-community push by ~24h. Each node tracks trending state in
                 # its own backend DB, so without this a user who switches nodes
                 # could receive a second lively push the same day from the
                 # newly-connected node. The conditional upsert only seeds users

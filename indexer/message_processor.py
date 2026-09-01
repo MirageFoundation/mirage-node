@@ -66,7 +66,7 @@ from indexer.settings import (
     ALLOWED_DIRECTIONS,
     WEIGHTED_VOTES,
     COMMUNITY_VOTE_BASELINE,
-    COMMUNITY_VOTE_MAX_TOPIC_VOTES,
+    COMMUNITY_VOTE_MAX_COMMUNITY_VOTES,
     COMMUNITY_VOTE_MIN_NET_VOTES,
     IGNORE_DELETIONS,
     COMMUNITY_VOTE_MATURITY_DAYS,
@@ -469,7 +469,7 @@ class MessageProcessor:
         owner = derive_owner_from_msg(msg_dict)
         relayer = str(msg_dict.get("authority", "") or "").strip().lower()
 
-        topic = str(msg_dict.get("community", "") or msg_dict.get("topic", "") or "")
+        community = str(msg_dict.get("community", "") or "")
         protocol_version = int(msg_dict.get("protocol_version", 0) or 0)
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
@@ -489,41 +489,41 @@ class MessageProcessor:
             int(msg_dict.get("envelope_difficulty", 0) or 0) > 0 or int(msg_dict.get("envelope_pow", 0) or 0) > 0
         )
 
-        # No topic/title/content size gates here: those are consensus rules the chain has
+        # No community/title/content size gates here: those are consensus rules the chain has
         # already enforced. Re-checking them against current params would silently drop
         # committed posts whenever the params change, leaving the DB behind chain state.
 
         existing = self.db.get_post(txhash)
 
-        # Denormalise root_topic/root_post_id so later consumers (e.g. vote routing)
+        # Denormalise root_community/root_post_id so later consumers (e.g. vote routing)
         # can resolve them in a single lookup.
         if not target:
-            # Root post: its own topic/id are the root.
-            root_topic = (topic or "").strip() or None
+            # Root post: its own community/id are the root.
+            root_community = (community or "").strip() or None
             root_post_id = txhash
         else:
             # Comment: resolve root via the current posts table (may walk parents once
             # for legacy data, but is O(1) for new chains with populated root_* fields).
-            root_topic, root_post_id = self.db.get_root_topic_for_post(target)
+            root_community, root_post_id = self.db.get_root_community_for_post(target)
             # A comment's MsgPost carries no community of its own; it lives in the
             # one its root was posted in. Without this the column stays empty and
             # the comment falls out of community feeds and the tag precedence
             # rules, both of which key off it.
-            if not topic.strip() and root_topic:
-                topic = root_topic
+            if not community.strip() and root_community:
+                community = root_community
 
         self.db.upsert_post(
             txhash,
             owner,
             ts,
-            topic,
+            community,
             title,
             content,
             target,
             paid,
             relayer=relayer,
             tag=tag,
-            root_topic=root_topic,
+            root_community=root_community,
             root_post_id=root_post_id,
             media=media,
             protocol_version=protocol_version,
@@ -536,22 +536,22 @@ class MessageProcessor:
                 )
             self.db.update_post_protocol_metadata(txhash, metadata)
 
-        # Update user topic stats for new posts (not edits). Required projection: any
+        # Update user community stats for new posts (not edits). Required projection: any
         # failure must abort the block rather than leave post_count silently short.
         # Auto-upvote also contributes +1 to net_votes so rebuild and live paths agree.
-        if not existing and owner and root_topic:
-            self.db.update_user_topic_stats(
+        if not existing and owner and root_community:
+            self.db.update_user_community_stats(
                 owner,
-                root_topic,
+                root_community,
                 net_votes_delta=1,
                 root_post_id=root_post_id,
                 is_new_vote=True,
                 post_increment=1,
             )
             logger.debug(
-                "user_topic_stats post+auto_upvote owner=%s topic=%s tx=%s",
+                "user_community_stats post+auto_upvote owner=%s community=%s tx=%s",
                 owner,
-                root_topic,
+                root_community,
                 txhash[:12],
             )
 
@@ -563,13 +563,13 @@ class MessageProcessor:
                 logger.exception("Failed to increment ancestor comment_counts for %s", txhash)
                 raise
 
-        # Update topic safety stats for root posts only, and only on first index —
+        # Update community safety stats for root posts only, and only on first index —
         # replaying an already-indexed post must not double-count the tag.
         if not existing and not target:
             try:
-                self.db.update_topic_content_stats(root_topic or topic, tag)
+                self.db.update_community_content_stats(root_community or community, tag)
             except Exception:
-                logger.exception("Failed to update topic_content_stats for %s", txhash)
+                logger.exception("Failed to update community_content_stats for %s", txhash)
                 raise
 
         if owner:
@@ -599,7 +599,7 @@ class MessageProcessor:
                 self.db.update_post_thumbnail(txhash, thumb)
 
         # existing shape may differ; always log insert/update
-        if not existing or existing[:4] != (topic, title, content, target):
+        if not existing or existing[:4] != (community, title, content, target):
             action = "insert" if not existing else "update"
             self.log_yaml(
                 "Stored post",
@@ -611,7 +611,7 @@ class MessageProcessor:
                     "time_iso": self.iso_timestamp(ts),
                     "owner": owner,
                     "relayer": relayer,
-                    "topic": topic,
+                    "community": community,
                     "title": title,
                     "content": content,
                     "target": target,
@@ -703,32 +703,32 @@ class MessageProcessor:
         if raw_direction == 0:
             # Neutral/clearing vote - zero-out this voter's vote and weight
             # for this target, but keep an audit record.
-            # Also reverse topic and author preferences if there was a previous vote.
+            # Also reverse community and author preferences if there was a previous vote.
             previous_vote = self.db.get_vote_by_owner_target(owner, target)
             prev_vote = 0.0
             if previous_vote:
                 _, prev_vote, _ = previous_vote
             prev_direction = _vote_direction(prev_vote)
-            root_topic, root_post_id = self.db.get_root_topic_for_post(target)
+            root_community, root_post_id = self.db.get_root_community_for_post(target)
 
             if prev_direction != 0:
-                reverse_topic_delta = -0.5 if prev_direction > 0 else 0.5
+                reverse_community_delta = -0.5 if prev_direction > 0 else 0.5
                 reverse_author_delta = -1.0 if prev_direction > 0 else 1.0
 
-                # Reverse topic preference - only for root posts, not comments
+                # Reverse community preference - only for root posts, not comments
                 is_root_post = root_post_id and target == root_post_id
-                if root_topic and owner and is_root_post:
+                if root_community and owner and is_root_post:
                     try:
-                        self.db.update_preference(owner, "topic", root_topic, reverse_topic_delta, ts)
+                        self.db.update_preference(owner, "community", root_community, reverse_community_delta, ts)
                         logger.debug(
-                            "Reversed topic preference for cleared vote: owner=%s topic=%s delta=%s",
+                            "Reversed community preference for cleared vote: owner=%s community=%s delta=%s",
                             owner,
-                            root_topic,
-                            reverse_topic_delta,
+                            root_community,
+                            reverse_community_delta,
                         )
                     except Exception as e:
                         logger.error(
-                            "Error reversing topic preference for cleared vote %s: %s", txhash, e, exc_info=True
+                            "Error reversing community preference for cleared vote %s: %s", txhash, e, exc_info=True
                         )
                         raise
 
@@ -750,19 +750,19 @@ class MessageProcessor:
                     raise
 
             # Reverse the cleared vote's contribution to net_votes. Without this the
-            # topic standing earned by a vote survives the vote being withdrawn.
-            if owner and root_topic and prev_direction != 0:
-                self.db.update_user_topic_stats(
+            # community standing earned by a vote survives the vote being withdrawn.
+            if owner and root_community and prev_direction != 0:
+                self.db.update_user_community_stats(
                     owner,
-                    root_topic,
+                    root_community,
                     net_votes_delta=-prev_direction,
                     root_post_id=root_post_id,
                     is_new_vote=False,
                 )
                 logger.debug(
-                    "user_topic_stats net_votes cleared owner=%s topic=%s delta=%d tx=%s",
+                    "user_community_stats net_votes cleared owner=%s community=%s delta=%d tx=%s",
                     owner,
-                    root_topic,
+                    root_community,
                     -prev_direction,
                     txhash[:12],
                 )
@@ -782,15 +782,15 @@ class MessageProcessor:
                     "user_weight": 0.0,
                     "weight": 0.0,
                     "previous_vote": prev_vote,
-                    "topic": None,
+                    "community": None,
                     "root_post_id": None,
                     "paid": bool(paid),
                 },
             )
             return
 
-        # Resolve root post/topic for this target (comments inherit topic from root).
-        root_topic, root_post_id = self.db.get_root_topic_for_post(target)
+        # Resolve root post/community for this target (comments inherit community from root).
+        root_community, root_post_id = self.db.get_root_community_for_post(target)
 
         # Get the author of the target post for author preference tracking
         target_author = None
@@ -820,12 +820,12 @@ class MessageProcessor:
 
         # Calculate user_weight based on vote direction:
         # - UPVOTES always count at full tier weight (1.0 for free, higher for subscribers)
-        # - DOWNVOTES require topic standing (gated by activity factors)
-        # This prevents outsiders from burying on-topic content while still allowing
+        # - DOWNVOTES require community standing (gated by activity factors)
+        # This prevents outsiders from burying on-community content while still allowing
         # positive signals to flow freely.
         user_weight = 0.0
         weight = COMMUNITY_VOTE_BASELINE
-        topic_factor = 0.0
+        community_factor = 0.0
         age_factor = 0.0
         root_factor = 0.0
         posts_factor = 0.0
@@ -837,7 +837,7 @@ class MessageProcessor:
         post_count = 0
         limiting_factor = None
 
-        if owner and root_topic and raw_direction != 0:
+        if owner and root_community and raw_direction != 0:
             try:
                 # Get account tier for weight ceiling
                 profile = self.db.get_profile(owner)
@@ -850,8 +850,8 @@ class MessageProcessor:
                     user_weight = weight
                     limiting_factor = "upvote_always_full"
                 else:
-                    # DOWNVOTES: gated by topic activity (outsiders have no downvote power)
-                    stats = self.db.get_user_topic_stats(owner, root_topic)
+                    # DOWNVOTES: gated by community activity (outsiders have no downvote power)
+                    stats = self.db.get_user_community_stats(owner, root_community)
                     vote_count, net_votes, unique_root_posts, post_count = stats or (0, 0, 0, 0)
 
                     created_at = profile[2] if profile and len(profile) > 2 else 0
@@ -864,9 +864,9 @@ class MessageProcessor:
                         weight = COMMUNITY_VOTE_BASELINE
                         limiting_factor = f"net_votes({net_votes})<{COMMUNITY_VOTE_MIN_NET_VOTES}"
                     else:
-                        topic_factor = (
-                            min(vote_count / COMMUNITY_VOTE_MAX_TOPIC_VOTES, 1.0)
-                            if COMMUNITY_VOTE_MAX_TOPIC_VOTES > 0
+                        community_factor = (
+                            min(vote_count / COMMUNITY_VOTE_MAX_COMMUNITY_VOTES, 1.0)
+                            if COMMUNITY_VOTE_MAX_COMMUNITY_VOTES > 0
                             else 1.0
                         )
                         age_factor = (
@@ -882,11 +882,11 @@ class MessageProcessor:
                         posts_factor = (
                             min(post_count / COMMUNITY_VOTE_MAX_POSTS, 1.0) if COMMUNITY_VOTE_MAX_POSTS > 0 else 1.0
                         )
-                        combined = topic_factor * age_factor * root_factor * posts_factor
+                        combined = community_factor * age_factor * root_factor * posts_factor
                         weight = COMMUNITY_VOTE_BASELINE + combined * (tier_max - COMMUNITY_VOTE_BASELINE)
 
                         factors = [
-                            (topic_factor, f"topic_votes({vote_count}/{COMMUNITY_VOTE_MAX_TOPIC_VOTES})"),
+                            (community_factor, f"community_votes({vote_count}/{COMMUNITY_VOTE_MAX_COMMUNITY_VOTES})"),
                             (age_factor, f"age({age_days:.0f}d/{COMMUNITY_VOTE_MATURITY_DAYS}d)"),
                             (root_factor, f"roots({unique_root_posts}/{COMMUNITY_VOTE_MIN_ROOT_POSTS})"),
                             (posts_factor, f"posts({post_count}/{COMMUNITY_VOTE_MAX_POSTS})"),
@@ -902,25 +902,25 @@ class MessageProcessor:
 
                     user_weight = weight * raw_direction  # negative for downvotes
 
-                # Update user topic stats AFTER calculating (so current vote uses pre-vote stats).
+                # Update user community stats AFTER calculating (so current vote uses pre-vote stats).
                 # net_votes tracks the standing signal, so a re-vote must apply the delta
                 # against the previous direction rather than the raw new direction.
                 is_new_vote = previous_vote is None
                 prev_direction = _vote_direction(prev_vote)
                 net_votes_delta = int(raw_direction) - prev_direction
                 logger.debug(
-                    "user_topic_stats vote owner=%s topic=%s prev=%d new=%d delta=%d new_vote=%s tx=%s",
+                    "user_community_stats vote owner=%s community=%s prev=%d new=%d delta=%d new_vote=%s tx=%s",
                     owner,
-                    root_topic,
+                    root_community,
                     prev_direction,
                     int(raw_direction),
                     net_votes_delta,
                     is_new_vote,
                     txhash[:12],
                 )
-                self.db.update_user_topic_stats(
+                self.db.update_user_community_stats(
                     owner,
-                    root_topic,
+                    root_community,
                     net_votes_delta=net_votes_delta,
                     root_post_id=root_post_id,
                     is_new_vote=is_new_vote,
@@ -929,11 +929,11 @@ class MessageProcessor:
                 logger.error("Error calculating vote weight for %s: %s", txhash, e, exc_info=True)
                 raise
 
-        # Update per-user topic preference weights for personalization.
-        # Only update topic prefs when voting on ROOT posts, not comments.
-        # Voting on a comment reflects opinion of the commenter, not the topic.
+        # Update per-user community preference weights for personalization.
+        # Only update community prefs when voting on ROOT posts, not comments.
+        # Voting on a comment reflects opinion of the commenter, not the community.
         is_root_post = root_post_id and target == root_post_id
-        if owner and root_topic and is_root_post:
+        if owner and root_community and is_root_post:
             try:
                 new_delta = 0.5 if raw_direction > 0 else -0.5
                 # If there was a previous vote and it's different, calculate the net delta
@@ -942,17 +942,17 @@ class MessageProcessor:
                     # Net effect: reverse old, apply new
                     net_delta = new_delta - old_delta
                     if net_delta != 0:
-                        self.db.update_preference(owner, "topic", root_topic, net_delta, ts)
+                        self.db.update_preference(owner, "community", root_community, net_delta, ts)
                 elif prev_vote == 0:
                     # No previous vote, just apply the new delta
-                    self.db.update_preference(owner, "topic", root_topic, new_delta, ts)
+                    self.db.update_preference(owner, "community", root_community, new_delta, ts)
                 # If prev_vote == user_vote, it's the same vote direction, no change needed
             except Exception as e:
                 logger.error(
-                    "Error updating topic preference for vote %s (owner=%s, topic=%s): %s",
+                    "Error updating community preference for vote %s (owner=%s, community=%s): %s",
                     txhash,
                     owner,
-                    root_topic,
+                    root_community,
                     e,
                     exc_info=True,
                 )
@@ -990,7 +990,7 @@ class MessageProcessor:
             "txhash": txhash,
             "vote": {
                 "direction": int(raw_direction),
-                "topic": root_topic,
+                "community": root_community,
                 "target": target,
             },
             "result": {
@@ -1000,7 +1000,7 @@ class MessageProcessor:
         }
 
         # Add calculation details if we computed community vote
-        if raw_direction != 0 and root_topic:
+        if raw_direction != 0 and root_community:
             if raw_direction > 0:
                 # Upvotes: always full tier weight
                 vote_log["calculation"] = {
@@ -1009,18 +1009,18 @@ class MessageProcessor:
                     "weight": round(weight, 3),
                 }
             else:
-                # Downvotes: gated by topic activity
+                # Downvotes: gated by community activity
                 vote_log["calculation"] = {
-                    "formula": "(topic * age * roots * posts) * tier_max",
+                    "formula": "(community * age * roots * posts) * tier_max",
                     "tier_max": round(tier_max, 2),
                     "factors": {
                         "net_votes": f"{net_votes} (min: {COMMUNITY_VOTE_MIN_NET_VOTES})",
-                        "topic": f"{vote_count}/{COMMUNITY_VOTE_MAX_TOPIC_VOTES} = {round(topic_factor, 2)}",
+                        "community": f"{vote_count}/{COMMUNITY_VOTE_MAX_COMMUNITY_VOTES} = {round(community_factor, 2)}",
                         "age": f"{round(age_days, 1)}d/{COMMUNITY_VOTE_MATURITY_DAYS}d = {round(age_factor, 2)}",
                         "roots": f"{unique_root_posts}/{COMMUNITY_VOTE_MIN_ROOT_POSTS} = {round(root_factor, 2)}",
                         "posts": f"{post_count}/{COMMUNITY_VOTE_MAX_POSTS} = {round(posts_factor, 2)}",
                     },
-                    "combined": round(topic_factor * age_factor * root_factor * posts_factor, 3),
+                    "combined": round(community_factor * age_factor * root_factor * posts_factor, 3),
                     "weight": round(weight, 3),
                 }
             if limiting_factor:
@@ -1038,11 +1038,11 @@ class MessageProcessor:
         relayer = str(msg_dict.get("authority", "") or "").strip().lower()
         override = str(msg_dict.get("override", "") or "").strip().lower()
         target = str(msg_dict.get("target", "") or "").strip().lower()
-        # MsgEdit carries the slug as `community`; reading the retired `topic` key
+        # MsgEdit carries the slug as `community`; reading the retired `community` key
         # made every value empty, so a root's community edit was dropped from the
         # index and never triggered the standing re-attribution below.
-        topic = str(msg_dict.get("community", "") or "")
-        logger.info("MsgEdit community=%s", topic)
+        community = str(msg_dict.get("community", "") or "")
+        logger.info("MsgEdit community=%s", community)
         title = str(msg_dict.get("title", "") or "")
         content = str(msg_dict.get("content", "") or "")
         raw_tag = str(msg_dict.get("tag", "") or "")
@@ -1069,7 +1069,7 @@ class MessageProcessor:
 
         # Determine if root (target empty in DB); enforce target immutability
         (
-            existing_topic,
+            existing_community,
             _,
             _,
             existing_target,
@@ -1088,7 +1088,7 @@ class MessageProcessor:
         # clear it and republish a post its author had removed. The standing stays
         # retracted, because delete_post recomputed it from the canonical tables
         # and an edit applies no delta, so the row also reappears in the canonical
-        # vote definition while user_topic_stats stays short. Same visibility
+        # vote definition while user_community_stats stays short. Same visibility
         # boundary as a foreign edit: leave the index alone.
         if existing_deleted:
             logger.warning("Rejected edit %s: post %s is deleted", tx_hash, override)
@@ -1108,54 +1108,54 @@ class MessageProcessor:
         logger.debug("MsgEdit media count=%d override=%s", len(media), override)
 
         # Apply update: preserve created_at, set edited_at
-        # Root posts may update topic; comments must not carry topic.
+        # Root posts may update community; comments must not carry community.
         if is_root:
-            new_topic = topic if topic else (existing_topic or "")
+            new_community = community if community else (existing_community or "")
             new_title = title
-            root_topic = (new_topic or "").strip().lower() or None
+            root_community = (new_community or "").strip().lower() or None
             root_post_id = override
         else:
-            new_topic = ""
+            new_community = ""
             new_title = ""
-            # For comments, inherit root topic/id from target/override
-            root_topic, root_post_id = self.db.get_root_topic_for_post(target or override)
+            # For comments, inherit root community/id from target/override
+            root_community, root_post_id = self.db.get_root_community_for_post(target or override)
         new_content = content
         if len(existing) <= 4:
             raise RuntimeError(f"Rejected edit {tx_hash}: stored post row missing paid flag")
         paid_flag = bool(existing[4])
-        logger.info("MsgEdit upsert: override=%s new_topic=%s new_title=%s", override, new_topic, new_title)
+        logger.info("MsgEdit upsert: override=%s new_community=%s new_title=%s", override, new_community, new_title)
         self.db.upsert_post(
             override,
             owner,
             int(existing_created_at) if existing_created_at else int(ts),
-            new_topic,
+            new_community,
             new_title,
             new_content,
             target,
             paid_flag,
             relayer=relayer,
             tag=tag,
-            root_topic=root_topic,
+            root_community=root_community,
             root_post_id=root_post_id,
             edited_at=int(ts),
             media=media,
         )
 
-        # Recompute topic safety stats when root posts change
+        # Recompute community safety stats when root posts change
         if is_root:
             try:
-                if existing_topic:
-                    self.db.recompute_topic_content_stats(existing_topic)
-                if new_topic and (existing_topic or "").lower() != (new_topic or "").lower():
-                    self.db.recompute_topic_content_stats(new_topic)
+                if existing_community:
+                    self.db.recompute_community_content_stats(existing_community)
+                if new_community and (existing_community or "").lower() != (new_community or "").lower():
+                    self.db.recompute_community_content_stats(new_community)
             except Exception:
-                logger.exception("Failed to recompute topic_content_stats for edit %s", tx_hash)
+                logger.exception("Failed to recompute community_content_stats for edit %s", tx_hash)
                 raise
 
-        # Vote and post standing is keyed by the topic the post carries now, so a
-        # topic change has to carry the thread's existing attribution with it.
-        if is_root and new_topic and (existing_topic or "").lower() != (new_topic or "").lower():
-            self.db.reattribute_topic_stats(override, existing_topic or "", new_topic)
+        # Vote and post standing is keyed by the community the post carries now, so a
+        # community change has to carry the thread's existing attribution with it.
+        if is_root and new_community and (existing_community or "").lower() != (new_community or "").lower():
+            self.db.reattribute_community_stats(override, existing_community or "", new_community)
 
         # Recompute thumbnail on root edits (content change). Deterministic derivation only.
         if is_root:
@@ -1389,7 +1389,7 @@ class MessageProcessor:
             },
         )
 
-    def _refresh_followed_topics(self, addr: str, ts: int):
+    def _refresh_joined_communities(self, addr: str, ts: int):
         """Query full profile via gRPC and replace joined communities in DB."""
         profile = self.chain.query_profile_full(addr)
         if profile is None:
@@ -1397,11 +1397,11 @@ class MessageProcessor:
             return
         if "joined_communities" not in profile:
             raise RuntimeError(f"missing joined_communities for {addr}")
-        topics = profile["joined_communities"]
-        if not isinstance(topics, list):
+        communities = profile["joined_communities"]
+        if not isinstance(communities, list):
             raise RuntimeError(f"invalid joined_communities for {addr}")
-        logger.debug("refresh_joined_communities addr=%s communities=%d", addr, len(topics))
-        self.db.set_followed_topics(addr, topics)
+        logger.debug("refresh_joined_communities addr=%s communities=%d", addr, len(communities))
+        self.db.set_joined_communities(addr, communities)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
             "Updated joined communities",
@@ -1409,7 +1409,7 @@ class MessageProcessor:
                 "address": addr,
                 "timestamp": int(ts),
                 "time_iso": self.iso_timestamp(ts),
-                "communities": topics,
+                "communities": communities,
             },
         )
 
@@ -1476,23 +1476,23 @@ class MessageProcessor:
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
-        topic = str(msg_dict.get("topic", "") or msg_dict.get("community", "")).strip().lower()
-        if not owner or not topic:
+        community = str(msg_dict.get("community", "") or msg_dict.get("community", "")).strip().lower()
+        if not owner or not community:
             return
-        removed = self.db.unblock_topics_matching(owner, topic)
+        removed = self.db.unblock_communities_matching(owner, community)
         if removed > 0:
-            logger.debug("Follow topic removed block(s): owner=%s community=%s removed=%d", owner, topic, removed)
-        self.db.follow_topic(owner, topic)
+            logger.debug("Follow community removed block(s): owner=%s community=%s removed=%d", owner, community, removed)
+        self.db.join_community(owner, community)
 
     def _handle_unfollow_topic(self, type_url: str, value: bytes, ts: int):
         parsed = MsgUnfollowTopic()
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
-        topic = str(msg_dict.get("topic", "") or msg_dict.get("community", "")).strip().lower()
-        if not owner or not topic:
+        community = str(msg_dict.get("community", "") or msg_dict.get("community", "")).strip().lower()
+        if not owner or not community:
             return
-        self.db.unfollow_topic(owner, topic)
+        self.db.leave_community(owner, community)
 
     def _handle_block_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockPost."""
@@ -1595,19 +1595,19 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = derive_owner_from_msg(msg_dict)
-            topic = str(msg_dict.get("topic", "")).strip().lower()
+            community = str(msg_dict.get("community", "")).strip().lower()
 
-            if not owner or not topic:
-                logger.warning("Rejected block_topic: missing owner or topic")
+            if not owner or not community:
+                logger.warning("Rejected block_community: missing owner or community")
                 return
 
-            self.db.block_topic(owner, topic, blocked_at=int(ts))
-            removed = self.db.unfollow_topics_matching(owner, topic)
+            self.db.block_community(owner, community, blocked_at=int(ts))
+            removed = self.db.leave_communities_matching(owner, community)
             if removed > 0:
-                logger.debug("Block topic removed follow(s): owner=%s pattern=%s removed=%d", owner, topic, removed)
+                logger.debug("Block community removed follow(s): owner=%s pattern=%s removed=%d", owner, community, removed)
             self.log_yaml(
-                "Block topic",
-                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
+                "Block community",
+                {"owner": owner, "community": community, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
             )
         except Exception as e:
             logger.error("Error handling MsgBlockTopic: %s", e, exc_info=True)
@@ -1626,7 +1626,7 @@ class MessageProcessor:
         # Blocking is a read filter, not a membership change: the chain's
         # AddBlockedCommunity leaves joins untouched, so the indexer must not
         # drop them either or its view diverges from chain state.
-        self.db.block_topic(owner, community, blocked_at=int(ts))
+        self.db.block_community(owner, community, blocked_at=int(ts))
         logger.info("block_community owner=%s community=%s", owner, community)
 
     def _handle_unblock_community(self, type_url: str, value: bytes, ts: int):
@@ -1638,7 +1638,7 @@ class MessageProcessor:
         if not owner or not community:
             logger.warning("Rejected unblock_community: missing owner or community")
             return
-        self.db.unblock_topic(owner, community)
+        self.db.unblock_community(owner, community)
         logger.info("unblock_community owner=%s community=%s", owner, community)
 
     def _handle_unblock_topic(self, type_url: str, value: bytes, ts: int):
@@ -1648,16 +1648,16 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = derive_owner_from_msg(msg_dict)
-            topic = str(msg_dict.get("topic", "")).strip().lower()
+            community = str(msg_dict.get("community", "")).strip().lower()
 
-            if not owner or not topic:
-                logger.warning("Rejected unblock_topic: missing owner or topic")
+            if not owner or not community:
+                logger.warning("Rejected unblock_community: missing owner or community")
                 return
 
-            self.db.unblock_topic(owner, topic)
+            self.db.unblock_community(owner, community)
             self.log_yaml(
-                "Unblock topic",
-                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
+                "Unblock community",
+                {"owner": owner, "community": community, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
             )
         except Exception as e:
             logger.error("Error handling MsgUnblockTopic: %s", e, exc_info=True)
@@ -2668,6 +2668,137 @@ class MessageProcessor:
                 len(touched),
             )
 
+    def sync_creator_epoch(self, epoch_id: int, height: int) -> None:
+        epoch = self.chain.query_creator_epoch(epoch_id)
+        if epoch is None:
+            raise RuntimeError(f"creator epoch {epoch_id} disappeared at height {height}")
+        missing_amounts = [
+            field
+            for field in ("pool", "engager_slice", "allocated_total", "claimed_total")
+            if not epoch[field]
+        ]
+        if missing_amounts:
+            raise RuntimeError(
+                f"creator epoch {epoch_id} omitted required amount fields: {', '.join(missing_amounts)}"
+            )
+        accruals = self.chain.query_creator_epoch_accruals(epoch_id)
+        for accrual in accruals:
+            if accrual["epoch_id"] != epoch_id:
+                raise RuntimeError(
+                    f"creator epoch {epoch_id} query returned accrual for epoch {accrual['epoch_id']}"
+                )
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO creator_epochs(
+                        epoch_id, pool, status, phase, gross_records, active_engagers,
+                        engager_slice, allocated_total, claimed_total, finalized_epoch,
+                        claim_window_days, claim_deadline_epoch, settlement_cursor,
+                        partial_actor, partial_count, prune_pending, prune_complete,
+                        updated_height
+                    ) VALUES(
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                    )
+                    ON CONFLICT(epoch_id) DO UPDATE SET
+                        pool=EXCLUDED.pool,
+                        status=EXCLUDED.status,
+                        phase=EXCLUDED.phase,
+                        gross_records=EXCLUDED.gross_records,
+                        active_engagers=EXCLUDED.active_engagers,
+                        engager_slice=EXCLUDED.engager_slice,
+                        allocated_total=EXCLUDED.allocated_total,
+                        claimed_total=EXCLUDED.claimed_total,
+                        finalized_epoch=EXCLUDED.finalized_epoch,
+                        claim_window_days=EXCLUDED.claim_window_days,
+                        claim_deadline_epoch=EXCLUDED.claim_deadline_epoch,
+                        settlement_cursor=EXCLUDED.settlement_cursor,
+                        partial_actor=EXCLUDED.partial_actor,
+                        partial_count=EXCLUDED.partial_count,
+                        prune_pending=EXCLUDED.prune_pending,
+                        prune_complete=EXCLUDED.prune_complete,
+                        updated_height=EXCLUDED.updated_height
+                    """,
+                    (
+                        epoch["epoch_id"],
+                        epoch["pool"],
+                        epoch["status"],
+                        epoch["phase"],
+                        epoch["gross_records"],
+                        epoch["active_engagers"],
+                        epoch["engager_slice"],
+                        epoch["allocated_total"],
+                        epoch["claimed_total"],
+                        epoch["finalized_epoch"],
+                        epoch["claim_window_days"],
+                        epoch["claim_deadline_epoch"],
+                        epoch["settlement_cursor"],
+                        epoch["partial_actor"],
+                        epoch["partial_count"],
+                        epoch["prune_pending"],
+                        epoch["prune_complete"],
+                        int(height),
+                    ),
+                )
+                creators = [accrual["creator"] for accrual in accruals]
+                if accruals:
+                    cur.executemany(
+                        """
+                        INSERT INTO creator_accruals(
+                            creator, epoch_id, earned, claimed, claim_deadline_epoch,
+                            claimed_height, claimed_txhash
+                        ) VALUES(%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT(creator, epoch_id) DO UPDATE SET
+                            earned=EXCLUDED.earned,
+                            claimed=EXCLUDED.claimed,
+                            claim_deadline_epoch=EXCLUDED.claim_deadline_epoch,
+                            claimed_height=EXCLUDED.claimed_height,
+                            claimed_txhash=EXCLUDED.claimed_txhash
+                        """,
+                        [
+                            (
+                                accrual["creator"],
+                                epoch_id,
+                                accrual["earned"],
+                                accrual["claimed"],
+                                epoch["claim_deadline_epoch"],
+                                accrual["claimed_height"],
+                                accrual["claimed_txhash"],
+                            )
+                            for accrual in accruals
+                        ],
+                    )
+                    cur.execute(
+                        "DELETE FROM creator_accruals WHERE epoch_id=%s AND NOT (creator=ANY(%s))",
+                        (epoch_id, creators),
+                    )
+                else:
+                    cur.execute("DELETE FROM creator_accruals WHERE epoch_id=%s", (epoch_id,))
+        logger.info(
+            "creator epoch projected epoch=%s status=%s accruals=%s height=%s",
+            epoch_id,
+            epoch["status"],
+            len(accruals),
+            height,
+        )
+
+    def process_creator_events(self, events: list, height: int) -> None:
+        """Project terminal creator epoch snapshots emitted during finalization."""
+        terminal_events = {"creator_epoch_claimable", "creator_epoch_expired"}
+        epochs: set[int] = set()
+        for event_type, attrs in self.decode_events(events):
+            if event_type not in terminal_events:
+                continue
+            raw_epoch = attrs.get("epoch")
+            if raw_epoch is None:
+                raise RuntimeError(f"{event_type} event missing epoch at height {height}")
+            epoch = int(raw_epoch)
+            if epoch < 0:
+                raise RuntimeError(f"{event_type} event has negative epoch {epoch}")
+            epochs.add(epoch)
+        for epoch in sorted(epochs):
+            self.sync_creator_epoch(epoch, height)
+
     def _handle_create_community(self, type_url: str, value: bytes, ts: int, height: int):
         parsed = MsgCreateCommunity()
         parsed.ParseFromString(value)
@@ -2685,6 +2816,10 @@ class MessageProcessor:
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
         epochs = [int(x) for x in (msg_dict.get("epoch_ids") or [])]
+        if not owner or not epochs:
+            raise RuntimeError("claim_creator_rewards is missing owner or epoch_ids")
+        for epoch in epochs:
+            self.sync_creator_epoch(epoch, height)
         logger.info("claim_creator_rewards owner=%s epochs=%s tx=%s height=%s", owner, epochs, tx_hash, height)
 
     @staticmethod

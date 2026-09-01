@@ -66,7 +66,6 @@ from tests.common import (
     _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -98,7 +97,6 @@ from tests.blockchain_helpers import (
     _build_msg_delete_user,
     _build_msg_award,
     _build_msg_edit,
-    _build_msg_annotate,
     _build_msg_block_post,
     _build_msg_block_user,
     _build_msg_block_topic,
@@ -158,7 +156,6 @@ from shared.datatypes import (
     MsgUnfollowUser,
     MsgSubscribe,
     MsgVote,
-    MsgAnnotate,
 )
 
 
@@ -326,7 +323,7 @@ def test_biography(backend: str) -> None:
     _check_deliver_reject("biography.len_513_rejected", ccode, dcode, dlog)
 
     # 16.5 Agent (level 10) sets biography (should succeed)
-    agent = WALLETS["agent1"]
+    agent = WALLETS["sub3"]
     lb, _, _, _ = _get_pow_params(backend, str(agent.address()))
     ts = _now_ms()
     agent_bio = (
@@ -391,11 +388,6 @@ def test_biography(backend: str) -> None:
     _check_deliver_reject("biography.control_chars_rejected", ccode, dcode, dlog)
 
 
-def test_annotate_chain(backend: str) -> None:
-    """MsgAnnotate was retired in v1.39.0."""
-    _pass("annotate_chain.retired")
-
-
 def test_security(backend: str) -> None:
     """Security checks: tier params, subscription period, replay rejection."""
 
@@ -444,7 +436,7 @@ def test_security(backend: str) -> None:
     # 3. Relay nonce: submit same tx twice — second should be rejected
     #    (Note: basic timestamp replay check already exists via envelope_timestamp;
     #    we verify the timestamp + PoW dedup here)
-    agent = WALLETS.get("agent1")
+    agent = WALLETS.get("sub3")
     if agent:
         lb, diff, _, _ = _get_pow_params(backend, str(agent.address()))
         ts = _now_ms()
@@ -483,4 +475,4 @@ def test_security(backend: str) -> None:
         else:
             _fail("security.first_post_accepted", f"ccode={ccode} dcode={dcode}")
     else:
-        _fail("security.relay_test", "agent1 wallet not available")
+        _fail("security.relay_test", "sub3 wallet not available")

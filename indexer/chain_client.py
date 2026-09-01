@@ -480,6 +480,95 @@ class ChainClient:
         )
         return result
 
+    def query_creator_epoch(self, epoch_id: int, timeout: int = GRPC_TIMEOUT) -> dict | None:
+        """Read one creator epoch, returning None only when it does not exist."""
+        from shared.datatypes import QueryCreatorEpochRequest, QueryCreatorEpochResponse
+
+        epoch = int(epoch_id)
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CreatorEpoch",
+                request_serializer=QueryCreatorEpochRequest.SerializeToString,
+                response_deserializer=QueryCreatorEpochResponse.FromString,
+            )
+            try:
+                resp = method(QueryCreatorEpochRequest(epoch_id=epoch), timeout=timeout)
+            except grpc.RpcError as e:
+                if e.code() == grpc.StatusCode.NOT_FOUND:
+                    return None
+                raise RuntimeError(f"CreatorEpoch gRPC failed for {epoch}: {e}") from e
+        value = resp.epoch
+        return {
+            "epoch_id": int(value.epoch_id),
+            "pool": str(value.pool),
+            "status": int(value.status),
+            "phase": int(value.phase),
+            "gross_records": int(value.gross_records),
+            "active_engagers": int(value.active_engagers),
+            "engager_slice": str(value.engager_slice),
+            "allocated_total": str(value.allocated_total),
+            "claimed_total": str(value.claimed_total),
+            "finalized_epoch": int(value.finalized_epoch) or None,
+            "claim_window_days": int(value.claim_window_days) or None,
+            "claim_deadline_epoch": int(value.claim_deadline_epoch) or None,
+            "settlement_cursor": bytes(value.settlement_cursor) or None,
+            "partial_actor": str(value.partial_actor or "") or None,
+            "partial_count": int(value.partial_count),
+            "prune_pending": bool(value.prune_pending),
+            "prune_complete": bool(value.prune_complete),
+        }
+
+    def query_creator_epoch_accruals(self, epoch_id: int) -> list[dict]:
+        """Read every creator accrual for one epoch with bounded pagination."""
+        from shared.datatypes import (
+            PageRequest,
+            QueryCreatorEpochAccrualsRequest,
+            QueryCreatorEpochAccrualsResponse,
+        )
+
+        epoch = int(epoch_id)
+        next_key = b""
+        out: list[dict] = []
+        seen: set[str] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CreatorEpochAccruals",
+                request_serializer=QueryCreatorEpochAccrualsRequest.SerializeToString,
+                response_deserializer=QueryCreatorEpochAccrualsResponse.FromString,
+            )
+            for _ in range(1001):
+                try:
+                    resp = method(
+                        QueryCreatorEpochAccrualsRequest(
+                            epoch_id=epoch,
+                            pagination=PageRequest(key=next_key, limit=1000),
+                        ),
+                        timeout=30,
+                    )
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"CreatorEpochAccruals gRPC failed for {epoch}: {e}") from e
+                for value in resp.accruals:
+                    creator = str(value.creator).strip().lower()
+                    if not creator or creator in seen:
+                        raise RuntimeError(f"CreatorEpochAccruals returned duplicate or empty creator for epoch {epoch}")
+                    if not value.amount or not value.claimed_amount:
+                        raise RuntimeError(f"CreatorEpochAccruals returned incomplete amounts for {creator} epoch {epoch}")
+                    seen.add(creator)
+                    out.append(
+                        {
+                            "creator": creator,
+                            "epoch_id": int(value.epoch),
+                            "earned": str(value.amount),
+                            "claimed": str(value.claimed_amount),
+                            "claimed_height": int(value.claimed_height) or None,
+                            "claimed_txhash": str(value.claimed_txhash or "") or None,
+                        }
+                    )
+                next_key = bytes(resp.pagination.next_key) if resp.HasField("pagination") else b""
+                if not next_key:
+                    return out
+        raise RuntimeError(f"CreatorEpochAccruals exceeded 1001 pages for epoch {epoch}")
+
     def query_subscription_runtime(self, address: str, timeout: int = GRPC_TIMEOUT) -> dict:
         """Read quota and renewal-warning state required by bootstrap."""
         from shared.datatypes import (

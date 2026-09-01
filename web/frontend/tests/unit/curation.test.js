@@ -85,7 +85,7 @@ describe('optimistic curation visibility', () => {
         const post = {
             post_id: 'post-1',
             user_id: 'mirage1author',
-            topic: 'tech',
+            community: 'tech',
             lens: { effective_team_id: 7 },
         };
         for (const [kind, target] of [['post', 'post-1'], ['user', 'mirage1author']]) {
@@ -222,7 +222,7 @@ describe('v1.39 curation UI contracts', () => {
 
     it('redirects the obsolete team listing route to the community', () => {
         const appSrc = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
-        expect(appSrc).toMatch(/path="\/c\/:topic\/teams"/);
+        expect(appSrc).toMatch(/path="\/c\/:community\/teams"/);
         expect(appSrc).toMatch(/element=\{<CommunityTeamsRedirect \/>}/);
     });
 
@@ -343,8 +343,8 @@ describe('v1.39 curation UI contracts', () => {
         expect(main).toMatch(/const CommunityLensHeading = styled\.div`[^`]*align-items: baseline;/);
         // The view toggle is icon-only and has no baseline, so its group stays centered.
         expect(main).toMatch(/const CommunityLensControls = styled\.div`[^`]*align-items: center;/);
-        expect(main).toMatch(/const feedTitle = urlTopic === 'all' \? 'All' : null/);
-        expect(main).not.toMatch(/else if \(isTopicFeed\) feedTitle = communityLabel/);
+        expect(main).toMatch(/const feedTitle = urlCommunity === 'all' \? 'All' : null/);
+        expect(main).not.toMatch(/else if \(isCommunityFeed\) feedTitle = communityLabel/);
     });
 
     it('uses the team description as the selected community header description', () => {
@@ -495,7 +495,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(membership).not.toMatch(/aria-haspopup/);
         expect(main).toMatch(/import CommunityMembershipButton/);
         expect(viewPost).toMatch(/import CommunityMembershipButton/);
-        expect(viewPost).not.toMatch(/const TopicFollowButton/);
+        expect(viewPost).not.toMatch(/const CommunityFollowButton/);
         // Membership, lens, sort and view controls stay together on the right.
         expect(main).toMatch(
             /CommunityMembershipButton[\s\S]*CurationLensPicker[\s\S]*FeedSortToggle[\s\S]*FeedViewToggle/,
@@ -621,8 +621,8 @@ describe('v1.39 curation UI contracts', () => {
         expect(cardView).toMatch(/showPostLens = false/);
         expect(listFeed).toMatch(/showPostLens = false/);
         expect(mainView).toMatch(/showPostLens=\{false\}/);
-        expect(viewPost).toMatch(/<TopicHeroMobileActions>[\s\S]*CommunityMembershipButton[\s\S]*renderHeaderLensPicker\(displayTopic\)/);
-        expect(viewPost).toMatch(/<TopicAction>[\s\S]*CommunityMembershipButton[\s\S]*renderHeaderLensPicker\(displayTopic\)/);
+        expect(viewPost).toMatch(/<CommunityHeroMobileActions>[\s\S]*CommunityMembershipButton[\s\S]*renderHeaderLensPicker\(displayCommunity\)/);
+        expect(viewPost).toMatch(/<CommunityAction>[\s\S]*CommunityMembershipButton[\s\S]*renderHeaderLensPicker\(displayCommunity\)/);
         expect(viewPost).toMatch(/<MobileRootMetaMenu>\s*\{renderPostMenu\(post\)\}/);
         expect(viewPost).toMatch(/<MetaInfoRowRight>\s*\{renderPostMenu\(post\)\}/);
         expect(viewPost).toMatch(/handleThreadLensChange/);
@@ -681,7 +681,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(sidebar).toMatch(/useViewerCuratorCommunities/);
         expect(sidebar).toMatch(/\$curated/);
         expect(sidebar).toMatch(/voteUp/);
-        expect(sidebar).toMatch(/orderedTopics/);
+        expect(sidebar).toMatch(/orderedCommunities/);
         expect(sidebar).toMatch(/HiUserGroup/);
         expect(sidebar).not.toMatch(/HiHashtag/);
         const createTeams = readFileSync(
@@ -843,7 +843,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(subscriptions).toMatch(/fetchViewerCuratorMembership\(lower, address, \{ fresh: true \}\)/);
         expect(subscriptions).toMatch(/requestCommunityLeaveConfirmation/);
         expect(app).toMatch(/<CommunityLeaveConfirmation \/>/);
-        expect(follows).toMatch(/await leaveCommunity\(address, topicTrimmed\)/);
+        expect(follows).toMatch(/await leaveCommunity\(address, communityTrimmed\)/);
         expect(follows).not.toMatch(/tx\.leaveCommunity/);
     });
 
@@ -857,10 +857,10 @@ describe('v1.39 curation UI contracts', () => {
         // otherwise the refetch re-caches the pre-team state it is replacing.
         const waitAt = teamsView.indexOf('waitForOwnCurationTeam(nextSlug');
         const invalidateAt = teamsView.indexOf('invalidateCurationReads(nextSlug)');
-        const topicsAt = teamsView.indexOf('notifyJoinedCommunitiesUpdated({ added: nextSlug })');
+        const communitiesAt = teamsView.indexOf('notifyJoinedCommunitiesUpdated({ added: nextSlug })');
         expect(waitAt).toBeGreaterThan(-1);
         expect(invalidateAt).toBeGreaterThan(waitAt);
-        expect(topicsAt).toBeGreaterThan(invalidateAt);
+        expect(communitiesAt).toBeGreaterThan(invalidateAt);
     });
 });
 

@@ -35,7 +35,6 @@ from tests.common import (
     _canon_base_block_community_raw, _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -47,8 +46,7 @@ from tests.blockchain_helpers import (
     _build_msg_post, _build_msg_vote, _build_msg_set_username,
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_community,
+    _build_msg_edit, _build_msg_block_post, _build_msg_block_user, _build_msg_block_community,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_join_community, _build_msg_leave_community,
@@ -72,8 +70,7 @@ from shared.datatypes import (
     MsgSetLevel, MsgSetUsername, MsgSetBiography,
     MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
     MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgSubscribe, MsgVote, MsgAnnotate,
-)
+    MsgSubscribe, MsgVote, )
 
 
 def test_follow_limits(backend: str) -> None:
@@ -179,22 +176,22 @@ def test_follow_limits(backend: str) -> None:
     joined_targets: list[str] = []
     for start in range(0, remaining_joined, chunk_size):
         batch_count = min(chunk_size, remaining_joined - start)
-        topics = [f"ft{_rand_str(4)}{start + i}" for i in range(batch_count)]
-        joined_targets.extend(topics)
+        communities = [f"ft{_rand_str(4)}{start + i}" for i in range(batch_count)]
+        joined_targets.extend(communities)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         pieces: list[tuple[str, int, int, bytes]] = []
-        for i, topic in enumerate(topics):
+        for i, community in enumerate(communities):
             ts = ts_base + i
             nonce = _gen_nonce()
-            base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, topic, nonce=nonce)
-            pieces.append((topic, ts, nonce, base))
+            base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, community, nonce=nonce)
+            pieces.append((community, ts, nonce, base))
         proofs = _compute_pows_parallel(
             [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
         )
         msgs = []
-        for (topic, ts, nonce, _), proof in zip(pieces, proofs):
-            msg = _build_msg_join_community(fw, lb, diff, ts, topic, pow_val=proof, nonce=nonce)
+        for (community, ts, nonce, _), proof in zip(pieces, proofs):
+            msg = _build_msg_join_community(fw, lb, diff, ts, community, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgJoinCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
@@ -211,11 +208,11 @@ def test_follow_limits(backend: str) -> None:
     if fill_ok:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
-        over_topic = f"ft{_rand_str(4)}over"
+        over_community = f"ft{_rand_str(4)}over"
         nonce = _gen_nonce()
-        base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, over_topic, nonce=nonce)
+        base = _canon_base_join_community_raw(fw_pub, _lb_bytes(lb), diff, ts, over_community, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_join_community(fw, lb, diff, ts, over_topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_join_community(fw, lb, diff, ts, over_community, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgJoinCommunity")],
             FILL_GAS_LIMIT,
@@ -293,7 +290,7 @@ def test_follow_limits(backend: str) -> None:
             _fail("follow.subscriber_level_persist", f"level={after_level}")
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
-    w_mx = WALLETS["agent1"]
+    w_mx = WALLETS["sub3"]
     w_mx_addr = str(w_mx.address())
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
@@ -324,8 +321,8 @@ def test_follow_limits(backend: str) -> None:
     # 8.5 Join community after blocking it still succeeds (block and join are independent)
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
-    block_topic = f"mx{_rand_str(4)}"
-    msg = _build_msg_block_community(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0, nonce=_gen_nonce())
+    block_community = f"mx{_rand_str(4)}"
+    msg = _build_msg_block_community(w_mx, lb, 0, ts, w_mx_addr, block_community, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgBlockCommunity")],
         DEFAULT_GAS_LIMIT,
@@ -336,7 +333,7 @@ def test_follow_limits(backend: str) -> None:
     if ccode == 0 and dcode == 0:
         lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
         ts = _now_ms()
-        msg = _build_msg_join_community(w_mx, lb, 0, ts, block_topic, pow_val=0, nonce=_gen_nonce())
+        msg = _build_msg_join_community(w_mx, lb, 0, ts, block_community, pow_val=0, nonce=_gen_nonce())
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgJoinCommunity")],
             DEFAULT_GAS_LIMIT,
@@ -485,37 +482,37 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     if block_post_ok:
         _pass(f"hardcap.blocked_post_deque_fill ({total_to_block_posts} blocked, no rejection)")
 
-    # ── 13.3 blocked_topics deque ──
+    # ── 13.3 blocked_communities deque ──
     max_blocked_communities = _tier_int(tier0, "max_blocked_communities")
-    total_to_block_topics = max_blocked_communities + 2
-    block_topic_ok = True
-    for start in range(0, total_to_block_topics, chunk_size):
-        batch_count = min(chunk_size, total_to_block_topics - start)
+    total_to_block_communities = max_blocked_communities + 2
+    block_community_ok = True
+    for start in range(0, total_to_block_communities, chunk_size):
+        batch_count = min(chunk_size, total_to_block_communities - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts_base = _now_ms()
         pieces: list[tuple[str, int, int, bytes]] = []
         for i in range(batch_count):
-            topic = f"bt{_rand_str(4)}{start + i}"
+            community = f"bt{_rand_str(4)}{start + i}"
             ts = ts_base + i
             nonce = _gen_nonce()
-            base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
-            pieces.append((topic, ts, nonce, base))
+            base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, community, nonce=nonce)
+            pieces.append((community, ts, nonce, base))
         proofs = _compute_pows_parallel(
             [(base, diff, base_bits, pow_factor, lb) for _, _, _, base in pieces]
         )
         msgs = []
-        for (topic, ts, nonce, _), proof in zip(pieces, proofs):
-            msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
+        for (community, ts, nonce, _), proof in zip(pieces, proofs):
+            msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, community, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockCommunity"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("hardcap.blocked_topic_deque_fill", f"chunk_start={start}")
-            block_topic_ok = False
+            _fail("hardcap.blocked_community_deque_fill", f"chunk_start={start}")
+            block_community_ok = False
             break
-    if block_topic_ok:
-        _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
+    if block_community_ok:
+        _pass(f"hardcap.blocked_community_deque_fill ({total_to_block_communities} blocked, no rejection)")
 
     _pass("hardcap.agent_lists_removed")
 

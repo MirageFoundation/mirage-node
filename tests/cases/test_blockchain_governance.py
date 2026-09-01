@@ -69,7 +69,6 @@ from tests.common import (
     _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -100,7 +99,6 @@ from tests.blockchain_helpers import (
     _build_msg_delete_user,
     _build_msg_award,
     _build_msg_edit,
-    _build_msg_annotate,
     _build_msg_block_post,
     _build_msg_block_user,
     _build_msg_block_topic,
@@ -160,7 +158,6 @@ from shared.datatypes import (
     MsgUnfollowUser,
     MsgSubscribe,
     MsgVote,
-    MsgAnnotate,
 )
 
 

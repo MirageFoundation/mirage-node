@@ -274,7 +274,7 @@ const LoadingSpinner = styled.div`
 `;
 
 const TABS = [
-    { id: 'topics', label: 'Communities' },
+    { id: 'communities', label: 'Communities' },
     { id: 'users', label: 'Users' },
     { id: 'posts', label: 'Posts' },
 ];
@@ -291,13 +291,13 @@ function makeRowClickHandler(navigate, url) {
 }
 
 export default function BlocksView({ state }) {
-    const [activeTab, setActiveTab] = useState('topics');
+    const [activeTab, setActiveTab] = useState('communities');
     const debugState = useDebugStateOverride();
     const {
         navigate,
         blockedUsers,
         blockedPosts,
-        blockedTopics,
+        blockedCommunities,
         blockedUsernames,
         listsLoading: listsLoadingRaw,
         listsError: listsErrorRaw,
@@ -317,7 +317,7 @@ export default function BlocksView({ state }) {
         ? 'Simulated error — appended ?_state=error to preview the error UI.'
         : listsErrorRaw;
     const forceEmpty = debugState === 'empty';
-    const visibleTopics = forceEmpty ? [] : blockedTopics;
+    const visibleCommunities = forceEmpty ? [] : blockedCommunities;
     const visibleUsers = forceEmpty ? [] : blockedUsers;
     const visiblePosts = forceEmpty ? [] : blockedPosts;
 
@@ -348,7 +348,7 @@ export default function BlocksView({ state }) {
     }
 
     const tabCounts = {
-        topics: visibleTopics.length,
+        communities: visibleCommunities.length,
         users: visibleUsers.length,
         posts: visiblePosts.length,
     };
@@ -410,7 +410,7 @@ export default function BlocksView({ state }) {
         );
     }
 
-    const showTopics = activeTab === 'topics';
+    const showCommunities = activeTab === 'communities';
     const showUsers = activeTab === 'users';
     const showPosts = activeTab === 'posts';
 
@@ -418,7 +418,7 @@ export default function BlocksView({ state }) {
         <>
             {headerBlock}
 
-            {showTopics && visibleTopics.length === 0 && (
+            {showCommunities && visibleCommunities.length === 0 && (
                 <StateBlock>
                     <StateIcon>
                         <HiNoSymbol />
@@ -430,27 +430,27 @@ export default function BlocksView({ state }) {
                 </StateBlock>
             )}
 
-            {showTopics && visibleTopics.length > 0 && (
+            {showCommunities && visibleCommunities.length > 0 && (
                 <List>
-                    {visibleTopics.map(topic => {
-                        const isPending = isCommunityPending(topic);
-                        const status = formatCommunityStatus(topic);
-                        const topicUrl = communityPath(topic);
+                    {visibleCommunities.map(community => {
+                        const isPending = isCommunityPending(community);
+                        const status = formatCommunityStatus(community);
+                        const communityUrl = communityPath(community);
                         return (
                             <Row
-                                key={topic}
+                                key={community}
                                 role="link"
                                 tabIndex={0}
-                                onClick={makeRowClickHandler(navigate, topicUrl)}
+                                onClick={makeRowClickHandler(navigate, communityUrl)}
                                 onKeyDown={e => {
-                                    if (e.key === 'Enter') navigate(topicUrl);
+                                    if (e.key === 'Enter') navigate(communityUrl);
                                 }}
                             >
                                 <LeadingIcon aria-hidden="true">
                                     <HiHashtag />
                                 </LeadingIcon>
                                 <Identity>
-                                    <IdentityTitle>{communityLabel(topic)}</IdentityTitle>
+                                    <IdentityTitle>{communityLabel(community)}</IdentityTitle>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
                                     <Button
@@ -461,7 +461,7 @@ export default function BlocksView({ state }) {
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            handleUnblockCommunity(e, topic);
+                                            handleUnblockCommunity(e, community);
                                         }}
                                     >
                                         {status || 'Unblock'}

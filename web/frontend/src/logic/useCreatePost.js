@@ -50,7 +50,7 @@ export function useCreatePost({
         } catch (_) { }
         return null;
     };
-    const getPreferredTopic = React.useCallback(() => {
+    const getPreferredCommunity = React.useCallback(() => {
         try {
             const st = locationState && locationState.fromCommunity;
             if (st && st !== 'all') {
@@ -70,8 +70,8 @@ export function useCreatePost({
         }
         return '';
     }, [locationState, locationSearch]);
-    const preferredTopic = React.useMemo(() => getPreferredTopic(), [getPreferredTopic]);
-    const [topicValue, setTopicValue] = useState(() => preferredTopic || '');
+    const preferredCommunity = React.useMemo(() => getPreferredCommunity(), [getPreferredCommunity]);
+    const [communityValue, setCommunityValue] = useState(() => preferredCommunity || '');
     const [titleValue, setTitleValue] = useState('');
     const [contentValue, setContentValue] = useState('');
     const [submitError, setSubmitError] = useState('');
@@ -120,7 +120,7 @@ export function useCreatePost({
                     scope: 'current',
                 });
                 if (data && data.root) {
-                    setTopicValue(data.root.topic || '');
+                    setCommunityValue(data.root.community || '');
                     setTitleValue(data.root.title || '');
                     const content = data.root.content || '';
                     const tagLower = (data.root.tag || '').toLowerCase();
@@ -175,36 +175,36 @@ export function useCreatePost({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isEditMode, overrideId]);
     useEffect(() => {
-        if ((!topicValue || topicValue === '') && preferredTopic) {
-            setTopicValue(preferredTopic);
+        if ((!communityValue || communityValue === '') && preferredCommunity) {
+            setCommunityValue(preferredCommunity);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [preferredTopic]);
+    }, [preferredCommunity]);
 
     // Auto-populate the content tag when the composer opens with a pre-filled
     // community (via referrer like `/c/gore` → "Create Post", URL `?community=foo`,
-    // or nav state `fromCommunity`). `handleTopicChange` already covers this for
-    // user-picked topics via `meta.dominant_tag` from `TopicSelector`, but
-    // pre-filled topics never go through that path — `topicValue` lands in
+    // or nav state `fromCommunity`). `handleCommunityChange` already covers this for
+    // user-picked communities via `meta.dominant_tag` from `CommunitySelector`, but
+    // pre-filled communities never go through that path — `communityValue` lands in
     // state directly without any meta. We do an explicit one-shot lookup so
-    // the same auto-apply works regardless of how the topic got there.
+    // the same auto-apply works regardless of how the community got there.
     //
     // Bails in edit mode (the post-loader sets the tag from the post itself
     // and marks it as manually set) and respects `tagManuallySet` so we
     // don't trample explicit user / preload intent. Override `allowed_tags`
     // with the full set since the user's display preferences shouldn't hide
-    // the tag of the topic they're actively posting in.
+    // the tag of the community they're actively posting in.
     useEffect(() => {
         if (isEditMode) return;
-        if (!topicValue) return;
+        if (!communityValue) return;
         if (tagManuallySet) return;
         let cancelled = false;
         (async () => {
             try {
-                // Dominant-tag auto-apply used retired search_topics. Communities
+                // Dominant-tag auto-apply used retired search_communities. Communities
                 // list has no tag stats, so leave the tag unset unless the user
-                // (or TopicSelector) sets it explicitly.
-                void topicValue;
+                // (or CommunitySelector) sets it explicitly.
+                void communityValue;
             } catch (_) { /* noop */ }
         })();
         return () => { cancelled = true; };
@@ -273,8 +273,8 @@ export function useCreatePost({
             return {
                 maxTitle,
                 maxContent,
-                maxTopic: parseInt(chain.max_topic_size) || 50,
-                minTopic: parseInt(chain.min_topic_size) || 2,
+                maxCommunity: parseInt(chain.max_community_size) || 50,
+                minCommunity: parseInt(chain.min_community_size) || 2,
                 willPayFee: userLevel >= 1,
                 isAdmin
             };
@@ -283,8 +283,8 @@ export function useCreatePost({
             return {
                 maxTitle: 150,
                 maxContent: 1000,
-                maxTopic: 50,
-                minTopic: 2,
+                maxCommunity: 50,
+                minCommunity: 2,
                 willPayFee: false,
                 isAdmin: false
             };
@@ -367,30 +367,30 @@ export function useCreatePost({
         return () => window.removeEventListener('paste', handleWindowPaste);
     }, [isSubmitting, isUploading, attachedMedia.length, editorUpload, MAX_MEDIA]);
 
-    const handleTopicChange = e => {
+    const handleCommunityChange = e => {
         let formattedValue = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (formattedValue.length > limits.maxTopic) {
-            formattedValue = formattedValue.slice(0, limits.maxTopic);
+        if (formattedValue.length > limits.maxCommunity) {
+            formattedValue = formattedValue.slice(0, limits.maxCommunity);
         }
-        const prevTopic = topicValue;
+        const prevCommunity = communityValue;
 
         // Ignore empty or identical values to avoid clearing when reopening selector
-        if (!formattedValue && prevTopic) {
+        if (!formattedValue && prevCommunity) {
             if (submitError) setSubmitError('');
             return;
         }
-        if (formattedValue === prevTopic) {
+        if (formattedValue === prevCommunity) {
             if (submitError) setSubmitError('');
             return;
         }
-        setTopicValue(formattedValue);
+        setCommunityValue(formattedValue);
 
-        // Tag follows the new topic deterministically: pick up the topic's
-        // dominant tag, or clear the tag entirely if the topic has none.
+        // Tag follows the new community deterministically: pick up the community's
+        // dominant tag, or clear the tag entirely if the community has none.
         // We don't honor `tagManuallySet` here — selecting a different
-        // topic is itself a strong signal that the previous tag may no
+        // community is itself a strong signal that the previous tag may no
         // longer apply, and surprise from the rare overwrite is less bad
-        // than mismatched content getting posted into the wrong topic.
+        // than mismatched content getting posted into the wrong community.
         const meta = e.meta || {};
         const dominantTag = (meta.dominant_tag || '').toLowerCase();
         if (dominantTag) {
@@ -400,7 +400,7 @@ export function useCreatePost({
             setTagEnabled(false);
             setTagValue('');
         }
-        // Reset to "auto-applied" so the next topic change can re-apply
+        // Reset to "auto-applied" so the next community change can re-apply
         // freely. Manual overrides via `handleTagSelect` still set this
         // back to `true`, but only the mount-time pre-fill effect honors
         // it (to avoid stomping the post-loader's tag in edit mode).
@@ -480,7 +480,7 @@ export function useCreatePost({
     const handleSubmit = async (event, opts = {}) => {
         event.preventDefault();
         setSubmitError('');
-        const topic = topicValue;
+        const community = communityValue;
         const title = String(titleValue).trim();
         let content = String(opts.content != null ? opts.content : contentValue).trim();
         const tag = tagEnabled ? String(tagValue || '').trim().toLowerCase() : '';
@@ -506,16 +506,16 @@ export function useCreatePost({
             setSubmitError(`Title too long (${title.length} > ${limits.maxTitle} chars)`);
             return;
         }
-        if (!topic || topic === '' || topic === '(select a topic)') {
+        if (!community || community === '' || community === '(select a community)') {
             setSubmitError(`Please select or enter a community`);
             return;
         }
-        if (topic.length < limits.minTopic) {
-            setSubmitError(`Community name too short (min ${limits.minTopic} characters)`);
+        if (community.length < limits.minCommunity) {
+            setSubmitError(`Community name too short (min ${limits.minCommunity} characters)`);
             return;
         }
-        if (topic.length > limits.maxTopic) {
-            setSubmitError(`Community name too long (max ${limits.maxTopic} characters)`);
+        if (community.length > limits.maxCommunity) {
+            setSubmitError(`Community name too long (max ${limits.maxCommunity} characters)`);
             return;
         }
         if (content.length > limits.maxContent) {
@@ -531,7 +531,7 @@ export function useCreatePost({
         try {
             if (isEditMode && overrideId) {
                 const res = await tx.editPost(overrideId, {
-                    topic,
+                    community,
                     title,
                     content,
                     target: '',
@@ -551,7 +551,7 @@ export function useCreatePost({
                 }
                 return;
             }
-            const res = await tx.createPostAsync(topic, title, content, tag, media);
+            const res = await tx.createPostAsync(community, title, content, tag, media);
             if (res && res.success) {
                 try {
                     const txHash = res && res.tx_hash ? String(res.tx_hash).toLowerCase() : "";
@@ -596,7 +596,7 @@ export function useCreatePost({
                         user_id: viewer,
                         username: Storage.load("username", ""),
                         timestamp: Math.floor(Date.now() / 1000),
-                        topic,
+                        community,
                         title,
                         content,
                         target: '',
@@ -623,7 +623,7 @@ export function useCreatePost({
                     window.dispatchEvent(new CustomEvent('postCreated', {
                         detail: {
                             postId: txHash,
-                            topic,
+                            community,
                             title,
                             content,
                             tag,
@@ -718,7 +718,7 @@ export function useCreatePost({
         location,
         isEditMode,
         overrideId,
-        topicValue,
+        communityValue,
         titleValue,
         contentValue,
         setContentValue,
@@ -749,7 +749,7 @@ export function useCreatePost({
         titleInputRef,
         contentEditorRef,
         limits,
-        handleTopicChange,
+        handleCommunityChange,
         getByteLength,
         handleTitleChange,
         getVideoThumbnailUrl,

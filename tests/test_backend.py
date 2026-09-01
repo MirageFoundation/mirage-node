@@ -50,7 +50,6 @@ from tests.cases.test_backend_content import (
     test_comments,
     test_media,
     test_content_limits,
-    test_annotate,
     test_edit_target_immutability,
     test_seen_posts,
     test_image_impressions,
@@ -65,7 +64,7 @@ from tests.cases.test_backend_subscriptions import (
     test_auto_renewal,
     test_tier_config_api,
     test_subscribe_gift_validation,
-    test_subscribe_gift_agent,
+    test_subscribe_gift_repeat,
 )
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import (
@@ -86,7 +85,7 @@ from tests.cases.test_backend_authz import (
     test_reward_claim_authz,
     test_cross_user_reads,
 )
-from tests.cases.test_backend_agents import test_agents, test_agent_behavior
+from tests.cases.test_backend_retired import test_retired_endpoints
 from tests.cases.test_backend_indexer import (
     test_indexer_hardening,
     test_indexer_invariants,
@@ -140,7 +139,7 @@ ALL_CATEGORIES = {
     "upload_bound": test_upload_body_bound,
     "indexer_drift": test_indexer_drift,
     "tokens": test_tokens,
-    "agents": test_agents,
+    "retired": test_retired_endpoints,
     "media": test_media,
     "auto_renewal": test_auto_renewal,
     "reports": test_reports,
@@ -151,8 +150,6 @@ ALL_CATEGORIES = {
     "content_limits": test_content_limits,
     "anon_visibility": test_anon_visibility,
     "profile_fields": test_profile_fields,
-    "agent_behavior": test_agent_behavior,
-    "annotate": test_annotate,
     "edit_target": test_edit_target_immutability,
     "tx_status": test_tx_status,
     "tx_status_npv": test_tx_status_non_post_vote,
@@ -169,7 +166,7 @@ ALL_CATEGORIES = {
     "net_tags": test_net_tags,
     "net_tags_live": test_net_tags_live,
     "subscribe_gift_validation": test_subscribe_gift_validation,
-    "subscribe_gift_agent": test_subscribe_gift_agent,
+    "subscribe_gift_repeat": test_subscribe_gift_repeat,
     "seen_posts": test_seen_posts,
     "image_impressions": test_image_impressions,
     "upload_media": test_upload_media,
@@ -212,6 +209,7 @@ EXCLUSIVE_CATEGORIES = {
 WALLETLESS_CATEGORIES = {
     "anon_visibility",
     "backend_hardening",
+    "retired",
     "stats_pure",
     "error_registry",
     "indexer_fail_hard",

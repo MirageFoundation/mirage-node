@@ -20,7 +20,7 @@ Rewrite `default`'s `CreatePostView` as a panel-styled composer that matches the
 - **Web (structure):** `web/frontend/src/themes/oldreddit/routes/CreatePostView.js`
 - **Data hook (do not modify):** `useCreatePost`
 - **Media helpers (reuse as-is):** `src/utils/ImageUpload.js`, `src/utils/VideoUpload.js`
-- **Theme-local primitives:** `MarkdownEditor`, `TopicSelector`, `MediaAttachmentLayout`
+- **Theme-local primitives:** `MarkdownEditor`, `CommunitySelector` (renamed from `TopicSelector` in v1.39.0), `MediaAttachmentLayout`
 
 ---
 
@@ -34,14 +34,14 @@ Rewrite `default`'s `CreatePostView` as a panel-styled composer that matches the
 ### Out of scope
 - `useCreatePost` or any submit flow change.
 - Media upload logic (reuse `ImageUpload.js` / `VideoUpload.js`).
-- `TopicSelector` internal logic (only restyle if needed).
+- `CommunitySelector` internal logic (only restyle if needed).
 
 ---
 
 ## Requirements
 
 - **Form container** styled as a panel (mobile-app tokens).
-- **Topic selector** uses theme-local `TopicSelector`.
+- **Community selector** uses theme-local `CommunitySelector`.
 - **Title** and **body** inputs aligned with mobile-app typography.
 - **`MarkdownEditor`** with **sticky toolbar on desktop** (scroll with content column).
 - **Media attach row** styled with theme tokens — reuse `MediaAttachmentLayout`.
@@ -60,7 +60,7 @@ Rewrite `default`'s `CreatePostView` as a panel-styled composer that matches the
 3. Read mobile `src/pages/create-screen.tsx` for composer tone + order.
 4. Copy the onyx structure (or oldreddit if simpler) into `themes/default/routes/CreatePostView.js`.
 5. Wrap the form in a panel container with mobile tokens.
-6. Wire `TopicSelector` from theme-local components.
+6. Wire `CommunitySelector` from theme-local components.
 7. Style title + body inputs with mobile typography.
 8. Apply sticky toolbar to `MarkdownEditor` via CSS `position: sticky` on desktop breakpoint.
 9. Style the media attach row with theme tokens.
@@ -73,7 +73,7 @@ Rewrite `default`'s `CreatePostView` as a panel-styled composer that matches the
 
 - [ ] `/create_post` composes and submits successfully.
 - [ ] Form container styled as a panel.
-- [ ] `TopicSelector` renders and selects a topic.
+- [ ] `CommunitySelector` renders and selects a community.
 - [ ] `MarkdownEditor` toolbar is sticky on desktop.
 - [ ] Media attach row styled + image/video upload still works.
 - [ ] Submit button uses theme `Button`.
@@ -93,7 +93,7 @@ CI=true npm run build
 
 - **Media upload regression** → only reuse existing helpers; never reimplement upload logic.
 - **Sticky toolbar layout shifts** → test at multiple viewport heights.
-- **TopicSelector breakage** → if restyled, verify selection still updates form state.
+- **CommunitySelector breakage** → if restyled, verify selection still updates form state.
 
 ---
 

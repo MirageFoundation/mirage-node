@@ -20,7 +20,7 @@ import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
  *   [brand] ─── flex ───  [search (centered)]  ─── flex ───  [create] [inbox] [avatar]
  *
  * Notes:
- *   - Home / Following / Topics nav lives in the sidebar only.
+ *   - Home / Following / Communities nav lives in the sidebar only.
  *   - Avatar uses the mobile app's DiceBear identicon (seeded by username/address),
  *     matching `mirage-mobile-app/src/components/atoms/avatar.tsx`.
  *   - Search input uses the main Mirage gradient border via tokens.gradient.
@@ -976,7 +976,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
     }, []);
     useEffect(() => { setMenuOpen(false); }, [location.pathname]);
 
-    // Search dropdown: drives recent searches, trending topics, and
+    // Search dropdown: drives recent searches, trending communities, and
     // debounced live results while the user is typing.
     const [searchFocused, setSearchFocused] = useState(false);
     const {
@@ -988,7 +988,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
         liveError,
         hasQuery,
         hasLiveResults,
-        trendingTopics,
+        trendingCommunities,
         isLoadingTrending,
         loadTrending,
         recentSearches,
@@ -1123,7 +1123,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                                 liveResults={liveResults}
                                 liveError={liveError}
                                 hasLiveResults={hasLiveResults}
-                                trendingTopics={trendingTopics}
+                                trendingCommunities={trendingCommunities}
                                 isLoadingTrending={isLoadingTrending}
                                 recentSearches={recentSearches}
                                 onRecentClick={handleRecentClick}

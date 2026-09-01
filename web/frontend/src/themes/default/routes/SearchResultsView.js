@@ -59,15 +59,15 @@ import { usePendingFollows } from "../../../logic/useFollowState.js";
  *  - R2: every color routed through tokens.
  *  - R3: only `1px solid theme.colors.border` dividers.
  *  - R4: data parity with `themes/bluemoon/routes/SearchResultsView.js`
- *    (topics, users, posts + load-more per tab), visual tone from
+ *    (communities, users, posts + load-more per tab), visual tone from
  *    `mirage-mobile-app/src/pages/search-screen.tsx` (plain-text tab row
- *    with active underline + count badge, row-style topic/user results,
+ *    with active underline + count badge, row-style community/user results,
  *    post results via the theme-local `CardView`).
  */
 
 const TABS = [
     { id: "posts", label: "Posts" },
-    { id: "topics", label: "Communities" },
+    { id: "communities", label: "Communities" },
     { id: "users", label: "Users" },
 ];
 
@@ -207,7 +207,7 @@ const MobileSearchClear = styled.button`
 /**
  * Wrappers used to show / hide entire blocks based on viewport. The
  * search page replaces the idle "Use the search bar" desktop copy with
- * a trending-topics list on mobile, so we hide the desktop-only block
+ * a trending-communities list on mobile, so we hide the desktop-only block
  * below 800px and hide the mobile-only block above 800px.
  */
 const DesktopOnly = styled.div`
@@ -266,7 +266,7 @@ const HeaderTitle = styled.div`
  * anchors to the right edge of the search column.
  *
  * A fixed `min-height` reserves vertical space equal to the toggle button
- * so the row never changes height when the toggle hides on the Topics /
+ * so the row never changes height when the toggle hides on the Communities /
  * Users tabs. The toggle itself is always mounted and toggles via a
  * `$visible` flag (visibility: hidden) — keeping it in the DOM preserves
  * its horizontal slot and prevents the tab bar below from shifting.
@@ -379,7 +379,7 @@ const PostsList = styled.div`
 `;
 
 /**
- * Reusable row container for topic / user results. Matches the inbox
+ * Reusable row container for community / user results. Matches the inbox
  * row style (full-bleed, feed divider, hover tile from `hoverBg`).
  */
 const RowItem = styled(Link)`
@@ -401,8 +401,8 @@ const RowItem = styled(Link)`
     }
 `;
 
-/** "#" pill for topic result rows — mirrors `FollowsView::TopicIcon` /
- *  `ProfileView::AlgoTopicChip` so topic chips read consistently across
+/** "#" pill for community result rows — mirrors `FollowsView::CommunityIcon` /
+ *  `ProfileView::AlgoCommunityChip` so community chips read consistently across
  *  the follows, algo, and search-results screens. */
 const RowIcon = styled.span`
     flex-shrink: 0;
@@ -423,7 +423,7 @@ const RowIcon = styled.span`
 `;
 
 /** Dicebear avatar used for user result rows. Same 28x28 footprint as
- *  `RowIcon` so the user list aligns with the topic list. Wraps the
+ *  `RowIcon` so the user list aligns with the community list. Wraps the
  *  shared `UserAvatar` so the bg color + 20% inner padding stay in
  *  sync with the rest of the app. */
 const RowAvatar = ({ src: _src, ...rest }) => (
@@ -438,8 +438,8 @@ const RowMain = styled.div`
     gap: 0.12rem;
 `;
 
-/* Primary line in topic / user result rows. Matches
- * `ProfileView::AlgoIdentityTitle` (0.78rem / 600) so topic + user
+/* Primary line in community / user result rows. Matches
+ * `ProfileView::AlgoIdentityTitle` (0.78rem / 600) so community + user
  * names read the same across the algo tab and search results. */
 const RowPrimary = styled.div`
     font-size: 0.78rem;
@@ -454,9 +454,9 @@ const RowPrimary = styled.div`
 const TierName = styled.span`
     color: ${({ $tierColor, theme }) => $tierColor || theme.colors.text};
     position: relative;
-    /* Keep the username text in lockstep with topic names — inherit the
+    /* Keep the username text in lockstep with community names — inherit the
      * RowPrimary typography (0.78rem / 600) so the users tab reads at
-     * the same size as the topics tab in search results. */
+     * the same size as the communities tab in search results. */
     font-size: inherit;
     font-weight: inherit;
     line-height: inherit;
@@ -602,17 +602,17 @@ export default function SearchResultsView({ state }) {
         query,
         loading,
         error,
-        topics,
+        communities,
         users,
         posts,
-        hasMoreTopics,
+        hasMoreCommunities,
         hasMoreUsers,
         hasMorePosts,
-        loadingMoreTopics,
+        loadingMoreCommunities,
         loadingMoreUsers,
         loadingMorePosts,
         displayQuery,
-        loadMoreTopics,
+        loadMoreCommunities,
         loadMoreUsers,
         loadMorePosts,
         formatDate,
@@ -628,9 +628,9 @@ export default function SearchResultsView({ state }) {
         [activeTab]
     );
 
-    /* --- Follow state (topics + users) ------------------------------------
+    /* --- Follow state (communities + users) ------------------------------------
      * Mirrors `useDiscover` / `useFollows`: load the viewer's followed
-     * topics + users once, keep them as lowercased `Set`s for O(1) checks,
+     * communities + users once, keep them as lowercased `Set`s for O(1) checks,
      * and optimistically update them on toggle. `usePendingFollows` drives
      * the in-flight spinner / queue-position label so the UI matches the
      * Follows tab.
@@ -661,14 +661,14 @@ export default function SearchResultsView({ state }) {
         let cancelled = false;
         (async () => {
             try {
-                const [topicsList, usersList] = await Promise.all([
+                const [communitiesList, usersList] = await Promise.all([
                     fetchJoinedCommunities(viewerAddressLower),
                     fetchFollowedUsers(viewerAddressLower),
                 ]);
                 if (cancelled) return;
                 setJoinedCommunitiesSet(
                     new Set(
-                        (topicsList || [])
+                        (communitiesList || [])
                             .map((t) => String(t || "").trim().toLowerCase())
                             .filter(Boolean)
                     )
@@ -688,7 +688,7 @@ export default function SearchResultsView({ state }) {
     }, [isLoggedIn, viewerAddressLower]);
 
     const isCommunityJoined = useCallback(
-        (topic) => joinedCommunitiesSet.has(String(topic || "").trim().toLowerCase()),
+        (community) => joinedCommunitiesSet.has(String(community || "").trim().toLowerCase()),
         [joinedCommunitiesSet]
     );
     const isUserFollowed = useCallback(
@@ -697,12 +697,12 @@ export default function SearchResultsView({ state }) {
     );
 
     const handleCommunityJoinToggle = useCallback(
-        async (e, topic) => {
+        async (e, community) => {
             if (e) {
                 if (typeof e.preventDefault === "function") e.preventDefault();
                 if (typeof e.stopPropagation === "function") e.stopPropagation();
             }
-            const t = String(topic || "").trim();
+            const t = String(community || "").trim();
             if (!t) return;
             if (!requireAccount('join communities')) return;
             if (!viewerAddressLower) return;
@@ -811,12 +811,12 @@ export default function SearchResultsView({ state }) {
         return () => clearTimeout(handle);
     }, [mobileQuery, query, navigate]);
 
-    // Pull trending topics from the shared dropdown hook so the mobile
+    // Pull trending communities from the shared dropdown hook so the mobile
     // idle state mirrors the desktop `SearchDropdown`. We intentionally
     // don't push the typed query into the hook — live search runs via
     // the URL-driven `useSearchResults` flow instead, which already
     // renders the full 3-tab view under the input on mobile.
-    const { trendingTopics, isLoadingTrending } = useSearchDropdown();
+    const { trendingCommunities, isLoadingTrending } = useSearchDropdown();
 
     const mobileSearchBar = (
         <MobileSearchForm role="search" onSubmit={handleMobileSubmit}>
@@ -862,7 +862,7 @@ export default function SearchResultsView({ state }) {
         </MobileSearchForm>
     );
 
-    // Mobile-only trending-topics block. Shown directly under the mobile
+    // Mobile-only trending-communities block. Shown directly under the mobile
     // search input when the input is empty (matches the desktop
     // `SearchDropdown` idle state). Hidden on desktop via the
     // `MobileOnly` wrapper.
@@ -871,23 +871,23 @@ export default function SearchResultsView({ state }) {
             <TrendingSectionLabel>Trending communities</TrendingSectionLabel>
             {isLoadingTrending ? (
                 <TrendingEmpty>Loading trending communities…</TrendingEmpty>
-            ) : trendingTopics.length === 0 ? (
+            ) : trendingCommunities.length === 0 ? (
                 <TrendingEmpty>No trending communities available</TrendingEmpty>
             ) : (
                 <TrendingList>
-                    {trendingTopics.map((topic) => (
+                    {trendingCommunities.map((community) => (
                         <RowItem
-                            key={`trending-${topic.topic}`}
-                            to={communityPath(topic.topic)}
+                            key={`trending-${community.community}`}
+                            to={communityPath(community.community)}
                         >
                             <RowIcon>
                                 <HiOutlineFire />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
+                                <RowPrimary>{communityLabel(community.community)}</RowPrimary>
                                 <RowMeta>
                                     {formatPostCount(
-                                        topic.post_count || topic.count
+                                        community.post_count || community.count
                                     ) || "No posts yet"}
                                 </RowMeta>
                             </RowMain>
@@ -932,7 +932,7 @@ export default function SearchResultsView({ state }) {
         if (userPickedTab) return;
         const counts = {
             posts: posts.length,
-            topics: topics.length,
+            communities: communities.length,
             users: users.length,
         };
         if (counts[activeTab] > 0) return;
@@ -940,7 +940,7 @@ export default function SearchResultsView({ state }) {
         if (firstWithResults && firstWithResults.id !== activeTab) {
             setActiveTab(firstWithResults.id);
         }
-    }, [query, loading, error, posts.length, topics.length, users.length, activeTab, userPickedTab]);
+    }, [query, loading, error, posts.length, communities.length, users.length, activeTab, userPickedTab]);
 
     const renderShell = (body) => (
         <ContentGrid>
@@ -1107,7 +1107,7 @@ export default function SearchResultsView({ state }) {
                         timestamp: post.timestamp,
                         title: post.title,
                         content: post.content,
-                        topic: post.topic,
+                        community: post.community,
                         tag: post.tag,
                         thumbnail: post.thumbnail,
                         points: post.points,
@@ -1133,8 +1133,8 @@ export default function SearchResultsView({ state }) {
         );
     };
 
-    const renderTopics = () => {
-        if (topics.length === 0) {
+    const renderCommunities = () => {
+        if (communities.length === 0) {
             return (
                 <StateBlock>
                     <StateIcon>
@@ -1147,23 +1147,23 @@ export default function SearchResultsView({ state }) {
         }
         return (
             <List>
-                {topics.map((topic) => {
-                    const topicName = topic.topic;
-                    const followed = isCommunityJoined(topicName);
-                    const pending = isCommunityPending(topicName);
-                    const status = formatCommunityStatus(topicName);
+                {communities.map((community) => {
+                    const communityName = community.community;
+                    const followed = isCommunityJoined(communityName);
+                    const pending = isCommunityPending(communityName);
+                    const status = formatCommunityStatus(communityName);
                     return (
                         <RowItem
-                            key={`topic-${topicName}`}
-                            to={communityPath(topicName)}
+                            key={`community-${communityName}`}
+                            to={communityPath(communityName)}
                         >
                             <RowIcon>
                                 <HiOutlineHashtag />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{communityLabel(topicName)}</RowPrimary>
+                                <RowPrimary>{communityLabel(communityName)}</RowPrimary>
                                 <RowMeta>
-                                    {formatPostCount(topic.post_count) || "No posts yet"}
+                                    {formatPostCount(community.post_count) || "No posts yet"}
                                 </RowMeta>
                             </RowMain>
                             {isLoggedIn && (
@@ -1177,15 +1177,15 @@ export default function SearchResultsView({ state }) {
                                         joined={followed}
                                         pending={pending}
                                         statusLabel={status}
-                                        onToggle={() => handleCommunityJoinToggle(null, topicName)}
+                                        onToggle={() => handleCommunityJoinToggle(null, communityName)}
                                     />
                                 </RowActions>
                             )}
                         </RowItem>
                     );
                 })}
-                {hasMoreTopics && (
-                    <ShowMoreButton onClick={loadMoreTopics} loading={loadingMoreTopics} spacing="loose">
+                {hasMoreCommunities && (
+                    <ShowMoreButton onClick={loadMoreCommunities} loading={loadingMoreCommunities} spacing="loose">
                         Show more
                     </ShowMoreButton>
                 )}
@@ -1289,13 +1289,13 @@ export default function SearchResultsView({ state }) {
 
     const tabContent = {
         posts: renderPosts,
-        topics: renderTopics,
+        communities: renderCommunities,
         users: renderUsers,
     };
 
     const tabCounts = {
         posts: posts.length,
-        topics: topics.length,
+        communities: communities.length,
         users: users.length,
     };
 

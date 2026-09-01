@@ -203,11 +203,15 @@ export function useNetwork({
             replace: true
         });
     };
+    const siteOf = peer => {
+        const url = peer.site || peer.moniker;
+        if (url && (url.startsWith('http://') || url.startsWith('https://'))) return url;
+        return '';
+    };
     const toHttpUrl = peer => {
         try {
-            if (peer.moniker && (peer.moniker.startsWith('http://') || peer.moniker.startsWith('https://'))) {
-                return peer.moniker.endsWith('/') ? peer.moniker : `${peer.moniker}/`;
-            }
+            const url = siteOf(peer);
+            if (url) return url.endsWith('/') ? url : `${url}/`;
             if (peer.ip) {
                 const formattedHost = typeof peer.ip === 'string' && peer.ip.includes(':') ? `[${peer.ip}]` : peer.ip;
                 return `http://${formattedHost}/`;
@@ -218,9 +222,8 @@ export function useNetwork({
         }
     };
     const getDisplayName = peer => {
-        if (peer.moniker && (peer.moniker.startsWith('http://') || peer.moniker.startsWith('https://'))) {
-            return peer.moniker;
-        }
+        const url = siteOf(peer);
+        if (url) return url;
         if (peer.ip) return `http://${peer.ip}`;
         return '(unknown)';
     };

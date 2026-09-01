@@ -210,6 +210,24 @@ func (am AppModule) CreatorAccruals(ctx context.Context, req *types.QueryCreator
 	return &types.QueryCreatorAccrualsResponse{Accruals: out}, nil
 }
 
+func (am AppModule) CreatorEpochAccruals(
+	ctx context.Context,
+	req *types.QueryCreatorEpochAccrualsRequest,
+) (*types.QueryCreatorEpochAccrualsResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	var key []byte
+	var limit uint64
+	if req.GetPagination() != nil {
+		key = req.GetPagination().GetKey()
+		limit = req.GetPagination().GetLimit()
+	}
+	out, nextKey, err := am.k.GetCreatorEpochAccrualsPaginated(sdkCtx, req.GetEpochId(), key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryCreatorEpochAccrualsResponse{Accruals: out, Pagination: teamPageResponse(nextKey)}, nil
+}
+
 func (am AppModule) TargetEarnings(ctx context.Context, req *types.QueryTargetEarningsRequest) (*types.QueryTargetEarningsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	h, err := types.HashBytes(strings.ToLower(strings.TrimSpace(req.GetTarget())))

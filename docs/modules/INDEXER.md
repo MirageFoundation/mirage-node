@@ -56,7 +56,8 @@ This is impractical at scale. The indexer pre-computes and indexes this data:
 Blockchain (KV Store)          →      Indexer      →      PostgreSQL (Relational)
 ┌──────────────────────┐              ┌──────────┐         ┌────────────────────────┐
 │ posts/{txhash}       │   decode     │          │  upsert │ posts (indexed by      │
-│ profiles/{addr}      │ ──────────►  │  Python  │ ──────► │   topic, owner, time)  │
+│ profiles/{addr}      │ ──────────►  │  Python  │ ──────► │  community, owner,     │
+│                      │              │          │         │  time)                 │
 │ votes/...            │   process    │  Service │         │ votes (indexed by      │
 └──────────────────────┘              └──────────┘         │   target, owner)       │
                                                            │ preferences, etc.      │
@@ -70,7 +71,7 @@ The indexer operates on an eventual consistency model, bounded by an atomic per-
 - **Blockchain is authoritative for current state, not for history:** the chain is pruned, and the indexer deliberately retains more than the chain does (blocked lists keep up to `INDEXER_LIST_CAP` = 100,000 entries per user while the chain keeps a small deque). PostgreSQL is therefore a **long-history artifact, not a disposable cache** — it cannot be fully rebuilt from a pruned chain.
 - **Indexer may lag:** during catch-up or network issues, the database trails the chain.
 - **Atomic per-block projection:** every required write for a block plus its checkpoint (`meta.last_height`, `meta.last_block_hash`, `meta.chain_id`) commit in **one** PostgreSQL transaction. A failure rolls the whole block back and the checkpoint never moves past a partially applied block.
-- **Replay is not idempotent against a populated database:** cumulative rows (topic stats, `user_topic_stats`, preferences) would be double-applied. `--height` is rejected outright when the database already holds a checkpoint; see [Replay and `--height`](#replay-and---height).
+- **Replay is not idempotent against a populated database:** cumulative rows (`community_content_stats`, `user_community_stats`, preferences) would be double-applied. `--height` is rejected outright when the database already holds a checkpoint; see [Replay and `--height`](#replay-and---height).
 - **Required vs. optional:** required projection writes fail the block. Optional telemetry (difficulty/supply samples, peers, observed chain head) runs *outside* the block transaction and is warn-only.
 - **No remote enrichment:** thumbnail derivation is deterministic and offline. The indexer issues no outbound requests on behalf of post content.
 
@@ -251,41 +252,50 @@ The indexer handles all `mirage.core.v1` message types, routing each to a specia
 TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgPost": MsgPost,
     "/mirage.core.v1.MsgEdit": MsgEdit,
-    "/mirage.core.v1.MsgAnnotate": MsgAnnotate,
     "/mirage.core.v1.MsgVote": MsgVote,
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
     "/mirage.core.v1.MsgDelete": MsgDelete,
+    "/mirage.core.v1.MsgJoinCommunity": MsgJoinCommunity,
+    "/mirage.core.v1.MsgLeaveCommunity": MsgLeaveCommunity,
     # ... 15+ message types
 }
 ```
+
+The map also still contains the message types retired in v1.39.0 (`MsgAnnotate`,
+`MsgEnableAgent`, `MsgDisableAgent`, `MsgSetAgents`, `MsgFollowTopic`,
+`MsgUnfollowTopic`, `MsgBlockTopic`, `MsgUnblockTopic`). The chain rejects new
+transactions of those types; the entries exist only so a reindex of blocks
+committed before v1.39.0 can decode them. The agent and annotate handlers are
+no-ops; the four retired topic-message handlers project the historical intent onto the community
+tables so a reindex reconstructs the same joins and blocks.
 
 ### Post Processing (MsgPost)
 
 Post handling involves several transformations:
 
-1. **No re-validation of consensus rules:** topic/title/content size limits are chain admission rules that the transaction has already passed with `code=0`. The indexer used to re-check them against *current-head* params, which silently dropped committed posts (it also invented a `min_title_size = 1` the chain does not have) and made the result depend on when indexing ran. Only database-safety checks that cannot disagree with consensus remain.
+1. **No re-validation of consensus rules:** community/title/content size limits are chain admission rules that the transaction has already passed with `code=0`. The indexer used to re-check them against *current-head* params, which silently dropped committed posts (it also invented a `min_title_size = 1` the chain does not have) and made the result depend on when indexing ran. Only database-safety checks that cannot disagree with consensus remain.
 2. **Owner derivation:** Extract from `envelope_pubkey` field
 3. **Paid flag derivation:** `paid = not (envelope_difficulty > 0 or envelope_pow > 0)`
-4. **Root resolution:** For comments, resolve `root_topic` and `root_post_id`
+4. **Root resolution:** For comments, resolve `root_community` and `root_post_id`
 5. **Auto-vote creation:** Author automatically upvotes their own post
 6. **Thumbnail discovery:** For root posts, extract preview image from content URLs
-7. **Topic stats update:** Increment `topic_content_stats` for content classification
+7. **Content stats update:** Increment `community_content_stats` for content classification
 
-**Root Topic Denormalization:**
+**Root Community Denormalization:**
 
-For efficient feed queries, every post stores its root topic (the topic of the thread's root post):
+For efficient feed queries, every post stores its root community (the community of the thread's root post):
 
 ```
-Root Post (txhash=abc123)     Comment (txhash=def456)
-┌────────────────────────┐    ┌────────────────────────┐
-│ topic: "technology"    │    │ topic: ""              │
-│ target: ""             │    │ target: "abc123"       │
-│ root_topic: technology │    │ root_topic: technology │  ← Denormalized
-│ root_post_id: abc123   │    │ root_post_id: abc123   │  ← Denormalized
-└────────────────────────┘    └────────────────────────┘
+Root Post (txhash=abc123)         Comment (txhash=def456)
+┌────────────────────────────┐    ┌────────────────────────────┐
+│ community: "technology"    │    │ community: ""              │
+│ target: ""                 │    │ target: "abc123"           │
+│ root_community: technology │    │ root_community: technology │  ← Denormalized
+│ root_post_id: abc123       │    │ root_post_id: abc123       │  ← Denormalized
+└────────────────────────────┘    └────────────────────────────┘
 ```
 
-This enables queries like "all posts/comments in topic X" without recursive parent traversal.
+This enables queries like "all posts/comments in community X" without recursive parent traversal.
 
 ### Vote Processing (MsgVote)
 
@@ -294,9 +304,9 @@ Vote handling is the most complex message type, involving:
 1. **Direction validation:** Must be -1, 0, or +1
 2. **Target existence check:** Reject votes for unknown posts
 3. **Previous vote lookup:** Handle vote changes (flip from +1 to -1)
-4. **Weight calculation:** Apply tier-based and topic-activity weighting
-5. **Preference updates:** Update topic and author preference scores
-6. **Topic stats update:** Track user's voting activity per topic
+4. **Weight calculation:** Apply tier-based and community-activity weighting
+5. **Preference updates:** Update community and author preference scores
+6. **Stats update:** Track user's voting activity per community in `user_community_stats`
 
 **Dual Vote Values:**
 
@@ -317,7 +327,7 @@ This separation allows personal preferences to use unweighted votes while commun
 CREATE TABLE posts (
     txhash TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
-    topic TEXT,
+    community TEXT,                 -- Renamed from `topic` in v1.39.0
     title TEXT,
     content TEXT,
     target TEXT,                    -- Parent post (empty for root posts)
@@ -327,7 +337,7 @@ CREATE TABLE posts (
     deleted BOOLEAN NOT NULL DEFAULT FALSE,
     thumbnail_url TEXT,
     tag TEXT NOT NULL DEFAULT '',   -- Content classification (sensitive, gore, etc.)
-    root_topic TEXT,                -- Denormalized: topic of thread's root post
+    root_community TEXT,            -- Denormalized: community of thread's root post (was `root_topic`)
     root_post_id TEXT               -- Denormalized: txhash of thread's root post
 );
 
@@ -362,8 +372,8 @@ CREATE TABLE profiles (
 -- User preferences (for personalized feeds)
 CREATE TABLE preferences (
     owner TEXT NOT NULL,
-    pref_type TEXT NOT NULL,        -- 'topic' or 'author'
-    target TEXT NOT NULL,           -- Topic name or author address
+    pref_type TEXT NOT NULL,        -- 'community' or 'author'
+    target TEXT NOT NULL,           -- Community slug or author address
     weight DOUBLE PRECISION NOT NULL,
     updated_at BIGINT NOT NULL,
     PRIMARY KEY (owner, pref_type, target)
@@ -380,15 +390,15 @@ CREATE TABLE user_similarity_cache (
     PRIMARY KEY (owner, similar_user)
 );
 
--- Per-user per-topic voting stats (for vote weighting)
-CREATE TABLE user_topic_stats (
+-- Per-user per-community voting stats (for vote weighting).
+CREATE TABLE user_community_stats (
     owner TEXT NOT NULL,
-    topic TEXT NOT NULL,
+    community TEXT NOT NULL,        -- Community slug
     vote_count INTEGER NOT NULL DEFAULT 0,
     net_votes INTEGER NOT NULL DEFAULT 0,      -- Sum of vote directions
     unique_root_posts INTEGER NOT NULL DEFAULT 0,
     post_count INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (owner, topic)
+    PRIMARY KEY (owner, community)
 );
 ```
 
@@ -397,8 +407,8 @@ CREATE TABLE user_topic_stats (
 Indexes are designed for common query patterns:
 
 ```sql
--- Feed queries (posts by topic, by time)
-CREATE INDEX idx_posts_topic_lower ON posts(LOWER(topic));
+-- Feed queries (posts by community, by time)
+CREATE INDEX idx_posts_community_lower ON posts(LOWER(community));
 CREATE INDEX idx_posts_created_at ON posts(created_at DESC);
 CREATE INDEX idx_posts_root_post_id ON posts(LOWER(root_post_id));
 
@@ -410,67 +420,70 @@ CREATE UNIQUE INDEX uniq_votes_owner_target ON votes(LOWER(owner), LOWER(target)
 CREATE INDEX idx_profiles_owner_lower ON profiles(LOWER(owner));
 ```
 
-**Design Rationale:** All text columns are indexed with `LOWER()` because Mirage uses case-insensitive matching for addresses and topics. The unique constraint on votes prevents duplicate votes and enables efficient "has user voted on post?" queries.
+**Design Rationale:** All text columns are indexed with `LOWER()` because Mirage uses case-insensitive matching for addresses and community slugs. The unique constraint on votes prevents duplicate votes and enables efficient "has user voted on post?" queries.
 
 ---
 
 ## Denormalization Strategy
 
-### Root Topic/Post Propagation
+### Root Community/Post Propagation
 
 The most significant denormalization is propagating root information to comments:
 
 ```
 Comment Chain Resolution:
-                                      
-Post A (root)  ←─┐                    
-  topic: "crypto" │                    
-  target: ""      │                    
-                  │ walk up            
-Comment B        ─┤                    
-  target: "A"     │                    
-                  │                    
-Comment C        ─┘                    
-  target: "B"                          
-  root_topic: "crypto"   ← Stored directly
-  root_post_id: "A"      ← Stored directly
+
+Post A (root)            ←─┐
+  community: "crypto"      │
+  target: ""               │
+                           │ walk up
+Comment B                 ─┤
+  target: "A"              │
+                           │
+Comment C                 ─┘
+  target: "B"
+  root_community: "crypto"   ← Stored directly
+  root_post_id: "A"          ← Stored directly
 ```
 
 **Resolution Algorithm:**
 
 ```python
-def get_root_topic_for_post(self, txhash: str):
+def get_root_community_for_post(self, txhash: str):
     """Walk parent chain to find root, with backfill."""
     current_id = txhash
     visited = set()
-    
+
     for _ in range(100):  # Bounded depth
         if current_id in visited:
             break
         visited.add(current_id)
-        
+
         row = fetch_post(current_id)
         if not row:
             break
-            
+
         # Fast path: already denormalized
-        if row.root_topic and row.root_post_id:
-            return row.root_topic, row.root_post_id
-            
+        if row.root_community and row.root_post_id:
+            return row.root_community, row.root_post_id
+
         # Reached root (no parent)
         if not row.target:
             # Backfill and return
-            update_post_root_fields(current_id, row.topic, current_id)
-            return row.topic, current_id
-            
+            update_post_root_fields(current_id, row.community, current_id)
+            return row.community, current_id
+
         current_id = row.target
-    
+
     return None, None
 ```
 
+The backfill runs inside the block transaction behind a savepoint, so a failed
+`UPDATE` degrades to a warning instead of aborting the whole block.
+
 **Benefits:**
 - Feed queries don't need recursive CTEs
-- Vote weighting can lookup topic instantly
+- Vote weighting can look up the community instantly
 - Thread reconstruction is a single query
 
 ### Preference Scoring
@@ -501,11 +514,11 @@ The indexer implements an asymmetric vote weighting system where upvotes and dow
 
 **Upvotes:** Always count at full tier weight (1.0 for free users, higher for subscribers)
 
-**Downvotes:** Gated by topic activity - users must have standing in a topic to downvote effectively
+**Downvotes:** Gated by community activity - users must have standing in a community to downvote effectively
 
-**Rationale:** This prevents "downvote brigading" where outsiders can bury on-topic content, while still allowing positive signals to flow freely. A user who has never engaged with a topic shouldn't be able to suppress content in that topic.
+**Rationale:** This prevents "downvote brigading" where outsiders can bury a community's content, while still allowing positive signals to flow freely. A user who has never engaged with a community shouldn't be able to suppress content in it.
 
-### Topic Activity Factors
+### Community Activity Factors
 
 For downvotes, the weight is calculated from multiple factors:
 
@@ -514,30 +527,30 @@ For downvotes, the weight is calculated from multiple factors:
 if net_votes < COMMUNITY_VOTE_MIN_NET_VOTES:
     weight = COMMUNITY_VOTE_BASELINE  # Zero effective weight
 else:
-    topic_factor = min(vote_count / COMMUNITY_VOTE_MAX_TOPIC_VOTES, 1.0)
+    community_factor = min(vote_count / COMMUNITY_VOTE_MAX_COMMUNITY_VOTES, 1.0)
     age_factor = min(age_days / COMMUNITY_VOTE_MATURITY_DAYS, 1.0)
     root_factor = min(unique_root_posts / COMMUNITY_VOTE_MIN_ROOT_POSTS, 1.0)
     posts_factor = min(post_count / COMMUNITY_VOTE_MAX_POSTS, 1.0)
-    
-    combined = topic_factor * age_factor * root_factor * posts_factor
+
+    combined = community_factor * age_factor * root_factor * posts_factor
     weight = BASELINE + combined * (tier_max - BASELINE)
 ```
 
 **Factors explained:**
-- `vote_count`: How many votes has user cast in this topic?
+- `vote_count`: How many votes has user cast in this community?
 - `net_votes`: Sum of vote directions (must be positive to have any power)
 - `age_days`: How old is the account?
 - `unique_root_posts`: How many distinct threads has user engaged with?
-- `post_count`: How many posts/comments has user made in this topic?
+- `post_count`: How many posts/comments has user made in this community?
 
-### User Topic Stats Tracking
+### User Community Stats Tracking
 
-To enable efficient weight calculation, the indexer maintains per-user per-topic statistics:
+To enable efficient weight calculation, the indexer maintains per-user per-community statistics.
 
 ```sql
-user_topic_stats:
+user_community_stats:
 ┌─────────────────────┬───────────┬────────────┬────────────┬────────────────────┬────────────┐
-│ owner               │ topic     │ vote_count │ net_votes  │ unique_root_posts  │ post_count │
+│ owner               │ community │ vote_count │ net_votes  │ unique_root_posts  │ post_count │
 ├─────────────────────┼───────────┼────────────┼────────────┼────────────────────┼────────────┤
 │ mirage1abc...       │ crypto    │ 45         │ 38         │ 12                 │ 5          │
 │ mirage1abc...       │ art       │ 3          │ 3          │ 2                  │ 0          │
@@ -563,9 +576,8 @@ def _sync_profiles_from_chain(self):
     with self.db.transaction(label="profile_sync"):
         self.db.upsert_profiles_batch(batch, now)
         for p in profiles:
-            self.db.set_enabled_agents(owner, p["enabled_agents"])
             self.db.set_followed_users(owner, p["followed_users"])
-            self.db.set_followed_topics(owner, p["followed_topics"])
+            self.db.set_joined_communities(owner, p["joined_communities"])
             # blocked_* are merged, never cleared
         self._soft_delete_absent_owners(chain_owners, now)
 ```
@@ -580,9 +592,11 @@ def _sync_profiles_from_chain(self):
 | Data | Treatment |
 |------|-----------|
 | Scalars (username, level, expiry, bio, avatar, banner, flair) | Authoritative from chain; overwritten |
-| `enabled_agents`, `followed_users`, `followed_topics` | Authoritative from chain (hard-capped lists); replaced wholesale |
-| `blocked_users`, `blocked_posts`, `blocked_topics` | **Merged, never cleared.** The chain keeps a small deque; the indexer intentionally retains the full history, so a sync must not truncate it to the chain's window |
+| `followed_users`, `joined_communities` | Authoritative from chain (hard-capped lists); replaced wholesale |
+| `blocked_users`, `blocked_posts`, `blocked_communities` | **Merged, never cleared.** The chain keeps a small deque; the indexer intentionally retains the full history, so a sync must not truncate it to the chain's window |
 | Profiles present in the DB but absent from chain | Soft-deleted, and their list rows removed |
+
+There is no `joined_communities` table. `set_joined_communities` writes rows into `community_curation_preferences`, because joining a community *is* having a curation-preference row for it.
 
 The whole reconciliation runs in one transaction, and **a failure aborts startup** rather than logging "KV Sync skipped" and continuing with stale profile state. Because chain-side profile listing is authoritative here, `GetProfiles` on the chain no longer skips profiles whose JSON or list reads fail — it returns an error, so a partial response cannot be mistaken for a complete owner inventory and trigger spurious soft-deletes.
 
@@ -686,14 +700,14 @@ Dimension metadata is likewise never probed. `DatabaseManager._extract_media_met
 
 **Consequence:** posts linking to a site whose preview image is only discoverable from its HTML get no thumbnail. That is the accepted trade for taking user-controlled network access off the validator.
 
-### Topic Content Classification
+### Community Content Classification
 
-Posts can be tagged with content classifications (`sensitive`, `gore`, `violence`, `death`, `adult`). The indexer aggregates these per topic:
+Posts can be tagged with content classifications (`sensitive`, `gore`, `violence`, `death`, `adult`). The indexer aggregates these per community:
 
 ```sql
-topic_content_stats:
+community_content_stats:
 ┌─────────────┬─────────────┬────────────────┬──────────────┬───────────────┐
-│ topic       │ total_posts │ sensitive_count│ adult_count  │ dominant_tag  │
+│ community   │ total_posts │ sensitive_count│ adult_count  │ dominant_tag  │
 ├─────────────┼─────────────┼────────────────┼──────────────┼───────────────┤
 │ random      │ 1000        │ 50             │ 600          │ adult         │
 │ technology  │ 500         │ 5              │ 0            │               │
@@ -701,8 +715,8 @@ topic_content_stats:
 ```
 
 This enables:
-- Topic safety warnings in the UI
-- Content filtering by topic reputation
+- Community safety warnings in the UI
+- Content filtering by community reputation
 - Moderation prioritization
 
 ---
@@ -775,7 +789,7 @@ self.log_yaml("Stored post", {
     "height": height,
     "txhash": txhash,
     "owner": owner,
-    "topic": topic,
+    "community": community,
     "paid": paid,
 })
 ```
@@ -788,7 +802,7 @@ action: insert
 height: 12345678
 txhash: abc123...
 owner: mirage1...
-topic: technology
+community: technology
 paid: true
 -------------------------------------------
 ```
@@ -801,17 +815,17 @@ Vote processing includes detailed calculation logs:
 Stored vote
 vote:
   direction: -1
-  topic: crypto
+  community: crypto
   target: abc123...
 result:
   user_vote: -1.0
   user_weight: -0.15
 calculation:
-  formula: "(topic * age * roots * posts) * tier_max"
+  formula: "(community * age * roots * posts) * tier_max"
   tier_max: 1.0
   factors:
     net_votes: "5 (min: 3)"
-    topic: "10/50 = 0.2"
+    community: "10/50 = 0.2"
     age: "30d/90d = 0.33"
     roots: "3/5 = 0.6"
     posts: "2/10 = 0.2"
@@ -888,7 +902,7 @@ When the checkpoint sits below the node's earliest retained block there is nothi
 Replay is only supported against an empty indexer database.
 ```
 
-Cumulative rows — `user_topic_stats` (`vote_count`, `net_votes`, `post_count`), `topic_content_stats`, and the decaying `preferences` weights — have no per-message idempotency guard. Replaying blocks into a populated database double-counts them. The flag exists for rebuilding an empty database from a chosen height, nothing else. If the derived tables are already suspect, rebuild them from the canonical `posts`/`votes` tables with the `v1.33.0_rebuild_derived_stats` migration rather than replaying blocks.
+Cumulative rows — `user_community_stats` (`vote_count`, `net_votes`, `post_count`), `community_content_stats`, and the decaying `preferences` weights — have no per-message idempotency guard. Replaying blocks into a populated database double-counts them. The flag exists for rebuilding an empty database from a chosen height, nothing else. If the derived tables are already suspect, rebuild them from the canonical `posts`/`votes` tables with the `v1.33.0_rebuild_derived_stats` migration rather than replaying blocks.
 
 ### Database Migrations
 

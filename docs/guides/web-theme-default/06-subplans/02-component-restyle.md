@@ -15,7 +15,7 @@ This sub-plan covered the "globals" component restyle: the REQUIRED theme compon
 
 > **Note:** Two additional slices were originally scoped and later dropped by design decision. Those components stay as-is; any future restyle work on them will be scoped as a separate plan.
 >
-> - **Slice B** (content rendering — MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard) — dropped.
+> - **Slice B** (content rendering — MarkdownRenderer, InlineMedia, MediaGallery) — dropped.
 > - **Slice C** (composer / feed controls — FilterBar, MediaAttachmentLayout, MarkdownEditor) — dropped.
 
 ### Slice A notes
@@ -44,7 +44,7 @@ Fixing these components first means every subsequent sub-plan benefits without p
 | Tooltip | `components/Tooltip.js` | restyled | ✅ required |
 | UnlockPrompt | `components/UnlockPrompt.js` | restyled | ✅ required |
 
-`MobileBottomNav` is tracked separately in sub-plan 08 because the restyle is large. `MarkdownRenderer`, `InlineMedia`, `MediaGallery`, `QuestHeroCard`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally out of scope for this sub-plan.
+`MobileBottomNav` is tracked separately in sub-plan 08 because the restyle is large. `MarkdownRenderer`, `InlineMedia`, `MediaGallery`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally out of scope for this sub-plan.
 
 ---
 
@@ -99,7 +99,7 @@ Bring every component in the audit in line with default RULES:
 - Behavior/data changes.
 - Icon library changes beyond `react-icons/hi2`.
 - MobileBottomNav (see sub-plan 08).
-- Content-rendering components (MarkdownRenderer, InlineMedia, MediaGallery, QuestHeroCard).
+- Content-rendering components (MarkdownRenderer, InlineMedia, MediaGallery).
 - Composer / feed control components (FilterBar, MediaAttachmentLayout, MarkdownEditor).
 
 ---

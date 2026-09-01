@@ -68,7 +68,6 @@ from shared.canon import (  # noqa: E402
     canon_base_report as _canon_base_report_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
-    canon_base_annotate as _canon_base_annotate_raw,
     canon_base_join_community as _canon_base_join_community_raw,
     canon_base_leave_community as _canon_base_leave_community_raw,
     canon_base_block_community as _canon_base_block_community_raw,
@@ -88,7 +87,7 @@ SUITE_BACKEND: str = DEFAULT_BACKEND
 # shared: two categories following, blocking and then asserting on sub1 at the
 # same time would fail on each other's writes. The pool holds N identical sets
 # and each running category leases one for its whole run.
-WALLET_ROLES = ("free", "sub1", "sub2", "agent1", "agent2")
+WALLET_ROLES = ("free", "sub1", "sub2", "sub3", "sub4")
 
 # Every set is funded identically, so this stays one global and the case files
 # that import it need no change.
@@ -786,7 +785,7 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
 
 def _do_subscribe(backend: str, wallet: LocalWallet, level: int, target: str = "") -> dict:
-    """Subscribe a wallet to the given level (1=Subscriber, 10=Agent), optionally gifting to target."""
+    """Subscribe a wallet to the given level (1=Subscriber), optionally gifting to target."""
     addr = str(wallet.address())
     st = get_status(backend, address=addr)
     lb = str(st.get("last_block_hash", ""))
@@ -883,7 +882,7 @@ def _wallet_entries() -> list[tuple[int, str, LocalWallet]]:
 
 
 # Roles that hold a paid subscription. free stays free on purpose.
-_PAID_ROLES = ("sub1", "sub2", "agent1", "agent2")
+_PAID_ROLES = ("sub1", "sub2", "sub3", "sub4")
 
 
 def setup_test_wallets(backend: str, sets: int = 1) -> bool:
@@ -980,8 +979,11 @@ def setup_test_wallets(backend: str, sets: int = 1) -> bool:
             "free": 1_000_000,  #           1 MIRAGE (minimal non-zero for balance checks)
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
-            "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 1_500_000_000_000,  # 1,500,000 MIRAGE (Agent fee + 2 agent gifts)
+            # Both only buy a level-1 subscription now that the Agent tier is gone.
+            # They are still funded at the old Agent prices, which is most of a
+            # wallet set's up-front faucet cost; right-sizing them is open work.
+            "sub3": 500_000_000_000,  #   500,000 MIRAGE
+            "sub4": 1_500_000_000_000,  # 1,500,000 MIRAGE (subscription + 2 gifts)
         }
     )
     try:
@@ -1102,22 +1104,22 @@ def setup_test_wallets(backend: str, sets: int = 1) -> bool:
         )
         return False
 
-    # Set biographies on the dedicated agent wallets
-    AGENT_BIOS = {
-        "agent1": (
-            "This is a test agent biography.\n"
-            "Agents operate at level 10 with expanded capabilities.\n"
+    # Two wallets carry a biography so the profile tests have something to read.
+    EXTRA_WALLET_BIOS = {
+        "sub3": (
+            "This is a test biography.\n"
+            "It spans several lines so multi-line storage is covered.\n"
             "This biography was set during automated testing."
         ),
-        "agent2": (
-            "Another test agent biography.\n"
-            "This agent was created for integration testing.\n"
-            "It verifies that level 10 accounts can hold biographies."
+        "sub4": (
+            "Another test biography.\n"
+            "This wallet was created for integration testing.\n"
+            "It verifies that subscriber accounts can hold biographies."
         ),
     }
     bio_tx_hashes: list[tuple[str, str]] = []
     for set_idx, role, w in entries:
-        bio = AGENT_BIOS.get(role)
+        bio = EXTRA_WALLET_BIOS.get(role)
         if bio is None:
             continue
         label = _wallet_label(set_idx, role)

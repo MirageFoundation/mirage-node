@@ -18,7 +18,7 @@ def run(db, chain, logger):
                     post_txhash TEXT NOT NULL,
                     agent_address TEXT NOT NULL,
                     edit_txhash TEXT NOT NULL,
-                    topic TEXT,
+                    community TEXT,
                     title TEXT,
                     content TEXT,
                     tag TEXT,

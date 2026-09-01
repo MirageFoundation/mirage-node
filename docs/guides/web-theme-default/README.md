@@ -62,7 +62,7 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
 
-**Next focus:** Plan 06 is closed. All sub-plans 06.1 – 06.5, 06.7 – 06.11 ✅ done; 06.6 ⏭️ skipped. Sub-plan [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) (Admin UI pass) landed last — A (`tierAdmin` token), B (profile menu), C (Subscription admin branch), D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity via the new `useAdminQuestActions` hook in `CardView`/`PostMenu`), and F (cleanup + grep gates) all green. Optional follow-up: flip `defaultManifest` to index 0 in `THEME_MANIFESTS` to make `default` the registry default.
+**Next focus:** Plan 06 is closed. All sub-plans 06.1 – 06.5, 06.7 – 06.11 ✅ done; 06.6 ⏭️ skipped. Sub-plan [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) (Admin UI pass) landed last — A (`tierAdmin` token), B (profile menu), C (Subscription admin branch), D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity in `CardView`/`PostMenu`), and F (cleanup + grep gates) all green. Optional follow-up: flip `defaultManifest` to index 0 in `THEME_MANIFESTS` to make `default` the registry default.
 
 Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3, and the profile slice closed via a tokenization-only pass in sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md) (full header/tabs rewrite dropped by design decision). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
@@ -74,8 +74,8 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 
 **Routes still rendering in oldreddit style** (need full default restyle):
 
-- `DiscoverView.js`, `AgentsView.js`
-- `SubscriptionView.js`, `ReferralsView.js`
+- `DiscoverView.js`
+- `SubscriptionView.js`
 - `NotFoundView.js`
 
 > `FollowsView.js`, `BlocksView.js`, `ReportsView.js` were restyled in sub-plan 06.3. `NetworkView.js`, `StatsView.js` were restyled in sub-plan 06.4.
@@ -86,17 +86,19 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 
 > `Button.js`, `Toast.js`, `Tooltip.js`, `UnlockPrompt.js` were ported in sub-plan 06.2 Slice A.
 >
-> `InlineMedia.js`, `MediaGallery.js`, `MarkdownRenderer.js`, `QuestHeroCard.js`, `FilterBar.js`, `MediaAttachmentLayout.js`, and `MarkdownEditor.js` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
+> `InlineMedia.js`, `MediaGallery.js`, `MarkdownRenderer.js`, `FilterBar.js`, `MediaAttachmentLayout.js`, and `MarkdownEditor.js` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
+>
+> This inventory is a snapshot from the Plan 06 audit. `AgentsView.js`, `ReferralsView.js` and `QuestHeroCard.js` appeared in it at the time and were deleted in v1.39.0 along with agents, referrals and quests.
 
 **New Plan 06 sub-plans** (each a PR):
 
 1. [`01-profile.md`](./06-subplans/01-profile.md) — `ProfileView` + profile header/tabs (was Plan 04 leftover)
-2. [`02-component-restyle.md`](./06-subplans/02-component-restyle.md) — Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer, QuestHeroCard + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout
+2. [`02-component-restyle.md`](./06-subplans/02-component-restyle.md) — Button, Toast, Tooltip, InlineMedia, MediaGallery, UnlockPrompt, MarkdownRenderer + finish passes on FilterBar / MarkdownEditor / MediaAttachmentLayout
 3. [`03-social-routes.md`](./06-subplans/03-social-routes.md) — Follows, Blocks, Reports (list-row pattern)
 4. [`04-network-stats.md`](./06-subplans/04-network-stats.md) — Network + Stats (info-panel + chart container)
-5. [`05-subscription-referrals.md`](./06-subplans/05-subscription-referrals.md) — Subscription + Referrals
+5. [`05-subscription-referrals.md`](./06-subplans/05-subscription-referrals.md) — Subscription (referrals section trimmed in v1.39.0)
 6. ~~Bridge~~ — removed permanently in v1.31.0 (no UI)
-7. [`07-agents-discover-notfound.md`](./06-subplans/07-agents-discover-notfound.md) — Agents, Discover (topics), NotFound
+7. [`07-agents-discover-notfound.md`](./06-subplans/07-agents-discover-notfound.md) — Discover (communities), NotFound (agents section trimmed in v1.39.0)
 8. [`08-mobile-bottom-nav.md`](./06-subplans/08-mobile-bottom-nav.md) — MobileBottomNav full restyle (deferred from Plan 02)
 9. [`09-polish-and-qa.md`](./06-subplans/09-polish-and-qa.md) — spacing / typography / state / responsive / accessibility polish + QA + optional default-theme switch
 10. [`10-loading-states-skeletons.md`](./06-subplans/10-loading-states-skeletons.md) — tokenized `Skeleton` primitive + per-route skeleton loaders; replaces inherited `Loading…` text (runs after 08, before 09)

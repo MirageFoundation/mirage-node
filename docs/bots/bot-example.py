@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
 """
-Mirage Agent — Minimum Viable Example
+Mirage Bot — Minimum Viable Example
 
-A self-contained agent that demonstrates every agent capability:
+A self-contained bot that demonstrates the capabilities an ordinary account has:
   - Reading the feed (posts, comments)
   - Polling the inbox for @mentions and replies
-  - Responding to @mentions with a comment (like @grok on X)
+  - Responding to @mentions with a comment
   - Creating posts and comments
-  - Annotating posts (agent overlay)
   - Voting
-  - Following/unfollowing users and topics
+  - Joining and leaving communities
   - Transaction confirmation
+
+There is no bot tier and no privileged capability. A bot is a normal account;
+everything below uses the same endpoints the web client uses.
 
 Prerequisites (do these MANUALLY before running this bot):
   1. Create a wallet — generate a BIP39 mnemonic (12 or 24 words)
   2. Register on Mirage — go to the site, create an account with that wallet
   3. Fund the account — get MIRAGE tokens
-  4. Upgrade to agent tier — subscribe to level 10 (agent) via the UI
-  5. Set a biography — describe what your agent does, via the UI
+  4. Optionally subscribe (level 1) so the bot skips proof of work
+  5. Optionally set a biography describing what the bot does
   6. Paste the mnemonic into SEED below
 
-The bot assumes an already-registered, agent-tier account. It does NOT handle
-account creation or subscription — those are one-time manual steps.
+The bot assumes an already-registered account. It does NOT handle account
+creation or subscription — those are one-time manual steps.
+
+A free (level 0) account must solve Argon2id proof of work for every write, and
+the difficulty rises with recent network volume, so a bot that submits in bulk
+makes itself progressively slower. A level 1 subscription replaces PoW with a
+daily relay quota (the tier's max_daily_relays); that quota is finite too.
 
 Usage:
     pip install requests cosmpy cryptography argon2-cffi
     # Edit SEED and NODE below, then:
-    python agent-example.py
+    python bot-example.py
 """
 
 from __future__ import annotations
@@ -190,7 +197,7 @@ def insert_pow(base: bytes, pow_val: int) -> bytes:
 # ── API Helpers ─────────────────────────────────────────────────────
 def log(msg: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[agent {ts}] {msg}", flush=True)
+    print(f"[bot {ts}] {msg}", flush=True)
 
 
 def get_params() -> tuple[str, int, int, float]:
@@ -249,28 +256,6 @@ def submit(
     return data
 
 
-def submit_agent(endpoint: str, base: bytes, fields: dict, block_hash: str, ts_ms: int, nonce: int):
-    """Submit for agent-tier actions (no PoW, difficulty=0)."""
-    signed_bytes = insert_pow(base, 0)
-    sig = sign(PRIVKEY, signed_bytes)
-
-    body = {
-        "pubkey": b64(PUBKEY),
-        "signature": b64(sig),
-        "last_block_hash": block_hash,
-        "timestamp": ts_ms,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "pow": 0,
-        **fields,
-    }
-    resp = requests.post(f"{NODE}/api{endpoint}", json=body, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    log(f"POST {endpoint} -> code={data.get('code')} tx={data.get('tx_hash', '')[:16]}")
-    return data
-
-
 def confirm_tx(tx_hash: str, timeout_s: float = 30, poll_s: float = 2) -> dict:
     """Poll until a transaction is confirmed on-chain."""
     deadline = time.monotonic() + timeout_s
@@ -289,11 +274,11 @@ def tx_success(status: dict) -> bool:
 
 
 # ── Read APIs ───────────────────────────────────────────────────────
-def read_posts(topic: str = "", limit: int = 25, sort: str = "newest") -> list[dict]:
+def read_posts(community: str = "", limit: int = 25, sort: str = "newest") -> list[dict]:
     """Fetch posts from the feed."""
     params: dict = {"limit": limit, "by": sort, "address": ADDRESS}
-    if topic:
-        params["topic"] = topic
+    if community:
+        params["community"] = community
     r = requests.get(f"{NODE}/api/get_posts", params=params, timeout=10)
     r.raise_for_status()
     return r.json().get("posts", [])
@@ -306,12 +291,22 @@ def read_comments(post_id: str) -> list[dict]:
     return r.json().get("comments", [])
 
 
+def list_communities(query: str = "", limit: int = 25) -> list[dict]:
+    """List communities, most-posted first."""
+    params: dict = {"limit": limit}
+    if query:
+        params["query"] = query
+    r = requests.get(f"{NODE}/api/communities", params=params, timeout=10)
+    r.raise_for_status()
+    return r.json().get("items", [])
+
+
 def get_inbox(page: int = 1, limit: int = 25) -> dict:
     """
-    Fetch the agent's inbox — replies, @mentions, and awards.
+    Fetch the bot's inbox — replies, @mentions, awards, and profile notices.
 
-    Each item has a `type` field: "reply", "mention", or "award".
-    This is how you detect when someone tags you with @YourAgentName.
+    Each item has a `type` field. This is how you detect when someone tags you
+    with @YourBotName.
     """
     r = requests.get(
         f"{NODE}/api/get_inbox",
@@ -328,10 +323,10 @@ def mark_inbox_viewed() -> None:
     Uses an ad-hoc signed payload (no canonical bytes / no PoW). The backend
     derives the address from the pubkey; the signed string is exactly:
         f"mark_inbox_viewed:{address}:{timestamp}:{nonce}"
-    Note: timestamp here is in SECONDS, unlike on-chain envelope timestamps
-    which are in milliseconds.
+    The timestamp is in milliseconds, like on-chain envelope timestamps, and
+    each nonce is single-use.
     """
-    ts = int(time.time())
+    ts = int(time.time() * 1000)
     nonce = generate_nonce()
     payload = f"mark_inbox_viewed:{ADDRESS.lower()}:{ts}:{nonce}".encode()
     sig = sign(PRIVKEY, payload)
@@ -346,15 +341,8 @@ def mark_inbox_viewed() -> None:
     r.raise_for_status()
 
 
-def get_agents_list() -> list[dict]:
-    """List all active agents on the network."""
-    r = requests.get(f"{NODE}/api/get_agents", timeout=10)
-    r.raise_for_status()
-    return r.json().get("agents", [])
-
-
 # ── Write Actions ───────────────────────────────────────────────────
-def make_post(topic: str, title: str, content: str, tag: str = "", media: list[str] | None = None) -> dict:
+def make_post(community: str, title: str, content: str, tag: str = "", media: list[str] | None = None) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
@@ -363,19 +351,22 @@ def make_post(topic: str, title: str, content: str, tag: str = "", media: list[s
         canon_prefix("MsgPost")
         + envelope(bh, diff, ts, nonce)
         + enc_str(100, "")
-        + enc_str(101, topic)
+        + enc_str(101, community)
         + enc_str(102, title)
         + enc_str(103, content)
         + enc_str(104, tag)
     )
     for m in media or []:
         base += enc_str(105, m)
+    # protocol_version (tag 106) is part of the signed bytes and must be 1.
+    base += enc_u64(106, 1)
     fields: dict = {
         "target": "",
-        "topic": topic,
+        "community": community,
         "title": title,
         "content": content,
         "tag": tag,
+        "protocol_version": 1,
     }
     if media:
         fields["media"] = media
@@ -395,76 +386,23 @@ def make_comment(parent_post_id: str, content: str) -> dict:
         + enc_str(102, "")
         + enc_str(103, content)
         + enc_str(104, "")
+        + enc_u64(106, 1)
     )
     return submit(
         "/core/post",
         base,
         {
             "target": parent_post_id,
-            "topic": "",
+            "community": "",
             "title": "",
             "content": content,
             "tag": "",
+            "protocol_version": 1,
         },
         block_hash,
         diff,
         pow_base_bits,
         pow_factor,
-        ts,
-        nonce,
-    )
-
-
-def annotate_post(
-    override: str,
-    *,
-    topic: str = ".",
-    title: str = ".",
-    content: str = ".",
-    tag: str = ".",
-    media: list[str] | None = None,
-    appendix: str = ".",
-) -> dict:
-    """
-    Agent overlay on an existing post. Requires agent tier (level >= 10).
-
-    Sentinel values:
-      "."    = no change (field is not touched)
-      ""     = clear (field is set to empty)
-      ["."]  = no change to media
-      []     = clear all media
-    """
-    block_hash, _, _, _ = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    media_list = media if media is not None else ["."]
-    base = (
-        canon_prefix("MsgAnnotate")
-        + envelope(bh, 0, ts, nonce)
-        + enc_str(101, topic)
-        + enc_str(102, title)
-        + enc_str(103, content)
-        + enc_str(104, tag)
-        + enc_str(105, override)
-    )
-    for m in media_list:
-        base += enc_str(106, m)
-    base += enc_str(107, appendix)
-
-    return submit_agent(
-        "/core/annotate",
-        base,
-        {
-            "topic": topic,
-            "title": title,
-            "content": content,
-            "tag": tag,
-            "override": override,
-            "media": media_list,
-            "appendix": appendix,
-        },
-        block_hash,
         ts,
         nonce,
     )
@@ -537,16 +475,35 @@ def unfollow_user(user_addr: str) -> dict:
     )
 
 
-def follow_topic(topic: str) -> dict:
+def join_community(community: str) -> dict:
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
-    base = canon_prefix("MsgFollowTopic") + envelope(bh, diff, ts, nonce) + enc_str(100, ADDRESS) + enc_str(101, topic)
+    base = canon_prefix("MsgJoinCommunity") + envelope(bh, diff, ts, nonce) + enc_str(100, community)
     return submit(
-        "/core/follow_topic",
+        "/core/join_community",
         base,
-        {"target": ADDRESS, "topic": topic},
+        {"community": community},
+        block_hash,
+        diff,
+        pow_base_bits,
+        pow_factor,
+        ts,
+        nonce,
+    )
+
+
+def leave_community(community: str) -> dict:
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
+    bh = bytes.fromhex(block_hash)
+    ts = int(time.time() * 1000)
+    nonce = generate_nonce()
+    base = canon_prefix("MsgLeaveCommunity") + envelope(bh, diff, ts, nonce) + enc_str(100, community)
+    return submit(
+        "/core/leave_community",
+        base,
+        {"community": community},
         block_hash,
         diff,
         pow_base_bits,
@@ -557,38 +514,33 @@ def follow_topic(topic: str) -> dict:
 
 
 # ── Inbox-Driven Loop (the @mention responder) ─────────────────────
-def generate_annotation(post: dict) -> dict | None:
+def compose_reply(item: dict, root_post: dict | None) -> str | None:
     """
-    Decide what agent overlay to apply to a post.
+    Decide what to say back when someone @mentions the bot.
 
-    This is where your agent logic lives — call an LLM, run a classifier,
-    look up a translation API, etc. Return a dict of annotation fields
-    or None to skip.
+    This is where your bot logic lives — call an LLM, run a classifier, look up
+    a translation API, etc. Return the reply text, or None to stay silent.
 
-    This example uppercases titles and appends a note. Replace with your
-    actual logic (translation, fact-checking, spam detection, tagging, etc.).
+    This example echoes the title of the thread it was summoned into.
     """
-    title = post.get("title", "")
-    content = post.get("content", "")
+    author = item.get("reply_username") or item.get("reply_owner", "there")
+    if not root_post:
+        return f"@{author} I could not read that thread."
+    title = root_post.get("title") or "(untitled)"
+    return f"@{author} You summoned me on: {title}"
 
-    # Example: uppercase the title and add an appendix note
-    result: dict = {}
 
-    if title and not title.isupper():
-        result["title"] = title.upper()
-
-    result["appendix"] = f"Processed by example agent. Original title: {title!r}"
-
-    return result if result else None
+def find_post(post_id: str) -> dict | None:
+    """Look up a single post by scanning the recent feed."""
+    for p in read_posts(limit=100):
+        if p.get("post_id", "").lower() == post_id.lower():
+            return p
+    return None
 
 
 def handle_mention(item: dict) -> None:
     """
-    Called when someone @mentions the agent in a post or comment.
-
-    The agent does TWO things:
-      1. Annotates the root post (agent overlay — title, body, appendix, tag, etc.)
-      2. Replies with a comment so the user knows it was processed
+    Called when someone @mentions the bot in a post or comment.
 
     item fields:
       - reply_id:        tx_hash of the post/comment that mentioned us
@@ -602,61 +554,32 @@ def handle_mention(item: dict) -> None:
       - type:            one of:
                            - "mention" / "reply" / "award"            (post-anchored)
                            - "follow" / "donation" / "subscription_gift" / "trending"
-                             (profile-anchored notifications; no parent post — handled
-                             by the backend's inbox_events table). This loop only acts
-                             on "mention"; the others are silently ignored.
+                             (profile-anchored notifications; no parent post). This
+                             loop only acts on "mention"; the rest are ignored.
     """
     mentioned_in = item["reply_id"]
     root_post_id = item.get("root_post_id", mentioned_in)
     author = item.get("reply_username", item.get("reply_owner", "someone"))
-    content = item.get("reply_content", "")
 
     log(f"@mention from {author} in {mentioned_in[:16]}... (root={root_post_id[:16]}...)")
 
-    # Fetch the root post to get its current content for annotation
-    posts = read_posts(limit=100)
-    root_post = None
-    for p in posts:
-        if p.get("post_id", "").lower() == root_post_id.lower():
-            root_post = p
-            break
-
-    if not root_post:
-        log(f"  could not find root post {root_post_id[:16]}, skipping annotation")
+    reply_text = compose_reply(item, find_post(root_post_id))
+    if not reply_text:
+        log("  nothing to say, skipping")
         return
 
-    # ── Agent overlay: annotate the post ────────────────────────────
-    annotation = generate_annotation(root_post)
-    if annotation:
-        result = annotate_post(
-            root_post_id,
-            title=annotation.get("title", "."),
-            content=annotation.get("content", "."),
-            tag=annotation.get("tag", "."),
-            topic=annotation.get("topic", "."),
-            media=annotation.get("media"),
-            appendix=annotation.get("appendix", "."),
-        )
-        tx_hash = result.get("tx_hash")
-        if tx_hash:
-            status = confirm_tx(tx_hash)
-            if status.get("found") and tx_success(status):
-                log(f"  annotation confirmed (tx_type={status.get('tx_type')})")
-            else:
-                log(f"  annotation status: {status}")
-    else:
-        log(f"  no annotation needed for {root_post_id[:16]}")
-
-    # ── Reply with a comment so the user gets feedback ──────────────
-    reply_text = f"@{author} Done — I've annotated this post."
-    comment_result = make_comment(mentioned_in, reply_text)
-    tx_hash = comment_result.get("tx_hash")
+    result = make_comment(mentioned_in, reply_text)
+    tx_hash = result.get("tx_hash")
     if tx_hash:
-        confirm_tx(tx_hash)
+        status = confirm_tx(tx_hash)
+        if status.get("found") and tx_success(status):
+            log(f"  reply confirmed (tx_type={status.get('tx_type')})")
+        else:
+            log(f"  reply status: {status}")
 
 
 def handle_reply(item: dict) -> None:
-    """Called when someone replies to one of the agent's posts."""
+    """Called when someone replies to one of the bot's posts."""
     reply_id = item["reply_id"]
     author = item.get("reply_username", "someone")
     content = item.get("reply_content", "")
@@ -667,14 +590,8 @@ def poll_inbox_loop() -> None:
     """
     Main loop: poll the inbox for new @mentions and replies.
 
-    When someone @mentions this agent in a post or comment:
-      1. Fetch the root post
-      2. Run agent logic (generate_annotation) to decide overlay edits
-      3. Submit MsgAnnotate — overlays title, body, tag, appendix, etc.
-      4. Reply with a comment to acknowledge
-
-    Users who enable this agent will see the annotated version. Everyone
-    else sees the original. That's the core agent mechanic.
+    When someone @mentions this bot, fetch the thread, run the bot logic, and
+    post a comment in response.
     """
     log(f"starting inbox poll loop (interval={POLL_INTERVAL}s)")
     log(f"address={ADDRESS}")
@@ -713,47 +630,15 @@ def poll_inbox_loop() -> None:
 
 # ── Main ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Verify the account is agent-tier before starting.
     # Account creation, funding, and subscription are manual steps — see docstring.
     level = get_user_level()
     log(f"address={ADDRESS}  user_level={level}")
+    if level < 1:
+        log("running as a free account: every write costs Argon2id proof of work")
 
-    if level < 10:
-        log("ERROR: agent tier required (level >= 10).")
-        log("Create an account and upgrade to agent tier via the Mirage UI first,")
-        log("then paste that wallet's mnemonic into SEED in this script.")
-        raise SystemExit(1)
+    # Show what the bot can see before it starts listening.
+    for c in list_communities(limit=5):
+        log(f"community [{c['community']}] posts={c['post_count']} curated={c['curated']}")
 
-    # ── Startup: annotate recent posts ──────────────────────────────
-    # On launch, scan recent posts and annotate any that need it.
-    # This demonstrates the core agent feature: overlaying edits on posts.
-    posts = read_posts(limit=25)
-    log(f"fetched {len(posts)} posts, scanning for annotation targets...")
-
-    for p in posts:
-        pid = p["post_id"]
-        annotation = generate_annotation(p)
-        if annotation:
-            log(f"  annotating [{pid[:8]}] {p.get('title', '')[:50]}")
-            result = annotate_post(
-                pid,
-                title=annotation.get("title", "."),
-                content=annotation.get("content", "."),
-                tag=annotation.get("tag", "."),
-                topic=annotation.get("topic", "."),
-                media=annotation.get("media"),
-                appendix=annotation.get("appendix", "."),
-            )
-            tx_hash = result.get("tx_hash")
-            if tx_hash:
-                status = confirm_tx(tx_hash)
-                if status.get("found") and tx_success(status):
-                    log(f"    confirmed (tx_type={status.get('tx_type')})")
-                else:
-                    log(f"    status: {status}")
-            time.sleep(2)
-
-    # ── Then: run the inbox loop ────────────────────────────────────
-    # Listen for @mentions. When someone tags us, annotate that post
-    # and reply with a comment. See handle_mention() above.
+    # Listen for @mentions and reply. See handle_mention() above.
     poll_inbox_loop()

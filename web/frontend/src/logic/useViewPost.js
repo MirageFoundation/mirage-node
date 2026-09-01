@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import * as tx from "../utils/tx.js";
 import Api from "../utils/api";
 import Storage from "../utils/Storage";
-import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateTopicsCache } from "../utils/Subscriptions";
+import { joinCommunity, leaveCommunity, fetchJoinedCommunities, invalidateCache as invalidateCommunitiesCache } from "../utils/Subscriptions";
 import { fetchFollowedUsers, follow as followAuthor, unfollow as unfollowAuthor, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { usePendingFollows } from "./useFollowState.js";
 import { usePendingSends } from "./usePendingSends.js";
@@ -169,37 +169,37 @@ export function useViewPost({
             try {
                 if (typeof window === 'undefined' || !window.sessionStorage) return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
                 const raw = window.sessionStorage.getItem('mirage_post_nav_source');
                 if (!raw) return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
                 const parsed = JSON.parse(raw);
                 if (parsed?.source !== 'feed') return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
                 const at = Number(parsed?.at || 0);
                 if (!Number.isFinite(at) || at <= 0) return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
                 const ageMs = Date.now() - at;
                 if (ageMs < 0 || ageMs > 10000) return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
-                const topic = typeof parsed?.topic === 'string' ? parsed.topic : null;
+                const community = typeof parsed?.community === 'string' ? parsed.community : null;
                 return {
                     opened: true,
-                    topic: topic || null
+                    community: community || null
                 };
             } catch (_) {
                 return {
                     opened: false,
-                    topic: null
+                    community: null
                 };
             }
         })();
@@ -286,7 +286,7 @@ export function useViewPost({
             // (/home, /following, /c/:community). Preserves MainView scroll restore.
             if (openedFromFeedInfoRef.current?.opened === true) {
                 console.debug('[ViewPost] back via history (opened from feed)', {
-                    topic: openedFromFeedInfoRef.current?.topic || null,
+                    community: openedFromFeedInfoRef.current?.community || null,
                 });
                 navigate(-1);
                 return;
@@ -302,7 +302,7 @@ export function useViewPost({
                 } catch (_) { }
             }
             const last = Storage.load('last_feed_route', '');
-            const postCommunity = String(root?.topic || root?.root_topic || '').trim().toLowerCase();
+            const postCommunity = String(root?.community || root?.root_community || '').trim().toLowerCase();
             // last_feed_route only started tracking /c/ after v1.39; a stale
             // "/home" here would strand community readers on the wrong feed.
             let target = typeof last === 'string' && last.startsWith('/') ? last : '';
@@ -313,9 +313,9 @@ export function useViewPost({
                 if (postCommunity) target = `/c/${encodeURIComponent(postCommunity)}`;
                 else target = '/home';
             }
-            const inferTopicIntent = route => {
+            const inferCommunityIntent = route => {
                 try {
-                    if (openedFromFeedInfoRef.current?.topic) return openedFromFeedInfoRef.current.topic;
+                    if (openedFromFeedInfoRef.current?.community) return openedFromFeedInfoRef.current.community;
                     if (route === '/home') return 'home';
                     if (route === '/following') return 'following';
                     if (route.startsWith('/c/')) {
@@ -330,12 +330,12 @@ export function useViewPost({
                     return null;
                 }
             };
-            const intendedTopic = inferTopicIntent(target) || postCommunity || null;
+            const intendedCommunity = inferCommunityIntent(target) || postCommunity || null;
             try {
                 if (typeof window !== 'undefined' && window.sessionStorage) {
-                    if (intendedTopic) {
+                    if (intendedCommunity) {
                         window.sessionStorage.setItem('mirage_restore_feed', JSON.stringify({
-                            topic: intendedTopic,
+                            community: intendedCommunity,
                             at: Date.now()
                         }));
                     }
@@ -358,7 +358,7 @@ export function useViewPost({
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
     const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
-    const [topicFollowHover, setTopicFollowHover] = useState(false);
+    const [communityFollowHover, setCommunityFollowHover] = useState(false);
     const {
         isCommunityPending,
         isUserPending,
@@ -406,10 +406,10 @@ export function useViewPost({
         const loadFollowed = async () => {
             if (!viewerAddress || viewerAddress === 'guest') return;
             try {
-                const [authors, topics] = await Promise.all([fetchFollowedUsers(viewerAddress), fetchJoinedCommunities(viewerAddress)]);
+                const [authors, communities] = await Promise.all([fetchFollowedUsers(viewerAddress), fetchJoinedCommunities(viewerAddress)]);
                 if (!cancelled) {
                     setFollowedAuthorsSet(new Set(authors.map(a => a.toLowerCase())));
-                    setJoinedCommunitiesSet(new Set(topics.map(t => t.toLowerCase())));
+                    setJoinedCommunitiesSet(new Set(communities.map(t => t.toLowerCase())));
                 }
             } catch (_) { }
         };
@@ -447,14 +447,14 @@ export function useViewPost({
             console.error('[ViewPostView] Follow toggle error:', e);
         }
     };
-    const isJoinedCommunity = topic => {
-        return joinedCommunitiesSet.has(String(topic || '').toLowerCase());
+    const isJoinedCommunity = community => {
+        return joinedCommunitiesSet.has(String(community || '').toLowerCase());
     };
-    const handleCommunityJoinToggle = async topic => {
-        const t = String(topic || '').trim().toLowerCase();
+    const handleCommunityJoinToggle = async community => {
+        const t = String(community || '').trim().toLowerCase();
         if (!t || isCommunityPending(t)) return;
         if (!requireAccount('join communities')) return;
-        const wasSubscribed = isJoinedCommunity(topic);
+        const wasSubscribed = isJoinedCommunity(community);
         // Optimistic update
         if (wasSubscribed) {
             setJoinedCommunitiesSet(prev => {
@@ -467,13 +467,13 @@ export function useViewPost({
         }
         try {
             if (wasSubscribed) {
-                await leaveCommunity(viewerAddress, topic);
+                await leaveCommunity(viewerAddress, community);
                 updateNotification(`Left ${communityLabel(t)}`);
             } else {
-                await joinCommunity(viewerAddress, topic);
+                await joinCommunity(viewerAddress, community);
                 updateNotification(`Joined ${communityLabel(t)}`);
             }
-            invalidateTopicsCache();
+            invalidateCommunitiesCache();
             setSubToggleTick(x => x + 1);
         } catch (e) {
             console.error('[ViewPostView] Community membership toggle error:', e);
@@ -768,8 +768,8 @@ export function useViewPost({
         setConfirmBlockUser(null);
         clearBlockMessages();
     };
-    const handleBlockCommunity = (topicName, postId) => {
-        const t = (topicName || "").trim().toLowerCase();
+    const handleBlockCommunity = (communityName, postId) => {
+        const t = (communityName || "").trim().toLowerCase();
         if (!t) {
             showBlockError("Invalid community");
             return;
@@ -1486,7 +1486,7 @@ export function useViewPost({
         try {
             const changes = {
                 target: post.target || '',
-                topic: isRoot ? post.topic || '' : '',
+                community: isRoot ? post.community || '' : '',
                 title: isRoot ? newTitle : '',
                 content: newContent,
                 tag: post && typeof post.tag === 'string' ? post.tag : '',
@@ -2603,11 +2603,11 @@ export function useViewPost({
                 flash
             };
             if (statePost) {
-                // Merge content, title, topic, edited fields if they exist in state
+                // Merge content, title, community, edited fields if they exist in state
                 if (statePost.content !== undefined) merged.content = statePost.content;
                 if (statePost.title !== undefined) merged.title = statePost.title;
-                if (statePost.topic !== undefined) merged.topic = statePost.topic;
-                if (statePost.root_topic !== undefined) merged.root_topic = statePost.root_topic;
+                if (statePost.community !== undefined) merged.community = statePost.community;
+                if (statePost.root_community !== undefined) merged.root_community = statePost.root_community;
                 if (statePost.tag !== undefined) merged.tag = statePost.tag;
                 if (statePost.thread_locked !== undefined) merged.thread_locked = statePost.thread_locked;
                 if (statePost.edited !== undefined) merged.edited = statePost.edited;
@@ -2722,8 +2722,8 @@ export function useViewPost({
         isMobile,
         goBackToFeed,
         viewerAddress,
-        topicFollowHover,
-        setTopicFollowHover,
+        communityFollowHover,
+        setCommunityFollowHover,
         isCommunityPending,
         isUserPending,
         formatCommunityStatus,

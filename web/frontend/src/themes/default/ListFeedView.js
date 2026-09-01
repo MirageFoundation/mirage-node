@@ -170,7 +170,7 @@ const Toolbar = styled.div`
 
     /* Mobile (below the 600px breakpoint) gets extra breathing room above
      * the title — on narrow screens the toolbar sits directly under the
-     * sticky MobileHeader, which made the topic title (e.g. "#memes")
+     * sticky MobileHeader, which made the community title (e.g. "#memes")
      * look cramped against the top edge. */
     @media (max-width: 600px) {
         /* Zero horizontal padding so the toolbar's leading title
@@ -343,7 +343,7 @@ const IconCompact = (props) => (
 //
 // Compact layout (thumbnail + stacked text):
 //
-//   ┌──────┐  #topic · @user · time
+//   ┌──────┐  #community · @user · time
 //   │ thumb│  Title (smaller than card-mode title)
 //   │ 72px │  [▲ cnt ▼]  [💬 N]       [⊘] [↗]  [⇱ expand]
 //   └──────┘
@@ -463,7 +463,7 @@ const CompactTopActions = styled.div`
     margin-top: -2px; /* align ellipsis with the first line of header text */
 `;
 
-const CompactTopicLink = styled(Link)`
+const CompactCommunityLink = styled(Link)`
     font-weight: 500;
     font-size: 0.62rem;
     color: ${({ theme }) => theme.colors.feedCtrlText};
@@ -1056,21 +1056,21 @@ function CompactRow({ post, state, updatePost, showPostLens }) {
         if (!linkTarget || linkTarget === '#') return;
         // Same marker CardView sets — Back from the post must return to /c/:community.
         try {
-            const feedTopic = typeof post?.topic === 'string' && post.topic.trim()
-                ? post.topic.trim().toLowerCase()
+            const feedCommunity = typeof post?.community === 'string' && post.community.trim()
+                ? post.community.trim().toLowerCase()
                 : null;
             sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                 source: 'feed',
-                topic: feedTopic,
+                community: feedCommunity,
                 at: Date.now(),
             }));
             sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
-                topic: feedTopic,
+                community: feedCommunity,
                 at: Date.now(),
             }));
         } catch (_) { /* noop */ }
         navigate(linkTarget);
-    }, [navigate, linkTarget, post?.topic]);
+    }, [navigate, linkTarget, post?.community]);
 
     const stop = useCallback((e) => { e.stopPropagation(); }, []);
 
@@ -1107,10 +1107,10 @@ function CompactRow({ post, state, updatePost, showPostLens }) {
 
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
-    if (typeof post.topic !== 'string' || post.topic.trim() === '') return null;
+    if (typeof post.community !== 'string' || post.community.trim() === '') return null;
     if (post.deleted || post.hidden_client) return null;
 
-    const topic = String(post.topic);
+    const community = String(post.community);
     const authorAddress = post.user_id || post.author || '';
     const displayAuthor = (() => {
         if (typeof post.username === 'string' && post.username.trim()) return post.username.trim();
@@ -1154,11 +1154,11 @@ function CompactRow({ post, state, updatePost, showPostLens }) {
 
             <CompactTopRow>
                 <CompactHeader>
-                    <CompactTopicLink to={communityPath(topic)} onClick={stop}>
-                        {communityLabel(topic)}
-                    </CompactTopicLink>
+                    <CompactCommunityLink to={communityPath(community)} onClick={stop}>
+                        {communityLabel(community)}
+                    </CompactCommunityLink>
                     {showPostLens && <PostLensPicker
-                        community={topic}
+                        community={community}
                         viewer={state?.publicKey}
                         hintLens={post.lens}
                         onOpenChange={setLensOpen}
@@ -1426,7 +1426,7 @@ export const MemoCompactRow = memo(CompactRow, (prev, next) => {
 function FeedRow({ post, state, updatePost, hiding, flashing, viewMode, showPostLens }) {
     if (!post || !post.post_id) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
-    if (typeof post.topic !== 'string' || post.topic.trim() === '') return null;
+    if (typeof post.community !== 'string' || post.community.trim() === '') return null;
     if (post.deleted || post.hidden_client) return null;
 
     return (
@@ -1566,7 +1566,7 @@ export default function ListFeedView({
     showSortTabs = false,
     feedTitle = null,
     showPostLens = false,
-    // feedNavTopic and sidebar props are intentionally ignored — the header
+    // feedNavCommunity and sidebar props are intentionally ignored — the header
     // no longer renders nav tabs or a sidebar action column.
 }) {
     const hidingSet = hidingPostsSet instanceof Set ? hidingPostsSet : new Set();

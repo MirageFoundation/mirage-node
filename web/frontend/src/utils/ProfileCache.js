@@ -113,8 +113,8 @@ export async function fetchProfile(viewerAddress, force = false) {
 export function getJoinedCommunities() {
     const cached = loadFromStorage();
     if (!cached || !cached.profile) return [];
-    const topics = cached.profile.joined_communities || [];
-    return topics.map(t => String(t || '').trim()).filter(t => {
+    const communities = cached.profile.joined_communities || [];
+    return communities.map(t => String(t || '').trim()).filter(t => {
         const v = t.toLowerCase();
         return v !== 'all' && v !== 'home' && v !== '';
     });
@@ -142,7 +142,7 @@ export function isCacheValid(addr) {
     return cached && cached.address === a;
 }
 
-export function updateCacheTopics(topics, address = null) {
+export function updateCacheCommunities(communities, address = null) {
     // Don't write to cache during no-cache window
     if (isInNoCacheWindow()) return;
 
@@ -157,7 +157,7 @@ export function updateCacheTopics(topics, address = null) {
             profile: { joined_communities: [], followed_users: [] }
         };
     }
-    cached.profile.joined_communities = topics;
+    cached.profile.joined_communities = communities;
     cached.timestamp = Date.now();
     try {
         localStorage.setItem(CACHE_KEY, JSON.stringify(cached));

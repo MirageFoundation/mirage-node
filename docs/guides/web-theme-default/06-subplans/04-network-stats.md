@@ -56,9 +56,9 @@ Dropped: `OldRedditContentBleed`, `OldRedditTabsStrip`, `OldRedditTabsRow`, `Old
   - **Usage** — DAUs, MAUs, Total Registered, New Registrations, Subscribers. Tier subscribers render as indented `SubRow` with tier-colored `SubLabel` (`TIER_COLORS`, kept per 06.1 intentional decision).
   - **Content** — Posts / Comments / Votes.
   - **Engagement** — Votes (↑/↓), Avg Posts/User, Avg Comments/Post, Avg Votes/User, Edit %, Delete %.
-  - **Active Topics** + **Content Tags** — data rows using `FieldRow` pattern.
+  - **Active Communities** + **Content Tags** — data rows using `FieldRow` pattern.
   - **Trend indicator** — up/down/same arrow uses `voteUp` / `voteDown` / `subtleText` tokens.
-- **Signups tab** — Invite Code Summary (`SummaryGrid` of 3 tiles with transparent background), Top Referrers table, Recent Signups table.
+- ~~**Signups tab**~~ — removed in v1.39.0 along with invite codes and referrals. `/api/get_stats` no longer serves a `signups` tab.
 - **Subscribers tab** — Subscriber Summary tiles, per-tier sections with tier-colored `TierBadge` (`#F59E0B` / `#EF4444` kept as tier visual language per 06.1).
 - **Accounts tab** — Total Accounts summary tile + Top 100 accounts table.
 - **Rewards tab** —

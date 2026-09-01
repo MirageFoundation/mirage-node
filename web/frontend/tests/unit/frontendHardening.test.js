@@ -131,7 +131,7 @@ describe('M-2: session reset drains account-bound caches', () => {
         unsubscribe();
     });
 
-    it('clears the per-tab feed cache, which is keyed by topic and not by account', async () => {
+    it('clears the per-tab feed cache, which is keyed by community and not by account', async () => {
         const { writeMemFeedState, readMemFeedState } = await import('../../src/logic/useMain.js');
         writeMemFeedState('all', { posts: [{ post_id: 'a', user_vote: 1 }] });
         expect(readMemFeedState('all')).toBeTruthy();
@@ -155,17 +155,17 @@ describe('M-2: session reset drains account-bound caches', () => {
         const realFetch = globalThis.fetch;
         globalThis.fetch = fetchMock;
         try {
-            const first = await Api.get('get_feed', { topic: 'all' }, { cacheMs: 60_000 });
+            const first = await Api.get('get_feed', { community: 'all' }, { cacheMs: 60_000 });
             expect(first.call).toBe(1);
 
             // Served from responseCache, which the cache-hit branch never
             // compared against the session generation.
-            const cached = await Api.get('get_feed', { topic: 'all' }, { cacheMs: 60_000 });
+            const cached = await Api.get('get_feed', { community: 'all' }, { cacheMs: 60_000 });
             expect(cached.call).toBe(1);
 
             Api.resetApiSession(getSessionGeneration() + 1, 'test_api_cache');
 
-            const afterReset = await Api.get('get_feed', { topic: 'all' }, { cacheMs: 60_000 });
+            const afterReset = await Api.get('get_feed', { community: 'all' }, { cacheMs: 60_000 });
             expect(afterReset.call).toBe(2);
         } finally {
             globalThis.fetch = realFetch;

@@ -13,7 +13,7 @@ Defined in `proto/mirage/core/v1/genesis.proto` and auto-generated into `x/core/
 Fields:
 - `owner` (string): Account address, primary key
 - `username` (string): Claimed username
-- `level` (int32): Subscription tier (0=Free, 1=Subscriber, 10=Agent, 100+=admin)
+- `level` (int32): Subscription tier (0=Free, 1=Subscriber, 100+=admin). Level 10 was the Agent tier, retired in v1.39.0; `MigrateV139` demoted every level-10 account.
 - `created_at` (int64): Unix timestamp of profile creation
 - `subscription_expiry` (int64): Unix timestamp when subscription expires (0 = no subscription)
 - `auto_renew` (bool): Whether subscription auto-renews
@@ -24,10 +24,10 @@ Fields:
 
 ### List Fields (Per-Entry KV Storage)
 
-All six profile lists use **per-entry KV keys** for O(1) add/remove/has operations.
+Every profile list uses **per-entry KV keys** for O(1) add/remove/has operations.
 Three flavors of the same underlying pattern:
 
-#### Unordered Set (followed_users, followed_topics)
+#### Unordered Set (followed_users)
 
 | Key | Value | Description |
 |-----|-------|-------------|
@@ -39,7 +39,11 @@ Three flavors of the same underlying pattern:
 - **Remove**: Delete entry + decrement count — O(1)
 - **List**: prefix iterator — O(n)
 
-#### Ordered Set (enabled_agents)
+#### Ordered Set (retired)
+
+`enabled_agents` was the only ordered set. It is gone as of v1.39.0; the shape is
+recorded here because `MigrateV139` still has to drain `ea/` keys written before
+the upgrade.
 
 | Key | Value | Description |
 |-----|-------|-------------|
@@ -47,12 +51,7 @@ Three flavors of the same underlying pattern:
 | `ea/{owner}\x00c` | `uint32` big-endian | Entry count |
 | `ea/{owner}\x00s` | `uint64` big-endian | Next position to assign |
 
-- **AddAgent**: assign next position, increment seq and count — O(1)
-- **RemoveAgent**: delete entry, decrement count — O(1). Gaps in position are fine.
-- **ListOrdered**: prefix iterate, sort by position — O(n log n), n ≤ 50
-- **ReplaceAll**: delete all + write with positions 0..n-1, reset seq — O(n)
-
-#### Deque (blocked_users, blocked_posts, blocked_topics)
+#### Deque (blocked_users, blocked_posts, blocked_communities)
 
 Same as ordered set but with **eviction**: when over cap, the entry with the lowest sequence is deleted.
 
@@ -102,12 +101,12 @@ The `InitialProfile` message wraps `ProfileCore` plus all list fields:
 ```protobuf
 message InitialProfile {
   ProfileCore core = 1;
-  repeated string enabled_agents = 2;
+  reserved 2; // was enabled_agents
   repeated string followed_users = 3;
-  repeated string followed_topics = 4;
+  repeated string joined_communities = 4;
   repeated string blocked_users = 5;
   repeated string blocked_posts = 6;
-  repeated string blocked_topics = 7;
+  repeated string blocked_communities = 7;
 }
 ```
 
@@ -120,12 +119,11 @@ The indexer DB (PostgreSQL) stores the full history of profile list data (up to 
 | Table | Description |
 |-------|-------------|
 | `profiles` | Core profile data |
-| `enabled_agents` | Enabled agents |
 | `followed_users` | Followed users |
-| `followed_topics` | Followed topics |
 | `blocked_users` | Blocked users |
 | `blocked_posts` | Blocked posts |
-| `blocked_topics` | Blocked topics |
+| `blocked_communities` | Blocked communities |
+| `community_curation_preferences` | Joined communities — a row here *is* the join |
 
 The `get_profile` API returns scalar fields from the chain and list fields from the indexer. Feed filtering also reads from the indexer. This means users see their full block/follow history even after the chain evicts old entries from its deque.
 

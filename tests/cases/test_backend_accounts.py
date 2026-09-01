@@ -60,7 +60,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -76,7 +75,6 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
@@ -96,10 +94,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
@@ -291,8 +289,8 @@ def test_profile_fields(backend: str):
 
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
-    agent1 = WALLETS["agent1"]
-    agent1_addr = str(agent1.address())
+    sub3 = WALLETS["sub3"]
+    agent1_addr = str(sub3.address())
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
 

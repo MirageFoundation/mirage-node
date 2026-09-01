@@ -214,7 +214,7 @@ def canon_base_post(
     last_block_hash_hex: str,
     difficulty: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     tag: str = "",
@@ -229,7 +229,7 @@ def canon_base_post(
         int(difficulty),
         ts,
         target,
-        topic,
+        community,
         title,
         content,
         tag,
@@ -351,12 +351,12 @@ class SpamWorker:
 
             title = f"Spam {_rand_str(6)}"
             content = f"Spam content {_rand_str(20)} at {int(time.time())}"
-            topic = f"spam{_rand_str(4)}"
+            community = f"spam{_rand_str(4)}"
             ts = _now_ms()
             used_difficulty = self.difficulty
 
             base = canon_base_post(
-                self.pub, self.last_block_hash, used_difficulty, "", topic, title, content, "", 0, ts
+                self.pub, self.last_block_hash, used_difficulty, "", community, title, content, "", 0, ts
             )
 
             proof, solve_time = _compute_pow(
@@ -380,7 +380,7 @@ class SpamWorker:
                 "pow_difficulty": int(used_difficulty),
                 "pow": int(proof),
                 "target": "",
-                "topic": topic,
+                "community": community,
                 "title": title,
                 "content": content,
                 "protocol_version": 1,
@@ -540,7 +540,7 @@ class SpamWorker:
             ts = _now_ms()
             used_difficulty = self.difficulty
 
-            # Comment: target is parent, topic/title are empty
+            # Comment: target is parent, community/title are empty
             base = canon_base_post(self.pub, self.last_block_hash, used_difficulty, target, "", "", content, "", 0, ts)
 
             proof, solve_time = _compute_pow(
@@ -564,7 +564,7 @@ class SpamWorker:
                 "pow_difficulty": int(used_difficulty),
                 "pow": int(proof),
                 "target": target,
-                "topic": "",
+                "community": "",
                 "title": "",
                 "content": content,
                 "protocol_version": 1,

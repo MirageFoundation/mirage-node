@@ -1,4 +1,4 @@
-"""v1.39.0: communities, curation, creator pool, drop agents/topics lists."""
+"""v1.39.0: communities, curation, creator pool, drop agents/communities lists."""
 
 from indexer.migrations import run_db_migration
 
@@ -45,8 +45,7 @@ def run(db, chain, logger):
             "ON posts(community, protocol_version, created_at DESC, txhash)"
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_posts_community_root_seq "
-            "ON posts(community, root_txhash, post_sequence)"
+            "CREATE INDEX IF NOT EXISTS idx_posts_community_root_seq " "ON posts(community, root_txhash, post_sequence)"
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_posts_owner_proto_ts "
@@ -363,7 +362,9 @@ def run(db, chain, logger):
         cur.execute("DROP TABLE IF EXISTS followed_topics")
         cur.execute("DROP TABLE IF EXISTS enabled_agents")
         cur.execute("DROP TABLE IF EXISTS agent_edits")
-        cur.execute("INSERT INTO meta(key, value) VALUES('schema_v1_39_0', 'complete') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value")
+        cur.execute(
+            "INSERT INTO meta(key, value) VALUES('schema_v1_39_0', 'complete') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"
+        )
         return "v1.39.0 communities schema applied"
 
     return run_db_migration(db, MIGRATION_KEY, _migrate, logger)

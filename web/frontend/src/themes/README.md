@@ -52,7 +52,7 @@ Default export is a plain object. Existing themes illustrate the full pattern; m
 | **`dark`**, **`light`** | Objects passed into **`getResolvedTheme`**: must include **`themeId`**, **`colors`**, **`layout`**, and **`name`** (`'dark'` / `'light'`). See **`themes/bluemoon/tokens.js`**. |
 | **`Style`** | React component (no props required) that injects global/theme CSS (styled-components or imports). **`getThemeFamily`** requires **`Style`** on the manifest. |
 | **`Shell`** | Root layout wrapping **`App`**’s `<Routes>`; receives **`state={appState}`** from **`App`**. |
-| **`Feed`** | Home/topic/following feed component; resolved via **`getThemeFamily(themeId).Feed`** from **`MainView`** / **`useProfile`**. |
+| **`Feed`** | Home/community/following feed component; resolved via **`getThemeFamily(themeId).Feed`** from **`MainView`** / **`useProfile`**. |
 | **`VoteSection`** | Registered on manifest; **`CardView`** resolves **`getThemeFamily(themeId).VoteSection`**. |
 | **`components`** | Map of string keys → React components. **Must** include every key in **`REQUIRED_THEME_COMPONENT_KEYS`** (§5). Optional keys are only needed if something calls **`useThemeComponent(key)`**. |
 | **`routes`** | Map of **route facade names** → components. Keys must match **`useThemeRoute('…')`** in **`src/views/*.js`** (§6). |

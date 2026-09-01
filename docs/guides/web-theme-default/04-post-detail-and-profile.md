@@ -47,7 +47,7 @@ Reference: mobile app `app/post/[id].tsx` + web `themes/oldreddit/routes/ViewPos
 3. **Action row** — same upvote/downvote/comment/share/more pattern as the feed.
 4. **Comment composer** — inline on desktop, collapsible on mobile.
 5. **Comment list** — nested threads with subtle indent and separators.
-6. **Context panel (optional)** — in desktop sidebar, show topic context / post metadata.
+6. **Context panel (optional)** — in desktop sidebar, show community context / post metadata.
 
 ### Behavior
 - Keep existing sort controls (best, new, old, etc.) — restyle them with `FilterBar`.

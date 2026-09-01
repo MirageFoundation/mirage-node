@@ -133,7 +133,7 @@ In the Bunny dashboard, on the pull zone that will serve `mirage.vote`:
 - **Origin URL**: `https://origin.mirage.vote` (NOT the public host).
 - **Verify Origin SSL**: ON (cert is valid, issued in step 2).
 - **Forward Host Header**: ON — the backend needs the real public Host
-  (`mirage.vote`) for host-based logic (e.g. invite codes on mirage.talk). Caddy
+  (`mirage.vote`) for host-based logic and for building absolute URLs. Caddy
   serves both names, so either way routes correctly.
 - **Shield upload scanning**: ON, CSAM detection in **Block** mode (blocks and
   auto-reports on a positive match; this is not the WAF "log first" workflow).

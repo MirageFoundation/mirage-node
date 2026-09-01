@@ -10,10 +10,19 @@
 - `themes/default/routes/SubscriptionView.js` (admin branch ~L886–L912)
 - `themes/default/routes/ReportsView.js`
 - `themes/default/routes/StatsView.js`
-- `themes/default/routes/ViewPostView.js` (`renderPostMenu` admin items ~L2696–L2718, `displayConfirmation` suspend/unsuspend banners ~L2398–L2476)
+- `themes/default/routes/ViewPostView.js` (`renderPostMenu` admin items + `displayConfirmation` banners)
 - `themes/default/tokens.js` (new admin token, see R2 update)
 
 **Status:** ✅ Done — A/B/C/D/E/F all landed
+
+> **Trimmed in v1.39.0.** Quests were removed from Mirage entirely, and with them the
+> admin "Suspend / Unsuspend from quests" moderation actions, the `/admin/rewards/*`
+> endpoints they called, and the `useAdminQuestActions` hook that shipped in slice E.
+> Those parts of this sub-plan have been cut rather than left describing controls that
+> no longer exist. The admin surfaces that survive — the `tierAdmin` token, the profile
+> menu admin group, the Subscription admin branch, and the admin "Mark post/comment
+> deleted" action in the post detail menu and feed-row menus — are unchanged and are
+> what the rest of this file describes.
 **Parent:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 **Depends on:** 06.1 (Profile), 06.2 (Components — `Button`, `ConfirmDialog`), 06.4 (Stats), 06.5 (Subscription) — all ✅ done.
 
@@ -23,7 +32,7 @@
 
 Admin UI was never treated as a first-class slice during Plan 06. Pieces of it shipped along with the routes that surfaced them (Stats / Reports tokenized in 06.4; Subscription admin branch tokenized in 06.5), but there are still **four admin gaps** that drift from `RULES.md`:
 
-1. **Feed-row admin actions are missing in default.** `themes/bluemoon/`, `themes/onyx/`, and `themes/oldreddit/` all expose admin moderation in `CardView.js` (mark-deleted / suspend / unsuspend on every feed row). `themes/default/components/CardView.js` and `themes/default/components/PostMenu.js` have **zero `isAdmin` references** — admins can only moderate from the post-detail page (`ViewPostView`), not the feed.
+1. **Feed-row admin actions are missing in default.** `themes/bluemoon/`, `themes/onyx/`, and `themes/oldreddit/` all expose admin moderation in `CardView.js` (mark-deleted on every feed row). `themes/default/components/CardView.js` and `themes/default/components/PostMenu.js` have **zero `isAdmin` references** — admins can only moderate from the post-detail page (`ViewPostView`), not the feed.
 2. **The post-detail admin confirm banners use raw hex.** `displayConfirmation` in `themes/default/routes/ViewPostView.js` paints the suspend/unsuspend confirmation strip and the success toast with hard-coded values (`#d97706`, `#fef3c7`, `#92400e`, `rgba(22, 163, 74, 0.18)`, `#16A34A`, etc.) instead of routing through R2 tokens. They also use emoji (`🛡️`, `✓`) where the rest of the theme uses `react-icons/hi2`.
 3. **Admin-only entries in `ProfileMenuContent` (`TopBar.js` L843–L897) and `MobileBottomNav.js`** ship without a tier indicator. Bluemoon shows an "Admin" pill next to admin-only menu groups; default does not. They also don't wear the canonical R6 `HiChevronDown` / R7 typography treatment that the rest of the menu got in 06.2.
 4. **`ADMIN_COLOR` is hard-coded in shared logic.** `logic/useSubscription.js` exports `ADMIN_COLOR = '#EF4444'` and `useProfile.js` repeats `'#EF4444'` inline. Default uses this color in `ProfileView` / `SubscriptionView` headlines via `getTierColor(userLevel)`. Per R2, dark↔light pairing should live in `tokens.js` so the admin red can shift in light mode if design wants it (today the dark hex bleeds through).
@@ -47,16 +56,12 @@ Admin UI was never treated as a first-class slice during Plan 06. Pieces of it s
 | `MobileBottomNav` profile group          | `components/MobileBottomNav.js` (uses `ProfileMenuContent`) | Same admin block surfaces in the profile sheet.                                                                                                  |
 | Subscription page                        | `routes/SubscriptionView.js` L886–L912                      | Admin branch hides the tier grid + auto-renew controls and shows a single "Active plan" card + "Admin status is managed via governance" copy.   |
 | Subscription "auto-renew" toggle         | `routes/SubscriptionView.js` L737                           | `showAutoRenew = userLevel > 0 && userLevel < 100` — admins never see auto-renew.                                                                |
-| Post detail menu                         | `routes/ViewPostView.js` L2696–L2718                        | Admin-only `MenuItem`s: **Mark post/comment deleted**, **Suspend from quests**, **Unsuspend from quests**.                                       |
-| Post detail confirm banners              | `routes/ViewPostView.js` L2398–L2476                        | Inline `BlockConfirmMessage` for the suspend duration picker and the unsuspend prompt; success toast for both.                                   |
-| Suspension fetch on menu open            | `routes/ViewPostView.js` L2584                              | `fetchUserSuspensionStatus` only fires when `isAdmin && questsEnabled`.                                                                          |
+| Post detail menu                         | `routes/ViewPostView.js`                                    | Admin-only `MenuItem`: **Mark post/comment deleted**.                                                                                           |
 
 ### Admin-conditional UI **missing** in default (parity gaps)
 | Surface                                | Where it exists today                                                              | Default file that needs it                                                                                                |
 | -------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Feed-row "Mark post deleted"           | `themes/bluemoon/components/CardView.js` ~L919, ~L2330 (and `onyx` / `oldreddit` mirrors) | `themes/default/components/CardView.js` + `themes/default/components/PostMenu.js` (`MoreMenuChip`).                       |
-| Feed-row "Suspend / Unsuspend from quests" | Same (`bluemoon` / `onyx` / `oldreddit` `CardView.js`)                            | `themes/default/components/CardView.js` + `themes/default/components/PostMenu.js`.                                        |
-| Suspension status pre-fetch in feed    | Same                                                                                | `themes/default/components/CardView.js` (mirror `fetchUserSuspensionStatus` wiring).                                      |
 
 ### Shared logic (do not modify in this sub-plan)
 | File                                | Concern                                                                                                                  |
@@ -64,7 +69,6 @@ Admin UI was never treated as a first-class slice during Plan 06. Pieces of it s
 | `logic/useSubscription.js` L21–L30  | `ADMIN_COLOR`, `getTierName(level)`, `getTierColor(level)`, `isAdmin(level)`. Visual change happens via the new R2 token, not here. |
 | `logic/useProfile.js` L565, L574    | Repeats `'#EF4444'` for the Admin chip. Refactor in a follow-up — out of scope for this sub-plan.                         |
 | `logic/useReports.js`               | Auth gate (`userLevel < 100` returns early). Used by `ReportsView`.                                                       |
-| `logic/useViewPost.js` L984–L1067   | `/admin/rewards/suspend` + `/admin/rewards/unsuspend` API calls. Visual restyle of callers only — no API change.          |
 
 ---
 
@@ -77,11 +81,10 @@ Bring every admin-only surface in `default` up to `RULES.md` (R1–R7) parity wi
 ## References (R4 reading list — read before changing each file)
 
 - **Web (data parity):** `themes/bluemoon/components/CardView.js`, `themes/bluemoon/routes/{ViewPostView,SubscriptionView}.js`, `themes/bluemoon/components/TopBar.js`.
-- **Visuals:** `mirage-mobile-app/src/pages/post-screen.tsx` (suspend / mark-deleted action sheet), `src/components/molecules/post-card-header.tsx` (overflow menu), `src/pages/profile-screen.tsx` for the admin chip color.
+- **Visuals:** `mirage-mobile-app/src/pages/post-screen.tsx` (mark-deleted action sheet), `src/components/molecules/post-card-header.tsx` (overflow menu), `src/pages/profile-screen.tsx` for the admin chip color.
 - **Already-shipped default patterns to reuse:**
   - Confirm dialogs → `themes/default/components/ConfirmDialog.js` (replace inline `BlockConfirmMessage` strips).
   - Menu items → `themes/default/components/PostMenu.js` (`MenuItemBtn`, `data-danger="true"`).
-  - Form inputs → R5 (the suspend-duration `<select>` must follow the canonical input style).
   - Status banners → R2 `voteUpBg` / `voteUp` for success, `inboxHighlightRail` / `inboxHighlightBg` for warning.
 
 ---
@@ -120,44 +123,32 @@ In `themes/default/components/TopBar.js` `ProfileMenuContent` (the same componen
 Two passes — one structural, one visual:
 
 **D1. Replace inline confirm strips with `ConfirmDialog`.**
-- The `confirmSuspendQuests` block (L2398–L2434) becomes a `ConfirmDialog` call:
-  - Title: `Suspend user from quests`.
-  - Body: existing copy + the duration `<select>` styled per R5 (rest border `border`, hover/focus `borderStrong`, `0.75rem/500`, `bg` background). No raw hex on the select.
-  - Primary action: `Button variant="danger"` → "Suspend".
-  - Secondary action: `Button variant="ghost"` → "Cancel".
-- Same treatment for `confirmUnsuspendQuests` (L2436–L2458) with primary copy "Unsuspend".
-- The success toast (L2460–L2476) becomes a `Toast` (success variant) — drop the inline `rgba(22,163,74,0.18)` + `#16A34A` styling. Reuse `themes/default/components/Toast.js`.
-- Remove the `🛡️` emoji from both prompts. Use `HiOutlineShieldExclamation` (already imported at the top of `ViewPostView.js`) inside the dialog title.
+- The inline admin confirm strips become `ConfirmDialog` calls with a `Button variant="danger"` primary action and a `Button variant="ghost"` secondary action.
+- The success toast becomes a `Toast` (success variant) — drop the inline `rgba(22,163,74,0.18)` + `#16A34A` styling. Reuse `themes/default/components/Toast.js`.
+- Remove the `🛡️` emoji from the prompts. Use `HiOutlineShieldExclamation` inside the dialog title.
 
-**D2. Tokenize the admin menu items (L2696–L2718).**
-- "Mark post/comment deleted", "Suspend from quests", "Unsuspend from quests" already use `MenuItem data-danger="true"`. Verify `data-danger` rule in `MenuDropdown` resolves to `menuDangerText` per RULES R2.
-- Order: `Mark deleted` → `Suspend` → `Unsuspend` (current order is fine; just confirm).
+**D2. Tokenize the admin menu items.**
+- "Mark post/comment deleted" uses `MenuItem data-danger="true"`. Verify the `data-danger` rule in `MenuDropdown` resolves to `menuDangerText` per RULES R2.
 
 ### E. Feed-row admin parity (CardView + PostMenu) — closes the parity gap — ✅ Done
 
-Landed via a shared hook so both feed-row surfaces stay in lockstep:
+Both feed-row surfaces gate on `isAdminVisible` (`userLevel >= 100` and not your own post) and render the admin **Mark post/comment deleted** item:
 
-- **New module** `themes/default/components/AdminQuestActions.js` exports `useAdminQuestActions({ post, state, updatePost, onCloseMenu })` returning `{ isAdminVisible, adminMenuItems, dialogs, fetchUserSuspensionStatus }`.
-  - Owns the `userLevel >= 100` + `questsEnabled` + `!isOwnPost` visibility gate (mirrors bluemoon).
-  - Fires `/admin/rewards/suspend`, `/admin/rewards/unsuspend`, and `tx.deletePost`. Success / error flow through the global `Toast` via `updateNotification`.
-  - Bundles the `SuspendDurationDropdown` (search-dropdown styling, R6 chevron, check-on-the-right rows, `voteUp` text on the selected row, R5 trigger). Dialog visuals match D1 exactly so post-detail and feed-row dialogs are pixel-identical.
-  - Mark-post-deleted menu icon is `HiOutlineShieldExclamation` (same icon as Suspend) so the admin block reads as one cohesive cluster.
-- `themes/default/components/CardView.js` calls `useAdminQuestActions`, lazy-fetches suspension status the first time the more-menu opens (`adminSuspensionFetchedRef`), maps `adminMenuItems` into the existing `MenuItemBtn` rows after Gift Subscription, and renders `{adminDialogs}` at the card root so overlays sit above feed siblings.
-- `themes/default/components/PostMenu.js` (`MoreMenuChip` used by `ListFeedView.js`) does the same wiring with its own `suspensionFetchedRef`.
-- Dialog title resolves to `Suspend @username from quests?` / `Unsuspend @username from quests?` (falls back to `this user`).
+- `themes/default/components/CardView.js` maps the admin item into the existing `MenuItemBtn` rows after Gift Subscription, and renders the confirm dialog at the card root so overlays sit above feed siblings.
+- `themes/default/components/PostMenu.js` (`MoreMenuChip` used by `ListFeedView.js`) does the same wiring.
+- The action fires `tx.deletePost`; success / error flow through the global `Toast` via `updateNotification`.
 - `ViewPostView.js` delete dialog now compares `confirmDeletePost` against `root.post_id` to detect comments (the previous `state.posts[id].target` heuristic was unreliable because `state.posts[id]` only stores per-row UI state). Comment variant copy: `Mark comment as deleted?` / "This will permanently remove this comment from every feed. This action cannot be undone."
 
 ### F. Visual cleanup — ✅ Done
 
 - No raw hex / rgba in any admin path inside `themes/default/**` after this sub-plan.
 - All admin-related buttons funnel through `themes/default/components/Button.js` (`variant="danger"` / `variant="ghost"`).
-- All admin-related inputs (the duration `<select>`) follow R5 (no blue ring).
 - All admin chevrons / icons use `react-icons/hi2` per R6 — no emoji, no inline polyline SVGs.
 - Page heading / row title typography follows R7.
 - Verified greps:
   - `#d97706 | #fef3c7 | #92400e | rgba(22, 163, 74 | #16A34A` in `routes/ViewPostView.js` → 0 matches.
   - `🛡️` in `routes/ViewPostView.js` → 0 matches.
-  - `isAdmin` (or equivalent admin gating via `useAdminQuestActions`) present in both `components/CardView.js` and `components/PostMenu.js`.
+  - `isAdmin` gating present in both `components/CardView.js` and `components/PostMenu.js`.
   - `CI=true npm run build` passes (only pre-existing unrelated `Sidebar.js` `EmptyPrompt` warning).
 
 ---
@@ -167,7 +158,6 @@ Landed via a shared hook so both feed-row surfaces stay in lockstep:
 - Refactoring `logic/useSubscription.js` `ADMIN_COLOR` / `logic/useProfile.js` inline `#EF4444` — those are shared across all themes and deserve their own cross-theme PR.
 - Adding new admin features (e.g. ban-user, force-unsubscribe). This sub-plan is **visual + parity** only.
 - Touching `themes/bluemoon/` / `themes/onyx/` / `themes/oldreddit/` admin UI.
-- Backend / API changes (`/admin/rewards/suspend`, `/admin/rewards/unsuspend`).
 - Mobile bottom nav full restyle — sub-plan 06.8 owns that. Only the `ProfileMenuContent` admin section is in scope here.
 
 ---
@@ -181,11 +171,10 @@ Before opening the PR:
 - [ ] `tierAdmin` token added to `themes/default/tokens.js` with both dark + light values, and documented in `RULES.md` R2.
 - [ ] `grep -nE "#EF4444|#DC2626" web/frontend/src/themes/default/` returns 0 matches.
 - [ ] `grep -nE "#d97706|#fef3c7|#92400e|rgba\\(22, 163, 74" web/frontend/src/themes/default/routes/ViewPostView.js` returns 0 matches.
-- [ ] `grep -n "🛡️\\|✓" web/frontend/src/themes/default/routes/ViewPostView.js` returns 0 matches inside the suspend / unsuspend banners.
+- [ ] `grep -n "🛡️\\|✓" web/frontend/src/themes/default/routes/ViewPostView.js` returns 0 matches inside the admin confirm banners.
 - [ ] `grep -n "isAdmin" web/frontend/src/themes/default/components/CardView.js` returns ≥1 match (parity gap closed).
 - [ ] `grep -n "isAdmin" web/frontend/src/themes/default/components/PostMenu.js` returns ≥1 match.
 - [ ] All admin menu items render `react-icons/hi2` icons (no emoji, no inline polyline).
-- [ ] R5 input style applied to the suspend-duration `<select>` (no blue ring, neutral `borderStrong` focus).
 - [ ] R7 typography on the new admin pill, eyebrow, dialog title, and menu rows.
 - [ ] Admin-only routes (`/stats`, `/reports`) still gate-render the `Forbidden` `StateBlock` for non-admins.
 - [ ] `SubscriptionView` admin branch shows `tierAdmin` headline, hides the tier grid, and hides the auto-renew banner.
@@ -206,14 +195,14 @@ Run with a `user_level >= 100` account:
 1. Open the avatar dropdown → confirm the new `Admin` eyebrow + pill render and the `Stats` / `Reports` items still navigate correctly.
 2. Open `MobileBottomNav` profile sheet at ≤600px — confirm the admin block surfaces identically.
 3. Visit `/subscription` — confirm the admin branch shows `tierAdmin`-colored "Admin" name + governance copy, no tier grid.
-4. Open any feed-row menu (home + topic + profile feed) — confirm `Mark deleted` / `Suspend from quests` / `Unsuspend from quests` appear, and that suspend status is fetched on menu open.
-5. Trigger Suspend / Unsuspend from a feed row → `ConfirmDialog` appears, success → success `Toast`. No layout shift.
-6. Trigger Suspend / Unsuspend from the post-detail page → same dialog, same toast.
+4. Open any feed-row menu (home + community + profile feed) — confirm `Mark deleted` appears.
+5. Trigger `Mark deleted` from a feed row → `ConfirmDialog` appears, success → success `Toast`. No layout shift.
+6. Trigger `Mark deleted` from the post-detail page → same dialog, same toast.
 7. `/reports` and `/stats` render normally; signed-out + non-admin viewers still see the `Forbidden` block (or the home redirect for `/reports`).
-8. Re-run the test above with a non-admin account — every admin item is hidden and no `/admin/rewards/*` request fires.
+8. Re-run the test above with a non-admin account — every admin item is hidden.
 
 ---
 
 ## PR description template
 
-> Sub-plan 06.11 — admin UI pass for the `default` theme. Closes the feed-row moderation parity gap, retires inline hex / emoji on the post-detail suspend confirm banners (now `ConfirmDialog` + `Toast`), tokenizes the admin red on a new `tierAdmin` R2 token, and adds an `Admin` eyebrow + pill to the profile menu. No behavior or API changes — gates and copy unchanged. Verified on dark + light with an admin and a non-admin account.
+> Sub-plan 06.11 — admin UI pass for the `default` theme. Closes the feed-row moderation parity gap, retires inline hex / emoji on the post-detail admin confirm banners (now `ConfirmDialog` + `Toast`), tokenizes the admin red on a new `tierAdmin` R2 token, and adds an `Admin` eyebrow + pill to the profile menu. No behavior or API changes — gates and copy unchanged. Verified on dark + light with an admin and a non-admin account.

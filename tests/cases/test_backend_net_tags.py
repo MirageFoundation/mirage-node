@@ -599,7 +599,7 @@ def test_net_tags_live(backend: str) -> None:
         _do_post(
             backend,
             wallet,
-            topic=f"nettag{_rand_str(4)}",
+            community=f"nettag{_rand_str(4)}",
             title="Network tag end to end",
             content="first tagged action",
         )

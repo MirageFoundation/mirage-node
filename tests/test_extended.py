@@ -37,7 +37,7 @@ from tests.blockchain_helpers import (
 import tests.blockchain_helpers as bh
 
 from tests.cases.test_backend_social import test_hard_cap_vs_deque, test_indexer_deque_storage
-from tests.cases.test_backend_indexer import test_indexer, test_tx_index, test_indexer_topic_edit
+from tests.cases.test_backend_indexer import test_indexer, test_tx_index, test_indexer_community_edit
 from tests.cases.test_blockchain_social import (
     test_follow_limits,
     test_hard_cap_vs_deque as test_chain_hard_cap_vs_deque,
@@ -50,7 +50,7 @@ ALL_CATEGORIES = {
     "indexer_deque": test_indexer_deque_storage,
     "indexer": test_indexer,
     "tx_index": test_tx_index,
-    "indexer_topic_edit": test_indexer_topic_edit,
+    "indexer_community_edit": test_indexer_community_edit,
     "follow_limits": test_follow_limits,
     "chain_hard_cap_vs_deque": test_chain_hard_cap_vs_deque,
     "block_list_cap_fills": test_block_list_cap_fills,

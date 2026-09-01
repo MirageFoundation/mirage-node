@@ -112,31 +112,31 @@ func validateAddress(address string) error {
 	return nil
 }
 
-// validateTopic enforces community-slug rules (lowercase, digits, single internal hyphens).
-func validateTopic(topic string, maxLen, minLen uint64) error {
-	topic = strings.TrimSpace(topic)
-	if topic == "" {
-		return fmt.Errorf("topic required for root posts")
+// validateCommunity enforces community-slug rules (lowercase, digits, single internal hyphens).
+func validateCommunity(community string, maxLen, minLen uint64) error {
+	community = strings.TrimSpace(community)
+	if community == "" {
+		return fmt.Errorf("community required for root posts")
 	}
-	return types.ValidateCommunitySlug(topic, minLen, maxLen)
+	return types.ValidateCommunitySlug(community, minLen, maxLen)
 }
 
-// validateBlockedTopicPattern allows exact topics or glob patterns with * wildcards.
-// The alphanumeric portion (with * removed) must pass validateTopic rules.
+// validateBlockedCommunityPattern allows exact communities or glob patterns with * wildcards.
+// The alphanumeric portion (with * removed) must pass validateCommunity rules.
 // Consecutive ** is not allowed.
-func validateBlockedTopicPattern(topic string, maxLen, minLen uint64) error {
-	topic = strings.TrimSpace(topic)
-	if topic == "" {
-		return fmt.Errorf("topic required for blocking")
+func validateBlockedCommunityPattern(community string, maxLen, minLen uint64) error {
+	community = strings.TrimSpace(community)
+	if community == "" {
+		return fmt.Errorf("community required for blocking")
 	}
-	if strings.Contains(topic, "**") {
+	if strings.Contains(community, "**") {
 		return fmt.Errorf("consecutive wildcards not allowed")
 	}
-	alpha := strings.ReplaceAll(topic, "*", "")
+	alpha := strings.ReplaceAll(community, "*", "")
 	if alpha == "" {
 		return fmt.Errorf("pattern must contain alphanumeric characters")
 	}
-	return validateTopic(alpha, maxLen, minLen)
+	return validateCommunity(alpha, maxLen, minLen)
 }
 
 // allowedTags is the whitelist of valid tag values
@@ -1140,7 +1140,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: followed_users for %s: %w", core.Owner, err)
 		}
-		topics, err := am.k.ListJoinedCommunities(sdkCtx, core.Owner)
+		joined, err := am.k.ListJoinedCommunities(sdkCtx, core.Owner)
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: joined_communities for %s: %w", core.Owner, err)
 		}
@@ -1152,7 +1152,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: blocked_posts for %s: %w", core.Owner, err)
 		}
-		blockedTopics, err := am.k.ListBlockedCommunities(sdkCtx, core.Owner)
+		blockedCommunities, err := am.k.ListBlockedCommunities(sdkCtx, core.Owner)
 		if err != nil {
 			return nil, fmt.Errorf("GetProfiles: blocked_communities for %s: %w", core.Owner, err)
 		}
@@ -1171,10 +1171,10 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			Flair:              core.Flair,
 			EffectivePaid:      core.EffectivePaid,
 			FollowedUsers:      users,
-			JoinedCommunities:  topics,
+			JoinedCommunities:  joined,
 			BlockedUsers:       blockedUsers,
 			BlockedPosts:       blockedPosts,
-			BlockedCommunities: blockedTopics,
+			BlockedCommunities: blockedCommunities,
 		})
 	}
 
@@ -1384,6 +1384,25 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if err := updated.ValidateGovernanceUpdate(); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
+	if current.CreatorEpochSeconds != updated.CreatorEpochSeconds {
+		hasState, err := am.k.HasCreatorRewardState(sdkCtx)
+		if err != nil {
+			return nil, err
+		}
+		if hasState {
+			return nil, fmt.Errorf("creator_epoch_seconds cannot change after creator reward state exists")
+		}
+		creatorEpoch, err := types.CreatorEpochFromUnix(
+			sdkCtx.BlockTime().Unix(),
+			updated.CreatorEpochSeconds,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := am.k.SetCreatorClock(sdkCtx, creatorEpoch); err != nil {
+			return nil, err
+		}
+	}
 	if err := am.k.SetParams(sdkCtx, updated); err != nil {
 		return nil, err
 	}
@@ -1471,7 +1490,7 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		if err := validateTxHash(target); err != nil {
 			return nil, err
 		}
-		// Comments must not include topic
+		// Comments must not include community
 		if strings.TrimSpace(req.GetCommunity()) != "" {
 			return nil, fmt.Errorf("comments must not include community")
 		}
@@ -1480,12 +1499,12 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 			return nil, fmt.Errorf("comment content cannot be empty")
 		}
 	} else {
-		// Root posts MUST include a non-empty topic
-		topic := strings.TrimSpace(req.GetCommunity())
-		if topic == "" {
+		// Root posts MUST include a non-empty community
+		community := strings.TrimSpace(req.GetCommunity())
+		if community == "" {
 			return nil, fmt.Errorf("root posts require a community")
 		}
-		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
+		if err := types.ValidateCommunitySlug(community, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
 		}
 	}
@@ -1529,10 +1548,14 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	if err != nil {
 		return nil, err
 	}
+	creatorEpoch, err := types.CreatorEpochFromUnix(sdkCtx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	if err != nil {
+		return nil, err
+	}
 	meta := &types.PostMetadata{
 		Author:                  owner,
 		CreatedHeight:           sdkCtx.BlockHeight(),
-		CreatedEpoch:            types.UTCEpoch(sdkCtx.BlockTime().Unix()),
+		CreatedEpoch:            creatorEpoch,
 		WasSubscriberAtCreation: paid,
 		GlobalSequence:          seq,
 	}
@@ -1714,19 +1737,19 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		}
 	}
 
-	// Validate topic
-	topic := strings.TrimSpace(req.GetCommunity())
+	// Validate community
+	community := strings.TrimSpace(req.GetCommunity())
 	if isComment {
-		// Comments must not include topic on edit
-		if topic != "" {
+		// Comments must not include community on edit
+		if community != "" {
 			return nil, fmt.Errorf("comments must not include community")
 		}
 	} else {
-		// Root posts must include a non-empty topic
-		if topic == "" {
+		// Root posts must include a non-empty community
+		if community == "" {
 			return nil, fmt.Errorf("root posts require a community")
 		}
-		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
+		if err := types.ValidateCommunitySlug(community, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
 			return nil, err
 		}
 	}
@@ -1754,152 +1777,14 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	return &types.MsgEditResponse{}, nil
 }
 
-// Annotate handler: agent-only overlay on an existing post.
-// Sentinel "." means no change; empty string means clear.
+// Annotate was the agent-tier overlay message. Agents were removed in v1.39.0
+// and MigrateV139 demotes every level-10 account, so the old handler's tier gate
+// could no longer pass and its body was unreachable. It is a rejection now, like
+// the other four retired messages, so the rule is stated instead of implied.
 func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*types.MsgAnnotateResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	gasStart := sdkCtx.GasMeter().GasConsumed()
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-
-	var owner string
-	if authority == govAuthority {
-		owner = authority
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("Annotate: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		owner = sdk.AccAddress(pub.Address()).String()
-	}
-
-	var userLevel int
-	if authority != govAuthority {
-		core, err := am.requireUsername(sdkCtx, owner, "Annotate")
-		if err != nil {
-			return nil, err
-		}
-		userLevel = int(core.Level)
-	}
-
-	// Enforce agent tier
-	if userLevel < types.LevelAgent && authority != govAuthority {
-		return nil, fmt.Errorf("annotate requires agent tier (level >= %d), got %d", types.LevelAgent, userLevel)
-	}
-
-	params := am.k.GetParams(sdkCtx)
-
-	// Validate override txhash (the post being annotated)
-	override := strings.ToLower(strings.TrimSpace(req.GetOverride()))
-	if err := validateTxHash(override); err != nil {
-		return nil, fmt.Errorf("invalid override: %w", err)
-	}
-
-	// Annotate never supports PoW
-	if req.GetEnvelopeDifficulty() != 0 || req.GetEnvelopePow() != 0 {
-		sdkCtx.Logger().Error("Annotate: PoW not allowed", "difficulty", req.GetEnvelopeDifficulty(), "pow", req.GetEnvelopePow())
-		return nil, fmt.Errorf("annotate does not allow pow")
-	}
-
-	tierConfig := params.GetTierConfig(types.LevelAgent)
-	if tierConfig == nil {
-		return nil, fmt.Errorf("tier config not found for level %d", types.LevelAgent)
-	}
-
-	// Sentinel "." means no change — skip validation for those fields.
-	const sentinel = "."
-
-	// Validate topic (skip if sentinel)
-	topic := strings.TrimSpace(req.GetTopic())
-	if topic != sentinel && topic != "" {
-		if err := types.ValidateCommunitySlug(topic, uint64(params.MinCommunitySize), uint64(params.MaxCommunitySize)); err != nil {
-			return nil, err
-		}
-	}
-
-	// Validate title length (skip if sentinel)
-	title := req.GetTitle()
-	if title != sentinel {
-		titleLen := uint64(utf8.RuneCountInString(title))
-		if titleLen > tierConfig.MaxTitleLength {
-			return nil, fmt.Errorf("title exceeds limit: %d > %d", titleLen, tierConfig.MaxTitleLength)
-		}
-	}
-
-	// Validate content length (skip if sentinel)
-	content := req.GetContent()
-	if content != sentinel {
-		contentLen := uint64(utf8.RuneCountInString(content))
-		if contentLen > tierConfig.MaxContentLength {
-			return nil, fmt.Errorf("content exceeds limit: %d > %d", contentLen, tierConfig.MaxContentLength)
-		}
-	}
-
-	// Validate and normalize tag (skip if sentinel)
-	tag := strings.TrimSpace(req.GetTag())
-	if tag != sentinel {
-		tag = normalizeTag(tag)
-		if err := validateTag(tag); err != nil {
-			return nil, err
-		}
-	}
-
-	// Validate appendix length (skip if sentinel)
-	appendix := req.GetAppendix()
-	if appendix != sentinel {
-		appendixLen := uint64(utf8.RuneCountInString(appendix))
-		if appendixLen > tierConfig.MaxContentLength {
-			return nil, fmt.Errorf("appendix exceeds limit: %d > %d", appendixLen, tierConfig.MaxContentLength)
-		}
-	}
-
-	// Validate media (skip if single-element sentinel ["."])
-	media := req.GetMedia()
-	isSentinelMedia := len(media) == 1 && media[0] == sentinel
-	if !isSentinelMedia && len(media) > 0 {
-		if err := validateMsgPostMedia(media); err != nil {
-			return nil, err
-		}
-	}
-
-	// Validate non-sentinel fields for unsafe text
-	unsafeChecks := []struct{ name, val string }{
-		{"topic", topic}, {"title", title}, {"content", content},
-		{"tag", tag}, {"appendix", appendix},
-	}
-	for _, c := range unsafeChecks {
-		if c.val != sentinel {
-			if err := rejectUnsafeFields(c.name, c.val); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	sdkCtx.Logger().Info("Annotate",
-		"agent", owner,
-		"override", override,
-		"topic_sentinel", topic == sentinel,
-		"title_sentinel", title == sentinel,
-		"content_sentinel", content == sentinel,
-		"tag_sentinel", tag == sentinel,
-		"appendix_sentinel", appendix == sentinel,
-		"media_sentinel", isSentinelMedia,
-		"media_count", len(media),
-	)
-
-	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Annotate"); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgAnnotateResponse{}, nil
+	return nil, fmt.Errorf("retired message MsgAnnotate is not accepted after v1.39.0")
 }
 
-// updateProfileCore is a helper that loads, updates, validates, and persists core profile data only.
-// Lists (EnabledAgents, etc.) are stored separately and should be updated via keeper methods.
 func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn func(*types.ProfileCore) error) error {
 	params := am.k.GetParams(sdkCtx)
 
@@ -1980,11 +1865,11 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	}
 	prof.FollowedUsers = users
 
-	topics, err := am.k.ListJoinedCommunities(sdkCtx, owner)
+	joined, err := am.k.ListJoinedCommunities(sdkCtx, owner)
 	if err != nil {
 		return types.Profile{}, false, fmt.Errorf("loading joined communities for %s: %w", owner, err)
 	}
-	prof.JoinedCommunities = topics
+	prof.JoinedCommunities = joined
 
 	blocked, err := am.k.ListBlockedUsers(sdkCtx, owner)
 	if err != nil {
@@ -1998,11 +1883,11 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	}
 	prof.BlockedPosts = posts
 
-	blockedTopics, err := am.k.ListBlockedCommunities(sdkCtx, owner)
+	blockedCommunities, err := am.k.ListBlockedCommunities(sdkCtx, owner)
 	if err != nil {
 		return types.Profile{}, false, fmt.Errorf("loading blocked communities for %s: %w", owner, err)
 	}
-	prof.BlockedCommunities = blockedTopics
+	prof.BlockedCommunities = blockedCommunities
 
 	return prof, true, nil
 }
@@ -2676,8 +2561,13 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		if authority != govAuthority && meta.Author != owner {
 			return nil, fmt.Errorf("only the author can delete this post")
 		}
+		params := am.k.GetParams(sdkCtx)
+		creatorEpoch, err := types.CreatorEpochFromUnix(sdkCtx.BlockTime().Unix(), params.CreatorEpochSeconds)
+		if err != nil {
+			return nil, err
+		}
 		meta.DeletedHeight = sdkCtx.BlockHeight()
-		meta.DeletedEpoch = types.UTCEpoch(sdkCtx.BlockTime().Unix())
+		meta.DeletedEpoch = creatorEpoch
 		meta.DeletionActor = owner
 		if err := am.k.SetPostMetadata(sdkCtx, target, meta); err != nil {
 			return nil, err

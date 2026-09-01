@@ -899,14 +899,17 @@ export default function NetworkView({ state }) {
             <ListBody>
                 {peers.map((peer, idx) => {
                     const p = typeof peer === 'string' ? { ip: peer, moniker: null } : peer;
-                    if (!p.ip && !p.moniker) return null;
-                    const hasMonikerUrl = p.moniker && (p.moniker.startsWith('http://') || p.moniker.startsWith('https://'));
+                    if (!p.ip && !p.moniker && !p.site) return null;
                     return (
                         <PeerRow key={`peer-${idx}`}>
                             <PeerLink href={toHttpUrl(p)} target="_blank" rel="noopener noreferrer">
                                 {getDisplayName(p)}
                             </PeerLink>
-                            {hasMonikerUrl && p.ip && <PeerMeta>({p.ip})</PeerMeta>}
+                            {p.verified === false && (
+                                <PeerMeta title="This address has not proved it belongs to the validator that published it.">
+                                    unconfirmed
+                                </PeerMeta>
+                            )}
                         </PeerRow>
                     );
                 })}

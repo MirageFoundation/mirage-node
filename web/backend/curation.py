@@ -293,7 +293,7 @@ def resolve_effective_tags(
     lens too. A per-post override of ``""`` is a curator asserting the post
     carries no tag, which is why an existing row wins even when it is empty.
 
-    Each post needs a ``topic`` (community slug) and a ``post_id``. When
+    Each post needs a ``community`` (community slug) and a ``post_id``. When
     filter_posts has already stamped ``post["lens"]`` that team is reused;
     otherwise the lens is resolved here. Always run this before any
     allowed-tags filtering, which must see the effective value.
@@ -304,7 +304,7 @@ def resolve_effective_tags(
     default_teams: dict[str, dict[str, Any] | None] = {}
     lens_teams: dict[str, int | None] = {}
     for post in posts:
-        community = str(post.get("topic") or "").strip().lower()
+        community = str(post.get("community") or "").strip().lower()
         post_id = str(post.get("post_id") or "").strip().lower()
         if not community or not post_id:
             continue

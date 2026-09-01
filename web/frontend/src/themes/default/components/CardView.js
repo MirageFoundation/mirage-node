@@ -46,15 +46,15 @@ import { formatTimeStamp } from "../../../logic/useViewPost";
  * Visual language ported from `mirage-mobile-app/src/components/molecules/post-card.tsx`:
  *   · Subtle bottom border between posts, whole card is pressable and gets a
  *     hover background.
- *   · Header:   #topic · time · @username [tag]            [ Follow ▾ ] [⋯]
+ *   · Header:   #community · time · @username [tag]            [ Follow ▾ ] [⋯]
  *   · Title (bold) + markdown body (truncated to 700 chars in feed).
  *   · Media block (InlineMedia handles image / video / redgifs / gallery).
  *   · Action row:
  *       [▲ count ▼]  [💬 count]                [ 🚫 block ]  [↪ share]
  *
  * Three popovers live on a card:
- *   1. Follow popover — Follow topic / Follow user
- *   2. Block popover  — Block user / Block post / Block topic / Report post
+ *   1. Follow popover — Follow community / Follow user
+ *   2. Block popover  — Block user / Block post / Block community / Report post
  *   3. More popover   — full set of actions mirroring bluemoon
  *
  * All popovers reuse the same visual style and behavior as the feed header
@@ -116,7 +116,7 @@ const HeaderRow = styled.div`
 
 /* Header row typography bumped up a notch (0.56 → 0.62rem) with lighter
  * weights across the board so the metadata reads as a single calm line
- * rather than three bold labels. Topic + user stay heavier than time /
+ * rather than three bold labels. Community + user stay heavier than time /
  * feed-reason so they still anchor the row. */
 const HeaderMeta = styled.div`
     display: flex;
@@ -130,7 +130,7 @@ const HeaderMeta = styled.div`
     line-height: 1.2;
 `;
 
-const TopicLink = styled(Link)`
+const CommunityLink = styled(Link)`
     font-weight: 500;
     font-size: 0.62rem;
     color: ${({ theme }) => theme.colors.feedCtrlText};
@@ -701,10 +701,10 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     })();
 
     const postId = safePost.post_id ? String(safePost.post_id) : '';
-    const topic = typeof safePost.topic === 'string' ? safePost.topic : '';
+    const community = typeof safePost.community === 'string' ? safePost.community : '';
     const linkTarget = postId ? `/p/${postId}` : '#';
     const authorAddress = safePost.user_id || safePost.author || '';
-    const communityJoinPending = isCommunityPending(topic);
+    const communityJoinPending = isCommunityPending(community);
     const userFollowPending = isUserPending(authorAddress);
     const authorDisplay = (() => {
         if (typeof safePost.username === 'string' && safePost.username.trim()) return safePost.username.trim();
@@ -728,8 +728,8 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     const followingUser = followOverride !== null ? followOverride : computedFollowingUser;
 
     const computedJoinedCommunity = (() => {
-        if (!isLoggedIn || !topic) return false;
-        try { return isJoinedCommunity(viewerAddress, topic); }
+        if (!isLoggedIn || !community) return false;
+        try { return isJoinedCommunity(viewerAddress, community); }
         catch (_) { return false; }
     })();
     const joinedCommunity = communityJoinOverride !== null ? communityJoinOverride : computedJoinedCommunity;
@@ -780,19 +780,19 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
         // Match <a href="/p/…"> so ViewPost's Back can history-pop to this feed
         // (including /c/:community). Programmatic navigate alone never set the marker.
         try {
-            const feedTopic = topic && String(topic).trim() ? String(topic).trim().toLowerCase() : null;
+            const feedCommunity = community && String(community).trim() ? String(community).trim().toLowerCase() : null;
             sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                 source: 'feed',
-                topic: feedTopic,
+                community: feedCommunity,
                 at: Date.now(),
             }));
             sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
-                topic: feedTopic,
+                community: feedCommunity,
                 at: Date.now(),
             }));
         } catch (_) { /* noop */ }
         navigate(linkTarget);
-    }, [navigate, linkTarget, topic]);
+    }, [navigate, linkTarget, community]);
 
     /**
      * Share handler ported from bluemoon: on mobile devices attempt the
@@ -914,17 +914,17 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
 
     const handleJoinCommunity = useCallback(async () => {
         closeAllMenus();
-        if (!topic) return;
+        if (!community) return;
         if (!requireAccount('join communities')) return;
         const next = !joinedCommunity;
         setCommunityJoinOverride(next);
         try {
-            if (next) await joinCommunity(viewerAddress, topic);
-            else await leaveCommunity(viewerAddress, topic);
+            if (next) await joinCommunity(viewerAddress, community);
+            else await leaveCommunity(viewerAddress, community);
         } catch (_) {
             setCommunityJoinOverride(!next);
         }
-    }, [closeAllMenus, topic, joinedCommunity, viewerAddress]);
+    }, [closeAllMenus, community, joinedCommunity, viewerAddress]);
 
     /**
      * Confirmation dialogs (06.3 polish round).
@@ -1043,7 +1043,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     // ─── Guards (after all hooks) ──────────────────────────────────────────
     if (!post || post.deleted || post.blocked) return null;
     if (typeof post.title !== 'string' || post.title.trim() === '') return null;
-    if (typeof post.topic !== 'string' || post.topic.trim() === '') return null;
+    if (typeof post.community !== 'string' || post.community.trim() === '') return null;
 
     // ─── Render ────────────────────────────────────────────────────────────
 
@@ -1057,11 +1057,11 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
         >
             <HeaderRow>
                 <HeaderMeta>
-                    <TopicLink to={communityPath(topic)} onClick={stop}>
-                        {communityLabel(topic)}
-                    </TopicLink>
+                    <CommunityLink to={communityPath(community)} onClick={stop}>
+                        {communityLabel(community)}
+                    </CommunityLink>
                     {showPostLens && <PostLensPicker
-                        community={topic}
+                        community={community}
                         viewer={viewerAddress}
                         hintLens={post.lens}
                         onOpenChange={setLensOpen}
@@ -1248,7 +1248,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                     setFollowOpen((v) => !v);
                                 }}
                             >
-                                {formatUserStatus(authorAddress) || formatCommunityStatus(topic) || (followingUser ? 'Following' : joinedCommunity ? 'Joined' : 'Follow')}
+                                {formatUserStatus(authorAddress) || formatCommunityStatus(community) || (followingUser ? 'Following' : joinedCommunity ? 'Joined' : 'Follow')}
                             </FollowButton>
                             {followOpen && (
                                 <Menu role="menu" aria-label="Follow options" $align="right">
@@ -1262,7 +1262,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                         onClick={handleJoinCommunity}
                                     >
                                         <HiOutlineHashtag />
-                                        <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
+                                        <span>{formatCommunityStatus(community) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                     </MenuItemBtn>
                                     <MenuItemBtn
                                         type="button"
@@ -1332,7 +1332,7 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" disabled={communityJoinPending} onClick={handleJoinCommunity}>
                                             <HiOutlineHashtag />
-                                            <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
+                                            <span>{formatCommunityStatus(community) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                         </MenuItemBtn>
                                         <MenuItemBtn type="button" onClick={handleGiveAward}>
                                             <HiOutlineSparkles />

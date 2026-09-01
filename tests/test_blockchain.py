@@ -69,7 +69,6 @@ from tests.cases.test_blockchain_params import (
 from tests.cases.test_blockchain_features import (
     test_chain_auto_renewal,
     test_biography,
-    test_annotate_chain,
     test_security,
     test_send_tokens_raw_log_present,
 )
@@ -97,7 +96,6 @@ ALL_CATEGORIES = {
     "subscribe_gift_extends": test_subscribe_gift_extends_expiry,
     "tier_features": test_tier_features,
     "biography": test_biography,
-    "annotate_chain": test_annotate_chain,
     "security": test_security,
     "send_tokens_raw_log": test_send_tokens_raw_log_present,
     "envelope_replay": test_envelope_replay,

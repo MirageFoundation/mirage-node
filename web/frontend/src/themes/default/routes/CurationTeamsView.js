@@ -5,7 +5,7 @@ import { Helmet } from 'react-helmet-async';
 import Storage from '../../../utils/Storage';
 import Api from '../../../utils/api';
 import * as tx from '../../../utils/tx';
-import { invalidateCache as invalidateTopicsCache, notifyJoinedCommunitiesUpdated } from '../../../utils/Subscriptions';
+import { invalidateCache as invalidateCommunitiesCache, notifyJoinedCommunitiesUpdated } from '../../../utils/Subscriptions';
 import { communityLabel, sanitizeCommunitySlug, isValidCommunitySlug } from '../../../utils/community';
 import {
     CURATION_TEAM_DESCRIPTION_EXAMPLE,
@@ -201,7 +201,7 @@ export default function CurationTeamsView() {
     const navigate = useNavigate();
     const location = useLocation();
     const returnTo = returnToFromLocation(location);
-    const routeCommunity = String(params.topic || params.community || '').toLowerCase();
+    const routeCommunity = String(params.community || params.community || '').toLowerCase();
     const [slug, setSlug] = useState(routeCommunity);
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
@@ -368,7 +368,7 @@ export default function CurationTeamsView() {
             // proven the indexer serves the team, so the refetch cannot re-cache
             // the state we are replacing.
             invalidateCurationReads(nextSlug);
-            invalidateTopicsCache();
+            invalidateCommunitiesCache();
             notifyJoinedCommunitiesUpdated({ added: nextSlug });
             const visibleId = Number(visible.team_id);
             console.debug('[curation] opening created team', {

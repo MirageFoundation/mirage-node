@@ -30,8 +30,7 @@ _LOCK = threading.Lock()
 PARAMS_REFRESH_SECONDS = 60
 
 _REQUIRED_INT_PARAMS = [
-    # Legacy key names intentionally retained for backend/public API stability.
-    # See indexer/params.py::_PARAMS_LEGACY_NAME_ALIASES.
+    # Some PoW keys keep pre-v1.11 names; see indexer/params.py::_PARAMS_LEGACY_NAME_ALIASES.
     "pow_base_bits",
     "pow_message_window",
     "pow_increase_threshold",
@@ -44,8 +43,8 @@ _REQUIRED_INT_PARAMS = [
     "mint_dynamic_credit_cap",
     "max_username_size",
     "min_username_size",
-    "max_topic_size",
-    "min_topic_size",
+    "max_community_size",
+    "min_community_size",
     "subscription_period",
     "relay_min_gas_price",
     "relay_max_gas_fee",

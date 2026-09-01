@@ -559,7 +559,7 @@ account” through surveillance. Abuse is handled through economics, filtering, 
 blocks.
 
 Individual nodes can still choose to add their own anti-abuse measures, especially if they
-offer user rewards. A node might rate-limit, check IP patterns, use invite codes, or apply
+offer user rewards. A node might rate-limit, check IP patterns, or apply
 other gating to avoid paying rewards to farmed or abusive accounts. Those are node-level
 choices, not a network requirement.
 

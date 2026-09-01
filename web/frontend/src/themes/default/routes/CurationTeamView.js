@@ -256,7 +256,7 @@ function tabFromHash(hash) {
 }
 
 export default function CurationTeamView() {
-    const { topic: community, teamId } = useParams();
+    const { community: community, teamId } = useParams();
     const location = useLocation();
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState(() => tabFromHash(location.hash));

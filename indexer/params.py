@@ -31,8 +31,6 @@ _PARAMS_LEGACY_NAME_ALIASES = {
     "pow_message_limit": "pow_increase_threshold",
     "pow_difficulty_allowance": "pow_difficulty_grace_period",
     "pow_difficulty_step": "pow_factor",
-    "min_community_size": "min_topic_size",
-    "max_community_size": "max_topic_size",
 }
 
 _PARAMS_PROTO_FIELD_NAMES = {f.name for f in Params.DESCRIPTOR.fields}
@@ -77,8 +75,8 @@ def _build_cache_from_params(p: dict) -> dict[str, Any]:
     required_int = [
         "max_username_size",
         "min_username_size",
-        "max_topic_size",
-        "min_topic_size",
+        "max_community_size",
+        "min_community_size",
     ]
     for key in required_int:
         value = p.get(key)
@@ -162,14 +160,14 @@ def get_raw_params() -> dict[str, Any]:
     return _RAW_PARAMS
 
 
-def get_max_topic_size() -> int:
-    """Get max topic size from chain params."""
-    return expect_params()["max_topic_size"]
+def get_max_community_size() -> int:
+    """Get max community size from chain params."""
+    return expect_params()["max_community_size"]
 
 
-def get_min_topic_size() -> int:
-    """Get min topic size from chain params."""
-    return expect_params()["min_topic_size"]
+def get_min_community_size() -> int:
+    """Get min community size from chain params."""
+    return expect_params()["min_community_size"]
 
 
 def get_max_username_size() -> int:
@@ -217,8 +215,8 @@ __all__ = [
     "load_params",
     "expect_params",
     "get_raw_params",
-    "get_max_topic_size",
-    "get_min_topic_size",
+    "get_max_community_size",
+    "get_min_community_size",
     "get_max_username_size",
     "get_min_username_size",
     "get_vote_weight",

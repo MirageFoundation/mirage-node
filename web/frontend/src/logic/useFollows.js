@@ -18,7 +18,7 @@ export function useFollows({
     const location = useLocation();
     const address = state && state.publicKey ? state.publicKey : Storage.load('publicKey', '');
     const [followedUsers, setFollowedUsers] = useState([]);
-    const [followedTopics, setFollowedTopics] = useState([]);
+    const [followedCommunities, setFollowedCommunities] = useState([]);
     const [followedUsernames, setFollowedUsernames] = useState({});
     const [listsLoading, setListsLoading] = useState(false);
     const [listsError, setListsError] = useState('');
@@ -40,7 +40,7 @@ export function useFollows({
                 });
                 if (cancelled) return;
                 setFollowedUsers(data?.followed_users || []);
-                setFollowedTopics(data?.joined_communities || []);
+                setFollowedCommunities(data?.joined_communities || []);
             } catch (err) {
                 if (!cancelled) {
                     setListsError(err?.message || 'Failed to load follows');
@@ -90,13 +90,13 @@ export function useFollows({
             cancelled = true;
         };
     }, [followedUsers]);
-    const handleLeaveCommunity = async (e, topic) => {
+    const handleLeaveCommunity = async (e, community) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-        const topicTrimmed = String(topic || '').trim().toLowerCase();
-        if (!topicTrimmed) return;
+        const communityTrimmed = String(community || '').trim().toLowerCase();
+        if (!communityTrimmed) return;
         try {
-            await leaveCommunity(address, topicTrimmed);
-            setFollowedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
+            await leaveCommunity(address, communityTrimmed);
+            setFollowedCommunities(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== communityTrimmed));
         } catch (error) {
             if (error?.code === 'community_leave_cancelled') return;
             alert(`Error leaving community: ${error?.message || error}`);
@@ -120,7 +120,7 @@ export function useFollows({
         navigate,
         location,
         followedUsers,
-        followedTopics,
+        followedCommunities,
         followedUsernames,
         listsLoading,
         listsError,

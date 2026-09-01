@@ -21,6 +21,10 @@ Contract:
   completion marker share one transaction.
 - RPC/network backfills must be resumable via meta progress keys and only
   write the completion marker after all work finishes.
+- A MIGRATION_KEY is an on-disk identity. Never change one: the completed set is
+  keyed by it, so a new spelling re-runs the migration everywhere.
+- An applied migration's file is checksummed and a mismatch is fatal. If a
+  release must rewrite one anyway, declare it in _REPINNED_MIGRATION_KEYS.
 """
 
 from __future__ import annotations
@@ -175,6 +179,45 @@ def _meta_set(db: "DatabaseManager", key: str, value: str) -> None:
             )
 
 
+# Applied migrations whose files a later release deliberately rewrote. The
+# checksum guard below exists to catch an *unreviewed* edit, and it fails the
+# whole start-up, so a reviewed rewrite has to be declared here or every node
+# that already ran the migration refuses to boot. The rewrite must not change
+# what the migration does to a database that already applied it.
+#
+# v1.39.0 renamed topic_content_stats -> community_content_stats and
+# user_topic_stats -> user_community_stats. Schema init creates the new names, so
+# every earlier migration touching those tables had to move with them or a fresh
+# database would fail on an old migration.
+_REPIN_RELEASE = "v1.39.0"
+_REPINNED_MIGRATION_KEYS = (
+    "v1.16.0_agent_edits",
+    "v1.22.4_rename_porn_to_adult",
+    "v1.33.0_rebuild_derived_stats",
+    "v1.34.0_repair_topic_attribution",
+    "v1.36.0_repair_deleted_post_standing",
+    "v1.39.0_communities",
+    "v1.39.0_legacy_vote_standing",
+    "v1.39.0_repair_resurrected_posts",
+)
+_REPIN_MARKER_KEY = "migration_checksum_repin"
+
+
+def _repin_rewritten_checksums(db: "DatabaseManager") -> None:
+    """Drop the pinned checksums this release rewrote, once, so they re-pin."""
+    if _meta_get(db, _REPIN_MARKER_KEY) == _REPIN_RELEASE:
+        return
+    with db._connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM meta WHERE key = ANY(%s)",
+                ([f"migration_{key}_checksum" for key in _REPINNED_MIGRATION_KEYS],),
+            )
+            dropped = cur.rowcount
+    _meta_set(db, _REPIN_MARKER_KEY, _REPIN_RELEASE)
+    logger.info("Re-pinning %s migration checksums rewritten by %s", dropped, _REPIN_RELEASE)
+
+
 def _pin_or_verify_checksum(db: "DatabaseManager", module_name: str, migration_key: str) -> None:
     """Pin checksum on first see of a completed migration; fail on later mismatch."""
     path = _migration_file_path(module_name)
@@ -236,6 +279,7 @@ def run_migrations(db: "DatabaseManager", chain: "ChainClient") -> int:
                 )
             logger.debug("Acquired migration advisory lock key=%s", _MIGRATION_ADVISORY_LOCK_KEY)
 
+        _repin_rewritten_checksums(db)
         completed = get_completed_migrations(db)
 
         for module_name, migration_key, _module in migrations:

@@ -5,7 +5,7 @@ export function deriveBootstrapView(pathname) {
     if (path === '/following') return 'feed:following';
     if (path.startsWith('/c/')) {
         const community = decodeURIComponent(path.slice(3).split('/')[0] || '').trim();
-        return community ? `topic:${community}` : null;
+        return community ? `community:${community}` : null;
     }
     if (path.startsWith('/p/')) {
         const id = path.slice(3).split('/')[0].split('?')[0].trim().toLowerCase();

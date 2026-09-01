@@ -34,7 +34,7 @@ import StickerPicker from './components/StickerPicker';
 import Toast from './components/Toast';
 import Tooltip, { InfoIcon, tooltipStyles } from './components/Tooltip';
 import TopBar, { ProfileMenuContent } from './components/TopBar';
-import TopicSelector from './components/TopicSelector';
+import CommunitySelector from './components/CommunitySelector';
 import UnlockPrompt from './components/UnlockPrompt';
 import {
     MediaRow,
@@ -101,7 +101,7 @@ const components = {
     tooltipStyles,
     TopBar,
     ProfileMenuContent,
-    TopicSelector,
+    CommunitySelector,
     UnlockPrompt,
     MediaRow,
     MediaIconButton,

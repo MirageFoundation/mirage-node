@@ -59,7 +59,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -75,7 +74,6 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
@@ -95,10 +93,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
@@ -113,7 +111,7 @@ def test_subscriber(backend: str):
     sub1_addr = str(sub1_wallet.address())
     sub2_wallet = WALLETS["sub2"]
     sub2_addr = str(sub2_wallet.address())
-    agent1_wallet = WALLETS["agent1"]
+    agent1_wallet = WALLETS["sub3"]
     agent1_addr = str(agent1_wallet.address())
 
     # 7.1 Free user level = 0
@@ -131,7 +129,7 @@ def test_subscriber(backend: str):
     for level, name, w, a in [
         (1, "sub1", sub1_wallet, sub1_addr),
         (1, "sub2", sub2_wallet, sub2_addr),
-        (1, "agent1", agent1_wallet, agent1_addr),
+        (1, "sub3", agent1_wallet, agent1_addr),
     ]:
         try:
             st = get_user_status(backend, a)
@@ -216,7 +214,7 @@ def test_subscriber(backend: str):
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
-        (10, "agent1", agent1_wallet),
+        (10, "sub3", agent1_wallet),
     ]:
         txh = _do_post(backend, w, "test", f"Tier{level} post {_rand_str(4)}", f"tier {level} body", skip_pow=True)
         if txh:
@@ -248,7 +246,7 @@ def test_subscriber(backend: str):
         for level, name, w in [
             (1, "sub1", sub1_wallet),
             (1, "sub2", sub2_wallet),
-            (10, "agent1", agent1_wallet),
+            (10, "sub3", agent1_wallet),
         ]:
             resp = _do_vote(backend, w, txh_free, 1, skip_pow=True)
             txh_vote = str(resp.get("tx_hash", "")).lower()
@@ -261,7 +259,7 @@ def test_subscriber(backend: str):
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
-        (10, "agent1", agent1_wallet),
+        (10, "sub3", agent1_wallet),
     ]:
         try:
             a = str(w.address())
@@ -284,7 +282,7 @@ def test_subscriber(backend: str):
                 "pow_difficulty": 1,
                 "pow": int(proof),
                 "target": "",
-                "topic": "test",
+                "community": "test",
                 "title": f"{name} pow",
                 "content": "body",
                 "protocol_version": 1,
@@ -305,7 +303,7 @@ def test_subscriber(backend: str):
         for name, w in [
             ("sub1", sub1_wallet),
             ("sub2", sub2_wallet),
-            ("agent1", agent1_wallet),
+            ("sub3", agent1_wallet),
         ]:
             try:
                 resp = _do_vote(backend, w, txh_pow_vote_target, 1, skip_pow=False)
@@ -323,7 +321,7 @@ def test_subscriber(backend: str):
         _fail("tiers.vote_pow_target_post", "failed to create target post for pow vote")
 
     # 7.7c Subscriber edit with PoW should be ACCEPTED (PoW fields ignored)
-    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
+    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("sub3", agent1_wallet)]:
         if name in tier_posts:
             if _wait_indexed(backend, str(w.address()), tier_posts[name]):
                 try:
@@ -368,7 +366,7 @@ def test_subscriber(backend: str):
             "envelope_nonce": str(nonce2),
             "pow_difficulty": 0,
             "target": "",
-            "topic": "test",
+            "community": "test",
             "title": "no pow",
             "content": "body",
             "protocol_version": 1,
@@ -382,7 +380,7 @@ def test_subscriber(backend: str):
         _fail("tiers.free_user_no_pow_rejected", str(e))
 
     # 7.9 All tiers can edit their own posts
-    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
+    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("sub3", agent1_wallet)]:
         if name in tier_posts:
             if _wait_indexed(backend, str(w.address()), tier_posts[name]):
                 resp = _do_edit(
@@ -643,7 +641,7 @@ def test_subscribe_gift_validation(backend: str):
 
     # 25.2 There is no tier above Subscriber, so a gift can never be rejected
     # for targeting a higher tier. Gifting an existing subscriber extends them,
-    # which test_subscribe_gift_agent asserts.
+    # which test_subscribe_gift_repeat asserts.
 
 
 # =========================================================================
@@ -651,35 +649,35 @@ def test_subscribe_gift_validation(backend: str):
 # =========================================================================
 
 
-def test_subscribe_gift_agent(backend: str):
-    """Test gifting level 10 (Agent) subscriptions via the backend API."""
+def test_subscribe_gift_repeat(backend: str):
+    """Gift a level-1 subscription to a wallet that already has one, twice over."""
 
-    agent2_wallet = WALLETS["agent2"]
-    agent1_wallet = WALLETS["agent1"]
+    agent2_wallet = WALLETS["sub4"]
+    agent1_wallet = WALLETS["sub3"]
     agent1_addr = str(agent1_wallet.address())
 
-    # 26.1 Gift level 10 from agent2 to agent1 (already level 10) — should succeed
+    # 26.1 Gift level 10 from sub4 to sub3 (already level 10) — should succeed
     try:
         before = get_user_status(backend, agent1_addr)
         before_exp = int(before.get("subscription_expiry", 0) or 0)
-        _debug(f"subscribe.gift_agent.before agent1 exp={before_exp} level={before.get('user_level')}")
+        _debug(f"subscribe.gift_repeat.before sub3 exp={before_exp} level={before.get('user_level')}")
 
         resp = _do_subscribe(backend, agent2_wallet, 1, target=agent1_addr)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         err = str(resp.get("error", "")) if resp else ""
         if err:
-            _debug(f"subscribe.gift_agent error={err}")
-            _fail("subscribe.gift_agent_succeeds", f"error={err[:200]}")
+            _debug(f"subscribe.gift_repeat error={err}")
+            _fail("subscribe.gift_repeat_succeeds", f"error={err[:200]}")
         elif txh:
             deliver = _wait_tx_deliver(txh)
             if deliver and deliver[0] != 0:
-                _fail("subscribe.gift_agent_succeeds", f"deliver code={deliver[0]} log={deliver[1][:200]}")
+                _fail("subscribe.gift_repeat_succeeds", f"deliver code={deliver[0]} log={deliver[1][:200]}")
             else:
-                _pass("subscribe.gift_agent_succeeds")
+                _pass("subscribe.gift_repeat_succeeds")
         else:
-            _fail("subscribe.gift_agent_succeeds", f"no txh or error: {resp}")
+            _fail("subscribe.gift_repeat_succeeds", f"no txh or error: {resp}")
     except Exception as e:
-        _fail("subscribe.gift_agent_succeeds", str(e))
+        _fail("subscribe.gift_repeat_succeeds", str(e))
 
     # 26.2 Wait for indexer and verify expiry increased
     try:
@@ -691,13 +689,13 @@ def test_subscribe_gift_agent(backend: str):
             if after_exp > before_exp:
                 break
             time.sleep(2)
-        _debug(f"subscribe.gift_agent.after agent1 exp={after_exp}")
+        _debug(f"subscribe.gift_repeat.after sub3 exp={after_exp}")
         if after_exp > before_exp:
-            _pass("subscribe.gift_agent_extends_expiry")
+            _pass("subscribe.gift_repeat_extends_expiry")
         else:
-            _fail("subscribe.gift_agent_extends_expiry", f"before={before_exp} after={after_exp}")
+            _fail("subscribe.gift_repeat_extends_expiry", f"before={before_exp} after={after_exp}")
     except Exception as e:
-        _fail("subscribe.gift_agent_extends_expiry", str(e))
+        _fail("subscribe.gift_repeat_extends_expiry", str(e))
 
     # 26.3 Gift level 10 again — should extend expiry further
     try:
@@ -706,11 +704,11 @@ def test_subscribe_gift_agent(backend: str):
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         err = str(resp.get("error", "")) if resp else ""
         if err:
-            _fail("subscribe.gift_agent_extends_again", f"error={err[:200]}")
+            _fail("subscribe.gift_repeat_extends_again", f"error={err[:200]}")
         elif txh:
             deliver = _wait_tx_deliver(txh)
             if deliver and deliver[0] != 0:
-                _fail("subscribe.gift_agent_extends_again", f"deliver code={deliver[0]}")
+                _fail("subscribe.gift_repeat_extends_again", f"deliver code={deliver[0]}")
             else:
                 deadline2 = time.time() + 30
                 after_exp2 = before_exp2
@@ -721,13 +719,13 @@ def test_subscribe_gift_agent(backend: str):
                         break
                     time.sleep(2)
                 if after_exp2 > before_exp2:
-                    _pass("subscribe.gift_agent_extends_again")
+                    _pass("subscribe.gift_repeat_extends_again")
                 else:
-                    _fail("subscribe.gift_agent_extends_again", f"before={before_exp2} after={after_exp2}")
+                    _fail("subscribe.gift_repeat_extends_again", f"before={before_exp2} after={after_exp2}")
         else:
-            _fail("subscribe.gift_agent_extends_again", f"no txh or error: {resp}")
+            _fail("subscribe.gift_repeat_extends_again", f"no txh or error: {resp}")
     except Exception as e:
-        _fail("subscribe.gift_agent_extends_again", str(e))
+        _fail("subscribe.gift_repeat_extends_again", str(e))
 
 
 # =========================================================================

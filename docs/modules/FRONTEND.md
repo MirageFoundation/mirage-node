@@ -28,7 +28,7 @@ The frontend is a React SPA that provides:
 
 - Account creation and management (seed phrase-based)
 - Content creation (posts, comments, votes)
-- Social features (follow users/topics, block content)
+- Social features (follow users, join communities, block content)
 - Subscription management and token transfers
 - Personalized feeds and discovery
 
@@ -101,7 +101,7 @@ web/frontend/src/
 ├── App.js                 # Root component, routing, theme
 ├── index.js               # Entry point
 ├── views/
-│   ├── MainView.js        # Feed views (home, following, topic)
+│   ├── MainView.js        # Feed views (home, following, community)
 │   ├── CreatePostView.js  # Post/comment creation
 │   ├── ViewPostView.js    # Thread view with comments
 │   ├── ProfileView.js     # User profile
@@ -134,7 +134,7 @@ web/frontend/src/
 | Component | Purpose |
 |-----------|---------|
 | `App.js` | Root routing, theme provider, global state |
-| `MainView.js` | Feed rendering (home, following, topic-specific) |
+| `MainView.js` | Feed rendering (home, following, community-specific) |
 | `CardView.js` | Individual post display with metadata |
 | `VoteSection.js` | Vote buttons with optimistic updates |
 | `TransactionHandler.js` | Transaction queue, PoW, signing |
@@ -478,11 +478,14 @@ The main feed view supports multiple modes:
 
 ```javascript
 // Route patterns
-/home           → Home feed (personalized)
-/following      → Following feed (users + topics)
-/t/{topic}      → Topic-specific feed
-/discover       → Discovery/trending
+/home             → Home feed (personalized)
+/following        → Following feed (followed users + joined communities)
+/c/{community}    → Community-specific feed
+/communities      → Discovery / community directory
 ```
+
+The pre-v1.39.0 `/t/{topic}`, `/topics` and `/agents` routes were removed and
+return 404. There is no redirect from the old paths.
 
 **Feed Loading:**
 ```javascript
@@ -491,7 +494,7 @@ const loadPosts = async () => {
         address: publicKey,
         limit: 20,
         offset: 0,
-        topic: currentTopic || undefined,
+        community: currentCommunity || undefined,
         filter: feedType,
     };
     const data = await Api.get('get_posts', params);
@@ -519,14 +522,13 @@ Each post is rendered as a card with:
 - Author info (username, address, tier badge)
 - Content (markdown rendered)
 - Voting controls
-- Metadata (timestamp, topic, comment count)
+- Metadata (timestamp, community, comment count)
 
 ```javascript
 <CardView
     post={post}
     onVote={handleVote}
     onComment={handleComment}
-    showTopic={!isSingleTopic}
 />
 ```
 

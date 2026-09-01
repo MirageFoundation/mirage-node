@@ -122,7 +122,7 @@ export function useProfile({
         formatStatusForPosition,
         getMyQueuePosition
     } = useTxStatus();
-    const [prefsTopics, setPrefsTopics] = useState([]);
+    const [prefsCommunities, setPrefsCommunities] = useState([]);
     const [prefsAuthors, setPrefsAuthors] = useState([]);
     const [prefsLoading, setPrefsLoading] = useState(false);
     const [prefsError, setPrefsError] = useState('');
@@ -130,7 +130,7 @@ export function useProfile({
     const [similarUsers, setSimilarUsers] = useState([]);
     const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
     const [similarUsersError, setSimilarUsersError] = useState('');
-    const [showAllTopicPrefs, setShowAllTopicPrefs] = useState(false);
+    const [showAllCommunityPrefs, setShowAllCommunityPrefs] = useState(false);
     const [showAllAuthorPrefs, setShowAllAuthorPrefs] = useState(false);
     const [showAllSimilarUsers, setShowAllSimilarUsers] = useState(false);
 
@@ -177,9 +177,9 @@ export function useProfile({
                     address: profileAddress
                 });
                 if (cancelled) return;
-                setPrefsTopics(Array.isArray(data?.topics) ? data.topics : []);
+                setPrefsCommunities(Array.isArray(data?.communities) ? data.communities : []);
                 setPrefsAuthors(Array.isArray(data?.authors) ? data.authors : []);
-                setShowAllTopicPrefs(false);
+                setShowAllCommunityPrefs(false);
                 setShowAllAuthorPrefs(false);
             } catch (err) {
                 if (!cancelled) {
@@ -258,7 +258,7 @@ export function useProfile({
 
     // Reset data when profile changes
     useEffect(() => {
-        setPrefsTopics([]);
+        setPrefsCommunities([]);
         setPrefsAuthors([]);
         setPrefsError('');
         setPrefAuthorUsernames({});
@@ -454,10 +454,10 @@ export function useProfile({
                 if (cancelled) return;
                 const raw = Array.isArray(res?.posts) ? res.posts : [];
                 // Comments don't carry a `title` (parent post owns it) and the
-                // backend explicitly forbids a `topic` on comments. The shared
+                // backend explicitly forbids a `community` on comments. The shared
                 // FeedRow renderer drops any row missing either field, so we
                 // synthesize both here when rendering the Comments tab — title
-                // from the body's first line, topic from the parent post id —
+                // from the body's first line, community from the parent post id —
                 // so users actually see their replies. Submissions untouched.
                 const incoming = (effectivePostsFilter === 'comments')
                     ? raw.map(p => {
@@ -470,20 +470,20 @@ export function useProfile({
                             const snippet = firstLine.trim().slice(0, 80);
                             next.title = snippet ? (snippet + (firstLine.trim().length > 80 ? '…' : '')) : '(reply)';
                         }
-                        const hasTopic = typeof next.topic === 'string' && next.topic.trim() !== '';
-                        if (!hasTopic) {
-                            // Prefer the parent post's topic (`root_topic`) when
-                            // the backend includes it — that's the real topic
+                        const hasCommunity = typeof next.community === 'string' && next.community.trim() !== '';
+                        if (!hasCommunity) {
+                            // Prefer the parent post's community (`root_community`) when
+                            // the backend includes it — that's the real community
                             // users care about. Fall back to a `comment-<short>`
                             // placeholder (keyed off root post id) so the shared
                             // FeedRow renderer still accepts the row.
-                            const rootTopic = typeof next.root_topic === 'string' ? next.root_topic.trim() : '';
-                            if (rootTopic) {
-                                next.topic = rootTopic;
+                            const rootCommunity = typeof next.root_community === 'string' ? next.root_community.trim() : '';
+                            if (rootCommunity) {
+                                next.community = rootCommunity;
                             } else {
                                 const root = (typeof next.root_post_id === 'string' && next.root_post_id) ? next.root_post_id : (next.target || '');
                                 const shortRoot = root ? String(root).slice(0, 8) : 'reply';
-                                next.topic = `comment-${shortRoot}`;
+                                next.community = `comment-${shortRoot}`;
                             }
                         }
                         return next;
@@ -628,8 +628,8 @@ export function useProfile({
         parts.push(`posted ${formatElapsed(post.timestamp)} ago`);
         const isComment = post.target && post.target.trim() !== '';
         if (!isComment) {
-            const topicPart = post.topic ? communityLabel(post.topic) : 'no community';
-            parts.push(`in ${topicPart}`);
+            const communityPart = post.community ? communityLabel(post.community) : 'no community';
+            parts.push(`in ${communityPart}`);
         }
         const rawPoints = typeof post.points === 'number' ? post.points : Number(post.points) || 0;
         const userWeight = typeof post.user_weight === 'number' ? post.user_weight : Number(post.user_weight) || 0;
@@ -1002,7 +1002,7 @@ export function useProfile({
         setFollowHover,
         myQueuePosition,
         formatStatusForPosition,
-        prefsTopics,
+        prefsCommunities,
         prefsAuthors,
         prefsLoading,
         prefsError,
@@ -1010,8 +1010,8 @@ export function useProfile({
         similarUsers,
         similarUsersLoading,
         similarUsersError,
-        showAllTopicPrefs,
-        setShowAllTopicPrefs,
+        showAllCommunityPrefs,
+        setShowAllCommunityPrefs,
         showAllAuthorPrefs,
         setShowAllAuthorPrefs,
         showAllSimilarUsers,

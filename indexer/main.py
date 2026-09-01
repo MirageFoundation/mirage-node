@@ -68,6 +68,7 @@ META_HISTORY_COMPLETE = "history_complete"
 TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
 
 MINT_DENOM = "umirage"
+CREATOR_EPOCH_TERMINAL_STATUSES = frozenset({3, 4})
 
 # Cosmos staking BondStatus for a validator in the active set.
 BOND_STATUS_BONDED = 3
@@ -224,7 +225,7 @@ class Indexer:
         self._expected_chain_id: str | None = None
 
         # Replay into a populated database would double-apply cumulative rows
-        # (topic stats, preferences, vote deltas). Only allowed on an empty DB.
+        # (community stats, preferences, vote deltas). Only allowed on an empty DB.
         self._start_height_override = None if start_height is None else int(start_height)
         if self._start_height_override is not None and self._last_height > 0:
             raise RuntimeError(
@@ -428,6 +429,10 @@ class Indexer:
                 self._process_subscription_events(result_obj, ts, height)
                 self.processor.process_curation_events(
                     result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [],
+                    height,
+                )
+                self.processor.process_creator_events(
+                    self._all_block_events(result_obj),
                     height,
                 )
                 self._accumulate_node_earnings(result_obj, height, now)
@@ -1336,6 +1341,7 @@ class Indexer:
             logger.info("Completed %d migrations", migration_count)
 
         self._sync_profiles_from_chain()
+        self._backfill_creator_rewards_once()
         self._startup_resync()
 
         self.running = True
@@ -1368,6 +1374,34 @@ class Indexer:
 
         self.db.set_indexer_state("chain_head_height", str(self.chain.get_current_height()), now)
         logger.info("Startup resync complete")
+
+    def _backfill_creator_rewards_once(self) -> None:
+        marker = "creator_projection_initialized_v1_39_0"
+        if self.db.get_indexer_state(marker) == "1":
+            return
+        height = self.chain.get_current_height()
+        block = self.chain.get_block(height)
+        header = (((block.get("result") or {}).get("block") or {}).get("header") or {})
+        current_epoch = self.chain.parse_header_time(str(header.get("time", ""))) // 86400
+        raw_params = get_raw_params()
+        claim_window_days = int(raw_params["creator_claim_window_days"])
+        first_epoch = max(0, current_epoch - claim_window_days - 1)
+        projected = 0
+        with self.db.transaction(label="creator-backfill", height=height):
+            for epoch_id in range(first_epoch, current_epoch):
+                epoch = self.chain.query_creator_epoch(epoch_id)
+                if epoch is None or epoch["status"] not in CREATOR_EPOCH_TERMINAL_STATUSES:
+                    continue
+                self.processor.sync_creator_epoch(epoch_id, height)
+                projected += 1
+            self.db.set_indexer_state(marker, "1", int(time.time()))
+        logger.info(
+            "Creator reward backfill complete epochs=%s range=%s..%s height=%s",
+            projected,
+            first_epoch,
+            current_epoch,
+            height,
+        )
 
     def _sync_validator_info(self, now: int):
         """Query validator info from chain and store in chain_stats."""
@@ -1499,13 +1533,13 @@ class Indexer:
             for p in profiles:
                 owner = str(p.get("owner", "")).strip().lower()
                 self.db.set_followed_users(owner, [str(u).lower() for u in p.get("followed_users") or []])
-                self.db.set_followed_topics(owner, [str(t) for t in p.get("joined_communities") or []])
+                self.db.set_joined_communities(owner, [str(t) for t in p.get("joined_communities") or []])
                 for target in p.get("blocked_users") or []:
                     self.db.block_user(owner, str(target).lower(), now)
                 for target in p.get("blocked_posts") or []:
                     self.db.block_post(owner, str(target).lower(), now)
                 for target in p.get("blocked_communities") or []:
-                    self.db.block_topic(owner, str(target), now)
+                    self.db.block_community(owner, str(target), now)
 
             absent = self._soft_delete_absent_owners(chain_owners, now)
 

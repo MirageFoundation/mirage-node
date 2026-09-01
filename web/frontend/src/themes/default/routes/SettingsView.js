@@ -722,7 +722,7 @@ export default function SettingsView({ state }) {
     const {
         themeMode,
         collapseThreshold,
-        sidebarTopicsLimit,
+        sidebarCommunitiesLimit,
         sidebarPeopleLimit,
         hideDownvotedPosts,
         setHideDownvotedPosts,
@@ -777,7 +777,7 @@ export default function SettingsView({ state }) {
         handleModeSelect,
         handleThemeModeChange,
         handleCollapseThresholdChange,
-        handleSidebarTopicsLimitChange,
+        handleSidebarCommunitiesLimitChange,
         handleSidebarPeopleLimitChange,
         getThemeExplanation,
         handleDeleteAccount
@@ -926,10 +926,10 @@ export default function SettingsView({ state }) {
 
                             <SectionHeader>Sidebar</SectionHeader>
 
-                            <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarTopics')}>
+                            <ClickableSettingRow type="button" onClick={() => setOpenModal('sidebarCommunities')}>
                                 <ClickableRowLabel>Communities shown</ClickableRowLabel>
                                 <ClickableRowRight>
-                                    <ClickableRowValue>{String(sidebarTopicsLimit)}</ClickableRowValue>
+                                    <ClickableRowValue>{String(sidebarCommunitiesLimit)}</ClickableRowValue>
                                     <ChevronPill className="chevron-pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg></ChevronPill>
                                 </ClickableRowRight>
                             </ClickableSettingRow>
@@ -1161,11 +1161,11 @@ export default function SettingsView({ state }) {
             onClose={closeModal}
         />}
 
-        {openModal === 'sidebarTopics' && <OptionModal
+        {openModal === 'sidebarCommunities' && <OptionModal
             title="Sidebar communities shown"
             options={limitOptions}
-            value={String(sidebarTopicsLimit)}
-            onChange={v => handleSidebarTopicsLimitChange({ target: { value: v } })}
+            value={String(sidebarCommunitiesLimit)}
+            onChange={v => handleSidebarCommunitiesLimitChange({ target: { value: v } })}
             onClose={closeModal}
         />}
 

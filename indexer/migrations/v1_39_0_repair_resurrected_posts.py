@@ -4,7 +4,7 @@
 the MsgEdit handler called it without passing the stored flag. The chain keeps no
 post body and so accepts an edit naming a deleted post, which means any author
 could delete a post and then edit it to republish it. Two things went wrong at
-once: the post reappeared in every feed, and `user_topic_stats` stayed short,
+once: the post reappeared in every feed, and `user_community_stats` stayed short,
 because `delete_post` had already recomputed the row from the canonical tables
 and an edit applies no delta. That is the drift
 `indexer_hardening.net_votes_matches_canonical_votes` reports.
@@ -57,29 +57,29 @@ def run(db, chain, logger):
             return "no resurrected posts; nothing to re-delete"
 
         owners = sorted({o for o, _ in pairs})
-        topics = sorted({t for _, t in pairs})
-        if owners and topics:
-            db._recompute_topic_stats(cur, owners, topics)
+        communities = sorted({t for _, t in pairs})
+        if owners and communities:
+            db._recompute_community_stats(cur, owners, communities)
 
         logger.info(
-            "repair_resurrected_posts re-deleted=%s owners=%s topics=%s",
+            "repair_resurrected_posts re-deleted=%s owners=%s communities=%s",
             restored,
             len(owners),
-            len(topics),
+            len(communities),
         )
 
         # The rebuild is the canonical definition, so a surviving disagreement
         # means the live path and the canonical query no longer match. Surface it
         # instead of recording the migration as done.
-        if owners and topics:
+        if owners and communities:
             cur.execute(
                 """
                 SELECT COUNT(*) FROM (
-                    SELECT s.owner, s.topic
-                    FROM user_topic_stats s
+                    SELECT s.owner, s.community
+                    FROM user_community_stats s
                     LEFT JOIN (
                         SELECT LOWER(v.owner) AS owner,
-                               LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS topic,
+                               LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS community,
                                SUM(CASE
                                    WHEN v.user_vote > 0 THEN 1
                                    WHEN v.user_vote < 0 THEN -1
@@ -90,12 +90,12 @@ def run(db, chain, logger):
                         WHERE COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
                           AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
                         GROUP BY 1, 2
-                    ) d ON d.owner = s.owner AND d.topic = s.topic
-                    WHERE s.owner = ANY(%s) AND s.topic = ANY(%s)
+                    ) d ON d.owner = s.owner AND d.community = s.community
+                    WHERE s.owner = ANY(%s) AND s.community = ANY(%s)
                       AND s.net_votes <> COALESCE(d.net, 0)
                 ) mismatched
                 """,
-                (owners, topics),
+                (owners, communities),
             )
             remaining = int(cur.fetchone()[0])
             if remaining:

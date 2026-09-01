@@ -46,7 +46,7 @@ Implemented in `web/frontend/src/themes/default/components/TopBar.js`.
 Layout:
 - Structure: `[Brand] [LeftSpacer] [Search (centered)] [RightSpacer: Create, Inbox, Avatar]`
 - Brand mark "M" removed; brand is just the word "Mirage"
-- Primary nav links (`Home`, `Following`, `Topics`) removed from TopBar — nav lives only in Sidebar now
+- Primary nav links (`Home`, `Following`, `Communities`) removed from TopBar — nav lives only in Sidebar now
 - Sticky top, background = `theme.colors.bg` (matches mobile app surface), vertical padding reduced to `0.3rem 1rem`
 - Bottom border uses new `theme.colors.headerBorder` token
 - `@username` text removed from trigger — avatar-only trigger
@@ -95,13 +95,13 @@ Tokens added/updated (`tokens.js`):
 Implemented in `components/Sidebar.js` as a desktop-only sticky rail (hidden below 1000px). Restructured and restyled in full during the polish pass:
 
 Structure:
-- **Primary nav (no section header)** — Home, Following, Topics, Create post, Search
-- **Topics** — collapsible list of followed topics (ported pattern from the `bluemoon` theme; `fetchFollowedTopics` / `loadSubscriptions`, persists expand state via `Storage`, `+N more` toggle with `sidebar_topics_limit`)
-- **Users** — collapsible list of followed users (`fetchFollowedUsers` / `loadFollowedAuthors` / `resolveUsernames`, same `+N more` pattern via `sidebar_people_limit`)
+- **Primary nav (no section header)** — Home, Following, Communities, Create post, Search
+- **Communities** — collapsible list of joined communities (ported pattern from the `bluemoon` theme; `fetchJoinedCommunities` / `loadSubscriptions`, persists expand state via `Storage`, `+N more` toggle with `sidebar_communities_limit`, renamed from `sidebar_topics_limit` in v1.39.0 and migrated by `Storage.migrateRenamedKeys`)
+- **Users** — collapsible list of followed users (`fetchFollowedUsers` / `loadFollowedAuthors` / `resolveUsernames`, same `+N more` pattern via `sidebar_users_limit`, renamed from `sidebar_people_limit` in v1.39.0)
 - All previous `Account` / `Moderation` / `Network` sections and the "About Mirage" footer removed — those routes live on TopBar and deeper pages now.
 
 Styling:
-- Font sizes reduced: items `0.72rem`, section labels `0.6rem`, topic/user rows `0.68rem`.
+- Font sizes reduced: items `0.72rem`, section labels `0.6rem`, community/user rows `0.68rem`.
 - Active state no longer changes font weight; uses **filled** (solid) icon variants.
 - Hover bg = `theme.colors.hoverBg` (`rgb(25,28,31)` dark / `rgb(246,248,249)` light).
 - Active bg uses new `sidebarItemActiveBg` token (`rgb(44,50,54)` dark / `rgb(230,235,238)` light).
@@ -114,7 +114,7 @@ Icons:
 - Migrated from inline SVG paths to **Heroicons v2** via `react-icons/hi2`:
   - Home → `HiOutlineHome` / `HiHome`
   - Following → `HiOutlineHeart` / `HiHeart`
-  - Topics → `HiOutlineHashtag` / `HiHashtag`
+  - Communities → `HiOutlineHashtag` / `HiHashtag`
   - Create → `HiOutlinePlusCircle` / `HiPlusCircle`
   - Search → `HiOutlineMagnifyingGlass` / `HiMagnifyingGlass`
   - Section chevron → `HiChevronDown` (rotates `-90deg → 0deg` on expand)
@@ -223,7 +223,7 @@ Inside `web/frontend/src/themes/default/`:
 Reference: `mirage-mobile-app/src/components/molecules/feed-header.tsx` (visual language), existing `themes/oldreddit/OldRedditShell.js` (structural patterns).
 
 Required slots:
-- **Left:** Mirage logo/brand, current page title/breadcrumb, primary nav links (`home`, `following`, `topics`, `create`)
+- **Left:** Mirage logo/brand, current page title/breadcrumb, primary nav links (`home`, `following`, `communities`, `create`)
 - **Right:** search entry, inbox icon with unread badge, user menu trigger
 - Sticky at top, panel background, subtle bottom border
 - Active-link state tied to current pathname
@@ -239,7 +239,7 @@ Reference: `themes/oldreddit/components/Sidebar.js`.
 
 Required sections:
 - Primary nav (mirrors TopBar but with full labels)
-- Topics / discovery
+- Communities / discovery
 - Account shortcuts (profile, settings, subscription)
 - Moderation / follows / blocks / reports
 - Optional info panel (node info / about Mirage)

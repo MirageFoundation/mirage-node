@@ -34,11 +34,11 @@ Likely candidates (to verify):
 - `routes/ViewPostView.js` — post body + comment tree.
 - `routes/SearchResultsView.js` — results list.
 - `routes/NetworkView.js`, `routes/StatsView.js` — info panels + charts.
-- `routes/AgentsView.js`, `routes/DiscoverView.js` — topic / agent lists.
+- `routes/DiscoverView.js` — community list.
 - `routes/FollowsView.js`, `routes/BlocksView.js`, `routes/ReportsView.js` — list rows.
-- `routes/SubscriptionView.js`, `routes/ReferralsView.js` — tier / invite panels.
+- `routes/SubscriptionView.js` — tier panel.
 - `components/SearchDropdown.js` — typeahead results.
-- `components/TopicSelector.js` — topic menu fetch.
+- `components/CommunitySelector.js` (renamed from `TopicSelector` in v1.39.0) — community menu fetch.
 
 ---
 
@@ -77,7 +77,7 @@ For each audited route, add a sibling loader component next to the real view (co
 - `FeedCardSkeleton` — mirrors `CardView` row (avatar + title + meta + actions).
 - `CommentSkeleton` — mirrors comment tree indent + body.
 - `InfoPanelSkeleton` — label + value rows (Network / Stats / Subscription).
-- `ListRowSkeleton` — used by Follows / Blocks / Reports / Agents / Discover / Referrals.
+- `ListRowSkeleton` — used by Follows / Blocks / Reports / Discover.
 - `ProfileHeaderSkeleton` — avatar circle + display name + stats row.
 
 Render N skeletons (typically 3–6) while `isLoading && !data`. Once real data arrives, fade in — don't pop.

@@ -1,5 +1,5 @@
 import transactionHandler from './TransactionHandler';
-import { fetchProfile, getJoinedCommunities as getCommunitiesFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheTopics, scheduleRefresh } from './ProfileCache';
+import { fetchProfile, getJoinedCommunities as getCommunitiesFromCache, invalidateCache as invalidateProfileCache, isCacheValid, updateCacheCommunities, scheduleRefresh } from './ProfileCache';
 import { fetchViewerCuratorMembership } from '../logic/useViewerCuratorMembership';
 import { invalidateCurationReads } from './curation';
 import { requestCommunityLeaveConfirmation } from './communityLeaveConfirmation';
@@ -62,7 +62,7 @@ function addToCache(community, address) {
     if (!t || t === 'all' || t === 'home') return;
     const current = getCommunitiesFromCache() || [];
     if (!current.map(x => x.toLowerCase()).includes(t)) {
-        updateCacheTopics([...current, t], address);
+        updateCacheCommunities([...current, t], address);
     }
 }
 
@@ -70,7 +70,7 @@ function removeFromCache(community, address) {
     const t = String(community || '').trim().toLowerCase();
     if (!t) return;
     const current = getCommunitiesFromCache() || [];
-    updateCacheTopics(current.filter(x => x.toLowerCase() !== t), address);
+    updateCacheCommunities(current.filter(x => x.toLowerCase() !== t), address);
 }
 
 export async function joinCommunity(address, community) {

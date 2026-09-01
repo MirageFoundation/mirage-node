@@ -1,6 +1,8 @@
-# Mirage Agent Guide
+# Mirage Bot Guide
 
-Comprehensive reference for building agents (bots) on the Mirage network. Covers wallet setup, signing, PoW, all message types, the agent overlay system (MsgAnnotate), and read APIs.
+Comprehensive reference for building bots and other automated clients on the Mirage network. Covers wallet setup, signing, PoW, every live message type, and the read APIs.
+
+A bot is an ordinary account. There is no special tier, no registry, and no privileged capability — a bot posts, comments, votes, joins communities and reads its inbox with exactly the same endpoints a browser uses. Everything in this guide was checked against `web/backend/routes/`, `shared/canon.py` and `blockchain/proto/mirage/core/v1/tx.proto` at v1.39.
 
 ## Dependencies
 
@@ -17,7 +19,7 @@ pip install requests cosmpy cryptography argon2-cffi
 
 ```python
 #!/usr/bin/env python3
-"""Mirage agent — minimal self-contained example."""
+"""Mirage bot — minimal self-contained example."""
 
 import base64, json, time, math, random, requests
 from argon2.low_level import hash_secret_raw, Type as Argon2Type
@@ -210,7 +212,7 @@ def submit(
 
 
 # ── Actions ─────────────────────────────────────────────────────────
-def make_post(topic: str, title: str, content: str, tag: str = "",
+def make_post(community: str, title: str, content: str, tag: str = "",
               media: list[str] | None = None):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
@@ -219,14 +221,15 @@ def make_post(topic: str, title: str, content: str, tag: str = "",
     base = (canon_prefix("MsgPost")
           + envelope(bh, diff, ts, nonce)
           + enc_str(100, "")            # target (empty for root post)
-          + enc_str(101, topic)
+          + enc_str(101, community)
           + enc_str(102, title)
           + enc_str(103, content)
           + enc_str(104, tag))
     for m in (media or []):
         base += enc_str(105, m)         # media URLs (repeated tag 105)
-    fields = {"target": "", "topic": topic, "title": title,
-              "content": content, "tag": tag}
+    base += enc_u64(106, 1)             # protocol_version — must be 1
+    fields = {"target": "", "community": community, "title": title,
+              "content": content, "tag": tag, "protocol_version": 1}
     if media:
         fields["media"] = media
     return submit("/core/post", base, fields,
@@ -240,16 +243,17 @@ def make_comment(parent_post_id: str, content: str):
     base = (canon_prefix("MsgPost")
           + envelope(bh, diff, ts, nonce)
           + enc_str(100, parent_post_id)  # target = parent
-          + enc_str(101, "")              # topic (empty for comments)
+          + enc_str(101, "")              # community (must be empty for comments)
           + enc_str(102, "")              # title (empty for comments)
           + enc_str(103, content)
-          + enc_str(104, ""))             # tag
+          + enc_str(104, "")              # tag
+          + enc_u64(106, 1))
     return submit("/core/post", base, {
-        "target": parent_post_id, "topic": "", "title": "",
-        "content": content, "tag": "",
+        "target": parent_post_id, "community": "", "title": "",
+        "content": content, "tag": "", "protocol_version": 1,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def edit_post(override: str, topic: str, title: str, content: str,
+def edit_post(override: str, community: str, title: str, content: str,
               tag: str = "", media: list[str] | None = None):
     """Edit an existing post. override = the post's tx_hash."""
     block_hash, diff, pow_base_bits, pow_factor = get_params()
@@ -260,72 +264,19 @@ def edit_post(override: str, topic: str, title: str, content: str,
     base = (canon_prefix("MsgEdit")
           + envelope(bh, diff, ts, nonce)
           + enc_str(100, target)
-          + enc_str(101, topic)
+          + enc_str(101, community)
           + enc_str(102, title)
           + enc_str(103, content)
           + enc_str(104, tag)
           + enc_str(105, override))       # override = original post tx_hash
     for m in (media or []):
         base += enc_str(106, m)           # media URLs (repeated tag 106)
-    fields = {"target": target, "topic": topic, "title": title,
+    fields = {"target": target, "community": community, "title": title,
               "content": content, "tag": tag, "override": override}
     if media:
         fields["media"] = media
     return submit("/core/edit", base, fields,
                   block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def annotate_post(override: str, *,
-                  topic: str = ".", title: str = ".",
-                  content: str = ".", tag: str = ".",
-                  media: list[str] | None = None,
-                  appendix: str = "."):
-    """Agent overlay on an existing post. Requires agent tier (level >= 10).
-
-    Sentinel values:
-      "."    = no change (field is not touched)
-      ""     = clear (field is set to empty)
-      ["."]  = no change to media
-      []     = clear all media
-    """
-    block_hash, _, _, _ = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    media_list = media if media is not None else ["."]
-    base = (canon_prefix("MsgAnnotate")
-          + envelope(bh, 0, ts, nonce)    # difficulty always 0 for agents
-          + enc_str(101, topic)
-          + enc_str(102, title)
-          + enc_str(103, content)
-          + enc_str(104, tag)
-          + enc_str(105, override))
-    for m in media_list:
-        base += enc_str(106, m)
-    base += enc_str(107, appendix)
-
-    signed_bytes = insert_pow(base, 0)    # pow always 0 for agents
-    sig = sign(PRIVKEY, signed_bytes)
-
-    body = {
-        "pubkey": b64(PUBKEY),
-        "signature": b64(sig),
-        "last_block_hash": block_hash,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "pow": 0,
-        "topic": topic,
-        "title": title,
-        "content": content,
-        "tag": tag,
-        "override": override,
-        "media": media_list,
-        "appendix": appendix,
-    }
-    resp = requests.post(f"{NODE}/api/core/annotate", json=body)
-    print(f"POST /core/annotate → {resp.status_code}")
-    print(json.dumps(resp.json(), indent=2))
-    return resp.json()
 
 def delete_post(target_post_id: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
@@ -354,7 +305,7 @@ def vote(target_post_id: str, direction: int):
         "target": target_post_id, "direction": direction,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def set_username(username: str, invite_code: str = "", referrer: str = ""):
+def set_username(username: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
@@ -363,41 +314,22 @@ def set_username(username: str, invite_code: str = "", referrer: str = ""):
           + envelope(bh, diff, ts, nonce)
           + enc_str(100, ADDRESS)
           + enc_str(101, username))
-    fields = {"username": username}
-    if invite_code:
-        fields["invite_code"] = invite_code
-    if referrer:
-        fields["referrer"] = referrer
-    return submit("/core/set_username", base, fields,
+    return submit("/core/set_username", base, {"username": username},
                   block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 def set_biography(biography: str):
-    """Set profile biography. Requires subscriber tier (level >= 1)."""
-    block_hash, _, _, _ = get_params()
+    """Set profile biography. Requires a tier that allows one."""
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
     base = (canon_prefix("MsgSetBiography")
-          + envelope(bh, 0, ts, nonce)
+          + envelope(bh, diff, ts, nonce)
           + enc_str(100, ADDRESS)
           + enc_str(101, biography))
-    signed_bytes = insert_pow(base, 0)
-    sig = sign(PRIVKEY, signed_bytes)
-    body = {
-        "pubkey": b64(PUBKEY),
-        "signature": b64(sig),
-        "last_block_hash": block_hash,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": 0,
-        "pow": 0,
-        "target": ADDRESS,
-        "biography": biography,
-    }
-    resp = requests.post(f"{NODE}/api/core/set_biography", json=body)
-    print(f"POST /core/set_biography → {resp.status_code}")
-    print(json.dumps(resp.json(), indent=2))
-    return resp.json()
+    return submit("/core/set_biography", base, {
+        "target": ADDRESS, "biography": biography,
+    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 def follow_user(user_addr: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
@@ -425,71 +357,41 @@ def unfollow_user(user_addr: str):
         "target": ADDRESS, "user": user_addr,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def follow_topic(topic: str):
+def join_community(community: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
-    base = (canon_prefix("MsgFollowTopic")
+    base = (canon_prefix("MsgJoinCommunity")
           + envelope(bh, diff, ts, nonce)
-          + enc_str(100, ADDRESS)
-          + enc_str(101, topic))
-    return submit("/core/follow_topic", base, {
-        "target": ADDRESS, "topic": topic,
+          + enc_str(100, community))
+    return submit("/core/join_community", base, {
+        "community": community,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def unfollow_topic(topic: str):
+def leave_community(community: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
-    base = (canon_prefix("MsgUnfollowTopic")
+    base = (canon_prefix("MsgLeaveCommunity")
           + envelope(bh, diff, ts, nonce)
-          + enc_str(100, ADDRESS)
-          + enc_str(101, topic))
-    return submit("/core/unfollow_topic", base, {
-        "target": ADDRESS, "topic": topic,
+          + enc_str(100, community))
+    return submit("/core/leave_community", base, {
+        "community": community,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def enable_agent(agent_addr: str):
+def block_community(community: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
-    base = (canon_prefix("MsgEnableAgent")
+    base = (canon_prefix("MsgBlockCommunity")
           + envelope(bh, diff, ts, nonce)
           + enc_str(100, ADDRESS)
-          + enc_str(101, agent_addr))
-    return submit("/core/enable_agent", base, {
-        "target": ADDRESS, "agent": agent_addr,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def disable_agent(agent_addr: str):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgDisableAgent")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, ADDRESS)
-          + enc_str(101, agent_addr))
-    return submit("/core/disable_agent", base, {
-        "target": ADDRESS, "agent": agent_addr,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def set_agents(agent_list: list[str]):
-    """Atomically replace the full ordered list of enabled agents."""
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgSetAgents")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, ADDRESS))
-    for agent_addr in agent_list:
-        base += enc_str(101, agent_addr)
-    return submit("/core/set_agents", base, {
-        "target": ADDRESS, "agents": agent_list,
+          + enc_str(101, community))
+    return submit("/core/block_community", base, {
+        "target": ADDRESS, "community": community,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 def block_post(post_id: str):
@@ -504,18 +406,6 @@ def block_post(post_id: str):
         "target": post_id,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def unblock_post(post_id: str):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgUnblockPost")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, post_id))
-    return submit("/core/unblock_post", base, {
-        "target": post_id,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
 def block_user(user_addr: str):
     block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
@@ -526,44 +416,6 @@ def block_user(user_addr: str):
           + enc_str(100, user_addr))
     return submit("/core/block_user", base, {
         "target": user_addr,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def unblock_user(user_addr: str):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgUnblockUser")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, user_addr))
-    return submit("/core/unblock_user", base, {
-        "target": user_addr,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def block_topic(topic: str):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgBlockTopic")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, "")
-          + enc_str(101, topic))
-    return submit("/core/block_topic", base, {
-        "target": "", "topic": topic,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def unblock_topic(topic: str):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgUnblockTopic")
-          + envelope(bh, diff, ts, nonce)
-          + enc_str(100, "")
-          + enc_str(101, topic))
-    return submit("/core/unblock_topic", base, {
-        "target": "", "topic": topic,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
 def send_tokens(recipient: str, amount: int):
@@ -581,32 +433,34 @@ def send_tokens(recipient: str, amount: int):
         "sender": ADDRESS, "target": recipient, "amount": amount,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def subscribe(level: int, target: str = ""):
-    """Subscribe or gift. level: 1=subscriber, 10=agent."""
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
+def subscribe(period_count: int = 1, target: str = ""):
+    """Buy or gift a subscription. Level must be 1 — it is the only paid tier."""
+    block_hash, _, _, _ = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     nonce = generate_nonce()
     base = (canon_prefix("MsgSubscribe")
-          + envelope(bh, diff, ts, nonce)
-          + enc_u64(100, level)
-          + (enc_str(101, target) if target else b""))
-    payload = {"level": level}
+          + envelope(bh, 0, ts, nonce)
+          + enc_u64(100, 1)
+          + (enc_str(101, target) if target else b"")
+          + enc_u64(102, period_count))
+    signed_bytes = insert_pow(base, 0)      # PoW is never allowed for MsgSubscribe
+    sig = sign(PRIVKEY, signed_bytes)
+    body = {
+        "pubkey": b64(PUBKEY),
+        "signature": b64(sig),
+        "last_block_hash": block_hash,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "level": 1,
+        "period_count": period_count,
+    }
     if target:
-        payload["target"] = target
-    return submit("/core/subscribe", base, payload, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
-
-def set_auto_renewal(enabled: bool):
-    block_hash, diff, pow_base_bits, pow_factor = get_params()
-    bh = bytes.fromhex(block_hash)
-    ts = int(time.time() * 1000)
-    nonce = generate_nonce()
-    base = (canon_prefix("MsgSetAutoRenewal")
-          + envelope(bh, diff, ts, nonce)
-          + enc_u64(100, 1 if enabled else 0))
-    return submit("/core/set_auto_renewal", base, {
-        "auto_renew": enabled,
-    }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
+        body["target"] = target
+    resp = requests.post(f"{NODE}/api/core/subscribe", json=body, timeout=15)
+    print(f"POST /core/subscribe → {resp.status_code}")
+    print(json.dumps(resp.json(), indent=2))
+    return resp.json()
 
 def award_post(post_id: str, award_type: str):
     """Give an award to a post. Burns MIRAGE (free for admins)."""
@@ -618,7 +472,7 @@ def award_post(post_id: str, award_type: str):
           + envelope(bh, 0, ts, nonce)
           + enc_str(100, post_id)
           + enc_str(101, award_type))
-    signed_bytes = insert_pow(base, 0)
+    signed_bytes = insert_pow(base, 0)      # PoW is never allowed for MsgAward
     sig = sign(PRIVKEY, signed_bytes)
     body = {
         "pubkey": b64(PUBKEY),
@@ -631,7 +485,7 @@ def award_post(post_id: str, award_type: str):
         "target": post_id,
         "award_type": award_type,
     }
-    resp = requests.post(f"{NODE}/api/core/award", json=body)
+    resp = requests.post(f"{NODE}/api/core/award", json=body, timeout=15)
     print(f"POST /core/award → {resp.status_code}")
     print(json.dumps(resp.json(), indent=2))
     return resp.json()
@@ -663,19 +517,13 @@ def report_post(post_id: str, reason: str):
         "target": post_id, "reason": reason,
     }, block_hash, diff, pow_base_bits, pow_factor, ts, nonce)
 
-def read_posts(topic: str = "", limit: int = 10) -> list:
+def read_posts(community: str = "", limit: int = 10) -> list:
     params = {"limit": limit}
-    if topic:
-        params["topic"] = topic
+    if community:
+        params["community"] = community
     r = requests.get(f"{NODE}/api/get_posts", params=params, timeout=10)
     r.raise_for_status()
     return r.json().get("posts", [])
-
-def get_agents_list() -> list:
-    """Get all available agents on the network."""
-    r = requests.get(f"{NODE}/api/get_agents", timeout=10)
-    r.raise_for_status()
-    return r.json().get("agents", [])
 
 def get_tx_status(tx_hash: str) -> dict:
     """Poll for transaction confirmation."""
@@ -686,29 +534,21 @@ def get_tx_status(tx_hash: str) -> dict:
 
 # ── Main ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    posts = read_posts(topic="general", limit=5)
+    posts = read_posts(community="general", limit=5)
     for p in posts:
         print(f"  [{p['post_id'][:8]}] {p.get('title', '(no title)')}")
 
     # Register (first time)
-    # set_username("my_agent", invite_code="ABCD-1234")
+    # set_username("my_bot")
 
-    # Upgrade to agent tier
-    # subscribe(10)
+    # Buy a subscription (skips PoW, higher limits)
+    # subscribe()
 
-    # Set biography (describes what your agent does)
-    # set_biography("I translate non-English posts to English.")
+    # Set biography (describes what your bot does)
+    # set_biography("I summarize long threads.")
 
     # Create a post
-    make_post("general", "Hello from agent", "This is an automated post.")
-
-    # Annotate a post (agent overlay — requires level >= 10)
-    if posts:
-        annotate_post(
-            posts[0]["post_id"],
-            title="Corrected: " + posts[0].get("title", ""),
-            appendix="Title corrected by translation agent.",
-        )
+    make_post("general", "Hello from a bot", "This is an automated post.")
 
     # Vote
     if posts:
@@ -743,7 +583,7 @@ Response:
 }
 ```
 
-- `last_block_hash` — anchors the request to a recent block (hex, 64 chars). Must match one of the last `block_hash_window` committed block hashes (chain param; default 10).
+- `last_block_hash` — anchors the request to a recent block (hex, 64 chars). Must match one of the last `block_hash_window` committed block hashes (chain param).
 - `pow_difficulty` — current difficulty step count (0 = base). Adjusts dynamically based on network message volume.
 - `pow_base_bits` / `pow_factor` — used to compute the PoW target threshold.
 - `balance` — only included if `address` is provided (in umirage; 1 MIRAGE = 1,000,000 umirage).
@@ -762,7 +602,7 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
   tag6  = timestamp_ms (varint)
   tag7  = nonce (varint)
   tag100 = target (string)           ← payload
-  tag101 = topic (string)
+  tag101 = community (string)
   ...
 ```
 
@@ -773,9 +613,11 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
 
 Authority (tag1) and signature (tag10) are never included in canonical bytes — authority is set by the backend to the validator address, and the signature is sent separately.
 
+`shared/canon.py` is the reference implementation of every builder listed later in this guide. Read it before hand-rolling a new one.
+
 ### 4. Proof of Work
 
-Free users (level 0) must solve Argon2id PoW. Subscribers (level >= 1) skip PoW entirely (send `pow_difficulty=0`, `pow=0`). Agents always send `pow_difficulty=0`, `pow=0`.
+Free users (level 0) must solve Argon2id PoW. A tier whose `max_daily_relays` is greater than zero — level 1 subscribers and admins under current defaults — skips PoW entirely and sends `pow_difficulty=0`, `pow=0` instead.
 
 **Algorithm:** Argon2id with `time_cost=1`, `memory_cost=4096` (4 MB), `parallelism=1`, `hash_len=32`.
 
@@ -794,7 +636,7 @@ digest = argon2id(password, salt, ...)
 - `factor = round(1000 * (1 + pow_factor)^difficulty)`
 - `effective_target = base_target * 1000 // factor`
 
-Difficulty adjusts dynamically — increases when message volume is high, decreases during calm periods.
+Difficulty adjusts dynamically — increases when message volume is high, decreases during calm periods. A bot that submits in bulk raises the difficulty it then has to solve, so budget for it.
 
 ### 5. Signature
 
@@ -840,94 +682,62 @@ GET /api/get_tx_status?hash=<tx_hash>
 
 Poll this endpoint after submitting. `found=true` + `code=0` means the transaction was included in a block and executed successfully. `found=false` means the tx hasn't been indexed yet — keep polling. `code != 0` means the chain rejected it — check `error_details` for the reason.
 
+For a post or a vote the response also carries a `details` object (`post_id`, `community`, `title` for posts; `owner`, `target`, `user_vote`, `user_weight`, `target_points` for votes).
+
 ---
 
 ## Subscription Tiers
 
-| Level | Name | PoW | Can Be Agent | Period Fee |
+| Level | Name | PoW | Period fee | Tier index |
 |---|---|---|---|---|
-| 0 | Free | Required | No | None |
-| 1 | Subscriber | Skipped | No | Per-period |
-| 10 | Agent | Skipped | Yes | Per-period |
-| 100+ | Admin | Skipped | Yes | — |
+| 0 | Free | Required | None | 0 |
+| 1 | Subscriber | Skipped | Per-period | 1 |
+| 100+ | Admin | Skipped | Not purchasable — appointed by governance | 2 |
 
-**Subscribe:** `POST /api/core/subscribe` with `level=1` (subscriber) or `level=10` (agent). The chain charges the tier's `period_fee` from your balance and sets `subscription_expiry` accordingly. Enable auto-renewal with `set_auto_renewal(True)`.
+Level 1 is the only level anyone can buy. `POST /api/core/subscribe` rejects any other value with `invalid_level`. `period_count` buys several periods at once and must be in `[1,12]`.
 
-**Tier limits** (title length, content length, max follows, etc.) are returned by `GET /api/get_chain_config` in the `tiers` array, indexed by tier index:
-- Tier index 0 = Level 0 (Free)
-- Tier index 1 = Level 1 (Subscriber)
-- Tier index 2 = Level 10 (Agent) and Level 100+ (Admin)
+Tier limits (title length, content length, follow caps, biography) are returned by `GET /api/get_chain_config` in the `tiers` array, indexed by the tier index above. Fields per tier: `period_fee`, `max_followed_users`, `max_joined_communities`, `max_blocked_users`, `max_blocked_posts`, `max_blocked_communities`, `max_title_length`, `max_content_length`, `editing_time_mins`, `vote_weight`, `can_have_biography`, `can_have_avatar`, `can_have_banner`, `can_have_flair`, `max_biography_length`, `max_curation_memberships`, `max_daily_relays`.
+
+`max_daily_relays` is the UTC-day envelope quota for the tier and is what actually replaces PoW: `0` means the account pays in proof of work instead. A subscriber that exhausts its daily quota starts failing, so a high-volume bot should track its own submission count rather than assume the quota is unlimited.
 
 ---
 
-## Agent Overlays (MsgAnnotate)
+## Communities
 
-The core agent feature. Agents can overlay edits on any post without modifying the original. Users who enable an agent see the agent's version; everyone else sees the original.
+A community is a slug, not an object with an owner. There is no create step: posting to a slug that nobody has used yet brings it into existence, and `/api/communities` lists slugs derived from posts, curation teams and membership rows.
 
-### How It Works
+- Slug format: `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$` with no `--`, length between `min_community_size` and `max_community_size` from `get_chain_config`.
+- In post bodies a community is written `[name]` and renders as a link to `/c/name`. `@name` still means a user.
+- Joining a community is `MsgJoinCommunity`; it is a hard cap, so once `max_joined_communities` is reached the chain rejects the join until you leave one.
+- Blocking a community is a deque: past the tier cap the chain evicts your oldest blocked entry rather than rejecting the write. A cap of `0` disables the list entirely and the handler rejects the write.
 
-1. Agent submits `MsgAnnotate` with `override` = the target post's tx_hash.
-2. The chain validates the agent tier, checks field limits, and broadcasts the message.
-3. The indexer stores the overlay in the `agent_edits` database table.
-4. When a viewer requests posts, the backend checks their enabled agents and applies overlays at query time.
-5. The original post is never modified on-chain.
+### Curation
 
-### Sentinel Values
+Communities are moderated by curation teams, which are on-chain and permissionless to create if your tier allows it. Every curation message takes `community` as its first payload field and (except for `MsgCreateCurationTeam`) a `team_id`:
 
-MsgAnnotate uses sentinel values to distinguish "no change" from "set to empty":
-
-| Value | Meaning |
-|---|---|
-| `"."` | No change — field is not touched |
-| `""` | Clear — field is set to empty |
-| `["."]` | No change to media list |
-| `[]` | Clear all media |
-| Any other value | Replace the field |
-
-### Fields
-
-| Field | Tag | Description |
+| Endpoint | Message | Payload |
 |---|---|---|
-| `topic` | 101 | Move post to a different topic |
-| `title` | 102 | Replace or fix the title |
-| `content` | 103 | Replace or translate the body |
-| `tag` | 104 | Add/change content warning tag |
-| `override` | 105 | Target post tx_hash (required, 64-char hex) |
-| `media` | 106 | Replace media URLs (repeated) |
-| `appendix` | 107 | Append a note below the post body |
+| `/api/core/create_curation_team` | `MsgCreateCurationTeam` | 100=community, 101=name, 102=description |
+| `/api/core/set_curation_team_profile` | `MsgSetCurationTeamProfile` | 100=community, 101=team_id, 102=name, 103=description |
+| `/api/core/invite_curator` | `MsgInviteCurator` | 100=community, 101=team_id, 102=target |
+| `/api/core/revoke_curator_invite` | `MsgRevokeCuratorInvite` | 100=community, 101=team_id, 102=target |
+| `/api/core/accept_curator_invite` | `MsgAcceptCuratorInvite` | 100=community, 101=team_id |
+| `/api/core/decline_curator_invite` | `MsgDeclineCuratorInvite` | 100=community, 101=team_id |
+| `/api/core/leave_curation_team` | `MsgLeaveCurationTeam` | 100=community, 101=team_id |
+| `/api/core/remove_curator` | `MsgRemoveCurator` | 100=community, 101=team_id, 102=target |
+| `/api/core/transfer_curation_team` | `MsgTransferCurationTeam` | 100=community, 101=team_id, 102=new_owner |
+| `/api/core/delete_curation_team` | `MsgDeleteCurationTeam` | 100=community, 101=team_id |
+| `/api/core/set_curation_preference` | `MsgSetCurationPreference` | 100=community, 101=mode, 102=pinned_team_id |
+| `/api/core/set_curation_post_hidden` | `MsgSetCurationPostHidden` | 100=community, 101=team_id, 102=target, 103=hidden |
+| `/api/core/set_curation_user_hidden` | `MsgSetCurationUserHidden` | 100=community, 101=team_id, 102=target, 103=hidden |
+| `/api/core/set_curation_thread_locked` | `MsgSetCurationThreadLocked` | 100=community, 101=team_id, 102=root_hash, 103=locked |
+| `/api/core/set_curation_subscriber_only` | `MsgSetCurationSubscriberOnly` | 100=community, 101=team_id, 102=enabled |
+| `/api/core/set_curation_tag` | `MsgSetCurationTag` | 100=community, 101=team_id, 102=tag |
+| `/api/core/set_curation_post_tag` | `MsgSetCurationPostTag` | 100=community, 101=team_id, 102=target, 103=tag, 104=clear |
 
-**Important differences from MsgEdit:**
-- No `target` field (tag 100) — agents cannot re-parent posts
-- Payload tags start at 101, not 100
-- `appendix` (tag 107) is unique to MsgAnnotate — multiple agents can each add their own note
-- PoW is always forbidden (`pow_difficulty=0`, `pow=0`)
-- Requires agent tier (level >= 10)
+`create_curation_team` requires an active subscription; the backend answers `not_subscriber` otherwise. Team membership is separately capped by the tier's `max_curation_memberships`, which the chain enforces.
 
-### Conflict Resolution
-
-When multiple agents edit the same post:
-- Per-field: first agent in the user's priority order wins
-- Appendices: ALL enabled agents' appendices are collected in priority order
-- Users toggle individual agents with `enable_agent()` / `disable_agent()` (single-agent mutations, race-free) and reorder priority with `set_agents()` (atomic full-list replace)
-
-### API Response with Agent Edits
-
-When agent overlays are active, posts in the API response include extra metadata:
-
-```json
-{
-  "post_id": "abc123...",
-  "title": "Agent-modified title",
-  "content": "Original content",
-  "agent_edited": true,
-  "agent_edits_meta": {
-    "title": "mirage1agent..."
-  },
-  "appendices": [
-    {"agent": "mirage1agent...", "text": "Fact-check: this claim is disputed."}
-  ]
-}
-```
+Read the curation state with the endpoints under `/api/communities/<slug>` — see [Reading Data](#reading-data).
 
 ---
 
@@ -940,29 +750,33 @@ When agent overlays are active, posts in the API response include extra metadata
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `target` | string | yes | Empty string `""` for root posts |
-| `topic` | string | yes | Lowercase alphanumeric (`[a-z0-9]+`), 3-50 chars |
+| `community` | string | yes | Community slug (see [Communities](#communities)) |
 | `title` | string | yes | Post title (length limit based on tier) |
 | `content` | string | yes | Post body (length limit based on tier) |
 | `tag` | string | no | Content warning: `""`, `"sensitive"`, `"adult"`, `"gore"`, `"violence"`, `"death"` |
 | `media` | string[] | no | Up to 10 HTTPS URLs, each max 2048 chars |
+| `protocol_version` | int | yes | Must be `1`. Anything else returns 426 `upgrade_required` |
 
 **Canonical bytes (MsgPost):**
 
 | Tag | Field | Encoding |
 |---|---|---|
 | 100 | target | string (empty `""`) |
-| 101 | topic | string |
+| 101 | community | string |
 | 102 | title | string |
 | 103 | content | string |
 | 104 | tag | string |
 | 105 | media[0] | string (repeated for each URL) |
+| 106 | protocol_version | uint64 (always `1`) |
+
+Tag 106 is easy to miss and there is no error message that points at it: omit it and the signature simply does not verify.
 
 ### Create a Comment
 
 Same endpoint (`POST /api/core/post`) and same canonical prefix (`MsgPost`), but:
 
 - `target` = parent post's `tx_hash` (64-char hex)
-- `topic` = empty string
+- `community` = empty string — sending one returns `comment_must_not_include_community`
 - `title` = empty string
 - `content` = comment body (required, non-empty)
 
@@ -974,45 +788,19 @@ Same endpoint (`POST /api/core/post`) and same canonical prefix (`MsgPost`), but
 |---|---|---|---|
 | `override` | string | yes | The `tx_hash` of the post being edited (64-char hex). You must own it. |
 
-All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work the same as create. Send the full updated values — this is a full replacement, not a partial update.
+All other fields (`target`, `community`, `title`, `content`, `tag`, `media`) work the same as create. Send the full updated values — this is a full replacement, not a partial update. `target` must equal the stored parent; the chain will not let you re-parent a post.
 
-**Canonical bytes (MsgEdit) — note different tag numbers for override/media:**
+**Canonical bytes (MsgEdit) — note different tag numbers for override/media, and no protocol_version:**
 
 | Tag | Field | Encoding |
 |---|---|---|
 | 100 | target | string |
-| 101 | topic | string |
+| 101 | community | string |
 | 102 | title | string |
 | 103 | content | string |
 | 104 | tag | string |
 | 105 | override | string |
 | 106 | media[0] | string (repeated for each URL) |
-
-### Annotate a Post (Agent Overlay)
-
-**Endpoint:** `POST /api/core/annotate`
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `override` | string | yes | Target post tx_hash (64-char hex). Any post, not just your own. |
-| `topic` | string | yes | `"."` = no change, `""` = clear, other = replace |
-| `title` | string | yes | `"."` = no change, `""` = clear, other = replace |
-| `content` | string | yes | `"."` = no change, `""` = clear, other = replace |
-| `tag` | string | yes | `"."` = no change; must be valid tag if not sentinel |
-| `media` | string[] | yes | `["."]` = no change, `[]` = clear, other = replace |
-| `appendix` | string | yes | `"."` = no change, `""` = clear, other = set note |
-
-**Canonical bytes (MsgAnnotate) — no target field, starts at tag 101:**
-
-| Tag | Field | Encoding |
-|---|---|---|
-| 101 | topic | string |
-| 102 | title | string |
-| 103 | content | string |
-| 104 | tag | string |
-| 105 | override | string |
-| 106 | media[0] | string (repeated for each URL) |
-| 107 | appendix | string |
 
 ### Delete a Post
 
@@ -1020,13 +808,9 @@ All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work th
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `target` | string | yes | The `tx_hash` of the post to delete. You must own it. |
+| `target` | string | yes | The `tx_hash` of the post to delete. You must own it (admins may delete any post). |
 
-**Canonical bytes (MsgDelete):**
-
-| Tag | Field | Encoding |
-|---|---|---|
-| 100 | target | string |
+**Canonical bytes (MsgDelete):** 100=target.
 
 ### Vote
 
@@ -1051,8 +835,6 @@ All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work th
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `username` | string | yes | `[A-Za-z0-9][A-Za-z0-9-]*` (must start with a letter or number), length from `get_chain_config` |
-| `invite_code` | string | no | Required for new users if `registration_invite_code_required=true` (`XXXX-XXXX`) |
-| `referrer` | string | no | Optional `mirage1...` address for referral tracking |
 
 The backend derives `target` from your pubkey; you cannot set a username for another address.
 
@@ -1063,10 +845,7 @@ The backend derives `target` from your pubkey; you cannot set a username for ano
 | 100 | target | string (own address derived from pubkey) |
 | 101 | username | string |
 
-**Notes:**
-
-- Usernames are case-insensitive; uniqueness is enforced on lowercase.
-- `invite_code` and `referrer` are NOT part of canonical bytes (do not include them in the signature).
+Usernames are case-insensitive; uniqueness is enforced on lowercase. If the node has `registration_enabled=false` in `get_node_config`, a first-time `set_username` is rejected with `registration_disabled`.
 
 ### Set Biography
 
@@ -1075,16 +854,9 @@ The backend derives `target` from your pubkey; you cannot set a username for ano
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `target` | string | yes | Own address (derived from pubkey by backend) |
-| `biography` | string | yes | Free-form text (length limit per tier) |
+| `biography` | string | yes | Free-form text. The backend caps it at 512 characters; the tier's `max_biography_length` applies on top of that, and `0` means the tier has no biography at all. |
 
-Requires subscriber tier (level >= 1). `pow_difficulty=0`, `pow=0`.
-
-**Canonical bytes (MsgSetBiography):**
-
-| Tag | Field | Encoding |
-|---|---|---|
-| 100 | target | string (own address) |
-| 101 | biography | string |
+**Canonical bytes (MsgSetBiography):** 100=target (own address), 101=biography.
 
 ### Award
 
@@ -1093,62 +865,35 @@ Requires subscriber tier (level >= 1). `pow_difficulty=0`, `pow=0`.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `target` | string | yes | Post tx_hash to award |
-| `award_type` | string | yes | Award name (configured on-chain) |
+| `award_type` | string | yes | A `name` from the `award_configs` array in `get_chain_config` |
 
-Burns MIRAGE tokens (free for admins level >= 100). `pow_difficulty=0`, `pow=0`.
+Burns MIRAGE tokens (free for admins level >= 100). PoW is not allowed: send `pow_difficulty=0`, `pow=0`.
 
-**Canonical bytes (MsgAward):**
-
-| Tag | Field | Encoding |
-|---|---|---|
-| 100 | target | string (post tx_hash) |
-| 101 | award_type | string |
+**Canonical bytes (MsgAward):** 100=target (post tx_hash), 101=award_type.
 
 ---
 
 ## Media: Uploading Images and Videos
 
-Posts accept up to 10 media URLs in the `media` field. You can use any HTTPS URL, or upload files directly to the node's Cloudflare-backed storage.
+Posts accept up to 10 media URLs in the `media` field. You can use any HTTPS URL, or upload the file to the node.
 
-### Upload Flow
-
-**Step 1:** Get an upload URL.
+### Upload
 
 ```
-POST /api/get_upload_url
-{"type": "image"}   // or "video"
+POST /api/upload_media?kind=image
 ```
 
-**Image response:**
+Send the bytes as a multipart form with the file in the `file` field. For `kind=video`, also send `duration` and `height` form fields — the backend rejects the upload without them.
+
+The response is provider-agnostic:
 
 ```json
-{
-  "uploadURL": "https://upload.imagedelivery.net/...",
-  "id": "image-uuid",
-  "accountHash": "abc123"
-}
+{"url": "https://...", "asset_id": "...", "kind": "image"}
 ```
 
-**Video response:**
+Put `url` straight into the `media` array when posting. Which storage backend is behind this (local disk, Cloudflare, Bunny) is a per-node deployment choice and is not visible to the client.
 
-```json
-{
-  "uploadURL": "https://upload.videodelivery.net/...",
-  "provider": "stream",
-  "streamCustomer": "customer-code",
-  "uid": "video-uuid"
-}
-```
-
-**Step 2:** Upload the file directly to the returned `uploadURL`.
-
-- **Images:** Multipart form upload (`file` field).
-- **Videos:** Multipart or TUS upload. Max duration: 60 seconds.
-
-**Step 3:** Use the final URL in the `media` array when posting.
-
-- **Image URL format:** `https://imagedelivery.net/{accountHash}/{id}/public`
-- **Video URL format:** `https://customer-{streamCustomer}.cloudflarestream.com/{uid}/manifest/video.m3u8`
+A node that is not fronted by a scanning edge sets uploads off entirely and answers `uploads_disabled` with 403. Handle that: it is a normal configuration, not an outage.
 
 ### Media Validation Rules
 
@@ -1166,17 +911,16 @@ POST /api/get_upload_url
 ### Get Posts
 
 ```
-GET /api/get_posts?topic=general&limit=25&page=1&by=magic
+GET /api/get_posts?community=general&limit=25&page=1&by=magic
 ```
 
 | Param | Default | Description |
 |---|---|---|
-| `topic` | — | Filter by topic. `"all"` for global feed. |
+| `community` | — | Filter to one community slug |
 | `limit` | 25 | Posts per page (max 100) |
 | `page` | 1 | Page number |
 | `by` | `"magic"` | Sort: `"magic"` (algorithmic) or `"newest"` (chronological) |
-| `address` | — | Viewer address (enables agent overlays and blocked content filtering) |
-| `allowed_tags` | `"sensitive"` | Comma-separated tags to include (default hides adult/violence/gore/death) |
+| `address` | — | Viewer address (enables blocked-content filtering and `user_vote`) |
 | `feed` | — | `"home"` or `"following"` for personalized feeds |
 
 **Response:**
@@ -1186,23 +930,23 @@ GET /api/get_posts?topic=general&limit=25&page=1&by=magic
   "posts": [
     {
       "post_id": "64char_hex_txhash",
-      "author": "mirage1...",
+      "user_id": "mirage1...",
       "username": "alice",
       "author_level": 1,
+      "author_is_new": false,
       "timestamp": 1700000000,
-      "topic": "general",
+      "community": "general",
       "title": "Post title",
       "content": "Post body",
       "tag": "",
-      "edited": false,
-      "media": ["https://..."],
       "thumbnail": "https://...",
+      "media": ["https://..."],
+      "relayer": "mirage1...",
       "points": 42.0,
       "comments": 5,
       "user_vote": 0,
-      "agent_edited": true,
-      "agent_edits_meta": {"title": "mirage1agent..."},
-      "appendices": [{"agent": "mirage1agent...", "text": "Note from agent"}]
+      "user_weight": 0.0,
+      "awards": []
     }
   ],
   "total": 100,
@@ -1212,29 +956,35 @@ GET /api/get_posts?topic=general&limit=25&page=1&by=magic
 }
 ```
 
-**Agent overlay fields** (`agent_edited`, `agent_edits_meta`, `appendices`) only appear when the `address` parameter is provided and the viewer has enabled agents that have edited those posts.
+Comment and thread payloads additionally carry `root_community` and `root_post_id`, which name the community and root post of the thread a comment belongs to.
 
-### Get Agents
+### Get Comments
 
 ```
-GET /api/get_agents
+GET /api/get_comments?post_id=<64char_hex>
 ```
 
-```json
-{
-  "agents": [
-    {
-      "address": "mirage1agent...",
-      "username": "TranslateBot",
-      "biography": "Translates non-English posts to English.",
-      "avatar": "https://...",
-      "last_active": 1700000000
-    }
-  ]
-}
+### Communities
+
+```
+GET /api/communities?query=&joined_by=&curated=&cursor=&limit=
+GET /api/communities/<slug>?viewer=<addr>
+GET /api/curators/<address>/communities
+GET /api/communities/<slug>/teams
+GET /api/communities/<slug>/teams/<team_id>
 ```
 
-Lists all active agent-tier profiles (level=10, subscription not expired, not deleted), ordered by recency of agent activity. `last_active` is a Unix-seconds timestamp computed as the most recent of: the agent's last `MsgAnnotate`, last block-post, last block-user, or last block-topic action; `null` if the agent has never acted.
+`/api/communities` returns `{items, next_cursor, has_more}` where each item is `{community, curated, live_team_count, post_count, default_team}`, ordered by post count. Pagination is cursor-based: pass the returned `next_cursor` (`post_count:community`) back as `cursor`.
+
+`/api/communities/<slug>` returns the community's team counts, post counts, and — when `viewer` is supplied — whether that viewer has joined and which curation lens applies to them.
+
+### Search
+
+```
+GET /api/search?q=<query>&type=&limit=10&offset=0&address=
+```
+
+`q` prefixed with `@` searches users, `#` searches communities, anything else searches all three. `type` narrows a general search to `communities`, `users` or `posts` for a Load More. The response is `{query, search_type, communities, users, posts, has_more_communities, has_more_users, has_more_posts}`.
 
 ### Get User Status
 
@@ -1247,6 +997,7 @@ GET /api/get_user_status?address=mirage1...
   "username": "alice",
   "balance": 1000000,
   "user_level": 0,
+  "effective_paid": false,
   "subscription_expiry": 0,
   "auto_renew": false,
   "reserve_funds": 0,
@@ -1254,17 +1005,25 @@ GET /api/get_user_status?address=mirage1...
   "recent_votes": [
     {"target": "txhash", "direction": 1, "timestamp": 1700000000}
   ],
-  "inbox_last_viewed_at": 1700000000,
-  "referral_precheck_enabled": false,
-  "new_inbox_items": 0
+  "inbox_last_viewed_at": 1700000000
 }
 ```
 
-**Notes:**
 - `subscription_expiry` is a Unix timestamp in seconds; `0` means no active subscription.
+- `effective_paid` is the indexer's view of whether the subscription is currently paid up. When it is true the response reports `user_level` of at least 1, which is what the PoW-exempt paths key off.
 - `recent_votes` returns up to the last 100 votes by this user (target tx-hash, direction `-1|0|1`, Unix-seconds timestamp).
 - `inbox_last_viewed_at` is a Unix timestamp updated by `POST /api/mark_inbox_viewed`.
-- `new_inbox_items` is auto-injected into every JSON response when the request is associated with a logged-in viewer (middleware in `factory.py`); it counts unread inbox items since `inbox_last_viewed_at`.
+- `new_inbox_items` is injected into every JSON response that carries an `address` query parameter (middleware in `factory.py`), so it appears here too.
+
+### Get Lists and Preferences
+
+```
+GET /api/get_user_followed?address=mirage1...   → {followed_users, joined_communities}
+GET /api/get_user_blocked?address=mirage1...    → {blocked_posts, blocked_users, blocked_communities}
+GET /api/get_preferences?address=mirage1...     → {communities: [{community, weight}], authors: [{user, weight}]}
+```
+
+`joined_communities` is derived from the viewer's curation-preference rows — joining a community *is* having a preference row for it, so there is no separate membership list to read.
 
 ### Get Chain Config
 
@@ -1272,51 +1031,30 @@ GET /api/get_user_status?address=mirage1...
 GET /api/get_chain_config
 ```
 
-Returns governance parameters including tier limits:
-
 ```json
 {
   "max_username_size": 30,
   "min_username_size": 3,
-  "max_topic_size": 35,
-  "min_topic_size": 2,
+  "max_community_size": 35,
+  "min_community_size": 2,
   "subscription_period": 43200,
   "subscription_reserve_bps": 9500,
   "mint_interval": 200,
+  "mint_floor_split": 0.5,
+  "mint_dynamic_split": 0.5,
   "block_time": 3,
-  "tiers": [
-    {
-      "period_fee": 0,
-      "max_enabled_agents": 50,
-      "max_followed_users": 50,
-      "max_followed_topics": 50,
-      "max_blocked_users": 50,
-      "max_blocked_posts": 50,
-      "max_blocked_topics": 10,
-      "max_title_length": 200,
-      "max_content_length": 5000,
-      "editing_time_mins": 30,
-      "vote_weight": 1.0,
-      "can_have_biography": false,
-      "can_have_avatar": false,
-      "can_have_banner": false,
-      "can_have_flair": false,
-      "max_biography_length": 0
-    }
-  ],
-  "award_configs": [
-    {"name": "quality_post", "cost": 1000000}
-  ]
+  "tiers": [ ... ],
+  "award_configs": [{"name": "quality_post", "cost": 1000000}]
 }
 ```
 
 **Units & semantics:**
-- `subscription_period` is in **minutes** (default `43200` = 30 days; `0` = one-time).
-- `mint_interval` is in **blocks** (default `200`; at ~3s block time that's a mint event every ~10 min).
-- `block_time` is the mean target block time in **seconds** (currently ~3s).
-- `subscription_reserve_bps` ∈ [0,10000] is the share of each period fee escrowed as gas reserve, in basis points; the remainder is burned (default 9500 / 95%). It replaced the `subscription_reserve_percent` fraction in v1.34.0.
+- `subscription_period` is in **minutes** (`43200` = 30 days; `0` = one-time).
+- `mint_interval` is in **blocks**.
+- `block_time` is the mean target block time in **seconds**.
+- `subscription_reserve_bps` ∈ [0,10000] is the share of each period fee escrowed as gas reserve, in basis points; the remainder is burned.
 
-**Tiers** are indexed by tier index (0 = Free, 1 = Subscriber, 2 = Agent — Admins level ≥100 inherit the Agent tier). Title/content length limits, follow caps, and capability flags are enforced per tier. `max_biography_length` (uint64; `0` = biography disabled for this tier) was added in v1.16.0.
+Cached 60 seconds server-side, alongside the underlying parameter cache, so a governance change becomes visible on the next window.
 
 ### Get Inbox (Replies, @Mentions, Awards)
 
@@ -1326,7 +1064,7 @@ GET /api/get_inbox?address=mirage1...&page=1&limit=25
 
 | Param | Default | Description |
 |---|---|---|
-| `address` | — | **Required.** Your agent's address |
+| `address` | — | **Required.** Your bot's address |
 | `page` | 1 | Page number |
 | `limit` | 25 | Items per page (max 100) |
 
@@ -1341,7 +1079,7 @@ GET /api/get_inbox?address=mirage1...&page=1&limit=25
       "reply_username": "alice",
       "reply_author_level": 1,
       "reply_author_is_new": false,
-      "reply_content": "Hey @MyAgent, what do you think?",
+      "reply_content": "Hey @MyBot, what do you think?",
       "reply_timestamp": 1700000000,
       "parent_id": "64char_hex_txhash",
       "parent_content": "Original post preview...",
@@ -1355,25 +1093,24 @@ GET /api/get_inbox?address=mirage1...&page=1&limit=25
   "total": 42,
   "page": 1,
   "limit": 25,
-  "has_more": true,
-  "new_inbox_items": 0
+  "has_more": true
 }
 ```
 
 The `type` field distinguishes inbox items. Indexer-sourced types:
-- `"mention"` — someone wrote `@YourAgentName` in a post or comment.
+- `"mention"` — someone wrote `@YourBotName` in a post or comment.
 - `"reply"` — someone replied to one of your posts.
 - `"award"` — someone gave an award to one of your posts (`award_type` is set).
 
 Backend-sourced types (stored in `inbox_events`):
 - `"follow"` — someone started following you.
 - `"donation"` — someone sent you tokens; `amount` is in umirage.
-- `"subscription_gift"` — someone gifted you a subscription tier; `amount` is the period fee in umirage.
+- `"subscription_gift"` — someone gifted you a subscription; `amount` is the level.
 - `"trending"` — one of your posts is trending; `parent_id` / `root_post_id` point at the post.
 
 For follow/donation/subscription_gift items there is no underlying post, so `parent_id`, `parent_content`, and `reply_content` are empty. `reply_author_is_new` reflects whether the actor profile is younger than `new_user_highlight_days` (per-node config). `amount` is `null` for non-monetary items.
 
-This is the key API for building agents that respond to @mentions (like @grok on X). Poll this endpoint, filter for `type: "mention"`, read `reply_content`, and reply with `make_comment(parent_id=reply_id, ...)`.
+This is the key API for building a bot that responds to @mentions. Poll this endpoint, filter for `type: "mention"`, read `reply_content`, and reply with `make_comment(parent_post_id=reply_id, ...)`.
 
 ### Mark Inbox Viewed
 
@@ -1383,12 +1120,12 @@ POST /api/mark_inbox_viewed
   "pubkey": "<base64, 33 bytes>",
   "signature": "<base64, 64 bytes>",
   "address": "mirage1...",
-  "timestamp": 1700000000,
+  "timestamp": 1700000000000,
   "envelope_nonce": "1234567890"
 }
 ```
 
-Resets `inbox_last_viewed_at` (and therefore the `new_inbox_items` counter that the backend auto-injects into other API responses) to `now`.
+Resets `inbox_last_viewed_at` (and therefore the `new_inbox_items` counter the backend injects into other API responses) to `now`.
 
 Unlike write transactions, this endpoint does **not** use canonical-bytes / PoW. It uses a lightweight ad-hoc signed payload:
 
@@ -1397,14 +1134,14 @@ signed_payload = f"mark_inbox_viewed:{address.lower()}:{timestamp}:{nonce}".enco
 signature      = ecdsa_sha256(signed_payload, privkey)   # low-S, 64-byte compact
 ```
 
-Send `pubkey` and `signature` base64-encoded; send `envelope_nonce` as a string (uint64); the backend derives the address from the pubkey and rejects the request if the optional `address` field doesn't match. The `timestamp` is in **seconds** (not milliseconds). Replay protection: nonce + timestamp are tracked per-address with the same envelope-age window that protects on-chain messages.
+Send `pubkey` and `signature` base64-encoded and `envelope_nonce` as a string (uint64); the backend derives the address from the pubkey and rejects the request if the optional `address` field doesn't match. The `timestamp` is in **milliseconds** and must be within the push skew window. Replay protection is a per-address nonce table, so each nonce is single-use.
 
 **Example client snippet:**
 
 ```python
 def mark_inbox_viewed():
-    ts    = int(time.time())                # SECONDS, not ms
-    nonce = generate_nonce()                # uint64
+    ts    = int(time.time() * 1000)
+    nonce = generate_nonce()
     payload = f"mark_inbox_viewed:{ADDRESS.lower()}:{ts}:{nonce}".encode()
     sig = sign(PRIVKEY, payload)
     body = {
@@ -1416,25 +1153,6 @@ def mark_inbox_viewed():
     }
     requests.post(f"{NODE}/api/mark_inbox_viewed", json=body, timeout=10).raise_for_status()
 ```
-
-### Get Transaction Status
-
-```
-GET /api/get_tx_status?hash=<tx_hash>
-```
-
-```json
-{
-  "found": true,
-  "tx_hash": "abc123...",
-  "code": 0,
-  "success": true,
-  "indexed": true,
-  "tx_type": "post"
-}
-```
-
-Use this to confirm a transaction was actually included in a block. The initial `POST` response only confirms mempool acceptance. `found=false` means keep polling.
 
 ### Get Node Config
 
@@ -1450,9 +1168,7 @@ GET /api/get_node_config
   "validator_moniker": "my-node",
   "giphy_api_key": "...",
   "registration_enabled": true,
-  "registration_invite_code_required": false,
-  "quests_enabled": true,
-  "quest_payouts_enabled": true,
+  "open_browsing_enabled": true,
   "new_user_highlight_days": 30,
   "push_notifications_enabled": true,
   "android_banner_enabled": false,
@@ -1460,7 +1176,9 @@ GET /api/get_node_config
 }
 ```
 
-Per-node static settings (validator info, feature flags, API keys). Cached 24 hours server-side. Not needed for posting. `new_user_highlight_days` is the threshold (in days) used by the inbox / feed `is_new` actor flag.
+Per-node static settings (validator info, feature flags, API keys). Cached 24 hours server-side. `registration_enabled` is the one a bot should check before its first `set_username`.
+
+The response also carries `registration_invite_code_required`. Ignore it. Invite codes were removed in v1.39.0, and a node configured with that flag set refuses to start, so on any reachable node the value is false.
 
 ---
 
@@ -1468,33 +1186,46 @@ Per-node static settings (validator info, feature flags, API keys). Cached 24 ho
 
 | Action | Prefix | Endpoint | Payload tags |
 |---|---|---|---|
-| Post | `MsgPost` | `/core/post` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=media (repeated) |
-| Comment | `MsgPost` | `/core/post` | Same as Post (target=parent post_id, topic/title empty) |
-| Edit | `MsgEdit` | `/core/edit` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=override, 106=media (repeated) |
-| **Annotate** | `MsgAnnotate` | `/core/annotate` | 101=topic, 102=title, 103=content, 104=tag, 105=override, 106=media (repeated), 107=appendix |
+| Post | `MsgPost` | `/core/post` | 100=target, 101=community, 102=title, 103=content, 104=tag, 105=media (repeated), 106=protocol_version |
+| Comment | `MsgPost` | `/core/post` | Same as Post (target=parent post_id, community/title empty) |
+| Edit | `MsgEdit` | `/core/edit` | 100=target, 101=community, 102=title, 103=content, 104=tag, 105=override, 106=media (repeated) |
 | Delete | `MsgDelete` | `/core/delete_post` | 100=target |
 | Vote | `MsgVote` | `/core/vote` | 100=target, 101=direction |
 | Set Username | `MsgSetUsername` | `/core/set_username` | 100=target (own addr), 101=username |
 | Set Biography | `MsgSetBiography` | `/core/set_biography` | 100=target (own addr), 101=biography |
 | Follow User | `MsgFollowUser` | `/core/follow_user` | 100=target (own addr), 101=user |
 | Unfollow User | `MsgUnfollowUser` | `/core/unfollow_user` | 100=target (own addr), 101=user |
-| Follow Topic | `MsgFollowTopic` | `/core/follow_topic` | 100=target (own addr), 101=topic |
-| Unfollow Topic | `MsgUnfollowTopic` | `/core/unfollow_topic` | 100=target (own addr), 101=topic |
-| Enable Agent | `MsgEnableAgent` | `/core/enable_agent` | 100=target (own addr), 101=agent |
-| Disable Agent | `MsgDisableAgent` | `/core/disable_agent` | 100=target (own addr), 101=agent |
-| Set Agents | `MsgSetAgents` | `/core/set_agents` | 100=target (own addr), 101=agents (repeated) |
+| Join Community | `MsgJoinCommunity` | `/core/join_community` | 100=community |
+| Leave Community | `MsgLeaveCommunity` | `/core/leave_community` | 100=community |
+| Block Community | `MsgBlockCommunity` | `/core/block_community` | 100=target (own addr), 101=community |
+| Unblock Community | `MsgUnblockCommunity` | `/core/unblock_community` | 100=target (own addr), 101=community |
 | Block Post | `MsgBlockPost` | `/core/block_post` | 100=target (post_id) |
 | Unblock Post | `MsgUnblockPost` | `/core/unblock_post` | 100=target (post_id) |
 | Block User | `MsgBlockUser` | `/core/block_user` | 100=target (address) |
 | Unblock User | `MsgUnblockUser` | `/core/unblock_user` | 100=target (address) |
-| Block Topic | `MsgBlockTopic` | `/core/block_topic` | 100=target (empty), 101=topic |
-| Unblock Topic | `MsgUnblockTopic` | `/core/unblock_topic` | 100=target (empty), 101=topic |
 | Report | `MsgReport` | `/core/report` | 100=target (post_id), 101=reason |
 | Send Tokens | `MsgSendTokens` | `/core/send_tokens` | 100=sender (own addr), 101=target, 102=amount (varint) |
-| Subscribe | `MsgSubscribe` | `/core/subscribe` | 100=level (1/10), 101=target (optional) |
+| Subscribe | `MsgSubscribe` | `/core/subscribe` | 100=level (always 1), 101=target (only when gifting), 102=period_count |
 | Set Auto Renewal | `MsgSetAutoRenewal` | `/core/set_auto_renewal` | 100=auto_renew (1=on, 0=off) |
 | Delete User | `MsgDeleteUser` | `/core/delete_user` | 100=target (own addr) |
 | Award | `MsgAward` | `/core/award` | 100=target (post_id), 101=award_type |
+| Claim Creator Rewards | `MsgClaimCreatorRewards` | `/core/claim_creator_rewards` | 100=epoch_id (repeated, strictly increasing, max 30) |
+
+Curation team messages are listed under [Curation](#curation).
+
+---
+
+## Removed in v1.39.0
+
+If you are porting a client written against an older guide, these are gone. Do not build against them.
+
+**Agents.** The agent tier, the agent overlay message `MsgAnnotate`, the enabled-agents list and the agent directory were all removed. `/api/core/annotate`, `/api/core/enable_agent`, `/api/core/disable_agent`, `/api/core/set_agents` and `/api/get_agents` answer **410 Gone**. There is no level 10 and no `can_be_agent` tier flag. Post responses no longer carry `agent_edited`, `agent_edits_meta` or `appendices`. Nothing replaces the overlay mechanism — a bot can post, comment and vote, but it cannot alter how anyone else's post is displayed.
+
+**Topics.** Topics were renamed to communities, and the rename went all the way through the wire format rather than being aliased. `/api/get_topics`, `/api/search_topics`, `/api/core/follow_topic`, `/api/core/unfollow_topic`, `/api/core/block_topic` and `/api/core/unblock_topic` answer **410 Gone**. The `topic` field on a post is now `community`, `root_topic` is `root_community`, and `/api/get_posts` takes `community` rather than `topic`. The `/t/:slug` and `/topics` web routes 404 with no redirect. Every `topic_*` error code was renamed to its `community_*` equivalent, with two exceptions worth knowing: the post-body one is `post_community_required` rather than `community_required`, because a distinct `community_required` already existed, and `topic_already_followed` became `community_already_joined`. Sending `topic=` to `/api/get_posts` still answers `topic_retired`, which is the one error code that keeps the old word on purpose.
+
+**Quests, referrals and invite codes.** `/api/quests`, `/api/referrals`, `/api/rewards`, `/api/invite`, `/api/get_referral`, `/api/get_invite_codes` and `/api/validate_invite_code` answer **410 Gone**, as do the `signups`, `rewards` and `rewards_history` tabs of `/api/get_stats`. `set_username` still accepts `invite_code` and `referrer` in the body and ignores them, purely so an old client's signup is not blocked; do not send them.
+
+`MsgFollowTopic`, `MsgUnfollowTopic`, `MsgBlockTopic`, `MsgUnblockTopic`, `MsgEnableAgent`, `MsgDisableAgent`, `MsgSetAgents` and `MsgAnnotate` still exist in `tx.proto` and in `shared/canon.py`. They are there so historical blocks can still be decoded. New transactions using them are rejected.
 
 ---
 
@@ -1504,15 +1235,14 @@ Per-node static settings (validator info, feature flags, API keys). Cached 24 ho
 - **Tag encoding**: `bytes`/`string` fields = `[tag_byte, uvarint(length), data]`. Integer fields = `[tag_byte, uvarint(value)]`.
 - **Direction** for votes: Go encodes `int32(-1)` as `uint32(4294967295)` in the canonical bytes.
 - **Amounts** are in `umirage` (1 MIRAGE = 1,000,000 umirage).
-- **Timestamps** are milliseconds since epoch.
+- **Timestamps** in the envelope are milliseconds since epoch.
 - **Post IDs** are 64-char lowercase hex (the transaction hash of the post).
-- **Topic format**: Posts/follows use lowercase alphanumeric (`[a-z0-9]+`) with `min_topic_size`/`max_topic_size`. Blocked-topic patterns may include `*` (no `**`), length checks apply to the non-`*` characters.
-- **Timestamp freshness**: Rejected if older than `max_envelope_age` seconds (default 60). Small future skew is allowed (capped at 30s, derived from `max_envelope_age/2`).
-- **Block hash window**: Must match one of the last `block_hash_window` committed block hashes (default 10).
-- **Registration gating**: Check `get_node_config`. If `registration_enabled=false`, new usernames are rejected. If `registration_invite_code_required=true`, include `invite_code` (`XXXX-XXXX`) for new users. `invite_code` and `referrer` are not part of canonical bytes.
-- **Unsafe characters**: Control characters are rejected in usernames, topics, titles, content, tags, and media URLs (Unicode is fine).
-- **Subscribers** (level >= 1) must send `pow_difficulty=0` and `pow=0`. The backend rejects if a subscriber sends PoW.
-- **Agents** (level >= 10) must send `pow_difficulty=0` and `pow=0` for MsgAnnotate. Non-zero PoW is rejected.
-- **Report** is stored off-chain in the backend database, not as a blockchain transaction. The canonical signature is still verified.
-- **Async broadcast**: All transactions use async broadcast. `code=0` in the POST response only means the backend submitted the tx bytes; the node can still reject it. Use `get_tx_status` to confirm inclusion.
-- **MsgAnnotate has no target (tag 100)**: Unlike other messages, MsgAnnotate payload starts at tag 101. This is because agents cannot re-parent posts.
+- **Community slugs** are lowercase, may contain single internal hyphens, and are bounded by `min_community_size` / `max_community_size`. Blocked-community patterns may include `*`.
+- **Timestamp freshness**: rejected if older than `max_envelope_age` seconds. Small future skew is allowed (capped at 30s, derived from `max_envelope_age/2`).
+- **Block hash window**: must match one of the last `block_hash_window` committed block hashes.
+- **Unsafe characters**: control characters (other than tab, newline and carriage return) are rejected in usernames, communities, titles, content, tags, and media URLs. Unicode is fine.
+- **Relay-exempt accounts** (a tier with `max_daily_relays > 0`) must send `pow_difficulty=0` and `pow=0`.
+- **PoW is never allowed** for `MsgSubscribe`, `MsgSetAutoRenewal` or `MsgAward`.
+- **Report** is stored off-chain in the backend database, not as a blockchain transaction, and always requires a valid `last_block_hash` plus PoW fields regardless of tier. The canonical signature is still verified.
+- **Async broadcast**: all transactions use async broadcast. `code=0` in the POST response only means the backend submitted the tx bytes; the node can still reject it. Use `get_tx_status` to confirm inclusion.
+- **Every error response carries `error_code`.** Match on that, never on the human-readable `error` string — the registry in `web/backend/error_utils.py` is the full list.

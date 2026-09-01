@@ -51,7 +51,7 @@
   - `ReplyUsername` with tier color + hover tooltip.
   - `ActionText` (subtle): `" replied to "`, `" mentioned you in "`, `" gave you a "X" award for your post/comment"`, `" followed you"`, `" donated to you"`, `" gifted you a subscription"`.
   - `ParentPreview` in curly quotes for non-special non-award types.
-- **Timestamp** (`TimeText`, 0.62rem) on the far right via shared `formatTimeAgo` from `useAgents.js`.
+- **Timestamp** (`TimeText`, 0.62rem) on the far right via shared `formatTimeAgo` from `utils/formatters.js`.
 
 #### Row 2 — `BodyRow` (only rendered if `hasBody || isUnread`)
 

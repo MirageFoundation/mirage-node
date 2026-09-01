@@ -53,16 +53,16 @@ export function useSearchResults({
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [, setSearchType] = useState('general');
-    const [topics, setTopics] = useState([]);
+    const [communities, setCommunities] = useState([]);
     const [users, setUsers] = useState([]);
     const [posts, setPosts] = useState([]);
-    const [hasMoreTopics, setHasMoreTopics] = useState(false);
+    const [hasMoreCommunities, setHasMoreCommunities] = useState(false);
     const [hasMoreUsers, setHasMoreUsers] = useState(false);
     const [hasMorePosts, setHasMorePosts] = useState(false);
-    const [loadingMoreTopics, setLoadingMoreTopics] = useState(false);
+    const [loadingMoreCommunities, setLoadingMoreCommunities] = useState(false);
     const [loadingMoreUsers, setLoadingMoreUsers] = useState(false);
     const [loadingMorePosts, setLoadingMorePosts] = useState(false);
-    const [topicsOffset, setTopicsOffset] = useState(0);
+    const [communitiesOffset, setCommunitiesOffset] = useState(0);
     const [usersOffset, setUsersOffset] = useState(0);
     const [postsOffset, setPostsOffset] = useState(0);
 
@@ -82,7 +82,7 @@ export function useSearchResults({
     useEffect(() => {
         if (!query) {
             setLoading(false);
-            setTopics([]);
+            setCommunities([]);
             setUsers([]);
             setPosts([]);
             return;
@@ -90,10 +90,10 @@ export function useSearchResults({
         let cancelled = false;
         setLoading(true);
         setError('');
-        setTopics([]);
+        setCommunities([]);
         setUsers([]);
         setPosts([]);
-        setTopicsOffset(0);
+        setCommunitiesOffset(0);
         setUsersOffset(0);
         setPostsOffset(0);
         const doSearch = async () => {
@@ -111,13 +111,13 @@ export function useSearchResults({
                 });
                 if (cancelled || !mountedRef.current) return;
                 setSearchType(data.search_type || 'general');
-                setTopics(data.topics || []);
+                setCommunities(data.communities || []);
                 setUsers(data.users || []);
                 setPosts(data.posts || []);
-                setHasMoreTopics(data.has_more_topics || false);
+                setHasMoreCommunities(data.has_more_communities || false);
                 setHasMoreUsers(data.has_more_users || false);
                 setHasMorePosts(data.has_more_posts || false);
-                setTopicsOffset((data.topics || []).length);
+                setCommunitiesOffset((data.communities || []).length);
                 setUsersOffset((data.users || []).length);
                 setPostsOffset((data.posts || []).length);
                 setLoading(false);
@@ -133,15 +133,15 @@ export function useSearchResults({
             cancelled = true;
         };
     }, [query, viewerAddress]);
-    const loadMoreTopics = useCallback(async () => {
-        if (loadingMoreTopics || !hasMoreTopics) return;
-        setLoadingMoreTopics(true);
+    const loadMoreCommunities = useCallback(async () => {
+        if (loadingMoreCommunities || !hasMoreCommunities) return;
+        setLoadingMoreCommunities(true);
         try {
             const params = {
                 q: query,
-                type: 'topics',
+                type: 'communities',
                 limit: 10,
-                offset: topicsOffset,
+                offset: communitiesOffset,
                 lens: 'effective',
                 scope: 'current',
             };
@@ -151,16 +151,16 @@ export function useSearchResults({
                 timeoutMs: 15000
             });
             if (!mountedRef.current) return;
-            const newTopics = data.topics || [];
-            setTopics(prev => [...prev, ...newTopics]);
-            setHasMoreTopics(data.has_more_topics || false);
-            setTopicsOffset(prev => prev + newTopics.length);
+            const newCommunities = data.communities || [];
+            setCommunities(prev => [...prev, ...newCommunities]);
+            setHasMoreCommunities(data.has_more_communities || false);
+            setCommunitiesOffset(prev => prev + newCommunities.length);
         } catch (err) {
-            console.error('[SearchResultsView] Load more topics failed:', err);
+            console.error('[SearchResultsView] Load more communities failed:', err);
         } finally {
-            if (mountedRef.current) setLoadingMoreTopics(false);
+            if (mountedRef.current) setLoadingMoreCommunities(false);
         }
-    }, [query, topicsOffset, hasMoreTopics, loadingMoreTopics, viewerAddress]);
+    }, [query, communitiesOffset, hasMoreCommunities, loadingMoreCommunities, viewerAddress]);
     const loadMoreUsers = useCallback(async () => {
         if (loadingMoreUsers || !hasMoreUsers) return;
         setLoadingMoreUsers(true);
@@ -225,7 +225,7 @@ export function useSearchResults({
             year: 'numeric'
         });
     };
-    const hasResults = topics.length > 0 || users.length > 0 || posts.length > 0;
+    const hasResults = communities.length > 0 || users.length > 0 || posts.length > 0;
     const isLoggedIn = !!viewerAddress;
     const openBrowsingEnabled = isOpenBrowsingEnabled();
     const nodeConfigLoaded = isNodeConfigLoaded();
@@ -235,17 +235,17 @@ export function useSearchResults({
         query,
         loading,
         error,
-        topics,
+        communities,
         users,
         posts,
-        hasMoreTopics,
+        hasMoreCommunities,
         hasMoreUsers,
         hasMorePosts,
-        loadingMoreTopics,
+        loadingMoreCommunities,
         loadingMoreUsers,
         loadingMorePosts,
         displayQuery,
-        loadMoreTopics,
+        loadMoreCommunities,
         loadMoreUsers,
         loadMorePosts,
         formatDate,

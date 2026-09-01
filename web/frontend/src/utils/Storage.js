@@ -78,6 +78,26 @@ class Storage {
         }
     }
 
+    // v1.39.0 renamed the last topic-named storage keys. Caches are not listed:
+    // they refetch. These two are user settings, so move the value once and drop
+    // the old key, rather than silently resetting someone's sidebar to default.
+    static _RENAMED_KEYS = [
+        ['sidebar_topics_limit', 'sidebar_communities_limit'],
+        ['sidebar_people_limit', 'sidebar_users_limit'],
+    ];
+
+    static migrateRenamedKeys() {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        for (const [from, to] of Storage._RENAMED_KEYS) {
+            const raw = window.localStorage.getItem(from);
+            if (raw === null) continue;
+            if (window.localStorage.getItem(to) === null) {
+                window.localStorage.setItem(to, raw);
+            }
+            window.localStorage.removeItem(from);
+        }
+    }
+
     static clear() {
         // Preserve the Mirage analytics visitor id across auth cleanup: it is a
         // device identity, not auth state, and must survive logout/account reset

@@ -942,6 +942,63 @@ def _build_pool():
     query_post_meta_resp.name = "QueryPostMetadataResponse"
     add_message_field(query_post_meta_resp, "metadata", 1, ".mirage.core.v1.PostMetadata")
 
+    creator_epoch = file_proto.message_type.add()
+    creator_epoch.name = "CreatorEpoch"
+    add_f(creator_epoch, "epoch_id", 1, INT64)
+    add_f(creator_epoch, "pool", 2, STRING)
+    add_f(creator_epoch, "status", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(creator_epoch, "phase", 4, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(creator_epoch, "gross_records", 5, UINT64)
+    add_f(creator_epoch, "active_engagers", 6, UINT64)
+    add_f(creator_epoch, "engager_slice", 7, STRING)
+    add_f(creator_epoch, "allocated_total", 8, STRING)
+    add_f(creator_epoch, "claimed_total", 9, STRING)
+    add_f(creator_epoch, "finalized_epoch", 10, INT64)
+    add_f(creator_epoch, "claim_window_days", 11, INT64)
+    add_f(creator_epoch, "claim_deadline_epoch", 12, INT64)
+    add_f(creator_epoch, "settlement_cursor", 13, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(creator_epoch, "partial_actor", 14, STRING)
+    add_f(creator_epoch, "partial_count", 15, UINT64)
+    add_f(creator_epoch, "prune_pending", 16, BOOL)
+    add_f(creator_epoch, "prune_complete", 17, BOOL)
+
+    creator_accrual = file_proto.message_type.add()
+    creator_accrual.name = "CreatorAccrual"
+    add_f(creator_accrual, "epoch", 1, INT64)
+    add_f(creator_accrual, "creator", 2, STRING)
+    add_f(creator_accrual, "amount", 3, STRING)
+    add_f(creator_accrual, "claimed_amount", 4, STRING)
+    add_f(creator_accrual, "claimed", 5, BOOL)
+    add_f(creator_accrual, "claimed_height", 6, INT64)
+    add_f(creator_accrual, "claimed_txhash", 7, STRING)
+
+    query_creator_epoch_req = file_proto.message_type.add()
+    query_creator_epoch_req.name = "QueryCreatorEpochRequest"
+    add_f(query_creator_epoch_req, "epoch_id", 1, INT64)
+    query_creator_epoch_resp = file_proto.message_type.add()
+    query_creator_epoch_resp.name = "QueryCreatorEpochResponse"
+    add_message_field(query_creator_epoch_resp, "epoch", 1, ".mirage.core.v1.CreatorEpoch")
+
+    query_epoch_accruals_req = file_proto.message_type.add()
+    query_epoch_accruals_req.name = "QueryCreatorEpochAccrualsRequest"
+    add_f(query_epoch_accruals_req, "epoch_id", 1, INT64)
+    add_message_field(query_epoch_accruals_req, "pagination", 2, ".cosmos.base.query.v1beta1.PageRequest")
+    query_epoch_accruals_resp = file_proto.message_type.add()
+    query_epoch_accruals_resp.name = "QueryCreatorEpochAccrualsResponse"
+    add_message_field(
+        query_epoch_accruals_resp,
+        "accruals",
+        1,
+        ".mirage.core.v1.CreatorAccrual",
+        repeated=True,
+    )
+    add_message_field(
+        query_epoch_accruals_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
     renewal_state = file_proto.message_type.add()
     renewal_state.name = "SubscriptionRenewalState"
     add_f(renewal_state, "expiry", 1, INT64)
@@ -1112,6 +1169,12 @@ QueryCommunityPreferenceResponse = _get_message_class("mirage.core.v1.QueryCommu
 PostMetadata = _get_message_class("mirage.core.v1.PostMetadata")
 QueryPostMetadataRequest = _get_message_class("mirage.core.v1.QueryPostMetadataRequest")
 QueryPostMetadataResponse = _get_message_class("mirage.core.v1.QueryPostMetadataResponse")
+CreatorEpoch = _get_message_class("mirage.core.v1.CreatorEpoch")
+CreatorAccrual = _get_message_class("mirage.core.v1.CreatorAccrual")
+QueryCreatorEpochRequest = _get_message_class("mirage.core.v1.QueryCreatorEpochRequest")
+QueryCreatorEpochResponse = _get_message_class("mirage.core.v1.QueryCreatorEpochResponse")
+QueryCreatorEpochAccrualsRequest = _get_message_class("mirage.core.v1.QueryCreatorEpochAccrualsRequest")
+QueryCreatorEpochAccrualsResponse = _get_message_class("mirage.core.v1.QueryCreatorEpochAccrualsResponse")
 SubscriptionRenewalState = _get_message_class("mirage.core.v1.SubscriptionRenewalState")
 QuerySubscriptionRenewalRequest = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalRequest")
 QuerySubscriptionRenewalResponse = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalResponse")

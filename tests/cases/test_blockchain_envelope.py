@@ -33,7 +33,6 @@ from tests.common import (
     _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -46,8 +45,7 @@ from tests.blockchain_helpers import (
     _shared_community,
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _build_msg_edit, _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
@@ -70,8 +68,7 @@ from shared.datatypes import (
     MsgSetLevel, MsgSetUsername, MsgSetBiography,
     MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
     MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgSubscribe, MsgVote, MsgAnnotate,
-)
+    MsgSubscribe, MsgVote, )
 
 
 def test_relay_sig(backend: str) -> None:
@@ -181,9 +178,9 @@ def test_envelope_replay(backend: str) -> None:
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
     ts = _now_ms()
     nonce = _gen_nonce()
-    topic = f"replay{_rand_str(4)}"
+    community = f"replay{_rand_str(4)}"
 
-    msg1 = _build_msg_post(sub, lb, 0, ts, topic, "Replay Test", "content", nonce=nonce)
+    msg1 = _build_msg_post(sub, lb, 0, ts, community, "Replay Test", "content", nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg1, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -193,7 +190,7 @@ def test_envelope_replay(backend: str) -> None:
     )
     _check_deliver_accept("envelope_replay.first_submit", ccode, dcode, dlog)
 
-    msg2 = _build_msg_post(sub, lb, 0, ts, topic, "Replay Test", "content", nonce=nonce)
+    msg2 = _build_msg_post(sub, lb, 0, ts, community, "Replay Test", "content", nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg2, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -205,7 +202,7 @@ def test_envelope_replay(backend: str) -> None:
 
     nonce2 = _gen_nonce()
     ts2 = _now_ms()
-    msg3 = _build_msg_post(sub, lb, 0, ts2, topic, "Replay Test 2", "content2", nonce=nonce2)
+    msg3 = _build_msg_post(sub, lb, 0, ts2, community, "Replay Test 2", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -228,11 +225,11 @@ def test_mandatory_nonce(backend: str) -> None:
     fee_payer = _bh._VALIDATOR_ADDR or ""
     pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
-    topic = f"nonce{_rand_str(4)}"
+    community = f"nonce{_rand_str(4)}"
 
     # 1. nonce=0 explicit — REJECTED (no legacy fallback)
     ts1 = _now_ms()
-    msg1 = _build_msg_post(sub, lb, 0, ts1, topic, "Legacy Post", "content", nonce=0)
+    msg1 = _build_msg_post(sub, lb, 0, ts1, community, "Legacy Post", "content", nonce=0)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg1, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -244,7 +241,7 @@ def test_mandatory_nonce(backend: str) -> None:
 
     # 2. nonce omitted (default=0 in proto3) — also REJECTED
     ts1b = _now_ms()
-    msg1b = _build_msg_post(sub, lb, 0, ts1b, topic, "Omitted Nonce", "content_omit")
+    msg1b = _build_msg_post(sub, lb, 0, ts1b, community, "Omitted Nonce", "content_omit")
     assert msg1b.envelope_nonce == 0, "default nonce must be 0"
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg1b, "/mirage.core.v1.MsgPost")],
@@ -271,7 +268,7 @@ def test_mandatory_nonce(backend: str) -> None:
     # 4. nonce>0 accepted with replay protection
     ts2 = _now_ms()
     nonce2 = _gen_nonce()
-    msg2 = _build_msg_post(sub, lb, 0, ts2, topic, "Nonce Post", "content2", nonce=nonce2)
+    msg2 = _build_msg_post(sub, lb, 0, ts2, community, "Nonce Post", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg2, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -282,7 +279,7 @@ def test_mandatory_nonce(backend: str) -> None:
     _check_deliver_accept("nonce.nonzero_nonce_accepted", ccode, dcode, dlog)
 
     # 5. nonce>0 replay must be rejected
-    msg3 = _build_msg_post(sub, lb, 0, ts2, topic, "Nonce Post", "content2", nonce=nonce2)
+    msg3 = _build_msg_post(sub, lb, 0, ts2, community, "Nonce Post", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,

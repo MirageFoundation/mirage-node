@@ -16,7 +16,7 @@ import styled, { useTheme } from "styled-components";
 import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import * as tx from "../../../utils/tx";
-import { isJoinedCommunity, joinCommunity, leaveCommunity, invalidateCache as invalidateTopicsCache } from "../../../utils/Subscriptions";
+import { isJoinedCommunity, joinCommunity, leaveCommunity, invalidateCache as invalidateCommunitiesCache } from "../../../utils/Subscriptions";
 import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
@@ -67,7 +67,7 @@ const FeedHeroColumn = styled.div.attrs(({ $feedViewMode }) => ({
  * `FeedSkeletonColumn` mirrors the width rules applied by `ListFeedView`'s
  * `FeedList` so loading-state skeletons render at the same width as real
  * posts — 820px card / 80% compact when the sidebar is hidden — on home,
- * following, and topic feeds. Keeping this parallel to `FeedHeroColumn`
+ * following, and community feeds. Keeping this parallel to `FeedHeroColumn`
  * avoids cross-file coupling and makes the wrapper explicit at the
  * skeleton render sites.
  */
@@ -122,7 +122,7 @@ const HomeFeedTitleBar = styled.div`
 
 // NSFW welcome hero — default: compact, app-style card using the
 // Mirage gradient accent. Blends with the page bg (rounded 8px, themed
-// border) and matches the visual language of TopicHeroCard.
+// border) and matches the visual language of CommunityHeroCard.
 const NsfwWelcomeHero = styled.div.attrs(({ $feedViewMode }) => ({
     'data-feed-view-mode': $feedViewMode,
 }))`
@@ -544,7 +544,7 @@ const PostHeaderText = styled.div`
     font-size: 0.6rem;
     line-height: 1.5;
 `;
-const TopicLinkInHeader = styled(Link)`
+const CommunityLinkInHeader = styled(Link)`
     color: ${({
     theme
 }) => theme.colors.link};
@@ -589,7 +589,7 @@ const HeaderInlineLink = styled.a`
 `;
 /* inline subscribe/unsubscribe will be rendered via FilterBar rightAction */
 
-// Removed old topics bar styled components (unused)
+// Removed old communities bar styled components (unused)
 
 /** Feed column fills the full width — background is the app-wide bg so
  *  the feed reads as one continuous canvas (no panel/body color split). */
@@ -637,11 +637,11 @@ const LoadingText = styled.div`
 
 /**
  * Blocked-community empty state — shown when the viewer navigates to `/c/<community>`
- * where the topic is in their blocked list. Mirrors the `StateBlock`
+ * where the community is in their blocked list. Mirrors the `StateBlock`
  * pattern used across BlocksView / Follows / Reports so the visual
  * language stays consistent (circle icon + title + message + action).
  */
-const BlockedTopicState = styled.div`
+const BlockedCommunityState = styled.div`
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -658,7 +658,7 @@ const BlockedTopicState = styled.div`
     width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
     box-sizing: border-box;
 `;
-const BlockedTopicIcon = styled.div`
+const BlockedCommunityIcon = styled.div`
     width: 56px;
     height: 56px;
     border-radius: 50%;
@@ -670,24 +670,24 @@ const BlockedTopicIcon = styled.div`
 
     svg { width: 26px; height: 26px; }
 `;
-const BlockedTopicTitle = styled.div`
+const BlockedCommunityTitle = styled.div`
     color: ${({ theme }) => theme.colors.text};
     font-size: 0.95rem;
     font-weight: 700;
 `;
-const BlockedTopicMessage = styled.div`
+const BlockedCommunityMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.78rem;
     line-height: 1.5;
     max-width: 26rem;
 `;
-const BlockedTopicActions = styled.div`
+const BlockedCommunityActions = styled.div`
     display: flex;
     gap: 0.5rem;
     margin-top: 0.35rem;
 `;
 
-// TopicsBar removed (unused)
+// CommunitiesBar removed (unused)
 
 const InlineLink = styled(Link)`
     color: ${({
@@ -706,8 +706,8 @@ const InlineLink = styled(Link)`
     }
 `;
 
-// Topic header card (for topic pages) - unified with HomeFeedInfoCard
-const TopicHeroCard = styled.div`
+// Community header card (for community pages) - unified with HomeFeedInfoCard
+const CommunityHeroCard = styled.div`
     margin-top: 1rem;
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
     border: 1px solid rgba(99, 102, 241, 0.2);
@@ -728,7 +728,7 @@ const TopicHeroCard = styled.div`
         margin-top: 0.5rem;
     }
 `;
-const TopicHeroTitle = styled.div`
+const CommunityHeroTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
     color: ${({
@@ -742,14 +742,14 @@ const TopicHeroTitle = styled.div`
     @media (max-width: 1000px) {
     }
 `;
-const TopicHeroHeader = styled.div`
+const CommunityHeroHeader = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
     flex-wrap: wrap;
 `;
-const TopicHeroDescription = styled.div`
+const CommunityHeroDescription = styled.div`
     color: ${({
     theme
 }) => theme.colors.subtleText};
@@ -906,14 +906,14 @@ const EmptyHomeMessage = () => <EmptyHomeCard role="region" aria-label="Empty ho
     </EmptyHomeBody>
 </EmptyHomeCard>;
 
-// Session storage key helpers for feed state preservation (keyed by topic)
+// Session storage key helpers for feed state preservation (keyed by community)
 
 const MainView = ({
     state,
     setPosts,
     updatePost,
-    setTopic,
-    routeTopic
+    setCommunity,
+    routeCommunity
 }) => {
     const theme = useTheme();
     const showHero = theme.caps.showHeroCards;
@@ -946,8 +946,8 @@ const MainView = ({
         formatCommunityStatus: formatCommunityBlockStatus,
     } = usePendingBlocks();
     const {
-        urlTopic,
-        currentTopicRef,
+        urlCommunity,
+        currentCommunityRef,
         error,
         stableOrder,
         setStableOrder,
@@ -964,7 +964,7 @@ const MainView = ({
         flashingPostsSet,
         isLoadingMore,
         isMobile,
-        isTopicBlockedLocal,
+        isCommunityBlockedLocal,
         location,
         viewerAddress,
         joinedCommunitiesSet,
@@ -990,18 +990,18 @@ const MainView = ({
         state,
         setPosts,
         updatePost,
-        setTopic,
-        routeTopic
+        setCommunity,
+        routeCommunity
     });
     const handleLensChange = useCallback((lens, teamId, team) => {
         setFeedLens({ lens, teamId });
-        setCurationHeader({ community: urlTopic, team });
+        setCurationHeader({ community: urlCommunity, team });
         console.debug('[lens] community header updated', {
-            community: urlTopic,
+            community: urlCommunity,
             teamId: team?.team_id || null,
         });
-    }, [setFeedLens, urlTopic]);
-    const activeCurationTeam = curationHeader.community === urlTopic ? curationHeader.team : null;
+    }, [setFeedLens, urlCommunity]);
+    const activeCurationTeam = curationHeader.community === urlCommunity ? curationHeader.team : null;
     // Open browsing: guests may read the feed too. Content-rendering branches use
     // canBrowse; logged-in-only chrome (heroes, banners) keeps using isLoggedIn.
     // Until the node config has loaded we don't yet know if open browsing is on,
@@ -1033,39 +1033,39 @@ const MainView = ({
         })();
         const p = pid ? state.posts[pid] : null;
         if (p) {
-            const topicKey = String(p.topic || '').trim().toLowerCase();
-            const isJoined = topicKey && (joinedCommunitiesSet.has(topicKey) || isJoinedCommunity(viewerAddress || 'guest', p.topic));
-            const isCommunityInProgress = isCommunityPending(topicKey);
+            const communityKey = String(p.community || '').trim().toLowerCase();
+            const isJoined = communityKey && (joinedCommunitiesSet.has(communityKey) || isJoinedCommunity(viewerAddress || 'guest', p.community));
+            const isCommunityInProgress = isCommunityPending(communityKey);
             header = <PostHeaderCard role="region" aria-label="Post context">
                 <PostHeaderText>
                     Posted in{' '}
-                    <TopicLinkInHeader to={communityPath(p.topic)} title={`View ${communityLabel(p.topic)}`}>
-                        {communityLabel(p.topic)}
-                    </TopicLinkInHeader>{' '}
+                    <CommunityLinkInHeader to={communityPath(p.community)} title={`View ${communityLabel(p.community)}`}>
+                        {communityLabel(p.community)}
+                    </CommunityLinkInHeader>{' '}
                     (
                     <HeaderInlineLink href="#" onClick={async e => {
                         e.preventDefault();
-                        const key = topicKey;
+                        const key = communityKey;
                         if (!key) return;
                         if (isCommunityPending(key)) return;
                         try {
-                            const isCurrentlyFollowing = key && (joinedCommunitiesSet.has(key) || isJoinedCommunity(viewerAddress || 'guest', p.topic));
+                            const isCurrentlyFollowing = key && (joinedCommunitiesSet.has(key) || isJoinedCommunity(viewerAddress || 'guest', p.community));
                             if (isCurrentlyFollowing) {
-                                await leaveCommunity(viewerAddress || 'guest', p.topic);
+                                await leaveCommunity(viewerAddress || 'guest', p.community);
                                 setJoinedCommunitiesSet(prev => {
                                     const next = new Set(prev);
                                     next.delete(key);
                                     return next;
                                 });
                             } else {
-                                await joinCommunity(viewerAddress || 'guest', p.topic);
+                                await joinCommunity(viewerAddress || 'guest', p.community);
                                 setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                             }
-                            invalidateTopicsCache();
+                            invalidateCommunitiesCache();
                             setStableOrder(s => s.slice());
                         } catch (_) {/* noop */ }
                     }}>
-                        {isCommunityInProgress ? formatCommunityStatus(topicKey) : isJoined ? 'Leave' : 'Join'}
+                        {isCommunityInProgress ? formatCommunityStatus(communityKey) : isJoined ? 'Leave' : 'Join'}
                     </HeaderInlineLink>
                     )
                 </PostHeaderText>
@@ -1075,19 +1075,19 @@ const MainView = ({
     }
     const showPosts = () => {
         // Compute display state
-        const displayTopic = currentTopicRef.current || urlTopic;
-        const routeTopicLower = urlTopic ? String(urlTopic).toLowerCase() : '';
-        const topicKeyLower = routeTopicLower || (displayTopic ? String(displayTopic).toLowerCase() : '');
-        const isCurrentCommunity = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
-        const isJoined = isCurrentCommunity && (joinedCommunitiesSet.has(routeTopicLower) || isJoinedCommunity(viewerAddress || 'guest', urlTopic));
-        const isCommunityInProgress = isCurrentCommunity && isCommunityPending(routeTopicLower);
+        const displayCommunity = currentCommunityRef.current || urlCommunity;
+        const routeCommunityLower = urlCommunity ? String(urlCommunity).toLowerCase() : '';
+        const communityKeyLower = routeCommunityLower || (displayCommunity ? String(displayCommunity).toLowerCase() : '');
+        const isCurrentCommunity = routeCommunityLower && routeCommunityLower !== 'home' && routeCommunityLower !== 'all' && routeCommunityLower !== 'following';
+        const isJoined = isCurrentCommunity && (joinedCommunitiesSet.has(routeCommunityLower) || isJoinedCommunity(viewerAddress || 'guest', urlCommunity));
+        const isCommunityInProgress = isCurrentCommunity && isCommunityPending(routeCommunityLower);
         /**
          * When the viewer navigates to `/c/<community>` for a community they've
-         * blocked, hide the feed and show a dedicated `BlockedTopicState`
+         * blocked, hide the feed and show a dedicated `BlockedCommunityState`
          * panel with an Unblock CTA. Keeps the visual language of the
          * BlocksView state blocks (circle icon + title + message).
          */
-        const isUrlTopicBlocked = !!(isLoggedIn && isCurrentCommunity && typeof isTopicBlockedLocal === 'function' && isTopicBlockedLocal(routeTopicLower));
+        const isUrlCommunityBlocked = !!(isLoggedIn && isCurrentCommunity && typeof isCommunityBlockedLocal === 'function' && isCommunityBlockedLocal(routeCommunityLower));
 
         // Determine what content to show
         let showEmptyHome = false;
@@ -1095,21 +1095,21 @@ const MainView = ({
         let showLoadingPosts = false;
         let orderedPosts = [];
 
-        // Show loading when switching to a different topic
-        const isTopicSwitching = isLoading && displayTopic !== urlTopic;
+        // Show loading when switching to a different community
+        const isCommunitySwitching = isLoading && displayCommunity !== urlCommunity;
         // Force loading overlay even when posts exist (e.g., mode toggle / hard refresh)
         const isHardRefreshLoading = isLoading && forceHardRefreshRef.current;
 
         // Check loading states
         if (isHardRefreshLoading) {
             showLoadingPosts = true;
-        } else if (isTopicSwitching) {
-            // Switching topics - show loading immediately
+        } else if (isCommunitySwitching) {
+            // Switching communities - show loading immediately
             showLoadingPosts = true;
         } else if (!state.posts || Object.keys(state.posts).length === 0) {
             if (isLoading) {
                 showLoadingPosts = true;
-            } else if (displayTopic === 'home') {
+            } else if (displayCommunity === 'home') {
                 showEmptyHome = true;
             } else {
                 showNoPostsAvailable = true;
@@ -1120,22 +1120,22 @@ const MainView = ({
             // Convert the posts object to an array once
             const postsArray = Object.values(state.posts || {});
 
-            // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked topics)
+            // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked communities)
             const isTopLevelPost = p => {
                 if (!p || p.deleted) return false;
                 if (p.hidden_client) return false;
                 if (isOptimisticallyCurationHidden(p)) return false;
                 const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
-                const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
-                const topicVal = String(p.topic || '').trim().toLowerCase();
-                const isReserved = ['all', 'home', 'following'].includes(topicVal);
-                if (isTopicBlockedLocal(topicVal)) return false;
-                return hasTitle && hasTopic && !isReserved;
+                const hasCommunity = typeof p.community === 'string' && p.community.trim().length > 0;
+                const communityVal = String(p.community || '').trim().toLowerCase();
+                const isReserved = ['all', 'home', 'following'].includes(communityVal);
+                if (isCommunityBlockedLocal(communityVal)) return false;
+                return hasTitle && hasCommunity && !isReserved;
             };
             const topLevelPosts = postsArray.filter(isTopLevelPost);
-            const filteredPosts = displayTopic === "all" || displayTopic === "home" || displayTopic === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(displayTopic || '').toLowerCase());
+            const filteredPosts = displayCommunity === "all" || displayCommunity === "home" || displayCommunity === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.community || '').toLowerCase() === String(displayCommunity || '').toLowerCase());
             if (filteredPosts.length === 0 && !isLoading) {
-                if (displayTopic === 'home') {
+                if (displayCommunity === 'home') {
                     showEmptyHome = true;
                 } else {
                     showNoPostsAvailable = true;
@@ -1171,8 +1171,8 @@ const MainView = ({
         }
 
         // Full-width main column + shell header (no left sidebar; old Reddit style)
-        const pageTitle = urlTopic === 'home' ? 'Home' : urlTopic === 'following' ? 'Following' : urlTopic === 'all' ? 'All Posts' : communityLabel(urlTopic);
-        const noPostsMessage = urlTopic === 'following'
+        const pageTitle = urlCommunity === 'home' ? 'Home' : urlCommunity === 'following' ? 'Following' : urlCommunity === 'all' ? 'All Posts' : communityLabel(urlCommunity);
+        const noPostsMessage = urlCommunity === 'following'
             ? 'No posts available. Follow users or join communities to populate this feed.'
             : 'No posts available';
         return <ContentGrid>
@@ -1185,9 +1185,9 @@ const MainView = ({
                     <MainFeedPanel>
                         <ModernPostFeed>
 
-                            {isLoggedIn && isCurrentCommunity && showHero && !isUrlTopicBlocked && <TopicHeroCard>
-                                <TopicHeroHeader>
-                                    <TopicHeroTitle>{communityLabel(urlTopic)}</TopicHeroTitle>
+                            {isLoggedIn && isCurrentCommunity && showHero && !isUrlCommunityBlocked && <CommunityHeroCard>
+                                <CommunityHeroHeader>
+                                    <CommunityHeroTitle>{communityLabel(urlCommunity)}</CommunityHeroTitle>
                                     <HomeFeedModeInline>
                                         <HomeFeedModeSelect value={homeSortMode} onChange={e => {
                                             const mode = e.target.value;
@@ -1205,52 +1205,52 @@ const MainView = ({
                                         <CommunityMembershipButton
                                             joined={isJoined}
                                             pending={isCommunityInProgress}
-                                            statusLabel={formatCommunityStatus(topicKeyLower)}
+                                            statusLabel={formatCommunityStatus(communityKeyLower)}
                                             onToggle={async () => {
-                                                const topicName = urlTopic;
-                                                if (!topicName) return;
-                                                const key = topicKeyLower;
+                                                const communityName = urlCommunity;
+                                                if (!communityName) return;
+                                                const key = communityKeyLower;
                                                 if (!key) return;
                                                 if (isCommunityPending(key)) return;
                                                 try {
                                                     if (isJoined) {
-                                                        await leaveCommunity(viewerAddress || 'guest', topicName);
+                                                        await leaveCommunity(viewerAddress || 'guest', communityName);
                                                         setJoinedCommunitiesSet(prev => {
                                                             const next = new Set(prev);
                                                             next.delete(key);
                                                             return next;
                                                         });
                                                     } else {
-                                                        await joinCommunity(viewerAddress || 'guest', topicName);
+                                                        await joinCommunity(viewerAddress || 'guest', communityName);
                                                         setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                                                     }
-                                                    invalidateTopicsCache();
+                                                    invalidateCommunitiesCache();
                                                 } catch (_) {/* noop */ }
                                             }}
                                         />
                                     </HomeFeedModeInline>
-                                </TopicHeroHeader>
-                                <TopicHeroDescription>
-                                    Community feed for {communityLabel(urlTopic)}. Join this community to stay up to date with the latest posts, discussions, and updates from users actively contributing here.
-                                </TopicHeroDescription>
-                            </TopicHeroCard>}
+                                </CommunityHeroHeader>
+                                <CommunityHeroDescription>
+                                    Community feed for {communityLabel(urlCommunity)}. Join this community to stay up to date with the latest posts, discussions, and updates from users actively contributing here.
+                                </CommunityHeroDescription>
+                            </CommunityHeroCard>}
 
-                            {isCurrentCommunity && !isUrlTopicBlocked && (
-                                <CommunityLensBar role="region" aria-label={`${communityLabel(urlTopic)} feed header`}>
+                            {isCurrentCommunity && !isUrlCommunityBlocked && (
+                                <CommunityLensBar role="region" aria-label={`${communityLabel(urlCommunity)} feed header`}>
                                     <CommunityLensTopRow $divided={Boolean(activeCurationTeam?.description)}>
                                         <CommunityLensHeading>
-                                            <CommunityLensTitle>{communityLabel(urlTopic)}</CommunityLensTitle>
+                                            <CommunityLensTitle>{communityLabel(urlCommunity)}</CommunityLensTitle>
                                         </CommunityLensHeading>
                                         <CommunityLensControls>
                                             {isLoggedIn && (
                                                 <CommunityMembershipButton
                                                     joined={isJoined}
                                                     pending={isCommunityInProgress}
-                                                    statusLabel={formatCommunityStatus(topicKeyLower)}
+                                                    statusLabel={formatCommunityStatus(communityKeyLower)}
                                                     onToggle={async () => {
-                                                        const topicName = urlTopic;
-                                                        if (!topicName) return;
-                                                        const key = topicKeyLower;
+                                                        const communityName = urlCommunity;
+                                                        if (!communityName) return;
+                                                        const key = communityKeyLower;
                                                         if (!key) return;
                                                         if (isCommunityPending(key)) return;
                                                         console.debug('[community] membership toggle', {
@@ -1259,17 +1259,17 @@ const MainView = ({
                                                         });
                                                         try {
                                                             if (isJoined) {
-                                                                await leaveCommunity(viewerAddress || 'guest', topicName);
+                                                                await leaveCommunity(viewerAddress || 'guest', communityName);
                                                                 setJoinedCommunitiesSet(prev => {
                                                                     const next = new Set(prev);
                                                                     next.delete(key);
                                                                     return next;
                                                                 });
                                                             } else {
-                                                                await joinCommunity(viewerAddress || 'guest', topicName);
+                                                                await joinCommunity(viewerAddress || 'guest', communityName);
                                                                 setJoinedCommunitiesSet(prev => new Set([...prev, key]));
                                                             }
-                                                            invalidateTopicsCache();
+                                                            invalidateCommunitiesCache();
                                                         } catch (err) {
                                                             console.error('[community] membership toggle failed', {
                                                                 community: key,
@@ -1281,7 +1281,7 @@ const MainView = ({
                                                 />
                                             )}
                                             <CurationLensPicker
-                                                community={urlTopic}
+                                                community={urlCommunity}
                                                 viewer={viewerAddress}
                                                 onChange={handleLensChange}
                                             />
@@ -1297,12 +1297,12 @@ const MainView = ({
                                 </CommunityLensBar>
                             )}
 
-                            {(isLoggedIn && (urlTopic === 'home' || urlTopic === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
+                            {(isLoggedIn && (urlCommunity === 'home' || urlCommunity === 'following')) && <FeedHeroColumn $feedViewMode={feedViewMode}>
                                 {/* Keep only the feed title row at the top for home/following. */}
-                                <HomeFeedTitleBar role="region" aria-label={`${urlTopic} feed header`}>
+                                <HomeFeedTitleBar role="region" aria-label={`${urlCommunity} feed header`}>
                                     <HomeFeedHeaderRow>
                                         <HomeFeedInfoTitle>
-                                            {urlTopic === 'home' ? 'Home' : 'Following'}
+                                            {urlCommunity === 'home' ? 'Home' : 'Following'}
                                         </HomeFeedInfoTitle>
                                         <HomeFeedModeInline>
                                             <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
@@ -1351,7 +1351,7 @@ const MainView = ({
                             {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
                             {/* Consent prompt — always show regardless of theme.caps.showHeroCards so
                             the default theme (which disables hero cards) still surfaces it. */}
-                            {isLoggedIn && urlTopic === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
+                            {isLoggedIn && urlCommunity === 'home' && showNsfwHero && <NsfwWelcomeHero $feedViewMode={feedViewMode} role="region" aria-label="Content preferences">
                                 <NsfwHeroHeader>
                                     <NsfwHeroIconTile aria-hidden="true">
                                         <NsfwHeroEmoji>🔞</NsfwHeroEmoji>
@@ -1378,18 +1378,18 @@ const MainView = ({
                             </NsfwWelcomeHero>}
 
                             {/* Home/Following header cards moved to the very top of the feed
-                         * (see block rendered just after <TopicHeroCard>). */}
+                         * (see block rendered just after <CommunityHeroCard>). */}
 
-                            {/* Blocked topic state — takes precedence over loading/empty states */}
-                            {isUrlTopicBlocked && <BlockedTopicState role="region" aria-label="Blocked community">
-                                <BlockedTopicIcon aria-hidden="true">
+                            {/* Blocked community state — takes precedence over loading/empty states */}
+                            {isUrlCommunityBlocked && <BlockedCommunityState role="region" aria-label="Blocked community">
+                                <BlockedCommunityIcon aria-hidden="true">
                                     <HiNoSymbol />
-                                </BlockedTopicIcon>
-                                <BlockedTopicTitle>{communityLabel(urlTopic)} is blocked</BlockedTopicTitle>
-                                <BlockedTopicMessage>
+                                </BlockedCommunityIcon>
+                                <BlockedCommunityTitle>{communityLabel(urlCommunity)} is blocked</BlockedCommunityTitle>
+                                <BlockedCommunityMessage>
                                     Posts in this community are hidden from your feeds. Unblock to see them again — you can always re-block it later from any post header or the Blocks page.
-                                </BlockedTopicMessage>
-                                <BlockedTopicActions>
+                                </BlockedCommunityMessage>
+                                <BlockedCommunityActions>
                                     {/* Standalone state panel — use `size="md"`
                                     so the CTA height matches primary buttons
                                     elsewhere (larger than BlocksView rows). */}
@@ -1397,22 +1397,22 @@ const MainView = ({
                                         variant="danger"
                                         size="md"
                                         minWidth="5.5rem"
-                                        disabled={isCommunityBlockPending(routeTopicLower)}
+                                        disabled={isCommunityBlockPending(routeCommunityLower)}
                                         onClick={async () => {
-                                            try { await tx.unblockCommunity(routeTopicLower); } catch (_) { /* noop */ }
+                                            try { await tx.unblockCommunity(routeCommunityLower); } catch (_) { /* noop */ }
                                         }}
                                     >
-                                        {formatCommunityBlockStatus(routeTopicLower) || `Unblock ${communityLabel(urlTopic)}`}
+                                        {formatCommunityBlockStatus(routeCommunityLower) || `Unblock ${communityLabel(urlCommunity)}`}
                                     </Button>
-                                </BlockedTopicActions>
-                            </BlockedTopicState>}
+                                </BlockedCommunityActions>
+                            </BlockedCommunityState>}
 
                             {/* Loading state (also covers the window before node config
                                 has loaded, so guests never flash an empty/splash state).
                                 Never stack skeletons over posts that already rendered —
                                 login used to clear nodeConfig and paint empty rows above
                                 a working feed. */}
-                            {canBrowse && !isUrlTopicBlocked && (showLoadingPosts || !nodeConfigLoaded) && orderedPosts.length === 0 && (
+                            {canBrowse && !isUrlCommunityBlocked && (showLoadingPosts || !nodeConfigLoaded) && orderedPosts.length === 0 && (
                                 <FeedSkeletonColumn $feedViewMode={feedViewMode}>
                                     {/* Community feeds already show the real title in CommunityLensBar. */}
                                     {!isCurrentCommunity && (
@@ -1423,10 +1423,10 @@ const MainView = ({
                             )}
 
                             {/* Empty home feed */}
-                            {canBrowse && !isUrlTopicBlocked && nodeConfigLoaded && showEmptyHome && <EmptyHomeMessage />}
+                            {canBrowse && !isUrlCommunityBlocked && nodeConfigLoaded && showEmptyHome && <EmptyHomeMessage />}
 
                             {/* No posts available */}
-                            {canBrowse && !isUrlTopicBlocked && nodeConfigLoaded && showNoPostsAvailable && <LoadingCard $size={cardSize}>
+                            {canBrowse && !isUrlCommunityBlocked && nodeConfigLoaded && showNoPostsAvailable && <LoadingCard $size={cardSize}>
                                 <LoadingText>{noPostsMessage}</LoadingText>
                             </LoadingCard>}
 
@@ -1434,8 +1434,8 @@ const MainView = ({
                             {!canBrowse && <LoggedOutPromptCard
                                 role="region"
                                 aria-label="Welcome to Mirage"
-                                title={urlTopic === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
-                                description={urlTopic === 'following'
+                                title={urlCommunity === 'following' ? 'Sign in to follow users' : 'Welcome to Mirage'}
+                                description={urlCommunity === 'following'
                                     ? 'Sign in to unlock your personalized feed and keep up with the users and communities you care about.'
                                     : 'Communities, posts, and voting without power mods, shadow bans, or corporate gatekeepers. Your identity is portable, moderation is voluntary, and no node can erase you from the network.'}
                                 stats={welcomeStats && welcomeStats.userCount > 0 ? [
@@ -1453,19 +1453,19 @@ const MainView = ({
                             />}
 
                             {/* Posts grid */}
-                            {canBrowse && !isUrlTopicBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
+                            {canBrowse && !isUrlCommunityBlocked && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (() => {
                                 const family = getThemeFamily(state?.themeId);
                                 const FeedComponent = family.Feed;
                                 const visiblePosts = orderedPosts.filter(p => {
                                     const hasValidTitle = p && typeof p.title === 'string' && p.title.trim().length > 0;
-                                    const hasValidTopic = p && typeof p.topic === 'string' && p.topic.trim().length > 0;
-                                    return hasValidTitle && hasValidTopic && !p.deleted;
+                                    const hasValidCommunity = p && typeof p.community === 'string' && p.community.trim().length > 0;
+                                    return hasValidTitle && hasValidCommunity && !p.deleted;
                                 });
                                 // Community feeds own title + lens + sort/view in CommunityLensBar.
                                 // Only the All feed still uses ListFeedView's toolbar title row.
-                                const showFeedToolbar = urlTopic === 'all';
-                                const feedTitle = urlTopic === 'all' ? 'All' : null;
-                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavTopic={urlTopic} showPostLens={false} />;
+                                const showFeedToolbar = urlCommunity === 'all';
+                                const feedTitle = urlCommunity === 'all' ? 'All' : null;
+                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavCommunity={urlCommunity} showPostLens={false} />;
                             })()}
 
                             {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (

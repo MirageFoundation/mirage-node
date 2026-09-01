@@ -1,17 +1,17 @@
 """
-Repair vote/post standing left on the wrong topic by earlier root-topic edits.
+Repair vote/post standing left on the wrong community by earlier root-community edits.
 
-`user_topic_stats` is maintained by deltas, but its meaning is defined by the
-topic a post row carries now. Until v1.34.0, an edit that changed a root post's
-topic recomputed `topic_content_stats` for both topics and moved nothing else, so
-every delta already applied under the old topic — including the author's
+`user_community_stats` is maintained by deltas, but its meaning is defined by the
+community a post row carries now. Until v1.34.0, an edit that changed a root post's
+community recomputed `community_content_stats` for both communities and moved nothing else, so
+every delta already applied under the old community — including the author's
 post-time auto-upvote — stayed there permanently. Two rows were still drifted
-when this was written: one topic read 3 against a canonical 2, another 8 against
-9, from a post created in one topic and edited into another 35 seconds later.
+when this was written: one community read 3 against a canonical 2, another 8 against
+9, from a post created in one community and edited into another 35 seconds later.
 
 Descendant comments are the second half of the same gap: they denormalise
-`root_topic` at creation, so a root topic edit never reached them and a thread
-could end up split across two topics. Those are corrected first, because the
+`root_community` at creation, so a root community edit never reached them and a thread
+could end up split across two communities. Those are corrected first, because the
 canonical attribution of a vote on a comment is read from the comment's own row,
 so the stats rebuild is only correct once the comments agree with their root.
 
@@ -23,10 +23,12 @@ stats row in the tree. Idempotent: running it again recomputes the same values.
 from indexer.migrations import run_db_migration
 from indexer.migrations.v1_33_0_rebuild_derived_stats import (
     _rebuild_preferences,
-    _rebuild_topic_content_stats,
-    _rebuild_user_topic_stats,
+    _rebuild_community_content_stats,
+    _rebuild_user_community_stats,
 )
 
+# A MIGRATION_KEY is an on-disk identity: changing it re-runs the migration on
+# every deployment that already applied it. It keeps its original spelling.
 MIGRATION_KEY = "v1.34.0_repair_topic_attribution"
 
 
@@ -34,40 +36,40 @@ def run(db, chain, logger):
     del chain  # unused; signature required by the migration runner
 
     def _repair(cur):
-        # Comments whose denormalised root_topic no longer matches the root post
+        # Comments whose denormalised root_community no longer matches the root post
         # they belong to. Root posts are excluded: theirs is authoritative.
         cur.execute(
             """
             UPDATE posts c
-            SET root_topic = r.root_topic
+            SET root_community = r.root_community
             FROM posts r
             WHERE LOWER(c.root_post_id) = LOWER(r.txhash)
               AND LOWER(c.txhash) <> LOWER(r.txhash)
-              AND COALESCE(r.root_topic, '') <> ''
-              AND LOWER(COALESCE(c.root_topic, '')) <> LOWER(r.root_topic)
+              AND COALESCE(r.root_community, '') <> ''
+              AND LOWER(COALESCE(c.root_community, '')) <> LOWER(r.root_community)
             """
         )
         comments_realigned = cur.rowcount
-        logger.info("repair_topic_attribution comments_realigned=%s", comments_realigned)
+        logger.info("repair_community_attribution comments_realigned=%s", comments_realigned)
 
-        _rebuild_user_topic_stats(cur, logger)
-        _rebuild_topic_content_stats(cur, logger)
+        _rebuild_user_community_stats(cur, logger)
+        _rebuild_community_content_stats(cur, logger)
         _rebuild_preferences(cur, logger)
 
         cur.execute(
             """
             SELECT COUNT(*) FROM (
-                SELECT s.owner, s.topic
-                FROM user_topic_stats s
+                SELECT s.owner, s.community
+                FROM user_community_stats s
                 LEFT JOIN (
                     SELECT LOWER(v.owner) AS owner,
-                           LOWER(COALESCE(NULLIF(p.root_topic, ''), p.topic)) AS topic,
+                           LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS community,
                            SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
                     FROM votes v
                     JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-                    WHERE COALESCE(NULLIF(p.root_topic, ''), p.topic) <> ''
+                    WHERE COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
                     GROUP BY 1, 2
-                ) d ON d.owner = s.owner AND d.topic = s.topic
+                ) d ON d.owner = s.owner AND d.community = s.community
                 WHERE s.net_votes <> COALESCE(d.net, 0)
             ) mismatched
             """

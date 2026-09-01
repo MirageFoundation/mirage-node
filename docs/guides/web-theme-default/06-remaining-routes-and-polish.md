@@ -18,15 +18,13 @@ Per-route current state (from the audit):
 | Route | File | Diff vs oldreddit | State |
 |---|---|---|---|
 | Profile | `routes/ProfileView.js` | 5 lines | **oldreddit clone** (was Plan 04 leftover) |
-| Discover | `routes/DiscoverView.js` | 2 lines | oldreddit clone |
-| Agents | `routes/AgentsView.js` | 3 lines | oldreddit clone |
+| Discover (`/communities`) | `routes/DiscoverView.js` | 2 lines | oldreddit clone |
 | Follows | `routes/FollowsView.js` | 2 lines | oldreddit clone |
 | Blocks | `routes/BlocksView.js` | 2 lines | oldreddit clone |
 | Reports | `routes/ReportsView.js` | 6 lines | oldreddit clone |
 | Network | `routes/NetworkView.js` | 2 lines | oldreddit clone |
 | Stats | `routes/StatsView.js` | 3 lines | oldreddit clone |
 | Subscription | `routes/SubscriptionView.js` | 2 lines | oldreddit clone |
-| Referrals | `routes/ReferralsView.js` | 2 lines | oldreddit clone |
 | NotFound | `routes/NotFoundView.js` | 2 lines | oldreddit clone |
 
 Per-component current state:
@@ -39,7 +37,9 @@ Per-component current state:
 | UnlockPrompt | `components/UnlockPrompt.js` | restyled in 06.2 | required theme component |
 | MobileBottomNav | `components/MobileBottomNav.js` | 10 lines | near-identical (deferred from Plan 02, tracked in sub-plan 08) |
 
-> `InlineMedia`, `MediaGallery`, `MarkdownRenderer`, `QuestHeroCard`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
+> `InlineMedia`, `MediaGallery`, `MarkdownRenderer`, `FilterBar`, `MediaAttachmentLayout`, and `MarkdownEditor` are intentionally left as-is and are **not** part of Plan 06's restyle scope.
+>
+> This audit table is a snapshot taken on 2026-04-18. `AgentsView.js`, `ReferralsView.js` and `QuestHeroCard.js` were listed here at the time and were deleted in v1.39.0 along with agents, referrals and quests; their rows have been removed.
 
 ---
 
@@ -51,8 +51,8 @@ See the sub-plan index: [`06-subplans/README.md`](./06-subplans/README.md). Summ
 2. **Component restyle pass** — Button, Toast, Tooltip, UnlockPrompt (globals only) — ✅ Done
 3. **Social routes** — Follows, Blocks, Reports
 4. **Network + Stats**
-5. **Subscription + Referrals**
-7. **Agents + Discover + NotFound**
+5. **Subscription**
+7. **Discover + NotFound**
 8. **MobileBottomNav** (deferred from Plan 02)
 9. **Polish + QA** (spacing, typography, state, responsive, accessibility, optional default-theme switch)
 

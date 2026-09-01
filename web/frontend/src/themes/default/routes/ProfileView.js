@@ -879,7 +879,7 @@ const TabContent = styled.div`
 `;
 
 /* -------------------------------------------------------------------------- */
-/* Algo tab — topic preferences, user preferences, similar users              */
+/* Algo tab — community preferences, user preferences, similar users              */
 /* -------------------------------------------------------------------------- */
 
 /** Section wrapper — groups a titled header + list of rows. */
@@ -976,9 +976,9 @@ const AlgoAvatar = ({ src: _src, ...rest }) => (
     <UserAvatar size={32} {...rest} />
 );
 
-/** "#" chip for topic rows — mirrors `FollowsView::TopicIcon` exactly so
- *  topics read consistently with the follows / topics list screens. */
-const AlgoTopicChip = styled.span`
+/** "#" chip for community rows — mirrors `FollowsView::CommunityIcon` exactly so
+ *  communities read consistently with the follows / communities list screens. */
+const AlgoCommunityChip = styled.span`
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -1157,7 +1157,7 @@ const IconActionButton = styled.button`
  *  tab). Per the user's profile-comments spec the row is:
  *
  *   ┌────┬───────────────────────────────────────────┐
- *   │    │ #topic · @user · time                      │  ← row 1 (header)
+ *   │    │ #community · @user · time                      │  ← row 1 (header)
  *   │ AV │ title / first-line snippet                 │  ← row 2 (title)
  *   └────┴───────────────────────────────────────────┘
  *
@@ -1212,7 +1212,7 @@ const CommentHeader = styled.div`
     line-height: 1.2;
 `;
 
-const CommentTopicLink = styled(Link)`
+const CommentCommunityLink = styled(Link)`
     font-weight: 500;
     font-size: 0.62rem;
     color: ${({ theme }) => theme.colors.feedCtrlText};
@@ -1275,7 +1275,7 @@ function formatCommentAge(ts) {
 
 /** Single comment row. Click anywhere on the row to open the parent
  *  thread (so the user can see the reply in context). Shows the full
- *  reply body with no truncation and no avatar — the header (topic /
+ *  reply body with no truncation and no avatar — the header (community /
  *  user / time) sits above the raw content. */
 /* Module-level cache of comment_id -> { title, rootId } so navigating
  * around the Comments tab doesn't refetch the parent chain repeatedly. */
@@ -1392,19 +1392,19 @@ function ProfileCommentRow({ post }) {
     if (!Number.isFinite(ts)) ts = Math.floor(Date.now() / 1000);
     if (ts > 1e12) ts = Math.floor(ts / 1000);
 
-    // Topic resolution: prefer the row's own `topic`, then `root_topic`
-    // (parent post's topic). `useProfile.js` synthesizes a `comment-<short>`
+    // Community resolution: prefer the row's own `community`, then `root_community`
+    // (parent post's community). `useProfile.js` synthesizes a `comment-<short>`
     // placeholder when neither is present — we surface that too so every
-    // comment row has a topic chip, and the chip links back to the parent
+    // comment row has a community chip, and the chip links back to the parent
     // thread via the usual `/c/<community>` route.
-    const rawTopic = typeof post.topic === 'string' ? post.topic.trim() : '';
-    const rootTopic = typeof post.root_topic === 'string' ? post.root_topic.trim() : '';
-    const displayTopic = rawTopic || rootTopic;
+    const rawCommunity = typeof post.community === 'string' ? post.community.trim() : '';
+    const rootCommunity = typeof post.root_community === 'string' ? post.root_community.trim() : '';
+    const displayCommunity = rawCommunity || rootCommunity;
     // Suppress the synthesized `comment-<short>` placeholder so it
     // never appears as `#comment-xxxxxxx` when no parent title is
     // available.
-    const isSyntheticTopic = /^comment-[0-9a-f]+$/i.test(displayTopic);
-    const hasRealTopic = !!displayTopic && !isSyntheticTopic;
+    const isSyntheticCommunity = /^comment-[0-9a-f]+$/i.test(displayCommunity);
+    const hasRealCommunity = !!displayCommunity && !isSyntheticCommunity;
     const postId = String(post.post_id);
     const linkTarget = `/p/${postId}`;
 
@@ -1435,16 +1435,16 @@ function ProfileCommentRow({ post }) {
                 <CommentHeader>
                     {parentTitle ? (
                         <>
-                            <CommentTopicLink to={parentLink} onClick={e => e.stopPropagation()}>
+                            <CommentCommunityLink to={parentLink} onClick={e => e.stopPropagation()}>
                                 {parentTitle}
-                            </CommentTopicLink>
+                            </CommentCommunityLink>
                             <CommentDot>·</CommentDot>
                         </>
-                    ) : hasRealTopic && (
+                    ) : hasRealCommunity && (
                         <>
-                            <CommentTopicLink to={communityPath(displayTopic)} onClick={e => e.stopPropagation()}>
-                                {communityLabel(displayTopic)}
-                            </CommentTopicLink>
+                            <CommentCommunityLink to={communityPath(displayCommunity)} onClick={e => e.stopPropagation()}>
+                                {communityLabel(displayCommunity)}
+                            </CommentCommunityLink>
                             <CommentDot>·</CommentDot>
                         </>
                     )}
@@ -1592,7 +1592,7 @@ function ProfileViewAuthenticated({
         setFollowHover,
         myQueuePosition,
         formatStatusForPosition,
-        prefsTopics,
+        prefsCommunities,
         prefsAuthors,
         prefsLoading,
         prefsError,
@@ -1600,8 +1600,8 @@ function ProfileViewAuthenticated({
         similarUsers,
         similarUsersLoading,
         similarUsersError,
-        showAllTopicPrefs,
-        setShowAllTopicPrefs,
+        showAllCommunityPrefs,
+        setShowAllCommunityPrefs,
         showAllAuthorPrefs,
         setShowAllAuthorPrefs,
         showAllSimilarUsers,
@@ -1780,7 +1780,7 @@ function ProfileViewAuthenticated({
                                             {isProfileBlocked && (
                                                 /* Matches the `Button variant="danger"` Unblock
                                                  * used everywhere else (BlocksView rows,
-                                                 * BlockedPost/BlockedTopic state). Inline
+                                                 * BlockedPost/BlockedCommunity state). Inline
                                                  * `borderRadius` keeps the pill fully rounded
                                                  * so it lines up with the adjacent Follow pill. */
                                                 <Button
@@ -2119,46 +2119,46 @@ function ProfileViewAuthenticated({
                                     </>}
 
                                     {activeTab === 'algo' && <>
-                                        {/* Topic preferences — "#" chip per topic, weight pill */}
+                                        {/* Community preferences — "#" chip per community, weight pill */}
                                         <AlgoSection>
                                             <AlgoSectionHead>
                                                 <AlgoSectionHeadText>
                                                     <AlgoSectionTitle>Community preferences</AlgoSectionTitle>
                                                     <AlgoSectionSubtitle>Communities this account engages with the most</AlgoSectionSubtitle>
                                                 </AlgoSectionHeadText>
-                                                {!prefsLoading && !prefsError && prefsTopics.length > 0 && (
-                                                    <AlgoSectionCount>{prefsTopics.length}</AlgoSectionCount>
+                                                {!prefsLoading && !prefsError && prefsCommunities.length > 0 && (
+                                                    <AlgoSectionCount>{prefsCommunities.length}</AlgoSectionCount>
                                                 )}
                                             </AlgoSectionHead>
                                             <AlgoList>
                                                 {prefsLoading && <ListRowSkeletonList count={5} hasAvatar={true} showMeta={false} />}
                                                 {!prefsLoading && prefsError && <AlgoEmpty $danger>{prefsError}</AlgoEmpty>}
-                                                {!prefsLoading && !prefsError && prefsTopics.length === 0 && <AlgoEmpty>No community preference data yet.</AlgoEmpty>}
-                                                {!prefsError && prefsTopics.length > 0 && (() => {
+                                                {!prefsLoading && !prefsError && prefsCommunities.length === 0 && <AlgoEmpty>No community preference data yet.</AlgoEmpty>}
+                                                {!prefsError && prefsCommunities.length > 0 && (() => {
                                                     const CAP = 5;
-                                                    const needsCollapse = prefsTopics.length > CAP * 2;
-                                                    const visible = needsCollapse && !showAllTopicPrefs ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)] : prefsTopics;
+                                                    const needsCollapse = prefsCommunities.length > CAP * 2;
+                                                    const visible = needsCollapse && !showAllCommunityPrefs ? [...prefsCommunities.slice(0, CAP), null, ...prefsCommunities.slice(-CAP)] : prefsCommunities;
                                                     return <>
                                                         {visible.map(t => {
                                                             if (t === null) {
-                                                                const hidden = prefsTopics.length - CAP * 2;
-                                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
+                                                                const hidden = prefsCommunities.length - CAP * 2;
+                                                                return <AlgoExpandRow key="__expand"><AlgoExpandPill type="button" onClick={() => setShowAllCommunityPrefs(true)}>Show {hidden} more</AlgoExpandPill></AlgoExpandRow>;
                                                             }
                                                             const tone = t.weight > 0 ? 'up' : t.weight < 0 ? 'down' : 'neutral';
-                                                            return <AlgoRow key={t.topic} href={communityPath(t.topic)} onClick={e => {
+                                                            return <AlgoRow key={t.community} href={communityPath(t.community)} onClick={e => {
                                                                 if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
                                                                     e.preventDefault();
-                                                                    navigate(communityPath(t.topic));
+                                                                    navigate(communityPath(t.community));
                                                                 }
                                                             }}>
-                                                                <AlgoTopicChip aria-hidden="true"><HiHashtag /></AlgoTopicChip>
+                                                                <AlgoCommunityChip aria-hidden="true"><HiHashtag /></AlgoCommunityChip>
                                                                 <AlgoIdentity>
-                                                                    <AlgoIdentityTitle>{communityLabel(t.topic)}</AlgoIdentityTitle>
+                                                                    <AlgoIdentityTitle>{communityLabel(t.community)}</AlgoIdentityTitle>
                                                                 </AlgoIdentity>
                                                                 <AlgoWeightPill $tone={tone}>{formatPrefWeight(t.weight)}</AlgoWeightPill>
                                                             </AlgoRow>;
                                                         })}
-                                                        {showAllTopicPrefs && prefsTopics.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllTopicPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
+                                                        {showAllCommunityPrefs && prefsCommunities.length > 10 && <AlgoExpandRow><AlgoExpandPill type="button" onClick={() => setShowAllCommunityPrefs(false)}>Show less</AlgoExpandPill></AlgoExpandRow>}
                                                     </>;
                                                 })()}
                                             </AlgoList>

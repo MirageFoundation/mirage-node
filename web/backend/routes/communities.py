@@ -29,8 +29,8 @@ def _limit() -> int:
 
 def _valid_slug(slug: str) -> bool:
     params = expect_params()
-    minimum = int(params["min_topic_size"])
-    maximum = int(params["max_topic_size"])
+    minimum = int(params["min_community_size"])
+    maximum = int(params["max_community_size"])
     return minimum <= len(slug) <= maximum and re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", slug) is not None
 
 

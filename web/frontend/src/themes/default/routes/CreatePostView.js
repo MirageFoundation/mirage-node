@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import styled from "styled-components";
 import { HiTrash, HiChevronLeft, HiChevronRight, HiChevronDown, HiArrowUpTray } from "react-icons/hi2";
-import { TopicSelector } from "../components/TopicSelector.js";
+import { CommunitySelector } from "../components/CommunitySelector.js";
 import MarkdownEditor from "../components/MarkdownEditor.js";
 import Button from "../components/Button.js";
 import ConfirmDialog from "../components/ConfirmDialog.js";
@@ -26,7 +26,7 @@ import { useCreatePost, TAG_OPTIONS_ENABLED } from "../../../logic/useCreatePost
  *  - Header row mirrors `InboxView::HeaderRow`/`HeaderTitle` (1.1rem/700,
  *    `0.25rem 1rem 0.5rem` padding) plus a trailing "Drafts" hint.
  *  - 820px capped `ComposerColumn` (matches Inbox width).
- *  - Stacked: topic → title → action chip row → unfurled artifacts
+ *  - Stacked: community → title → action chip row → unfurled artifacts
  *    (link input, media carousel) → body editor → submit row.
  *  - Action chips ("+ Link", "+ Media", "+ Tag") sit between Title and
  *    Body. "+ Link" and "+ Media" each unfurl their artifact directly
@@ -198,7 +198,7 @@ const Counter = styled.span`
 
 /* Field-level error panel — used for hard validation failures (invalid URL,
  * etc.). Uses the theme's `voteDown` (red) palette to signal "error", which
- * is distinct from the amber `NewTopicNote` that signals "advisory".
+ * is distinct from the amber `NewCommunityNote` that signals "advisory".
  *
  * The fill is intentionally very soft (red with ~6% alpha) so the red text
  * remains the primary signal rather than the background. */
@@ -475,7 +475,7 @@ const MediaDropHint = styled.div`
  *             but no value is locked in)
  *   $set    — amber palette signaling "value committed" (used by the tag
  *             chip so a chosen content-warning tag is impossible to miss
- *             at a glance, matching the amber palette of NewTopicNote
+ *             at a glance, matching the amber palette of NewCommunityNote
  *             which sits in the same content-warning vocabulary)
  *
  * `$set` wins over `$active` visually so a user re-opening the menu on
@@ -896,7 +896,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     const {
         isEditMode,
         overrideId,
-        topicValue,
+        communityValue,
         titleValue,
         contentValue,
         setContentValue,
@@ -925,7 +925,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
         titleInputRef,
         contentEditorRef,
         limits,
-        handleTopicChange,
+        handleCommunityChange,
         getByteLength,
         handleTitleChange,
         getVideoThumbnailUrl,
@@ -1040,7 +1040,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     const hasUnsavedContent = useMemo(() => {
         if (isEditMode) return false;
         return !!(
-            (topicValue && topicValue.trim())
+            (communityValue && communityValue.trim())
             || (titleValue && titleValue.trim())
             || (contentValue && contentValue.trim())
             || (linkUrl && linkUrl.trim())
@@ -1048,7 +1048,7 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
             || (attachedMedia && attachedMedia.length > 0)
             || pickerMediaUrl
         );
-    }, [isEditMode, topicValue, titleValue, contentValue, linkUrl, tagEnabled, attachedMedia, pickerMediaUrl]);
+    }, [isEditMode, communityValue, titleValue, contentValue, linkUrl, tagEnabled, attachedMedia, pickerMediaUrl]);
 
     /* Browser-level guard — covers tab close, refresh, hard URL changes.
      * `returnValue = ''` is the legacy contract that triggers the prompt;
@@ -1181,11 +1181,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
     /* Submit gate — disables the Post button until required fields are filled. */
     const canSubmit = useMemo(() => {
         if (isSubmitting || isUploading) return false;
-        if (!topicValue || topicValue.length < (limits.minTopic || 1)) return false;
+        if (!communityValue || communityValue.length < (limits.minCommunity || 1)) return false;
         if (!titleValid) return false;
         if (linkUrl.trim() && !linkValid) return false;
         return true;
-    }, [isSubmitting, isUploading, topicValue, limits.minTopic, titleValid, linkUrl, linkValid]);
+    }, [isSubmitting, isUploading, communityValue, limits.minCommunity, titleValid, linkUrl, linkValid]);
 
     const activeMedia = attachedMedia[Math.min(slideIndex, Math.max(0, attachedMedia.length - 1))];
     const canPrev = attachedMedia.length > 1 && slideIndex > 0;
@@ -1424,11 +1424,11 @@ function CreatePostAuthenticated({ state, setPosts, updatePost }) {
                                     </EditHashRow>
                                 )}
 
-                                <TopicSelector
-                                    value={topicValue}
-                                    maxLength={limits.maxTopic}
-                                    minLength={limits.minTopic}
-                                    onChange={handleTopicChange}
+                                <CommunitySelector
+                                    value={communityValue}
+                                    maxLength={limits.maxCommunity}
+                                    minLength={limits.minCommunity}
+                                    onChange={handleCommunityChange}
                                     disabled={isSubmitting}
                                     aria-label="Community"
                                 />

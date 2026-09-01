@@ -42,7 +42,6 @@ from tests.common import (
     _canon_base_report_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _canon_base_join_community_raw,
     _canon_base_leave_community_raw,
     _canon_base_block_community_raw,
@@ -145,7 +144,7 @@ def _do_award(
 
 
 def _do_post(
-    backend: str, wallet, topic: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
+    backend: str, wallet, community: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
 ) -> str | None:
     """Create a post/comment and return the tx_hash or None."""
     addr = str(wallet.address())
@@ -155,7 +154,7 @@ def _do_post(
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, community, title, content, tag, 0, None, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -170,7 +169,7 @@ def _do_post(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "community": topic,
+        "community": community,
         "protocol_version": 1,
         "title": title,
         "content": content,
@@ -193,7 +192,7 @@ def _do_post(
 def _do_post_at_timestamp(
     backend: str,
     wallet,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     timestamp_ms: int,
@@ -210,7 +209,7 @@ def _do_post_at_timestamp(
     nonce = _fresh_nonce() if nonce is None else int(nonce)
     d = 0 if skip_pow else diff
 
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, community, title, content, tag, 0, None, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -225,7 +224,7 @@ def _do_post_at_timestamp(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "community": topic,
+        "community": community,
         "protocol_version": 1,
         "title": title,
         "content": content,
@@ -239,7 +238,7 @@ def _do_post_at_timestamp(
 def _do_post_with_nonce(
     backend: str,
     wallet,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     nonce: int,
@@ -250,7 +249,7 @@ def _do_post_with_nonce(
     _, resp = _do_post_at_timestamp(
         backend,
         wallet,
-        topic,
+        community,
         title,
         content,
         _now_ms(),
@@ -332,7 +331,7 @@ def _do_edit(
     backend: str,
     wallet,
     override_hash: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     target: str = "",
@@ -343,7 +342,7 @@ def _do_edit(
 
     Args:
         override_hash: The tx hash of the post/comment being edited.
-        topic:         Topic (required for root posts, empty for comments).
+        community:         Community (required for root posts, empty for comments).
         title:         New title (root posts only).
         content:       New content.
         target:        Parent post hash (for comments) or "" for root posts.
@@ -358,7 +357,7 @@ def _do_edit(
     d = 0 if skip_pow else diff
 
     base = _canon_base_edit_raw(
-        pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce
+        pub, _lb_bytes(lb), d, ts, target, community, title, content, tag, override_hash, None, nonce
     )
     if skip_pow:
         proof = 0
@@ -374,7 +373,7 @@ def _do_edit(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "community": topic,
+        "community": community,
         "protocol_version": 1,
         "title": title,
         "content": content,
@@ -383,71 +382,6 @@ def _do_edit(
     }
     payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/edit", payload)
-    return resp
-
-
-def _do_annotate(
-    backend: str,
-    wallet,
-    override_hash: str,
-    topic: str = ".",
-    title: str = ".",
-    content: str = ".",
-    tag: str = ".",
-    media: list[str] | None = None,
-    appendix: str = ".",
-    pow_difficulty: int = 0,
-    pow_val: int = 0,
-) -> dict:
-    """Agent-only: annotate a post with overlay edits. '.' means no change."""
-    addr = str(wallet.address())
-    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
-    pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
-    nonce = _fresh_nonce()
-    media_list = media if media is not None else ["."]
-
-    base = _canon_base_annotate_raw(
-        pub,
-        _lb_bytes(lb),
-        int(pow_difficulty),
-        ts,
-        topic,
-        title,
-        content,
-        tag,
-        override_hash,
-        media=media_list,
-        appendix=appendix,
-        nonce=nonce,
-    )
-    signed = canon_signed_with_pow(base, int(pow_val))
-    sig = sign_canonical(wallet, signed)
-    payload = {
-        "pubkey": _b64(pub),
-        "signature": _b64(sig),
-        "last_block_hash": lb,
-        "timestamp": ts,
-        "envelope_nonce": str(nonce),
-        "pow_difficulty": int(pow_difficulty),
-        "pow": int(pow_val),
-        "topic": topic,
-        "title": title,
-        "content": content,
-        "tag": tag,
-        "override": override_hash,
-        "media": media_list,
-        "appendix": appendix,
-    }
-    code, resp = _post(f"{backend}/api/core/annotate", payload)
-    resp = resp or {}
-    if code >= 400 or resp.get("error"):
-        details = resp.get("details")
-        _debug(f"annotate error code={code} error={resp.get('error')} details={details}")
-        out = {"error": resp.get("error", f"HTTP {code}")}
-        if details:
-            out["details"] = details
-        return out
     return resp
 
 
@@ -576,9 +510,9 @@ def _do_follow_user_with_nonce(
     return resp
 
 
-def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
+def _do_follow_topic(backend: str, wallet, community: str, follow: bool = True, skip_pow: bool = False) -> dict:
     """Join or leave a community (legacy helper name used by existing tests)."""
-    slug = (topic or "").strip().lower()
+    slug = (community or "").strip().lower()
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -684,9 +618,9 @@ def _do_block_with_nonce(
     return resp
 
 
-def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
+def _do_block_topic(backend: str, wallet, community: str, block: bool = True, skip_pow: bool = False) -> dict:
     """Block or unblock a community (legacy helper name used by existing tests)."""
-    slug = (topic or "").strip().lower()
+    slug = (community or "").strip().lower()
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
@@ -844,7 +778,7 @@ def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
 def _do_post_with_media(
     backend: str,
     wallet,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     media: list,
@@ -860,7 +794,7 @@ def _do_post_with_media(
     nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media, nonce)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, community, title, content, tag, 0, media, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -875,7 +809,7 @@ def _do_post_with_media(
         "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
-        "community": topic,
+        "community": community,
         "protocol_version": 1,
         "title": title,
         "content": content,
@@ -899,7 +833,7 @@ def _wait_list_count(
 ) -> int:
     """Poll until a profile/followed list reaches expected count (or timeout).
 
-    list_key: "followed_users", "followed_topics", "enabled_agents"
+    list_key: "followed_users", "joined_communities", "enabled_agents"
     By default waits until count >= expected (fill). With at_most=True waits
     until count <= expected (after unfollow/disable).
     Returns the actual count observed.
@@ -1059,52 +993,52 @@ def _wait_username(
     return None
 
 
-def _wait_blocked_topic_state(
+def _wait_blocked_community_state(
     backend: str,
     address: str,
-    topic: str,
+    community: str,
     expect_present: bool = True,
     timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
-    topic_lower = (topic or "").strip().lower()
+    community_lower = (community or "").strip().lower()
     while time.perf_counter() < deadline:
         # Check indexed DB first (fast, eventually consistent)
         code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
         if code == 200:
-            blocked = (data or {}).get("blocked_communities") or (data or {}).get("blocked_topics") or []
-            present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
+            blocked = (data or {}).get("blocked_communities") or (data or {}).get("blocked_communities") or []
+            present = any(str(t or "").strip().lower() == community_lower for t in blocked)
             if present == expect_present:
                 return True
         # Fall back to chain profile (authoritative, always current)
         code2, profile = _get(f"{backend}/api/get_profile", {"address": address})
         if code2 == 200:
-            chain_blocked = (profile or {}).get("blocked_communities") or (profile or {}).get("blocked_topics") or []
-            present2 = any(str(t or "").strip().lower() == topic_lower for t in chain_blocked)
+            chain_blocked = (profile or {}).get("blocked_communities") or (profile or {}).get("blocked_communities") or []
+            present2 = any(str(t or "").strip().lower() == community_lower for t in chain_blocked)
             if present2 == expect_present:
                 return True
         time.sleep(0.5)
     return False
 
 
-def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
-    return _wait_blocked_topic_state(backend, address, topic, True, timeout)
+def _wait_blocked_community(backend: str, address: str, community: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
+    return _wait_blocked_community_state(backend, address, community, True, timeout)
 
 
-def _wait_followed_topic(
+def _wait_followed_community(
     backend: str,
     address: str,
-    topic: str,
+    community: str,
     expect_present: bool = True,
     timeout: float = INDEX_TIMEOUT_SEC,
 ) -> bool:
     deadline = time.perf_counter() + timeout
-    topic_lower = (topic or "").strip().lower()
+    community_lower = (community or "").strip().lower()
     while time.perf_counter() < deadline:
         code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
         if code == 200:
-            topics = (data or {}).get("joined_communities") or (data or {}).get("followed_topics") or []
-            present = any(str(t or "").strip().lower() == topic_lower for t in topics)
+            communities = (data or {}).get("joined_communities") or (data or {}).get("joined_communities") or []
+            present = any(str(t or "").strip().lower() == community_lower for t in communities)
             if present == expect_present:
                 return True
         time.sleep(0.5)

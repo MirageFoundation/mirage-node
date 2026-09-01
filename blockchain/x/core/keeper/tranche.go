@@ -120,13 +120,25 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if err := k.storeSet(ctx, types.KeyTrancheRecipient(recipient, id), []byte{1}); err != nil {
 		return err
 	}
-	first := types.UTCEpoch(start)
-	last := types.UTCEpoch(end - 1)
+	first, err := types.CreatorEpochFromUnix(start, params.CreatorEpochSeconds)
+	if err != nil {
+		return err
+	}
+	last, err := types.CreatorEpochFromUnix(end-1, params.CreatorEpochSeconds)
+	if err != nil {
+		return err
+	}
 	remaining := sdkmath.NewIntFromUint64(creatorAmt)
 	dur := sdkmath.NewIntFromUint64(duration)
 	for epoch := first; epoch <= last; epoch++ {
-		epochStart := epoch * 86400
-		epochEnd := (epoch + 1) * 86400
+		epochStart, err := types.CreatorEpochStart(epoch, params.CreatorEpochSeconds)
+		if err != nil {
+			return err
+		}
+		epochEnd, err := types.CreatorEpochEnd(epoch, params.CreatorEpochSeconds)
+		if err != nil {
+			return err
+		}
 		lo := start
 		if epochStart > lo {
 			lo = epochStart
@@ -239,7 +251,13 @@ func (k Keeper) addEpochPool(ctx sdk.Context, epoch int64, amount sdkmath.Int) e
 		return err
 	}
 	if !found {
-		ce = types.CreatorEpoch{EpochId: epoch, Pool: "0"}
+		ce = types.CreatorEpoch{
+			EpochId:        epoch,
+			Pool:           "0",
+			EngagerSlice:   "0",
+			AllocatedTotal: "0",
+			ClaimedTotal:   "0",
+		}
 	}
 	cur, err := k.parseInt(ce.Pool)
 	if err != nil {

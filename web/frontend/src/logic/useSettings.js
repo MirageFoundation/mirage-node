@@ -151,9 +151,9 @@ export function useSettings({
             return -5;
         }
     });
-    const [sidebarTopicsLimit, setSidebarTopicsLimit] = useState(() => {
+    const [sidebarCommunitiesLimit, setSidebarCommunitiesLimit] = useState(() => {
         try {
-            const v = Storage.load('sidebar_topics_limit', 10);
+            const v = Storage.load('sidebar_communities_limit', 10);
             const n = Number(v);
             return Number.isFinite(n) ? n : 10;
         } catch (_) {
@@ -162,7 +162,7 @@ export function useSettings({
     });
     const [sidebarPeopleLimit, setSidebarPeopleLimit] = useState(() => {
         try {
-            const v = Storage.load('sidebar_people_limit', 10);
+            const v = Storage.load('sidebar_users_limit', 10);
             const n = Number(v);
             return Number.isFinite(n) ? n : 10;
         } catch (_) {
@@ -467,18 +467,18 @@ export function useSettings({
         setCollapseThreshold(n);
         Storage.save('comment_auto_collapse_threshold', n);
     };
-    const handleSidebarTopicsLimitChange = e => {
+    const handleSidebarCommunitiesLimitChange = e => {
         const n = Number(e.target.value);
         if (!Number.isFinite(n)) return;
-        setSidebarTopicsLimit(n);
-        Storage.save('sidebar_topics_limit', n);
+        setSidebarCommunitiesLimit(n);
+        Storage.save('sidebar_communities_limit', n);
         window.dispatchEvent(new CustomEvent('sidebarSettingsUpdated'));
     };
     const handleSidebarPeopleLimitChange = e => {
         const n = Number(e.target.value);
         if (!Number.isFinite(n)) return;
         setSidebarPeopleLimit(n);
-        Storage.save('sidebar_people_limit', n);
+        Storage.save('sidebar_users_limit', n);
         window.dispatchEvent(new CustomEvent('sidebarSettingsUpdated'));
     };
     const getThemeExplanation = mode => {
@@ -544,7 +544,7 @@ export function useSettings({
         themeId,
         themeMode,
         collapseThreshold,
-        sidebarTopicsLimit,
+        sidebarCommunitiesLimit,
         sidebarPeopleLimit,
         hideDownvotedPosts,
         setHideDownvotedPosts,
@@ -600,7 +600,7 @@ export function useSettings({
         handleThemeIdChange,
         handleThemeModeChange,
         handleCollapseThresholdChange,
-        handleSidebarTopicsLimitChange,
+        handleSidebarCommunitiesLimitChange,
         handleSidebarPeopleLimitChange,
         getThemeExplanation,
         handleDeleteAccount

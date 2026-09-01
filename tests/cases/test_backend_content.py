@@ -62,7 +62,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -79,7 +78,6 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
@@ -99,10 +97,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
@@ -113,7 +111,7 @@ def test_post_lifecycle(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
-    topic = f"annot{_rand_str(6)}"
+    community = f"annot{_rand_str(6)}"
     title = f"Test Post {_rand_str(6)}"
     content = f"Content body {_rand_str(20)}"
     try:
@@ -125,7 +123,7 @@ def test_post_lifecycle(backend: str):
     _debug(f"expected relayer={validator_lower}")
 
     # 3.1 Create post
-    txh = _do_post(backend, wallet, topic, title, content)
+    txh = _do_post(backend, wallet, community, title, content)
     if txh:
         _pass("post.create succeeds", tx=txh)
     else:
@@ -182,13 +180,13 @@ def test_post_lifecycle(backend: str):
         p = found[0]
         ok = (
             p.get("title", "").strip() == title.strip()
-            and p.get("topic", "").strip() == topic.strip()
+            and p.get("community", "").strip() == community.strip()
             and content[:20] in (p.get("content") or "")
         )
         if ok:
-            _pass("post.fields correct (title, topic, content)")
+            _pass("post.fields correct (title, community, content)")
         else:
-            _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
+            _fail("post.fields correct", f"title={p.get('title')}, community={p.get('community')}")
 
     # 3.4a get_tx_status includes relayer
     post_status = _wait_tx_status(backend, txh, expect_type="post")
@@ -343,8 +341,8 @@ def test_post_lifecycle(backend: str):
     # Community magic is the Magic assertion: that pool is small enough that
     # this post is a candidate, unlike home magic's bounded discovery set.
     hidden_newest = False
-    hidden_topic_newest = False
-    hidden_topic_magic = False
+    hidden_community_newest = False
+    hidden_community_magic = False
     for _ in range(int(INDEX_TIMEOUT_SEC)):
         time.sleep(1)
         _code_n, feed_n = _get(
@@ -353,29 +351,29 @@ def test_post_lifecycle(backend: str):
         )
         _code_tn, feed_tn = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "community": topic, "by": "newest", "address": addr},
+            {"limit": 50, "community": community, "by": "newest", "address": addr},
         )
         _code_tm, feed_tm = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "community": topic, "by": "magic", "address": addr},
+            {"limit": 50, "community": community, "by": "magic", "address": addr},
         )
         in_n = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_n or {}).get("posts") or []))
         in_tn = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_tn or {}).get("posts") or []))
         in_tm = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_tm or {}).get("posts") or []))
         hidden_newest = not in_n
-        hidden_topic_newest = not in_tn
-        hidden_topic_magic = not in_tm
-        if hidden_newest and hidden_topic_newest and hidden_topic_magic:
+        hidden_community_newest = not in_tn
+        hidden_community_magic = not in_tm
+        if hidden_newest and hidden_community_newest and hidden_community_magic:
             break
     if hidden_newest:
         _pass("post.vote_down omitted from home newest")
     else:
         _fail("post.vote_down omitted from home newest", "downvoted post still in home newest feed")
-    if hidden_topic_newest:
+    if hidden_community_newest:
         _pass("post.vote_down omitted from community newest")
     else:
         _fail("post.vote_down omitted from community newest", "downvoted post still in community newest feed")
-    if hidden_topic_magic:
+    if hidden_community_magic:
         _pass("post.vote_down omitted from community magic")
     else:
         _fail("post.vote_down omitted from community magic", "downvoted post still in community magic feed")
@@ -387,7 +385,7 @@ def test_post_lifecycle(backend: str):
 
     # 3.8 Edit post (root post: target="", override=post hash)
     new_content = f"Edited content {_rand_str(10)}"
-    _do_edit(backend, wallet, override_hash=txh, topic=topic, title=title, content=new_content)
+    _do_edit(backend, wallet, override_hash=txh, community=community, title=title, content=new_content)
     time.sleep(3)
     code, feed4 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
     posts4 = (feed4 or {}).get("posts") or []
@@ -398,18 +396,18 @@ def test_post_lifecycle(backend: str):
         _pass("post.edit submitted (indexer may lag)")
 
     # 3.9 Create post with tags
-    tag_txh = _do_post(backend, wallet, topic, f"Tagged {_rand_str(4)}", "tag test", tag="sensitive")
+    tag_txh = _do_post(backend, wallet, community, f"Tagged {_rand_str(4)}", "tag test", tag="sensitive")
     if tag_txh:
         _pass("post.create_with_tag succeeds", tx=tag_txh)
     else:
         _fail("post.create_with_tag succeeds")
 
-    # 3.10 Get posts by topic filter
-    code, tf = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
+    # 3.10 Get posts by community filter
+    code, tf = _get(f"{backend}/api/get_posts", {"community": community, "limit": 10})
     if code == 200:
-        _pass("post.get_posts topic filter works")
+        _pass("post.get_posts community filter works")
     else:
-        _fail("post.get_posts topic filter works", f"code={code}")
+        _fail("post.get_posts community filter works", f"code={code}")
 
     # 3.11 Pagination
     code, pg = _get(f"{backend}/api/get_posts", {"limit": 2, "page": 1})
@@ -616,7 +614,7 @@ def test_comments(backend: str):
     # 4.6 Edit comment (comment: target=parent, override=comment hash)
     if c1_txh:
         _do_edit(
-            backend, wallet, override_hash=c1_txh, topic="", title="", content="Edited comment body", target=parent_txh
+            backend, wallet, override_hash=c1_txh, community="", title="", content="Edited comment body", target=parent_txh
         )
         time.sleep(2)
         _pass("comments.edit submitted")
@@ -751,8 +749,8 @@ def test_media(backend: str):
         _pass("media.oversized_url submitted (chain may reject)")
 
     # 14.8 Edit adding media
-    edit_media_topic = f"media{_rand_str(4)}"
-    base_post = _do_post(backend, sub1, edit_media_topic, "Edit media test", "body", skip_pow=True)
+    edit_media_community = f"media{_rand_str(4)}"
+    base_post = _do_post(backend, sub1, edit_media_community, "Edit media test", "body", skip_pow=True)
     if base_post:
         time.sleep(3)
         try:
@@ -761,7 +759,7 @@ def test_media(backend: str):
             pub = sub1.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
-            topic = edit_media_topic
+            community = edit_media_community
             media_list = ["https://example.com/edited.jpg"]
             base = _canon_base_edit_raw(
                 pub,
@@ -769,7 +767,7 @@ def test_media(backend: str):
                 0,
                 ts,
                 "",
-                topic,
+                community,
                 "Edit media test",
                 "updated body",
                 "",
@@ -787,7 +785,7 @@ def test_media(backend: str):
                 "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "target": "",
-                "topic": topic,
+                "community": community,
                 "title": "Edit media test",
                 "content": "updated body",
                 "tag": "",
@@ -831,7 +829,7 @@ def test_content_limits(backend: str):
 
     free_wallet = WALLETS["free"]
     sub1 = WALLETS["sub1"]
-    agent1 = WALLETS["agent1"]
+    sub3 = WALLETS["sub3"]
 
     # 23.1 Free user: content > 1000 should fail
     long_content = "x" * 1050
@@ -893,7 +891,7 @@ def test_content_limits(backend: str):
         _fail("content_limits.sub_title_160_accepted")
 
     # 23.7 Agent: same limits as subscriber for content/title
-    txh = _do_post(backend, agent1, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
+    txh = _do_post(backend, sub3, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
     if txh:
         _pass("content_limits.agent_1050_accepted")
     else:
@@ -903,15 +901,6 @@ def test_content_limits(backend: str):
 # =========================================================================
 # Category 24: Profile Fields Verification
 # =========================================================================
-
-
-def test_annotate(backend: str):
-    """Annotate was removed in v1.39.0."""
-    code, _ = _post(f"{backend}/api/core/annotate", {})
-    if code == 410:
-        _pass("annotate.gone")
-    else:
-        _fail("annotate.gone", f"code={code}")
 
 
 def test_edit_target_immutability(backend: str):
@@ -925,10 +914,10 @@ def test_edit_target_immutability(backend: str):
     free_addr = str(free.address())
 
     # Create a root post
-    topic = "test"
+    community = "test"
     title = f"Root Post {_rand_str(6)}"
     content = f"Content {_rand_str(10)}"
-    txh = _do_post(backend, free, topic, title, content)
+    txh = _do_post(backend, free, community, title, content)
     if not txh:
         _fail("edit_target.create_root")
         return
@@ -939,7 +928,7 @@ def test_edit_target_immutability(backend: str):
 
     # Try to edit with a fake target (re-parenting attempt)
     fake_target = "a" * 64
-    resp = _do_edit(backend, free, override_hash=txh, topic=topic, title=title, content="edited", target=fake_target)
+    resp = _do_edit(backend, free, override_hash=txh, community=community, title=title, content="edited", target=fake_target)
     if resp.get("error"):
         _pass("edit_target.mismatch_rejected", msg=resp["error"])
     else:
@@ -954,11 +943,11 @@ def test_tag_normalization_porn_to_adult(backend: str) -> None:
         return
 
     free_addr = str(free.address())
-    topic = "test"
+    community = "test"
     title = f"Tag Normalize {_rand_str(6)}"
     content = f"Body {_rand_str(10)}"
 
-    txh = _do_post(backend, free, topic, title, content, tag="porn")
+    txh = _do_post(backend, free, community, title, content, tag="porn")
     if not txh:
         _fail("tag_normalize.post_with_porn_tag")
         return
@@ -997,7 +986,7 @@ def test_seen_posts(backend: str) -> None:
 
     free_addr = str(free.address())
     viewer_addr = str(viewer.address())
-    topic = "test"
+    community = "test"
     title = f"Seen Test {_rand_str(6)}"
     content = f"Body {_rand_str(10)}"
 
@@ -1012,7 +1001,7 @@ def test_seen_posts(backend: str) -> None:
             "envelope_nonce": str(nonce),
         }
 
-    txh = _do_post(backend, free, topic, title, content)
+    txh = _do_post(backend, free, community, title, content)
     if not txh:
         _fail("seen_posts.create_post")
         return
@@ -1191,13 +1180,13 @@ def test_image_impressions(backend: str) -> None:
     sub1_addr = str(sub1.address())
 
     image_id = str(uuid.uuid4()).upper()
-    topic = f"imgtrack{_rand_str(6)}"
+    community = f"imgtrack{_rand_str(6)}"
     url = f"https://imagedelivery.net/testhash/{image_id}/public"
 
     txh = _do_post_with_media(
         backend,
         sub1,
-        topic,
+        community,
         "Image impressions test",
         "body",
         media=[url],
@@ -1218,7 +1207,7 @@ def test_image_impressions(backend: str) -> None:
                 return int(row[0]) if row else 0
 
     before = _get_view_count()
-    code, resp = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
+    code, resp = _get(f"{backend}/api/get_posts", {"community": community, "limit": 10})
     if code != 200:
         _fail("image_impressions.get_posts", f"code={code}")
         return
@@ -1242,7 +1231,7 @@ def test_image_impressions(backend: str) -> None:
     else:
         _fail("image_impressions.increment_once", f"before={before} after={after}")
 
-    code2, _ = _get(f"{backend}/api/get_posts", {"community": topic, "limit": 10})
+    code2, _ = _get(f"{backend}/api/get_posts", {"community": community, "limit": 10})
     if code2 != 200:
         _fail("image_impressions.get_posts_repeat", f"code={code2}")
         return
@@ -1383,8 +1372,8 @@ def test_recent_content(backend: str) -> None:
         "author",
         "username",
         "timestamp",
-        "topic",
-        "root_topic",
+        "community",
+        "root_community",
         "root_post_id",
         "target",
         "title",

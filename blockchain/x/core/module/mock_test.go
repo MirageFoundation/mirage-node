@@ -169,8 +169,10 @@ type mockBank struct {
 	// node-local bank/store failure.
 	sendToModuleErr error
 
-	sendModuleToModuleErr error
-	burnCoinsErr          error
+	sendModuleToModuleErr  error
+	sendModuleToAccountErr error
+	burnCoinsErr           error
+	sentModuleToAccount    sdk.Coins
 
 	// balances overrides the default empty balance per bech32 address. Needed to
 	// back escrowed reserve, which BurnFromModuleAmount refuses to burn without
@@ -216,6 +218,14 @@ func (m *mockBank) SendCoinsFromAccountToModule(_ context.Context, _ sdk.AccAddr
 
 func (m *mockBank) SendCoinsFromModuleToModule(_ context.Context, _, _ string, _ sdk.Coins) error {
 	return m.sendModuleToModuleErr
+}
+
+func (m *mockBank) SendCoinsFromModuleToAccount(_ context.Context, _ string, _ sdk.AccAddress, coins sdk.Coins) error {
+	if m.sendModuleToAccountErr != nil {
+		return m.sendModuleToAccountErr
+	}
+	m.sentModuleToAccount = m.sentModuleToAccount.Add(coins...)
+	return nil
 }
 
 func (m *mockBank) BurnCoins(_ context.Context, _ string, _ sdk.Coins) error {

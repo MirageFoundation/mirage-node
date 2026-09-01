@@ -3,7 +3,7 @@
 Behavioural, not source-grep: each check runs the shipped code and asserts on what
 it does. Backend modules validate required settings at import, so anything that
 imports them runs through `docker_python`, which loads the node env inside the
-container. `topic_glob` deliberately has no such dependency and is imported here.
+container. `community_glob` deliberately has no such dependency and is imported here.
 
 Probe code is embedded in `python3 -c "..."` inside a double-quoted shell string,
 so it must contain no double quotes and no literal backslashes — chr(92) is used
@@ -39,16 +39,16 @@ def _probe(name: str, code: str, *, timeout: int = 60) -> None:
         _fail(name, f"rc={rc} out={out.strip()[-400:]}")
 
 
-def _test_topic_matcher() -> None:
+def _test_community_matcher() -> None:
     """C-1: the matcher is linear and agrees with the chain's implementation.
 
-    Also probed inside the container (`topic_matcher_deployed`) so the assertion
+    Also probed inside the container (`community_matcher_deployed`) so the assertion
     covers the code the node actually serves, not just this checkout.
     """
     backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
     if str(backend_dir) not in sys.path:
         sys.path.insert(0, str(backend_dir))
-    from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
+    from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards, community_matches_pattern
 
     cases = [
         ("abc", "abc", True),
@@ -62,30 +62,30 @@ def _test_topic_matcher() -> None:
         ("aXbXc", "a*b*c", True),
         ("", "*", True),
     ]
-    bad = [(t, p, e, topic_matches_pattern(t, p)) for t, p, e in cases if topic_matches_pattern(t, p) != e]
+    bad = [(t, p, e, community_matches_pattern(t, p)) for t, p, e in cases if community_matches_pattern(t, p) != e]
     if bad:
-        _fail("backend_hardening.topic_matcher_semantics", f"mismatches: {bad}")
+        _fail("backend_hardening.community_matcher_semantics", f"mismatches: {bad}")
     else:
-        _pass("backend_hardening.topic_matcher_semantics", cases=len(cases))
+        _pass("backend_hardening.community_matcher_semantics", cases=len(cases))
 
-    # The measured worst case: a full-length topic whose final character cannot
-    # match, so the engine must exhaust every split before failing. A shorter topic
+    # The measured worst case: a full-length community whose final character cannot
+    # match, so the engine must exhaust every split before failing. A shorter community
     # lets the engine reject on a literal count and finish instantly, which is why
     # the obvious "a*a*...*b" shape is not the expensive one.
     evil = "a" * 34 + "z"
     pattern = "a" + "*a" * 16
     start = time.time()
-    matched = topic_matches_pattern(evil, pattern)
+    matched = community_matches_pattern(evil, pattern)
     elapsed_ms = (time.time() - start) * 1000
     if not matched and elapsed_ms < 50:
-        _pass("backend_hardening.topic_matcher_linear", elapsed_ms=round(elapsed_ms, 4))
+        _pass("backend_hardening.community_matcher_linear", elapsed_ms=round(elapsed_ms, 4))
     else:
-        _fail("backend_hardening.topic_matcher_linear", f"matched={matched} elapsed_ms={elapsed_ms:.1f}")
+        _fail("backend_hardening.community_matcher_linear", f"matched={matched} elapsed_ms={elapsed_ms:.1f}")
 
-    if count_wildcards("a*b*c") == 2 and count_wildcards("abc") == 0 and MAX_TOPIC_WILDCARDS == 4:
+    if count_wildcards("a*b*c") == 2 and count_wildcards("abc") == 0 and MAX_COMMUNITY_WILDCARDS == 4:
         _pass("backend_hardening.wildcard_counter")
     else:
-        _fail("backend_hardening.wildcard_counter", f"cap={MAX_TOPIC_WILDCARDS}")
+        _fail("backend_hardening.wildcard_counter", f"cap={MAX_COMMUNITY_WILDCARDS}")
 
 
 def _test_curation_visibility() -> None:
@@ -201,7 +201,7 @@ def _test_effective_tag_precedence() -> None:
     from curation import resolve_effective_tags
 
     def effective(default_tag, overrides, author_tag, post_id="a" * 64):
-        posts = [{"post_id": post_id, "topic": "test", "tag": author_tag, "lens": {"effective_team_id": 7}}]
+        posts = [{"post_id": post_id, "community": "test", "tag": author_tag, "lens": {"effective_team_id": 7}}]
         resolve_effective_tags(_TagCursor(default_tag, overrides), posts)
         return posts[0]["tag"]
 
@@ -447,7 +447,7 @@ def _test_legacy_posts_reach_current_scope() -> None:
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
-    _test_topic_matcher()
+    _test_community_matcher()
     _test_curation_visibility()
     _test_effective_tag_precedence()
     _test_visible_comment_recount()
@@ -458,9 +458,12 @@ def test_backend_hardening(backend: str):
         _fail("backend_hardening.container_probes", "local docker required")
         return
 
-    # Community ownership, topics and agents all went away in v1.39.0, and the
-    # chain rejects their messages outright, so the backend must refuse before
-    # it ever builds a transaction.
+    # Community ownership, the topic-era follow/block calls and agents all went
+    # away in v1.39.0, and the chain rejects their messages outright, so the
+    # backend must refuse before it ever builds a transaction. These paths keep
+    # their pre-rename spelling on purpose: an outdated client sends `follow_topic`
+    # verbatim, so that is the string the gate has to answer 410 for. The live
+    # replacements are join_community / leave_community / block_community.
     for route in (
         "create_community",
         "set_community_metadata",
@@ -481,9 +484,9 @@ def test_backend_hardening(backend: str):
 
     # ── C-1: the deployed matcher is exact and linear ────────────────────
     _probe(
-        "backend_hardening.topic_matcher_deployed",
+        "backend_hardening.community_matcher_deployed",
         "import time\n"
-        "from topic_glob import topic_matches_pattern as m\n"
+        "from community_glob import community_matches_pattern as m\n"
         "cases = [('abc','abc',True), ('abc','abd',False), ('abc','a*',True), ('abc','*c',True),\n"
         "         ('abc','*b*',True), ('abc','b*',False), ('abc','*b',False), ('abc','*',True),\n"
         "         ('aXbXc','a*b*c',True), ('','*',True)]\n"
@@ -496,19 +499,19 @@ def test_backend_hardening(backend: str):
 
     # ── C-1: the SQL pre-filter drops over-cap patterns ──────────────────
     _probe(
-        "backend_hardening.blocked_topics_sql_skips_over_cap",
-        "from routes.public import _blocked_topics_sql\n"
+        "backend_hardening.blocked_communities_sql_skips_over_cap",
+        "from routes.public import _blocked_communities_sql\n"
         "over = 'a*' * 10\n"
-        "clauses, params = _blocked_topics_sql('t', set(), (over, 'a*b'))\n"
+        "clauses, params = _blocked_communities_sql('t', set(), (over, 'a*b'))\n"
         "print('OK' if len(params) == 1 else ('BAD', clauses, params))\n",
     )
 
     # ── C-1: the validator rejects an over-cap pattern at the door ───────
     _probe(
         "backend_hardening.wildcard_cap_enforced_at_entry",
-        "from topic_glob import count_wildcards, MAX_TOPIC_WILDCARDS\n"
+        "from community_glob import count_wildcards, MAX_COMMUNITY_WILDCARDS\n"
         "over = 'a*' * 17\n"
-        "print('OK' if count_wildcards(over) > MAX_TOPIC_WILDCARDS else ('BAD', count_wildcards(over)))\n",
+        "print('OK' if count_wildcards(over) > MAX_COMMUNITY_WILDCARDS else ('BAD', count_wildcards(over)))\n",
     )
 
     # ── H-1: page and pool sizes are bounded ─────────────────────────────
@@ -537,8 +540,12 @@ def test_backend_hardening(backend: str):
         "monikers = ['http://a.example', '93.184.216.34', 'not-a-host', '', 'a.example']\n"
         "fleet.get_active_validators = lambda: "
         "[{'moniker': m, 'operator_address': 'v'} for m in monikers]\n"
+        "fleet.get_connected_peers = lambda: []\n"
+        "fleet._local_operator = lambda: ''\n"
+        "fleet._probe = lambda url: None\n"
         "fleet._sites_cache = []\n"
         "fleet._sites_cached_at = 0.0\n"
+        "fleet._sites_cache_ttl = 0.0\n"
         "sites = fleet.active_node_sites()\n"
         "import stats\n"
         "targets = stats.fleet_fanout_targets()\n"

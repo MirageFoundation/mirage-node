@@ -42,10 +42,14 @@
 After confirming `scripts/migrate_backend_db.py` has run on production, DROP these tables from the **indexer** database (`mirage_indexer`). They now live in `mirage_backend` and the indexer no longer reads or writes them:
 ```
 push_tokens, push_budget, push_throttle, push_receipts, push_nonces,
-user_daily_quests, user_flash_quests, user_quest_state,
-user_achievements, pending_rewards, user_unlocks, reward_suspensions,
 user_similarity_cache
 ```
+The quest, achievement, reward and referral tables that used to be on this list
+(`user_daily_quests`, `user_flash_quests`, `user_quest_state`, `user_achievements`,
+`pending_rewards`, `user_unlocks`, `reward_suspensions`, `invite_codes`,
+`referral_*`) do not need migrating anywhere: those features were removed in
+v1.39.0 and `init_backend_schema()` already drops the tables from `mirage_backend`
+on startup. They may still be sitting in an old `mirage_indexer` and can be dropped.
 Run `scripts/verify_upgrade.py` after dropping — warnings in section 7 should disappear.
 
 ## Performance
@@ -63,12 +67,16 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 2. **User-level (end-user preference):** Individual users can block relays the same way they block users or posts. Requires a new `blocked_relayers` table or extending the existing block tables, plus client UI to manage the list. The backend would merge user-level blocked relays into the existing per-request filter set.
 
 ## Content / UX
-- Add blocking keywords (in topics or posts)?
+- Add blocking keywords (in communities or posts)?
 - **On-chain `allowed_tags` (content filter preferences):** Currently `allowed_tags` is a client-side localStorage preference passed as a query param. Move it to `ProfileCore` on-chain so preferences sync across devices and the backend can enforce without trusting the client. Requires: proto field on `ProfileCore`, upgrade handler, indexer migration, backend reads from indexer DB instead of query param, new `MsgSetContentFilter` tx type. The backend would still accept the query param as an override for unauthenticated/guest users.
 
 ## Engagement
-- **Streaks:** Track consecutive days of activity (posting, voting, etc.). Could be implemented as a quest type — e.g. "7-day streak" quest with token reward. Resets on missed day.
-- **App store reviews:** Reward users for leaving a 5-star review on the app store. Verification is tricky — no reliable API to confirm reviews. Options: manual confirmation (user submits screenshot, admin approves), honor-system with fraud detection, or tie it to a referral/invite code printed on the review confirmation screen.
+> Quests, achievements, referrals and invite codes were all removed in v1.39.0.
+> The ideas below would need a new reward mechanism built from scratch; there is
+> no quest system left to hang them off.
+
+- **Streaks:** Track consecutive days of activity (posting, voting, etc.). Resets on missed day.
+- **App store reviews:** Reward users for leaving a 5-star review on the app store. Verification is tricky — no reliable API to confirm reviews. Options: manual confirmation (user submits screenshot, admin approves), or honor-system with fraud detection.
 
 ## Security
 - Full security audit for every module.
@@ -81,7 +89,7 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 
 ### Frontend E2E Tests
 - Current: Only two trivial Jest unit tests in `web/frontend/src/utils/__tests__/`. No real frontend coverage.
-- Recommendation: Add headless Playwright tests in `tests/` (alongside `test_backend.py` and `test_blockchain.py`). Should cover core user flows: wallet creation, posting, voting, username setup, subscription, agent management. Run against the local Docker testnet the same way backend tests do.
+- Recommendation: Add headless Playwright tests in `tests/` (alongside `test_backend.py` and `test_blockchain.py`). Should cover core user flows: wallet creation, posting, voting, username setup, subscription, joining and leaving communities. Run against the local Docker testnet the same way backend tests do.
 
 # Other Ideas:
 - Allow only 3 new profiles (set_username) per minute
@@ -90,8 +98,10 @@ The `relayer` field (the validator/node address that submitted a transaction) is
 # We should explicitly add LINK as field (like media)
 - and something like youtube or redgifs link should just be media link?
 
-# New agent ideas:
-- Real User agent: keeps tabs on every user and assigns them a trust score
+# Bot ideas (ordinary accounts — the agent tier is gone):
+- Real User bot: keeps tabs on every user and assigns them a trust score. Note
+  that a bot can only publish its own posts and comments; it cannot annotate or
+  overlay anyone else's content the way agents used to.
 
 
 # Video Series ideas:

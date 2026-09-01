@@ -4,10 +4,87 @@ import (
 	"fmt"
 
 	sdkmath "cosmossdk.io/math"
+	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 
 	"mirage/x/core/types"
 )
+
+const MaxCreatorAccrualQueryLimit = 1000
+
+func (k Keeper) GetCreatorEpochAccrualsPaginated(
+	ctx sdk.Context,
+	epoch int64,
+	pageKey []byte,
+	limit uint64,
+) (accruals []*types.CreatorAccrual, nextKey []byte, err error) {
+	if limit == 0 || limit > MaxCreatorAccrualQueryLimit {
+		limit = MaxCreatorAccrualQueryLimit
+	}
+	prefix := types.KeyEpochCreatorAccrualPrefix(epoch)
+	start := prefix
+	if len(pageKey) > 0 {
+		start = append(append([]byte(nil), prefix...), pageKey...)
+	}
+	it, err := k.storeService.OpenKVStore(ctx).Iterator(start, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if closeErr := it.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	for ; it.Valid() && uint64(len(accruals)) < limit; it.Next() {
+		var accrual types.CreatorAccrual
+		if err := k.cdc.Unmarshal(it.Value(), &accrual); err != nil {
+			return nil, nil, err
+		}
+		accrualCopy := accrual
+		accruals = append(accruals, &accrualCopy)
+	}
+	if err := it.Error(); err != nil {
+		return nil, nil, err
+	}
+	if it.Valid() {
+		fullKey := it.Key()
+		nextKey = append([]byte(nil), fullKey[len(prefix):]...)
+	}
+	return accruals, nextKey, nil
+}
+
+func (k Keeper) HasCreatorRewardState(ctx sdk.Context) (bool, error) {
+	liability, err := k.GetCreatorLiability(ctx)
+	if err != nil {
+		return false, err
+	}
+	if !liability.IsZero() {
+		return true, nil
+	}
+	prefixes := []string{
+		types.PfxCreatorEpoch,
+		types.PfxCreatorEpochOpen,
+		types.PfxCreatorEpochSettle,
+		types.PfxCreatorEpochDeadline,
+		types.PfxCreatorEpochPrune,
+		types.PfxEngagement,
+		types.PfxEpochCreatorAccrual,
+		types.PfxTranche,
+	}
+	for _, prefix := range prefixes {
+		found := false
+		if err := k.iterPrefixKeys(ctx, []byte(prefix), 1, func(_, _ []byte) error {
+			found = true
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		if found {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, direction int32) error {
 	if err := k.setVoteDir(ctx, voter, target, direction); err != nil {
@@ -115,7 +192,13 @@ func (k Keeper) ensureOpenEpoch(ctx sdk.Context, epoch int64) (*types.CreatorEpo
 		return nil, err
 	}
 	if !found {
-		ce = types.CreatorEpoch{EpochId: epoch, Pool: "0"}
+		ce = types.CreatorEpoch{
+			EpochId:        epoch,
+			Pool:           "0",
+			EngagerSlice:   "0",
+			AllocatedTotal: "0",
+			ClaimedTotal:   "0",
+		}
 	}
 	if err := k.storeSet(ctx, types.KeyCreatorEpochOpen(epoch), []byte{1}); err != nil {
 		return nil, err

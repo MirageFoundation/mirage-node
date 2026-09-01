@@ -33,7 +33,6 @@ from tests.common import (
     _canon_base_block_topic_raw, _canon_base_unblock_topic_raw,
     _canon_base_send_tokens_raw, _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw, _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -45,8 +44,7 @@ from tests.blockchain_helpers import (
     _build_msg_post, _build_msg_vote, _build_msg_set_username,
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_annotate,
-    _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
+    _build_msg_edit, _build_msg_block_post, _build_msg_block_user, _build_msg_block_topic,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_follow_topic, _build_msg_unfollow_topic,
@@ -69,8 +67,7 @@ from shared.datatypes import (
     MsgSetLevel, MsgSetUsername, MsgSetBiography,
     MsgUnblockPost, MsgUnblockTopic, MsgUnblockUser,
     MsgDisableAgent, MsgSetAgents, MsgUnfollowTopic, MsgUnfollowUser,
-    MsgSubscribe, MsgVote, MsgAnnotate,
-)
+    MsgSubscribe, MsgVote, )
 
 
 def test_pow(backend: str) -> None:
@@ -93,7 +90,7 @@ def test_pow(backend: str) -> None:
     # 2.2 Insufficient difficulty
     if diff > 0:
         diff_low = diff - 1
-        topic_low = f"pow{_rand_str(4)}"
+        community_low = f"pow{_rand_str(4)}"
         nonce = _gen_nonce()
         base = _canon_base_post_raw(
             free_wallet.public_key().public_key_bytes,
@@ -101,7 +98,7 @@ def test_pow(backend: str) -> None:
             diff_low,
             ts,
             "",
-            topic_low,
+            community_low,
             "Title",
             "content",
             "",
@@ -111,7 +108,7 @@ def test_pow(backend: str) -> None:
         )
         proof = compute_pow(base, diff_low, base_bits, pow_factor, lb)
         msg = _build_msg_post(
-            free_wallet, lb, diff_low, ts, topic_low, "Title", "content", pow_val=int(proof), nonce=nonce
+            free_wallet, lb, diff_low, ts, community_low, "Title", "content", pow_val=int(proof), nonce=nonce
         )
         txh, code, log, _, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
@@ -137,7 +134,7 @@ def test_pow(backend: str) -> None:
 
     # 2.3 Invalid block hash — chain may not validate hash against actual blocks
     bad_lb = _rand_hex(64)
-    topic_bad = f"pow{_rand_str(4)}"
+    community_bad = f"pow{_rand_str(4)}"
     nonce = _gen_nonce()
     base = _canon_base_post_raw(
         free_wallet.public_key().public_key_bytes,
@@ -145,7 +142,7 @@ def test_pow(backend: str) -> None:
         diff,
         ts,
         "",
-        topic_bad,
+        community_bad,
         "Title",
         "content",
         "",
@@ -159,7 +156,7 @@ def test_pow(backend: str) -> None:
         lb,
         diff,
         ts,
-        topic_bad,
+        community_bad,
         "Title",
         "content",
         pow_val=int(proof),

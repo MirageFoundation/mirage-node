@@ -163,6 +163,12 @@ QueryDifficultyRequest, QueryDifficultyResponse
 Params, TierConfig
 ```
 
+The module also exports message classes the chain no longer accepts —
+`MsgAnnotate`, `MsgEnableAgent`, `MsgDisableAgent`, `MsgSetAgents`,
+`MsgFollowTopic`, `MsgUnfollowTopic`, `MsgBlockTopic`, `MsgUnblockTopic`. They
+exist so the indexer can decode blocks committed before v1.39.0, and for nothing
+else.
+
 ---
 
 ## Canonical Serialization Module
@@ -211,11 +217,14 @@ def canon_base_post(
     difficulty: int,
     timestamp: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     tag: str = "",
     pow_val: int = 0,
+    media: list[str] | None = None,
+    nonce: int = 0,
+    protocol_version: int = 1,
 ) -> bytes:
     out = bytearray(_prefix("MsgPost"))  # "mirage.core.v1:MsgPost\x00"
     out += _enc_bytes(2, pubkey)
@@ -224,13 +233,29 @@ def canon_base_post(
     if pow_val > 0:
         out += _enc_u64(5, pow_val)
     out += _enc_u64(6, timestamp)
+    out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
-    out += _enc_str(101, topic or "")
+    out += _enc_str(101, community or "")
     out += _enc_str(102, title)
     out += _enc_str(103, content)
     out += _enc_str(104, tag)
+    for m in media or []:
+        out += _enc_str(105, m)
+    out += _enc_u64(106, protocol_version)
     return bytes(out)
 ```
+
+Tag 101 is named `community`; it was `topic` before v1.39.0 and the rename went
+through the wire format rather than being aliased. Tag 106
+(`protocol_version`) is always emitted and must be `1` — a client that omits it
+produces a signature the chain will not verify.
+
+`canon.py` still exports builders for messages the chain no longer accepts —
+`canon_base_annotate`, `canon_base_enable_agent`, `canon_base_disable_agent`,
+`canon_base_set_agents`, `canon_base_follow_topic`, `canon_base_unfollow_topic`,
+`canon_base_block_topic`, `canon_base_unblock_topic`. They keep their original
+names so historical transactions can still be re-derived and verified. Do not
+sign new transactions with them; the chain rejects those message types.
 
 ### Encoding Primitives
 
@@ -401,7 +426,6 @@ All three raise `RuntimeError` if the corresponding environment variable is miss
 ├── backend/        # backend-YYYY-MM-DD.log
 ├── postgres/       # postgres-YYYY-MM-DD.log
 ├── caddy/          # Web server logs
-├── referrals/      # Referral daemon logs
 └── deploy/         # Deployment logs
 ```
 
@@ -521,7 +545,7 @@ def test_canonical_post():
         difficulty=10,
         timestamp=1700000000000,
         target="",
-        topic="general",
+        community="general",
         title="Test",
         content="Hello",
         tag="",

@@ -18,7 +18,7 @@ Nine-stage pass on `themes/default/routes/ProfileView.js` plus targeted fixes in
 5. **Stage 5** — Reddit-style two-column layout: left column with avatar + display name + `u/handle` header above tabs, right sidebar with banner + identity card + stats grid + settings links.
 6. **Stage 6** — Tier / avatar / seed alignment with mirage-mobile-app (Free tier default color, DiceBear seed parity, hard-pinned avatar bg, banner uses brand gradient).
 7. **Stage 7** — Action-button layout: Follow moved to header right + compact in aside, Gift Sub moved next to Share as a 32px ActionPill, Gift Mirage restyled with icon + compact width, bio editor Save matches `CreatePostView::PostBtn`.
-8. **Stage 8** — Comments-tab fix + compact-feed placeholder swap (letter sourced from author username instead of topic, letter color hard-pinned white).
+8. **Stage 8** — Comments-tab fix + compact-feed placeholder swap (letter sourced from author username instead of the community, letter color hard-pinned white).
 9. **Stage 9** — Responsive polish: fixed label column so value rails align, gap collapses at `<1100px` instead of at mobile, `ProfileIdentity` hidden on `<1000px`, rows stay single-line on mobile, Balance / Reserve in compact `K`/`M`/`B` with uppercase suffix.
 
 Data wiring is unchanged (all handlers still run through `useProfile`).
@@ -28,7 +28,7 @@ Data wiring is unchanged (all handlers still run through `useProfile`).
 - **BioTextarea `:focus`** — `accent` → `borderStrong` (R5).
 - **PostItem active glow** — dropped `box-shadow: 0 0 12px rgba(102,126,234,0.25)`; now uses `layout.cardShadow`.
 - **Inline hard-coded colors → R2 tokens**:
-  - `'#888'` → `theme.colors.subtleText` (pref-topics / pref-authors / similar-users loading/empty/error/expand rows, tier expiry suffix, bio char-count, bio empty placeholder — 9 sites).
+  - `'#888'` → `theme.colors.subtleText` (pref-communities / pref-authors / similar-users loading/empty/error/expand rows, tier expiry suffix, bio char-count, bio empty placeholder — 9 sites).
   - `'#ff6b6b'` / `'#f87171'` / `'#ef4444'` → `theme.colors.voteDown` (7 sites).
   - `'#22c55e'` / `'#16a34a'` → `theme.colors.voteUp` (2 sites).
   - `'#f59e0b'` + `rgba(251, 191, 36, 0.1)` (confirm banners) → `inboxHighlightRail` + `inboxHighlightBg`.
@@ -98,7 +98,7 @@ Data wiring is unchanged (all handlers still run through `useProfile`).
 
 Referenced branch: `mirage-mobile-app @ mesonalirajput/performance-optimizations`.
 
-- **Free tier uses default body color** — `getTierColor(0)` returns a hardcoded `#6B7280` gray. The profile's `Tier:` row `Mono` and the right-aside `AsideStatValue` now branch on `userLevel > 0` — non-free tiers keep `getTierColor(userLevel)`, Free drops the override so the value falls through to `theme.colors.cardBodyText` / `theme.colors.text` (same color as Balance / Address / Username). Subscriber / Agent / Admin unaffected.
+- **Free tier uses default body color** — `getTierColor(0)` returns a hardcoded `#6B7280` gray. The profile's `Tier:` row `Mono` and the right-aside `AsideStatValue` now branch on `userLevel > 0` — non-free tiers keep `getTierColor(userLevel)`, Free drops the override so the value falls through to `theme.colors.cardBodyText` / `theme.colors.text` (same color as Balance / Address / Username). Subscriber / Admin unaffected.
 - **DiceBear seed parity with mobile** — `web/frontend/src/utils/avatar.js` rewritten. Dropped `normalizeAvatarSeed` (the earlier lowercasing caused seed drift vs mobile). Now passes the raw seed through `encodeURIComponent`, matching `mirage-mobile-app/src/components/atoms/avatar.tsx` (`seed ?? "default"` verbatim).
 - **Seed order aligned with mobile (address-first)** — mobile's `profile-screen.tsx` uses `user?.walletAddress || username`. Updated to match:
   - `TopBar.js` avatar → `publicKey || username || 'default'`.
@@ -109,7 +109,7 @@ Referenced branch: `mirage-mobile-app @ mesonalirajput/performance-optimizations
   - `TopBar.js::AvatarImg` — top-right 32px (mobile 28px) header avatar.
   - Earlier experiments with `panelAlt` and `actionIconBg` were too close to the page bg in light mode and made the circle disappear.
 - **Avatar's `$color` prop dropped** — the styled component no longer accepts a tier-based `$color`. Background is always `#232830`.
-- **Banner uses the app's brand gradient** — `Banner` (right-aside identity card) rewritten from a blue-on-blue ramp to `linear-gradient(135deg, gradientStart → gradientEnd)` — the canonical indigo→purple Mirage gradient used by quests, new-posts, feed-type. Height `96px`, no fade-to-panel. Reads identically in light + dark.
+- **Banner uses the app's brand gradient** — `Banner` (right-aside identity card) rewritten from a blue-on-blue ramp to `linear-gradient(135deg, gradientStart → gradientEnd)` — the canonical indigo→purple Mirage gradient used by new-posts and feed-type. Height `96px`, no fade-to-panel. Reads identically in light + dark.
 
 ### Stage 7 — Action-button layout + bio pill
 
@@ -127,10 +127,10 @@ Referenced branch: `mirage-mobile-app @ mesonalirajput/performance-optimizations
 ### Stage 8 — Comments tab fix + compact-feed placeholder
 
 - **Comments tab no longer renders blank** (`web/frontend/src/logic/useProfile.js`):
-  - Root cause: shared `FeedRow` renderer drops any row where `title.trim() === ''` or `topic.trim() === ''`. Comments carry neither (parent post owns the title; backend explicitly forbids `topic` on comments).
-  - Fix: when `effectivePostsFilter === 'comments'`, each incoming row is mapped to synthesize both fields — `title` from the body's first line (max 80 chars, truncated with `…`, fallback `"(reply)"`), `topic` set to `comment-<short-parent-id>`. Submissions / main feed untouched.
+  - Root cause: shared `FeedRow` renderer drops any row where `title.trim() === ''` or `community.trim() === ''`. Comments carry neither (parent post owns the title; the backend explicitly forbids `community` on comments).
+  - Fix: when `effectivePostsFilter === 'comments'`, each incoming row is mapped to synthesize both fields — `title` from the body's first line (max 80 chars, truncated with `…`, fallback `"(reply)"`), `community` set to `comment-<short-parent-id>`. Submissions / main feed untouched.
 - **Compact-feed placeholder letter + color** (`web/frontend/src/themes/default/ListFeedView.js::CompactRow`):
-  - Letter source: `topic` → `post.username` (fallback to author wallet address, then `#`). Posts with no media now show the author's initial on the gradient tile, not the topic initial.
+  - Letter source: `community` → `post.username` (fallback to author wallet address, then `#`). Posts with no media now show the author's initial on the gradient tile, not the community initial.
   - Letter color: `theme.colors.sidebarItemActiveText` → hard-pinned `#ffffff`. `sidebarItemActiveText` flips to black in light mode, which was invisible against the brand gradient — now renders white in both modes.
 
 ### Stage 9 — Responsive polish
@@ -177,8 +177,8 @@ The original 06.1 doc called for a structural rewrite with two new components (`
 - [x] `ProfileMainColumn` and profile tab strip both paint `theme.colors.bg` (R1).
 - [x] Avatar (`ProfileView.js::Avatar` + `TopBar.js::AvatarImg`) renders identically in light and dark modes.
 - [x] Same user → identical identicon between web `TopBar` + web `ProfileView` + mobile app (seed normalized to raw address-first, no casing drift).
-- [x] Comments tab renders rows for users with replies (title + topic synthesized from body + parent post id).
-- [x] Compact-feed placeholder letter = author initial (not topic initial), always white on gradient.
+- [x] Comments tab renders rows for users with replies (title + community synthesized from body + parent post id).
+- [x] Compact-feed placeholder letter = author initial (not community initial), always white on gradient.
 - [x] `ProfileFieldRow` values all start at the same x coordinate (fixed `110px` label column).
 - [x] Profile rows stay single-line on mobile (no stacked label above value).
 - [x] `ProfileIdentity` hidden when right-aside identity card reorders above main column (<1000px).
@@ -221,8 +221,8 @@ CI=true npm run build
 > - Username / Address / Biography Change/Copy/Edit converted to 28×28 icon chips (`IconActionButton`).
 >
 > **Comments + compact feed (Stage 8)**
-> - Comments tab no longer blank — `useProfile` synthesizes `title` + `topic` for comment rows so the shared `FeedRow` renders them.
-> - `ListFeedView::CompactRow` placeholder letter = author initial (not topic initial); color hard-pinned `#ffffff`.
+> - Comments tab no longer blank — `useProfile` synthesizes `title` + `community` for comment rows so the shared `FeedRow` renders them.
+> - `ListFeedView::CompactRow` placeholder letter = author initial (not community initial); color hard-pinned `#ffffff`.
 >
 > **Responsive polish (Stage 9)**
 > - Fixed `110px` label column aligns every row's value at the same x coordinate.

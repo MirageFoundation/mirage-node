@@ -13,20 +13,20 @@ import { LENS, lensCacheKey, lensQuery } from "../utils/curation";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 
-function bootstrapFeedMatchesTopic(stashed, topic) {
+function bootstrapFeedMatchesCommunity(stashed, community) {
     if (!stashed || stashed.kind !== 'feed') return false;
-    const t = String(topic || '').trim().toLowerCase();
+    const t = String(community || '').trim().toLowerCase();
     if (stashed.feed) {
         return String(stashed.feed).trim().toLowerCase() === t;
     }
-    if (stashed.topic) {
-        return String(stashed.topic).trim().toLowerCase() === t;
+    if (stashed.community) {
+        return String(stashed.community).trim().toLowerCase() === t;
     }
     return false;
 }
 
-// Session storage key helpers for feed state preservation (keyed by topic)
-export const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
+// Session storage key helpers for feed state preservation (keyed by community)
+export const getFeedKey = (community, suffix) => `feed_${suffix}_${community}`;
 
 // In-memory (per-tab) feed cache to avoid sessionStorage quota issues on long feeds.
 // This cache survives SPA navigation (feed -> post -> back), but not a full page refresh.
@@ -41,18 +41,18 @@ export const getFeedMemCache = () => {
         return null;
     }
 };
-export const getMemKey = topic => {
+export const getMemKey = community => {
     try {
-        return encodeURIComponent(String(topic || '').trim());
+        return encodeURIComponent(String(community || '').trim());
     } catch (_) {
-        return String(topic || '');
+        return String(community || '');
     }
 };
-export const readMemFeedState = topic => {
+export const readMemFeedState = community => {
     try {
         const cache = getFeedMemCache();
         if (!cache) return null;
-        const key = getMemKey(topic);
+        const key = getMemKey(community);
         const v = cache[key];
         if (!v || typeof v !== 'object') return null;
         return v;
@@ -60,7 +60,7 @@ export const readMemFeedState = topic => {
         return null;
     }
 };
-// The feed cache is keyed by topic, not by account, and it holds the viewer's own
+// The feed cache is keyed by community, not by account, and it holds the viewer's own
 // user_vote on every cached post. Without this it survives sign-out and the next
 // account in the same tab is served the previous one's feed until a refetch.
 export const clearFeedMemCache = () => {
@@ -73,11 +73,11 @@ onSessionReset(({ reason }) => {
     clearFeedMemCache();
     try { console.debug('[Feed] mem-cache cleared on session reset', { reason }); } catch (_) { /* noop */ }
 });
-export const writeMemFeedState = (topic, patch) => {
+export const writeMemFeedState = (community, patch) => {
     try {
         const cache = getFeedMemCache();
         if (!cache) return;
-        const key = getMemKey(topic);
+        const key = getMemKey(community);
         const prev = cache[key] && typeof cache[key] === 'object' ? cache[key] : {};
         cache[key] = {
             ...prev,
@@ -86,9 +86,9 @@ export const writeMemFeedState = (topic, patch) => {
         };
     } catch (_) { }
 };
-export const readSavedOrder = topic => {
+export const readSavedOrder = community => {
     try {
-        const savedOrder = sessionStorage.getItem(getFeedKey(topic, 'order'));
+        const savedOrder = sessionStorage.getItem(getFeedKey(community, 'order'));
         if (!savedOrder) return null;
         const parsed = JSON.parse(savedOrder);
         return Array.isArray(parsed) ? parsed : null;
@@ -99,44 +99,44 @@ export const readSavedOrder = topic => {
 export const isTopLevelPostForFeed = p => {
     if (!p) return false;
     const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
-    const hasTopic = typeof p.topic === 'string' && String(p.topic).trim().length > 0;
-    if (!hasTitle || !hasTopic) return false;
-    const topicVal = String(p.topic || '').trim().toLowerCase();
-    const isReserved = ['all', 'home', 'following'].includes(topicVal);
+    const hasCommunity = typeof p.community === 'string' && String(p.community).trim().length > 0;
+    if (!hasTitle || !hasCommunity) return false;
+    const communityVal = String(p.community || '').trim().toLowerCase();
+    const isReserved = ['all', 'home', 'following'].includes(communityVal);
     return !isReserved;
 };
-export const hasAnyCachedPostsForTopic = (topic, postsObj) => {
+export const hasAnyCachedPostsForCommunity = (community, postsObj) => {
     try {
         if (!postsObj || typeof postsObj !== 'object') return false;
         const ids = Object.keys(postsObj);
         if (ids.length === 0) return false;
-        const t = String(topic || '').trim();
+        const t = String(community || '').trim();
         const tLower = t.toLowerCase();
         const values = Object.values(postsObj);
 
-        // "all", "home", "following" all render top-level posts across topics.
+        // "all", "home", "following" all render top-level posts across communities.
         if (tLower === 'all' || tLower === 'home' || tLower === 'following') {
             return values.some(isTopLevelPostForFeed);
         }
         return values.some(p => {
             if (!isTopLevelPostForFeed(p)) return false;
-            return String(p.topic || '').trim().toLowerCase() === tLower;
+            return String(p.community || '').trim().toLowerCase() === tLower;
         });
     } catch (_) {
         return false;
     }
 };
-export const checkRestoreFeedIntent = topic => {
+export const checkRestoreFeedIntent = community => {
     try {
         const raw = sessionStorage.getItem('mirage_restore_feed');
         if (!raw) return false;
         const parsed = JSON.parse(raw);
-        const intended = String(parsed?.topic || '').trim();
+        const intended = String(parsed?.community || '').trim();
         const at = Number(parsed?.at || 0);
         if (!intended || !Number.isFinite(at) || at <= 0) return false;
         const ageMs = Date.now() - at;
         if (ageMs < 0 || ageMs > 15000) return false;
-        return intended === String(topic || '');
+        return intended === String(community || '');
     } catch (_) {
         return false;
     }
@@ -203,43 +203,43 @@ export function useMain({
     state,
     setPosts,
     updatePost,
-    setTopic,
-    routeTopic
+    setCommunity,
+    routeCommunity
 }) {
     const params = useParams();
-    const urlTopic = routeTopic || params.topic || "home"; // Get the topic from URL or prop
+    const urlCommunity = routeCommunity || params.community || "home"; // Get the community from URL or prop
     const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
     const isBackNavigation = getIsBackNavigation(navigationType);
     const theme = useTheme();
     const mapHomeSortMode = theme.caps.mapHomeSortMode;
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [storedFeedLens, setStoredFeedLens] = useState({
-        community: urlTopic,
+        community: urlCommunity,
         lens: LENS.EFFECTIVE,
         teamId: null,
     });
     const feedLens = useMemo(() => (
-        storedFeedLens.community === urlTopic
+        storedFeedLens.community === urlCommunity
             ? storedFeedLens
-            : { community: urlTopic, lens: LENS.EFFECTIVE, teamId: null }
-    ), [storedFeedLens, urlTopic]);
+            : { community: urlCommunity, lens: LENS.EFFECTIVE, teamId: null }
+    ), [storedFeedLens, urlCommunity]);
     const setFeedLens = useCallback((next) => {
-        setStoredFeedLens({ community: urlTopic, lens: next.lens, teamId: next.teamId ?? null });
-    }, [urlTopic]);
-    const feedCacheTopic = lensCacheKey({
+        setStoredFeedLens({ community: urlCommunity, lens: next.lens, teamId: next.teamId ?? null });
+    }, [urlCommunity]);
+    const feedCacheCommunity = lensCacheKey({
         viewer: viewerAddress,
-        community: urlTopic,
+        community: urlCommunity,
         lens: feedLens.lens,
         teamId: feedLens.teamId,
     });
-    const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
-    const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
+    const currentCommunityRef = useRef(urlCommunity); // Track current community to detect changes
+    const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlCommunity));
     // For browser back button: only restore if we came from a post view that was opened from the feed
     const cameFromViewPostRef = useRef(isBackNavigation && checkCameFromViewPost());
 
-    // If we are switching topics (and reusing component), we must invalidate any stale "restore" intents
-    // that were calculated for the previous topic.
-    if (currentTopicRef.current !== urlTopic) {
+    // If we are switching communities (and reusing component), we must invalidate any stale "restore" intents
+    // that were calculated for the previous community.
+    if (currentCommunityRef.current !== urlCommunity) {
         try {
             restoreFeedIntentRef.current = false;
             cameFromViewPostRef.current = false;
@@ -263,18 +263,18 @@ export function useMain({
         }
     }, []);
     const [error, setError] = useState(null);
-    const [, setTopics] = useState([]); // Dynamically store unique topics (state is persisted but value unused)
+    const [, setCommunities] = useState([]); // Dynamically store unique communities (state is persisted but value unused)
 
     // Only restore from cache on back navigation (POP), not on direct nav (clicking links)
     const [stableOrder, setStableOrder] = useState(() => {
         if (!shouldRestoreFeedState) return [];
         try {
-            const mem = readMemFeedState(feedCacheTopic);
+            const mem = readMemFeedState(feedCacheCommunity);
             const memOrder = mem && Array.isArray(mem.order) ? mem.order : null;
             if (memOrder && memOrder.length > 0) return memOrder;
         } catch (_) { }
         try {
-            const savedOrder = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'order'));
+            const savedOrder = sessionStorage.getItem(getFeedKey(feedCacheCommunity, 'order'));
             if (savedOrder) {
                 const parsed = JSON.parse(savedOrder);
                 return Array.isArray(parsed) ? parsed : [];
@@ -287,10 +287,10 @@ export function useMain({
     const [isLoading, setIsLoading] = useState(() => {
         if (!shouldRestoreFeedState) return true;
         try {
-            const memOrder = readMemFeedState(feedCacheTopic)?.order;
-            const order = readSavedOrder(feedCacheTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            const memOrder = readMemFeedState(feedCacheCommunity)?.order;
+            const order = readSavedOrder(feedCacheCommunity) || (Array.isArray(memOrder) ? memOrder : null);
             if (order && order.length > 0 && state.posts && order.some(id => state.posts[id])) return false;
-            if (hasAnyCachedPostsForTopic(urlTopic, state.posts)) return false;
+            if (hasAnyCachedPostsForCommunity(urlCommunity, state.posts)) return false;
         } catch (_) { }
         return true;
     });
@@ -299,11 +299,11 @@ export function useMain({
     const [currentPage, setCurrentPage] = useState(() => {
         if (!shouldRestoreFeedState) return 1;
         try {
-            const memPage = Number(readMemFeedState(feedCacheTopic)?.page || 0);
+            const memPage = Number(readMemFeedState(feedCacheCommunity)?.page || 0);
             if (Number.isFinite(memPage) && memPage > 0) return Math.floor(memPage);
         } catch (_) { }
         try {
-            const savedPage = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'page'));
+            const savedPage = sessionStorage.getItem(getFeedKey(feedCacheCommunity, 'page'));
             if (savedPage) return parseInt(savedPage, 10) || 1;
         } catch (_) { }
         return 1;
@@ -313,11 +313,11 @@ export function useMain({
     const [hasMorePosts, setHasMorePosts] = useState(() => {
         if (!shouldRestoreFeedState) return false;
         try {
-            const memHasMore = readMemFeedState(feedCacheTopic)?.hasMore;
+            const memHasMore = readMemFeedState(feedCacheCommunity)?.hasMore;
             if (typeof memHasMore === 'boolean') return memHasMore;
         } catch (_) { }
         try {
-            const savedHasMore = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'hasmore'));
+            const savedHasMore = sessionStorage.getItem(getFeedKey(feedCacheCommunity, 'hasmore'));
             if (savedHasMore) return savedHasMore === 'true';
         } catch (_) { }
         return false;
@@ -390,7 +390,7 @@ export function useMain({
         hideDownvotedPostsRef.current = hideDownvotedPosts;
     }, [hideDownvotedPosts]);
     const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
-    const [blockedTopicsLocal, setBlockedTopicsLocal] = useState(() => new Set()); // Optimistic blocked topic patterns (may contain *)
+    const [blockedCommunitiesLocal, setBlockedCommunitiesLocal] = useState(() => new Set()); // Optimistic blocked community patterns (may contain *)
     const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
         // Consume any pending highlight on mount
         const pendingId = Storage.consumePendingPostHighlight();
@@ -408,26 +408,26 @@ export function useMain({
         } catch (_) { }
         return false;
     });
-    const _topicMatchesPattern = (topic, pattern) => {
-        if (!pattern.includes('*')) return topic === pattern;
+    const _communityMatchesPattern = (community, pattern) => {
+        if (!pattern.includes('*')) return community === pattern;
         const re = new RegExp('^' + pattern.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
-        return re.test(topic);
+        return re.test(community);
     };
-    const isTopicBlockedLocal = useCallback(topicVal => {
-        const t = String(topicVal || '').trim().toLowerCase();
+    const isCommunityBlockedLocal = useCallback(communityVal => {
+        const t = String(communityVal || '').trim().toLowerCase();
         if (!t) return false;
-        if (blockedTopicsLocal.size === 0) return false;
-        for (const pat of blockedTopicsLocal) {
-            if (_topicMatchesPattern(t, pat)) return true;
+        if (blockedCommunitiesLocal.size === 0) return false;
+        for (const pat of blockedCommunitiesLocal) {
+            if (_communityMatchesPattern(t, pat)) return true;
         }
         return false;
-    }, [blockedTopicsLocal]);
+    }, [blockedCommunitiesLocal]);
     const location = useLocation(); // Call useLocation at the top level of the component
     useEffect(() => {
-        setBlockedTopicsLocal(new Set());
+        setBlockedCommunitiesLocal(new Set());
     }, [viewerAddress]);
-    // Hydrate the local blocked-topics set from the server on login / viewer
-    // change. Without this, `isTopicBlockedLocal` only reflects topics the
+    // Hydrate the local blocked-communities set from the server on login / viewer
+    // change. Without this, `isCommunityBlockedLocal` only reflects communities the
     // viewer blocked in THIS session — so visiting /c/<already-blocked>
     // would still render the normal "no posts" state on a fresh page load.
     // On cold load the data is usually already in the bootstrap stash; we
@@ -437,11 +437,11 @@ export function useMain({
         let cancelled = false;
         const applyBlocked = (data) => {
             if (cancelled) return;
-            const serverTopics = Array.isArray(data?.blocked_communities) ? data.blocked_communities : [];
-            if (serverTopics.length === 0) return;
-            setBlockedTopicsLocal(prev => {
+            const serverCommunities = Array.isArray(data?.blocked_communities) ? data.blocked_communities : [];
+            if (serverCommunities.length === 0) return;
+            setBlockedCommunitiesLocal(prev => {
                 const next = new Set(prev);
-                for (const raw of serverTopics) {
+                for (const raw of serverCommunities) {
                     const t = String(raw || '').trim().toLowerCase();
                     if (t) next.add(t);
                 }
@@ -463,14 +463,14 @@ export function useMain({
     }, [viewerAddress]);
     const [joinedCommunitiesSet, setJoinedCommunitiesSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
-    const [topicFollowHover, setTopicFollowHover] = useState(false);
+    const [communityFollowHover, setCommunityFollowHover] = useState(false);
     const {
         isCommunityPending,
         formatCommunityStatus
     } = usePendingFollows();
     const followDataLoadedRef = useRef(false);
     const afterSetPostsRef = useRef(0);
-    const topicsLoadedRef = useRef(false); // Track if we've attempted to load topics from API
+    const communitiesLoadedRef = useRef(false); // Track if we've attempted to load communities from API
     const isMountedRef = useRef(true); // Track if component is mounted
     const forceHardRefreshRef = useRef(isInitialPageLoad()); // Bypass debounce on initial page load
     const downvoteTimeoutsRef = useRef(new Set());
@@ -548,7 +548,7 @@ export function useMain({
         // effects are deferred while the main thread parses the ~1MB bundle).
         // If the config already landed in storage, force a re-read here so we
         // don't stay stuck on the null we read at first render — otherwise
-        // openBrowsingEnabled never flips true and the gated feed/topics
+        // openBrowsingEnabled never flips true and the gated feed/communities
         // fetches never fire (the feed renders an endless skeleton).
         try {
             if (localStorage.getItem('nodeConfig') != null) setNodeConfigTick(prev => prev + 1);
@@ -590,7 +590,7 @@ export function useMain({
             });
         } catch (_) { }
     }, [nodeConfig]);
-    // Open browsing: when on, logged-out visitors fetch & read the feed/topics
+    // Open browsing: when on, logged-out visitors fetch & read the feed/communities
     // (account prompts only fire on write/social actions). When off, behavior is
     // unchanged: logged-out users get the welcome/invite screen, no content fetch.
     const openBrowsingEnabled = Boolean(nodeConfig?.open_browsing_enabled);
@@ -673,9 +673,9 @@ export function useMain({
         const loadFollowData = async () => {
             if (!viewerAddress || viewerAddress === 'guest' || followDataLoadedRef.current) return;
             try {
-                const [topics, authors] = await Promise.all([fetchJoinedCommunities(viewerAddress), fetchFollowedUsers(viewerAddress)]);
+                const [communities, authors] = await Promise.all([fetchJoinedCommunities(viewerAddress), fetchFollowedUsers(viewerAddress)]);
                 if (cancelled) return;
-                setJoinedCommunitiesSet(new Set(topics.map(t => t.toLowerCase())));
+                setJoinedCommunitiesSet(new Set(communities.map(t => t.toLowerCase())));
                 setFollowedAuthorsSet(new Set(authors.map(a => a.toLowerCase())));
                 followDataLoadedRef.current = true;
             } catch (_) { }
@@ -787,7 +787,7 @@ export function useMain({
     }, [flashingPostsSet]);
     const optimisticPostIdsRef = useRef(new Map()); // post_id -> created_at_ms
 
-    const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false, preloaded = null) => {
+    const getPosts = useCallback((community, overrideChrono = null, pageOverride = null, silent = false, preloaded = null) => {
         if (!isMountedRef.current) return;
 
         // Logged-out users only fetch when open browsing is on. Guests have no
@@ -796,16 +796,16 @@ export function useMain({
         const viewer = Storage.load("publicKey", "");
         const isGuest = !viewer || viewer === 'guest';
         if (isGuest && !openBrowsingEnabled) return;
-        if (topic === "") topic = "all";
-        if (isGuest && (topic === 'home' || topic === 'following') && !preloaded) topic = 'all';
-        const isHomeFeed = topic === 'home';
-        const isFollowingFeed = topic === 'following';
-        if (topic !== state.topic) {
+        if (community === "") community = "all";
+        if (isGuest && (community === 'home' || community === 'following') && !preloaded) community = 'all';
+        const isHomeFeed = community === 'home';
+        const isFollowingFeed = community === 'following';
+        if (community !== state.community) {
             if (!isMountedRef.current) return;
-            setTopic(topic);
+            setCommunity(community);
         }
         if (!isMountedRef.current) return;
-        // Only show full loading state for initial load or topic switch, not pagination
+        // Only show full loading state for initial load or community switch, not pagination
         const effectivePage = typeof pageOverride === 'number' && Number.isFinite(pageOverride) && pageOverride > 0 ? Math.floor(pageOverride) : currentPage;
         const isPaginating = effectivePage > 1;
         if (!silent && !isPaginating) {
@@ -816,10 +816,10 @@ export function useMain({
         const requestId = latestFeedRequestRef.current + 1;
         latestFeedRequestRef.current = requestId;
         const isCurrentRequest = () => latestFeedRequestRef.current === requestId;
-        const matchTopic = t => {
-            if (topic === 'all') return true;
-            if (topic === 'home' || topic === 'following') return true;
-            return String(t || '').toLowerCase() === String(topic || '').toLowerCase();
+        const matchCommunity = t => {
+            if (community === 'all') return true;
+            if (community === 'home' || community === 'following') return true;
+            return String(t || '').toLowerCase() === String(community || '').toLowerCase();
         };
         const handleResponse = data => {
             if (!isMountedRef.current) return;
@@ -832,13 +832,13 @@ export function useMain({
             const isTopLevelPost = p => {
                 if (!p) return false;
                 const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
-                const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
-                const topicVal = String(p.topic || '').trim().toLowerCase();
-                const isReserved = ['all', 'home', 'following'].includes(topicVal);
-                return hasTitle && hasTopic && !isReserved;
+                const hasCommunity = typeof p.community === 'string' && p.community.trim().length > 0;
+                const communityVal = String(p.community || '').trim().toLowerCase();
+                const isReserved = ['all', 'home', 'following'].includes(communityVal);
+                return hasTitle && hasCommunity && !isReserved;
             };
             const topLevel = arr.filter(isTopLevelPost);
-            let filtered = isHomeFeed || isFollowingFeed ? topLevel : topLevel.filter(p => matchTopic(p.topic));
+            let filtered = isHomeFeed || isFollowingFeed ? topLevel : topLevel.filter(p => matchCommunity(p.community));
 
             // Note: Downvote filtering is handled in render phase to avoid stale closure issues
 
@@ -865,8 +865,8 @@ export function useMain({
             if (!isMountedRef.current) return;
             setStableOrder(currentOrder => {
                 if (page === 1) {
-                    const topicChanged = currentTopicRef.current !== topic;
-                    if (topicChanged || forcedHard) {
+                    const communityChanged = currentCommunityRef.current !== community;
+                    if (communityChanged || forcedHard) {
                         const now = Date.now();
                         const keepOptimistic = [];
                         for (const [id, ts] of optimisticPostIdsRef.current.entries()) {
@@ -876,23 +876,23 @@ export function useMain({
                         }
                         return [...keepOptimistic, ...sortedOrder.filter(id => !keepOptimistic.includes(id))];
                     } else {
-                        // Same topic refresh: preserve existing posts from previous pages
+                        // Same community refresh: preserve existing posts from previous pages
                         const currentPosts = state.posts || {};
                         const existingPostsInOrder = currentOrder.filter(id => {
                             const post = currentPosts[id];
                             if (!post || post.deleted) return false;
                             const dir = Number(post.direction ?? post.user_vote ?? post.my_vote ?? 0);
                             if (Number.isFinite(dir) && dir < 0) return false;
-                            if (topic === 'all') {
+                            if (community === 'all') {
                                 const hasTitle = typeof post.title === 'string' && post.title.trim().length > 0;
-                                const hasTopic = typeof post.topic === 'string' && post.topic.trim().length > 0;
-                                const topicVal = String(post.topic || '').trim().toLowerCase();
-                                const isReserved = ['all', 'home', 'following'].includes(topicVal);
-                                return hasTitle && hasTopic && !isReserved;
-                            } else if (topic === 'home' || topic === 'following') {
+                                const hasCommunity = typeof post.community === 'string' && post.community.trim().length > 0;
+                                const communityVal = String(post.community || '').trim().toLowerCase();
+                                const isReserved = ['all', 'home', 'following'].includes(communityVal);
+                                return hasTitle && hasCommunity && !isReserved;
+                            } else if (community === 'home' || community === 'following') {
                                 return isTopLevelPost(post);
                             } else {
-                                return String(post.topic || '').trim().toLowerCase() === topic.toLowerCase();
+                                return String(post.community || '').trim().toLowerCase() === community.toLowerCase();
                             }
                         }).filter(id => !sortedOrder.includes(id));
                         return [...sortedOrder, ...existingPostsInOrder];
@@ -906,10 +906,10 @@ export function useMain({
                 forceHardRefreshRef.current = false;
             } catch (_) { }
 
-            // Mark topic switch complete - from now on, render new topic
+            // Mark community switch complete - from now on, render new community
             if (!isMountedRef.current) return;
             try {
-                currentTopicRef.current = topic;
+                currentCommunityRef.current = community;
             } catch (_) { }
             // Only clear isLoading if we set it (not during pagination)
             if (page === 1) {
@@ -950,7 +950,7 @@ export function useMain({
 
         if (preloaded && page === 1) {
             console.debug('[Bootstrap] applying feed stash', {
-                topic,
+                community,
                 feed: preloaded.feed,
                 posts: Array.isArray(preloaded.posts) ? preloaded.posts.length : 0,
             });
@@ -968,12 +968,12 @@ export function useMain({
             allowed_tags: getAllowedTagsParam(),
         };
         if (isHomeFeed || isFollowingFeed) {
-            params.feed = topic;
-        } else if (topic && topic !== 'all') {
+            params.feed = community;
+        } else if (community && community !== 'all') {
             // Guest home/following remaps to the unscoped catalog (`all`); that
             // query takes no community filter. A real slug is `community`.
-            // `topic` is retired — the backend 400s it.
-            params.community = topic;
+            // `community` is retired — the backend 400s it.
+            params.community = community;
             Object.assign(params, lensQuery(feedLens.lens, feedLens.teamId, 'current'));
         }
         console.debug('[Feed] get_posts', {
@@ -986,7 +986,7 @@ export function useMain({
         });
         Api.get('get_posts', params).then(handleResponse).catch(onError);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
+    }, [state.community, state.lastFetched, setCommunity, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback(allowNsfw => {
@@ -1021,10 +1021,10 @@ export function useMain({
                 setHasMorePosts(false);
                 setStableOrder([]);
                 // Always force page 1 on user-initiated feed refresh to avoid stale pagination leaks
-                getPosts(urlTopic, null, 1);
+                getPosts(urlCommunity, null, 1);
             } catch (_) {/* noop */ }
         } catch (_) {/* noop */ }
-    }, [getPosts, urlTopic]);
+    }, [getPosts, urlCommunity]);
 
     // Listen for content tag settings changes - must be after getPosts is defined
     useEffect(() => {
@@ -1040,13 +1040,13 @@ export function useMain({
                     setCurrentPage(1);
                     setHasMorePosts(false);
                     setStableOrder([]);
-                    getPosts(urlTopic, null, 1);
+                    getPosts(urlCommunity, null, 1);
                 } catch (_) {/* noop */ }
             }
         };
         window.addEventListener('settingsUpdated', handler);
         return () => window.removeEventListener('settingsUpdated', handler);
-    }, [getPosts, urlTopic]);
+    }, [getPosts, urlCommunity]);
 
     // Listen for new post creation events (must be after getPosts is defined)
     useEffect(() => {
@@ -1056,12 +1056,12 @@ export function useMain({
             if (!pid) return;
             try {
                 const viewer = String(Storage.load("publicKey", "") || '').trim().toLowerCase();
-                const topic = String(detail?.topic || '').trim();
+                const community = String(detail?.community || '').trim();
                 const title = String(detail?.title || '').trim();
                 const content = String(detail?.content || '');
                 const tag = String(detail?.tag || '').trim().toLowerCase();
                 const thumbnail = String(detail?.thumbnail || '').trim();
-                if (viewer && viewer !== 'guest' && topic && title) {
+                if (viewer && viewer !== 'guest' && community && title) {
                     const nowSec = Math.floor(Date.now() / 1000);
                     const optimistic = {
                         post_id: pid,
@@ -1069,7 +1069,7 @@ export function useMain({
                         user_id: viewer,
                         username: "",
                         timestamp: nowSec,
-                        topic,
+                        community,
                         title,
                         content,
                         tag,
@@ -1095,7 +1095,7 @@ export function useMain({
                 return next;
             });
             // If we're on home, immediately refetch page 1 in the current mode and pin the fresh post
-            if (currentTopicRef.current === 'home' || urlTopic === 'home') {
+            if (currentCommunityRef.current === 'home' || urlCommunity === 'home') {
                 try {
                     forceHardRefreshRef.current = true;
                 } catch (_) { }
@@ -1111,9 +1111,9 @@ export function useMain({
         window.addEventListener('postCreated', handler);
         return () => window.removeEventListener('postCreated', handler);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [getPosts, urlTopic, homeSortMode]);
+    }, [getPosts, urlCommunity, homeSortMode]);
 
-    // Reset page and loading state when topic changes
+    // Reset page and loading state when community changes
     // Skip reset on back navigation (we want to restore cached state)
     //
     // `isBackNavigation` is intentionally NOT in the dependency array. It is
@@ -1126,7 +1126,7 @@ export function useMain({
     // WITHOUT the fetch effect below firing — the fetcher is keyed on
     // `location.pathname`, which does not change for a same-path click — leaving
     // the feed wiped and stuck on the loading skeleton with nothing reloaded.
-    // We only want to reset on a real trigger change (topic / viewer / sort /
+    // We only want to reset on a real trigger change (community / viewer / sort /
     // downvote toggle); `isBackNavigation` is read inside the body purely as a
     // guard, so a stale closure value is fine here.
     useEffect(() => {
@@ -1142,19 +1142,19 @@ export function useMain({
         setStableOrder([]); // Clear stale order to prevent flash of old content
         setIsLoading(true); // Show loading immediately when navigating
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts, feedLens]);
+    }, [urlCommunity, viewerAddress, homeSortMode, hideDownvotedPosts, feedLens]);
 
     useEffect(() => {
         const onLensChanged = (event) => {
             const detail = event?.detail || {};
-            if (String(detail.community || '').toLowerCase() !== String(urlTopic || '').toLowerCase()) return;
+            if (String(detail.community || '').toLowerCase() !== String(urlCommunity || '').toLowerCase()) return;
             const next = { lens: detail.lens, teamId: detail.teamId ?? null };
             setFeedLens(next);
-            console.debug('[Feed] lens changed', { community: urlTopic, ...next });
+            console.debug('[Feed] lens changed', { community: urlCommunity, ...next });
         };
         window.addEventListener('lensChanged', onLensChanged);
         return () => window.removeEventListener('lensChanged', onLensChanged);
-    }, [setFeedLens, urlTopic]);
+    }, [setFeedLens, urlCommunity]);
 
     // Infinite scroll: observe a sentinel near the bottom (also clickable fallback)
     const bottomSentinelRef = useRef(null);
@@ -1256,11 +1256,11 @@ export function useMain({
         if (currentPage > 1 && hasMorePosts && isLoadingMore) {
             try {
                 console.log('[Feed] paginate fetch:', {
-                    topic: urlTopic,
+                    community: urlCommunity,
                     page: currentPage
                 });
             } catch (_) { }
-            getPosts(urlTopic);
+            getPosts(urlCommunity);
         } else if (currentPage > 1 && !hasMorePosts) {
             setIsLoadingMore(false);
             try {
@@ -1268,49 +1268,49 @@ export function useMain({
             } catch (_) { }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentPage, urlTopic, hasMorePosts, isLoadingMore]);
+    }, [currentPage, urlCommunity, hasMorePosts, isLoadingMore]);
     useEffect(() => {
-        // Skip topics fetch for logged-out users, unless open browsing is on (then
-        // they can navigate topics like anyone else).
+        // Skip communities fetch for logged-out users, unless open browsing is on (then
+        // they can navigate communities like anyone else).
         if (!isLoggedIn && !openBrowsingEnabled) return;
-        const storedTopicsData = Storage.load("topics", {
-            topics: [],
+        const storedCommunitiesData = Storage.load("communities", {
+            communities: [],
             lastFetched: null
         });
-        const stored = Array.isArray(storedTopicsData.topics) ? storedTopicsData.topics : [];
-        const lastFetched = storedTopicsData.lastFetched ? new Date(storedTopicsData.lastFetched) : null;
+        const stored = Array.isArray(storedCommunitiesData.communities) ? storedCommunitiesData.communities : [];
+        const lastFetched = storedCommunitiesData.lastFetched ? new Date(storedCommunitiesData.lastFetched) : null;
         const shouldFetch = stored.length === 0 || !lastFetched || Date.now() - lastFetched.getTime() > 24 * 60 * 60 * 1000;
-        if (shouldFetch && !topicsLoadedRef.current) {
-            topicsLoadedRef.current = true;
+        if (shouldFetch && !communitiesLoadedRef.current) {
+            communitiesLoadedRef.current = true;
             let cancelled = false;
             Api.get('communities', {
                 limit: 50,
             }).then(data => {
                 if (cancelled || !isMountedRef.current) return;
                 const items = Array.isArray(data?.items) ? data.items : [];
-                const topicsWithCounts = items
+                const communitiesWithCounts = items
                     .filter(t => t && t.community && typeof t.community === 'string' && t.community.trim() !== '')
                     .map(t => ({
-                        topic: t.community,
+                        community: t.community,
                         count: 0
                     }));
-                const topicNames = topicsWithCounts.map(t => t.topic);
-                const topicsWithAll = ['all', ...topicNames];
-                Storage.save("topics", {
-                    topics: topicsWithAll,
-                    topicsWithCounts: topicsWithCounts,
+                const communityNames = communitiesWithCounts.map(t => t.community);
+                const communitiesWithAll = ['all', ...communityNames];
+                Storage.save("communities", {
+                    communities: communitiesWithAll,
+                    communitiesWithCounts: communitiesWithCounts,
                     lastFetched: new Date().toISOString()
                 });
-                setTopics(topicsWithAll);
+                setCommunities(communitiesWithAll);
             }).catch(error => {
                 if (cancelled || !isMountedRef.current) return;
-                topicsLoadedRef.current = false;
+                communitiesLoadedRef.current = false;
             });
             return () => {
                 cancelled = true;
             };
         } else if (stored.length > 0) {
-            setTopics(stored);
+            setCommunities(stored);
         }
     }, [isLoggedIn, viewerAddress, openBrowsingEnabled]);
     useEffect(() => {
@@ -1320,11 +1320,11 @@ export function useMain({
 
         // On back navigation (POP), restore from cache if available
         if (shouldRestoreFeedState) {
-            const memOrder = readMemFeedState(feedCacheTopic)?.order;
-            const order = readSavedOrder(feedCacheTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            const memOrder = readMemFeedState(feedCacheCommunity)?.order;
+            const order = readSavedOrder(feedCacheCommunity) || (Array.isArray(memOrder) ? memOrder : null);
             const hasPostsForOrder = !!(order && order.length > 0 && state.posts && order.some(id => state.posts[id]));
-            const hasPostsForTopic = hasAnyCachedPostsForTopic(urlTopic, state.posts);
-            if (hasPostsForOrder || hasPostsForTopic) {
+            const hasPostsForCommunity = hasAnyCachedPostsForCommunity(urlCommunity, state.posts);
+            if (hasPostsForOrder || hasPostsForCommunity) {
                 // Back navigation with cached data - don't fetch
                 if (!cancelled && isMountedRef.current) {
                     setIsLoading(false);
@@ -1332,7 +1332,7 @@ export function useMain({
                     loadMoreLockRef.current = false;
                 }
                 try {
-                    console.log('[Feed] POP restore from cache:', urlTopic);
+                    console.log('[Feed] POP restore from cache:', urlCommunity);
                 } catch (_) { }
                 return;
             }
@@ -1347,7 +1347,7 @@ export function useMain({
                     isLoggedIn ? viewerAddress : null,
                 );
                 if (cancelled || !isMountedRef.current) return;
-                if (bootstrapFeedMatchesTopic(stashed, urlTopic)) {
+                if (bootstrapFeedMatchesCommunity(stashed, urlCommunity)) {
                     // The open-browsing gate is only meaningful once node config
                     // has landed. On a cold load it is still null here, so hold the
                     // stash and let the re-run (nodeConfigLoaded flips) decide —
@@ -1364,16 +1364,16 @@ export function useMain({
                     } else {
                         readBootstrapStash('bootstrap_view', isLoggedIn ? viewerAddress : null);
                         console.debug('[Bootstrap] feed stash hit', {
-                            urlTopic,
+                            urlCommunity,
                             feed: stashed.feed,
-                            topic: stashed.topic,
+                            community: stashed.community,
                             posts: Array.isArray(stashed.posts) ? stashed.posts.length : 0,
                         });
                         forceHardRefreshRef.current = true;
                         setCurrentPage(1);
                         setStableOrder([]);
                         setIsLoading(true);
-                        getPosts(urlTopic, null, 1, false, stashed);
+                        getPosts(urlCommunity, null, 1, false, stashed);
                         return;
                     }
                 }
@@ -1402,12 +1402,12 @@ export function useMain({
             setStableOrder([]); // Clear stale order
             setIsLoading(true);
             try {
-                console.log('[Feed] PUSH fetch fresh:', urlTopic);
+                console.log('[Feed] PUSH fetch fresh:', urlCommunity);
             } catch (_) { }
             timeoutId = setTimeout(() => {
                 if (cancelled || !isMountedRef.current) return;
                 // Hard force page 1 on navigation so Home/Following never starts at page 2
-                getPosts(urlTopic, null, 1);
+                getPosts(urlCommunity, null, 1);
             }, 50);
         })();
 
@@ -1416,7 +1416,7 @@ export function useMain({
             if (timeoutId) clearTimeout(timeoutId);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [urlTopic, location.pathname, openBrowsingEnabled, nodeConfigLoaded, feedLens]);
+    }, [urlCommunity, location.pathname, openBrowsingEnabled, nodeConfigLoaded, feedLens]);
 
     // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
@@ -1425,37 +1425,37 @@ export function useMain({
         if (prevHomeSortModeRef.current === homeSortMode) return;
         prevHomeSortModeRef.current = homeSortMode;
 
-        // Force refetch with new mode (works for all feeds including topics)
+        // Force refetch with new mode (works for all feeds including communities)
         forceHardRefreshRef.current = true;
         setCurrentPage(1);
         setHasMorePosts(false);
         setStableOrder([]);
         setIsLoading(true);
-        getPosts(urlTopic, null, 1);
-    }, [homeSortMode, urlTopic, getPosts]);
+        getPosts(urlCommunity, null, 1);
+    }, [homeSortMode, urlCommunity, getPosts]);
     useEffect(() => {
-        const storedTopicsData = Storage.load("topics", {
-            topics: [],
+        const storedCommunitiesData = Storage.load("communities", {
+            communities: [],
             lastFetched: null
         });
-        const stored = Array.isArray(storedTopicsData.topics) ? storedTopicsData.topics : [];
+        const stored = Array.isArray(storedCommunitiesData.communities) ? storedCommunitiesData.communities : [];
 
-        // If not viewing "all", preserve known topics from storage (do not drop).
-        if (urlTopic !== "all") {
+        // If not viewing "all", preserve known communities from storage (do not drop).
+        if (urlCommunity !== "all") {
             if (stored.length > 0) {
-                setTopics(stored);
+                setCommunities(stored);
             } else {
-                const fallback = ["all", ...(urlTopic ? [urlTopic] : [])];
-                setTopics(fallback);
+                const fallback = ["all", ...(urlCommunity ? [urlCommunity] : [])];
+                setCommunities(fallback);
             }
             return;
         }
 
-        // When viewing "all", just use stored topics (no merging)
+        // When viewing "all", just use stored communities (no merging)
         if (stored.length > 0) {
-            setTopics(stored);
+            setCommunities(stored);
         }
-    }, [urlTopic]);
+    }, [urlCommunity]);
 
     // Recompute stable order only when needed; skip if already set by latest fetch
     useEffect(() => {
@@ -1468,17 +1468,17 @@ export function useMain({
             if (!p) return false;
             if (p.hidden_client) return false;
             const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
-            const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
-            const topicVal = String(p.topic || '').trim().toLowerCase();
-            const isReserved = ['all', 'home', 'following'].includes(topicVal);
-            if (isTopicBlockedLocal(topicVal)) return false;
-            return hasTitle && hasTopic && !isReserved;
+            const hasCommunity = typeof p.community === 'string' && p.community.trim().length > 0;
+            const communityVal = String(p.community || '').trim().toLowerCase();
+            const isReserved = ['all', 'home', 'following'].includes(communityVal);
+            if (isCommunityBlockedLocal(communityVal)) return false;
+            return hasTitle && hasCommunity && !isReserved;
         };
         const topLevelPosts = postsArray.filter(isTopLevelPost);
-        const filtered = urlTopic === "all" || urlTopic === "home" || urlTopic === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
+        const filtered = urlCommunity === "all" || urlCommunity === "home" || urlCommunity === "following" ? topLevelPosts : topLevelPosts.filter(post => String(post.community || '').toLowerCase() === String(urlCommunity || '').toLowerCase());
         // Server already returns posts in correct order
         setStableOrder(filtered.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, joinedCommunitiesSet, followedAuthorsSet, isLoading, isTopicBlockedLocal]);
+    }, [state.lastFetched, urlCommunity, homeSortMode, stableOrder.length, state.posts, viewerAddress, joinedCommunitiesSet, followedAuthorsSet, isLoading, isCommunityBlockedLocal]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
@@ -1497,31 +1497,31 @@ export function useMain({
     }, []);
 
     // Save feed state to sessionStorage when values change (for back button restoration)
-    // Each topic gets its own cache keys so we can restore any feed independently
+    // Each community gets its own cache keys so we can restore any feed independently
     useEffect(() => {
         try {
-            const orderKey = getFeedKey(feedCacheTopic, 'order');
+            const orderKey = getFeedKey(feedCacheCommunity, 'order');
             if (stableOrder.length > 0) sessionStorage.setItem(orderKey, JSON.stringify(stableOrder)); else sessionStorage.removeItem(orderKey);
-            sessionStorage.setItem(getFeedKey(feedCacheTopic, 'page'), String(currentPage));
-            sessionStorage.setItem(getFeedKey(feedCacheTopic, 'hasmore'), String(hasMorePosts));
+            sessionStorage.setItem(getFeedKey(feedCacheCommunity, 'page'), String(currentPage));
+            sessionStorage.setItem(getFeedKey(feedCacheCommunity, 'hasmore'), String(hasMorePosts));
         } catch (_) { }
         try {
-            writeMemFeedState(feedCacheTopic, {
+            writeMemFeedState(feedCacheCommunity, {
                 order: stableOrder,
                 page: currentPage,
                 hasMore: hasMorePosts
             });
         } catch (_) { }
-    }, [feedCacheTopic, stableOrder, currentPage, hasMorePosts]);
+    }, [feedCacheCommunity, stableOrder, currentPage, hasMorePosts]);
 
-    // Save scroll position before navigating away (keyed by current topic)
+    // Save scroll position before navigating away (keyed by current community)
     useEffect(() => {
         const saveScrollPosition = () => {
             try {
-                sessionStorage.setItem(getFeedKey(feedCacheTopic, 'scroll'), String(window.scrollY || 0));
+                sessionStorage.setItem(getFeedKey(feedCacheCommunity, 'scroll'), String(window.scrollY || 0));
             } catch (_) { }
             try {
-                writeMemFeedState(feedCacheTopic, {
+                writeMemFeedState(feedCacheCommunity, {
                     scroll: Number(window.scrollY || 0)
                 });
             } catch (_) { }
@@ -1541,11 +1541,11 @@ export function useMain({
                     if (url.pathname.startsWith('/p/')) {
                         sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                             source: 'feed',
-                            topic: urlTopic,
+                            community: urlCommunity,
                             at: Date.now()
                         }));
                         sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
-                            topic: urlTopic,
+                            community: urlCommunity,
                             at: Date.now()
                         }));
                     }
@@ -1560,7 +1560,7 @@ export function useMain({
             window.removeEventListener('click', handleClick, true);
             window.removeEventListener('beforeunload', saveScrollPosition);
         };
-    }, [feedCacheTopic, urlTopic]);
+    }, [feedCacheCommunity, urlCommunity]);
 
     // Track if scroll has been restored to prevent multiple restorations
     const scrollRestoredRef = useRef(false);
@@ -1577,9 +1577,9 @@ export function useMain({
         // Wait for posts to be loaded
         if (stableOrder.length === 0) return;
         try {
-            const savedScrollRaw = sessionStorage.getItem(getFeedKey(feedCacheTopic, 'scroll'));
+            const savedScrollRaw = sessionStorage.getItem(getFeedKey(feedCacheCommunity, 'scroll'));
             const fromSession = savedScrollRaw ? parseInt(savedScrollRaw, 10) : 0;
-            const fromMem = Number(readMemFeedState(feedCacheTopic)?.scroll || 0);
+            const fromMem = Number(readMemFeedState(feedCacheCommunity)?.scroll || 0);
             const scrollY = Number.isFinite(fromSession) && fromSession > 0 ? fromSession : Number.isFinite(fromMem) && fromMem > 0 ? fromMem : 0;
             if (scrollY > 0) {
                 scrollRestoredRef.current = true;
@@ -1594,7 +1594,7 @@ export function useMain({
                 });
             }
         } catch (_) { }
-    }, [feedCacheTopic, stableOrder.length]);
+    }, [feedCacheCommunity, stableOrder.length]);
 
     // Listen for global hard refresh requests (from header)
     useEffect(() => {
@@ -1609,36 +1609,36 @@ export function useMain({
                 setHasMorePosts(false);
                 setCurrentPage(1);
                 setStableOrder([]);
-                // Refresh current visible topic
-                getPosts(urlTopic, null, 1);
+                // Refresh current visible community
+                getPosts(urlCommunity, null, 1);
             } catch (_) {/* noop */ }
         };
-        const applyBlockedTopic = raw => {
-            const topic = String(raw || '').trim().toLowerCase();
-            if (!topic) return;
-            setBlockedTopicsLocal(prev => new Set([...prev, topic]));
-            console.debug('[blocked_topics] optimistic pattern added', {
-                topic
+        const applyBlockedCommunity = raw => {
+            const community = String(raw || '').trim().toLowerCase();
+            if (!community) return;
+            setBlockedCommunitiesLocal(prev => new Set([...prev, community]));
+            console.debug('[blocked_communities] optimistic pattern added', {
+                community
             });
         };
-        const removeBlockedTopic = raw => {
-            const topic = String(raw || '').trim().toLowerCase();
-            if (!topic) return;
-            setBlockedTopicsLocal(prev => {
+        const removeBlockedCommunity = raw => {
+            const community = String(raw || '').trim().toLowerCase();
+            if (!community) return;
+            setBlockedCommunitiesLocal(prev => {
                 const next = new Set(prev);
-                next.delete(topic);
+                next.delete(community);
                 return next;
             });
-            console.debug('[blocked_topics] optimistic pattern removed', {
-                topic
+            console.debug('[blocked_communities] optimistic pattern removed', {
+                community
             });
         };
         const onCommunityBlocked = e => {
-            applyBlockedTopic(e?.detail?.community || '');
+            applyBlockedCommunity(e?.detail?.community || '');
             handler();
         };
         const onCommunityUnblocked = e => {
-            removeBlockedTopic(e?.detail?.community || '');
+            removeBlockedCommunity(e?.detail?.community || '');
             handler();
         };
         window.addEventListener('mirageRefreshFeed', handler);
@@ -1650,10 +1650,10 @@ export function useMain({
             window.removeEventListener('communityUnblocked', onCommunityUnblocked);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [getPosts, urlTopic]);
+    }, [getPosts, urlCommunity]);
     return {
-        urlTopic,
-        currentTopicRef,
+        urlCommunity,
+        currentCommunityRef,
         error,
         stableOrder,
         setStableOrder,
@@ -1670,13 +1670,13 @@ export function useMain({
         flashingPostsSet,
         isLoadingMore,
         isMobile,
-        isTopicBlockedLocal,
+        isCommunityBlockedLocal,
         location,
         viewerAddress,
         joinedCommunitiesSet,
         setJoinedCommunitiesSet,
-        topicFollowHover,
-        setTopicFollowHover,
+        communityFollowHover,
+        setCommunityFollowHover,
         isCommunityPending,
         formatCommunityStatus,
         forceHardRefreshRef,

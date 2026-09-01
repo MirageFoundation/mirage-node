@@ -27,14 +27,14 @@ import CommunityMembershipButton from "../components/CommunityMembershipButton";
  *
  * Rules (`docs/guides/web-theme-default/RULES.md`):
  *  - R1 search + list sit on `theme.colors.bg`.
- *  - R2 every color routed through a token (topic tag badge still uses
+ *  - R2 every color routed through a token (community tag badge still uses
  *    `tagColors` from the shared `useDiscover` util which already pairs
  *    bg/border/text — left unchanged per R4 "do not hard-code tag
  *    icon / color").
  *  - R3 no row dividers (matches AgentsView decision).
  *  - R4 data parity with `themes/bluemoon/routes/DiscoverView.js`;
- *    visual language from `mirage-mobile-app/src/pages/topics-list-screen.tsx`
- *    (search pill on top, topic rows with `#topic`, post/comment meta,
+ *    visual language from `mirage-mobile-app/src/pages/communities-list-screen.tsx`
+ *    (search pill on top, community rows with `#community`, post/comment meta,
  *    Follow action on the right).
  *  - R5 search input focuses on `borderStrong` with no blue ring.
  *  - R7 page heading 1.1rem/700, section label 0.6rem/700 uppercase,
@@ -224,7 +224,7 @@ const RowMain = styled.div`
     gap: 0.15rem;
 `;
 
-const TopicLine = styled.div`
+const CommunityLine = styled.div`
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -232,7 +232,7 @@ const TopicLine = styled.div`
     flex-wrap: wrap;
 `;
 
-const TopicLink = styled(Link)`
+const CommunityLink = styled(Link)`
     color: ${({ theme }) => theme.colors.text};
     text-decoration: none;
     font-size: 0.75rem;
@@ -327,8 +327,8 @@ function formatRowMeta(t) {
 
 export default function DiscoverView({ state }) {
     const {
-        filteredTopics,
-        smallTopicsCount,
+        filteredCommunities,
+        smallCommunitiesCount,
         searchTerm,
         setSearchTerm,
         searchResults,
@@ -361,7 +361,7 @@ export default function DiscoverView({ state }) {
     );
 
     const hasQuery = Boolean(searchTerm.trim());
-    const showSmallHint = !hasQuery && smallTopicsCount > 0;
+    const showSmallHint = !hasQuery && smallCommunitiesCount > 0;
 
     const headerBlock = (
         <>
@@ -405,9 +405,9 @@ export default function DiscoverView({ state }) {
         return renderShell(<><HeaderRow><HeaderTitle>Communities</HeaderTitle></HeaderRow><StateBlock><StateTitle>Couldn’t load communities</StateTitle><StateMessage>{error}</StateMessage></StateBlock></>);
     }
 
-    const topicsEmpty = filteredTopics.length === 0 && searchResults.length === 0 && !isSearching;
+    const communitiesEmpty = filteredCommunities.length === 0 && searchResults.length === 0 && !isSearching;
 
-    if (topicsEmpty) {
+    if (communitiesEmpty) {
         return renderShell(
             <>
                 {headerBlock}
@@ -432,27 +432,27 @@ export default function DiscoverView({ state }) {
     }
 
     const renderRow = (t, keyPrefix) => {
-        const topicLower = t.topic.toLowerCase();
-        const isJoined = isJoinedCommunity(t.topic);
-        const pending = isCommunityPending(topicLower);
+        const communityLower = t.community.toLowerCase();
+        const isJoined = isJoinedCommunity(t.community);
+        const pending = isCommunityPending(communityLower);
         const tag = t.dominant_tag ? normalizeTag(t.dominant_tag) : null;
         const meta = formatRowMeta(t);
 
         return (
-            <Row key={`${keyPrefix}-${t.topic}`}>
+            <Row key={`${keyPrefix}-${t.community}`}>
                 <RowMain>
-                    <TopicLine>
-                        <TopicLink to={communityPath(t.topic)}>{communityLabel(t.topic)}</TopicLink>
+                    <CommunityLine>
+                        <CommunityLink to={communityPath(t.community)}>{communityLabel(t.community)}</CommunityLink>
                         {tag && <ContentTagBadge tag={tag} />}
-                    </TopicLine>
+                    </CommunityLine>
                     {meta ? <RowMeta>{meta}</RowMeta> : null}
                 </RowMain>
                 <RowActions>
                     <CommunityMembershipButton
                         joined={isJoined}
                         pending={pending}
-                        statusLabel={formatCommunityStatus(topicLower)}
-                        onToggle={() => handleSubscribeToggle(t.topic)}
+                        statusLabel={formatCommunityStatus(communityLower)}
+                        onToggle={() => handleSubscribeToggle(t.community)}
                     />
                 </RowActions>
             </Row>
@@ -463,13 +463,13 @@ export default function DiscoverView({ state }) {
         <>
             {headerBlock}
 
-            {filteredTopics.length > 0 && (
+            {filteredCommunities.length > 0 && (
                 <>
                     <SectionHeader>
                         <span>{hasQuery ? 'Matching communities' : 'All communities'}</span>
-                        <CountBadge>{filteredTopics.length}</CountBadge>
+                        <CountBadge>{filteredCommunities.length}</CountBadge>
                     </SectionHeader>
-                    <List>{filteredTopics.map((t) => renderRow(t, 'topic'))}</List>
+                    <List>{filteredCommunities.map((t) => renderRow(t, 'community'))}</List>
                 </>
             )}
 
@@ -489,7 +489,7 @@ export default function DiscoverView({ state }) {
 
             {showSmallHint && (
                 <FootHint>
-                    and {smallTopicsCount} more communit{smallTopicsCount !== 1 ? 'ies' : 'y'} with fewer than 10 posts
+                    and {smallCommunitiesCount} more communit{smallCommunitiesCount !== 1 ? 'ies' : 'y'} with fewer than 10 posts
                 </FootHint>
             )}
         </>

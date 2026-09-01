@@ -68,7 +68,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -85,7 +84,6 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
@@ -105,10 +103,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
@@ -136,10 +134,10 @@ def test_security(backend: str):
         pub = free_wallet.public_key().public_key_bytes
         ts = _now_ms()
         nonce = _fresh_nonce()
-        topic_a = f"topic{_rand_str(4)}"
+        community_a = f"community{_rand_str(4)}"
 
         base_a = _canon_base_post_raw(
-            pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce
+            pub, _lb_bytes(lb), diff, ts, "", community_a, "Original", "original content", "", 0, None, nonce
         )
         proof = compute_pow(base_a, diff, base_bits, pow_factor, lb)
         signed_a = canon_signed_with_pow(base_a, int(proof))
@@ -155,7 +153,7 @@ def test_security(backend: str):
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": "",
-            "topic": topic_a,
+            "community": community_a,
             "title": "Original",
             "content": "HACKED content",
             "protocol_version": 1,
@@ -179,19 +177,19 @@ def test_security(backend: str):
         pub = free_wallet.public_key().public_key_bytes
         ts1 = _now_ms()
         nonce1 = _fresh_nonce()
-        topic1 = f"topic{_rand_str(4)}"
+        community1 = f"community{_rand_str(4)}"
 
         base1 = _canon_base_post_raw(
-            pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1
+            pub, _lb_bytes(lb), diff, ts1, "", community1, "First", "first content", "", 0, None, nonce1
         )
         proof1 = compute_pow(base1, diff, base_bits, pow_factor, lb)
 
         # Build a different message and reuse proof1
         ts2 = _now_ms()
         nonce2 = _fresh_nonce()
-        topic2 = f"topic{_rand_str(4)}"
+        community2 = f"community{_rand_str(4)}"
         base2 = _canon_base_post_raw(
-            pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2
+            pub, _lb_bytes(lb), diff, ts2, "", community2, "Second", "second content", "", 0, None, nonce2
         )
         signed2 = canon_signed_with_pow(base2, int(proof1))
         sig2 = sign_canonical(free_wallet, signed2)
@@ -205,7 +203,7 @@ def test_security(backend: str):
             "pow_difficulty": diff,
             "pow": int(proof1),
             "target": "",
-            "topic": topic2,
+            "community": community2,
             "title": "Second",
             "content": "second content",
             "protocol_version": 1,
@@ -234,7 +232,7 @@ def test_security(backend: str):
             backend,
             sub_wallet,
             override_hash=target_post,
-            topic="test",
+            community="test",
             title="Hacked",
             content="hacked body",
             skip_pow=True,
@@ -251,7 +249,7 @@ def test_security(backend: str):
                 backend,
                 sub_wallet,
                 override_hash=comment_txh,
-                topic="",
+                community="",
                 title="",
                 content="hacked comment",
                 target=target_post,
@@ -440,7 +438,7 @@ def test_security(backend: str):
             backend,
             sub_wallet,
             override_hash=del_post,
-            topic="test",
+            community="test",
             title="Edited deleted",
             content="body",
             skip_pow=True,
@@ -482,7 +480,7 @@ def test_security(backend: str):
                 backend,
                 sub_wallet,
                 override_hash=race_post,
-                topic="test",
+                community="test",
                 title=f"Rapid edit {i}",
                 content=f"rapid body {i}",
                 skip_pow=True,
@@ -881,8 +879,10 @@ def test_validation(backend: str):
             pub = sub_wallet.public_key().public_key_bytes
             ts = _now_ms()
             nonce = _fresh_nonce()
-            topic = f"topic{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
+            community = f"community{_rand_str(4)}"
+            base = _canon_base_post_raw(
+                pub, _lb_bytes(lb), 0, ts, "", community, "Tag test", "body", tag, 0, None, nonce
+            )
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub_wallet, signed)
             payload = {
@@ -894,7 +894,7 @@ def test_validation(backend: str):
                 "pow_difficulty": 0,
                 "pow": 0,
                 "target": "",
-                "topic": topic,
+                "community": community,
                 "title": "Tag test",
                 "content": "body",
                 "tag": tag,
@@ -978,8 +978,8 @@ def test_relay_signing(backend: str):
     code, which shipped a 1-byte placeholder signature.
     """
     wallet = WALLETS["sub1"]
-    topic = f"relaysig{_rand_str(5)}"
-    resp = _do_follow_topic(backend, wallet, topic)
+    community = f"relaysig{_rand_str(5)}"
+    resp = _do_follow_topic(backend, wallet, community)
     txh = str((resp or {}).get("tx_hash", "") or "").strip().lower()
     if not txh:
         _fail("relay_signing.tx_submitted", f"no tx_hash in response: {str(resp)[:200]}")
@@ -987,7 +987,7 @@ def test_relay_signing(backend: str):
     _pass("relay_signing.tx_submitted")
 
     # Tx indexing is disabled on Mirage nodes, so fetch the decoded tx from the
-    # block it landed in and match it by topic.
+    # block it landed in and match it by community.
     tx = None
     deadline = time.time() + 30
     scanned = 0
@@ -1003,7 +1003,10 @@ def test_relay_signing(backend: str):
                 if not messages:
                     continue
                 msg = messages[0]
-                if str(msg.get("@type", "")) == "/mirage.core.v1.MsgJoinCommunity" and msg.get("community") == topic:
+                if (
+                    str(msg.get("@type", "")) == "/mirage.core.v1.MsgJoinCommunity"
+                    and msg.get("community") == community
+                ):
                     tx = candidate
                     _debug(f"relay_signing found tx at height={height}")
                     break
@@ -1012,7 +1015,7 @@ def test_relay_signing(backend: str):
         if tx is None:
             time.sleep(2)
     if not tx:
-        _fail("relay_signing.tx_fetched", f"tx {txh} (topic {topic}) not found in {scanned} scanned blocks")
+        _fail("relay_signing.tx_fetched", f"tx {txh} (community {community}) not found in {scanned} scanned blocks")
         return
     _pass("relay_signing.tx_fetched")
 
@@ -1160,7 +1163,7 @@ def test_envelope_timestamp_window(backend: str):
     _debug(f"envelope_window max_age={max_age_s}s future_skew={future_skew_s}s")
 
     wallet = WALLETS["sub1"]
-    topic = f"tswindow{_rand_str(5)}"
+    community = f"tswindow{_rand_str(5)}"
 
     for label, ts_ms in (
         ("too_old", _now_ms() - (max_age_s + 5) * 1000),
@@ -1169,7 +1172,7 @@ def test_envelope_timestamp_window(backend: str):
         status, resp = _do_post_at_timestamp(
             backend,
             wallet,
-            topic,
+            community,
             f"TS {label} {_rand_str(5)}",
             f"Body {_rand_str(8)}",
             ts_ms,
@@ -1188,7 +1191,7 @@ def test_envelope_timestamp_window(backend: str):
     status, resp = _do_post_at_timestamp(
         backend,
         wallet,
-        topic,
+        community,
         f"TS inside {_rand_str(5)}",
         f"Body {_rand_str(8)}",
         _now_ms() - 2000,
@@ -1728,12 +1731,16 @@ def _check_active_node_sites():
 
     /network lists every reachable node, http included: a node reached by IP can
     hold no certificate, so requiring https there hid real nodes and had the page
-    reporting two servers while four ran. The fan-out list is the one that decides
-    who is handed the admin's signed proof, and it stays narrow -- https, and a
-    name rather than a bare address, since no certificate proves an IP. A host
-    that resolves inside the network is dropped from both. Called with the
-    caller's stubbed resolver still installed, so `evil.example` resolves
-    privately here.
+    reporting two servers while four ran. A node whose operator published no
+    address at all is found from this node's P2P connections, but an address
+    nobody put on chain is listed only once a challenge proves a bonded
+    validator answers there -- otherwise peering would be enough to appear.
+
+    The fan-out list is the one that decides who is handed the admin's signed
+    proof, and it stays narrow -- https, and a name rather than a bare address,
+    since no certificate proves an IP. A host that resolves inside the network is
+    dropped from both. Called with the caller's stubbed resolver still installed,
+    so `evil.example` resolves privately here.
     """
     try:
         import fleet
@@ -1742,16 +1749,24 @@ def _check_active_node_sites():
         return
 
     original_lookup = fleet.get_active_validators
+    original_peers = fleet.get_connected_peers
+    original_probe = fleet._probe
+    original_local = fleet._local_operator
 
-    def _stub(monikers):
+    def _stub(monikers, peer_ips=(), proves=None):
+        proved = dict(proves or {})
         fleet.get_active_validators = lambda: [
             {"moniker": m, "operator_address": f"miragevaloper{i}"} for i, m in enumerate(monikers)
         ]
+        fleet.get_connected_peers = lambda: [{"ip": ip, "moniker": ""} for ip in peer_ips]
+        fleet._local_operator = lambda: ""
+        fleet._probe = lambda url: proved.get(url)
         fleet._sites_cache = []
         fleet._sites_cached_at = 0.0
+        fleet._sites_cache_ttl = 0.0
 
-    def _sites(monikers):
-        _stub(monikers)
+    def _sites(monikers, peer_ips=(), proves=None):
+        _stub(monikers, peer_ips, proves)
         return fleet.active_node_sites()
 
     def _fanout(monikers):
@@ -1762,14 +1777,15 @@ def _check_active_node_sites():
         cases = {
             # (monikers) -> displayed sites
             ("mirage.talk", "https://mirage.vote"): ["https://mirage.talk", "https://mirage.vote"],
-            # Shown now. A validator serving plain http is still a real node.
+            # Shown. A validator serving plain http is still a real node.
             ("http://mirage.talk",): ["http://mirage.talk"],
             # A global IP is a place a visitor can go; schemeless still means https.
             ("93.184.216.34",): ["https://93.184.216.34"],
             ("http://93.184.216.34",): ["http://93.184.216.34"],
             # Resolves inside the network: dropped, listed or not.
             ("evil.example",): [],
-            # Names nowhere reachable, so there is no link to offer.
+            # Names nowhere reachable. The chain offers no link, and nothing was
+            # discovered elsewhere, so there is still nothing to show.
             ("frankfurt-node", "", "no-dot"): [],
             ("mirage.talk", "MIRAGE.TALK", "https://mirage.talk"): ["https://mirage.talk"],
         }
@@ -1778,6 +1794,54 @@ def _check_active_node_sites():
             _pass("fleet.sites_include_reachable_http_nodes", checked=len(cases))
         else:
             _fail("fleet.sites_include_reachable_http_nodes", f"mismatches: {wrong}")
+
+        # A nickname moniker no longer hides a running node: the address comes
+        # from the P2P connection and the node proves the address is its own.
+        nickname = _sites(
+            ("EuroServer",), peer_ips=("93.184.216.34",), proves={"http://93.184.216.34": "miragevaloper0"}
+        )
+        if nickname == ["http://93.184.216.34"]:
+            _pass("fleet.peer_discovered_node_listed_on_proof")
+        else:
+            _fail("fleet.peer_discovered_node_listed_on_proof", f"got {nickname}")
+
+        # ...but peering alone must not be enough, or anyone who connects to this
+        # node lands on /network. Both of these have a live P2P connection.
+        unproved = [
+            # nothing answered the challenge
+            ("silent", {}),
+            # something answered, for a validator that is not in the active set
+            ("stranger", {"http://93.184.216.34": "miragevaloper_stranger"}),
+        ]
+        leaked = {
+            label: got
+            for label, proves in unproved
+            if (got := _sites(("EuroServer",), ("93.184.216.34",), proves)) != []
+        }
+        if not leaked:
+            _pass("fleet.unproved_peer_not_listed", checked=len(unproved))
+        else:
+            _fail("fleet.unproved_peer_not_listed", f"listed without proof: {leaked}")
+
+        # A node already listed from its moniker must not appear a second time as
+        # a bare IP just because it is also a peer -- including when the published
+        # address is not answering, or a blip would swap a domain for an IP.
+        dupes = {
+            "published address confirmed": {
+                "https://mirage.talk": "miragevaloper0",
+                "http://93.184.216.34": "miragevaloper0",
+            },
+            "published address silent": {"http://93.184.216.34": "miragevaloper0"},
+        }
+        wrong = {
+            label: got
+            for label, proves in dupes.items()
+            if (got := _sites(("https://mirage.talk",), ("93.184.216.34",), proves)) != ["https://mirage.talk"]
+        }
+        if not wrong:
+            _pass("fleet.one_entry_per_validator", checked=len(dupes))
+        else:
+            _fail("fleet.one_entry_per_validator", f"mismatches: {wrong}")
 
         # The credential boundary must not have moved with the display list.
         fanout_cases = {
@@ -1793,26 +1857,38 @@ def _check_active_node_sites():
         else:
             _fail("fleet.fanout_stays_authenticated_only", f"mismatches: {wrong}")
 
-        # The list is cached, so a page view cannot turn into a fan of lookups.
-        calls = {"n": 0}
+        # The list is cached, so a page view cannot turn into a fan of lookups
+        # and a probe of every node in the network.
+        calls = {"chain": 0, "probes": 0}
 
         def _counting():
-            calls["n"] += 1
+            calls["chain"] += 1
             return [{"moniker": "mirage.vote", "operator_address": "v"}]
 
+        def _counting_probe(url):
+            calls["probes"] += 1
+            return "v"
+
+        _stub(())
         fleet.get_active_validators = _counting
+        fleet._probe = _counting_probe
         fleet._sites_cache = []
         fleet._sites_cached_at = 0.0
+        fleet._sites_cache_ttl = 0.0
         fleet.active_node_sites()
         fleet.active_node_sites()
-        if calls["n"] == 1:
+        if calls == {"chain": 1, "probes": 1}:
             _pass("fleet.sites_cached")
         else:
-            _fail("fleet.sites_cached", f"{calls['n']} chain reads for two calls, expected 1")
+            _fail("fleet.sites_cached", f"{calls} for two calls, expected one of each")
     finally:
         fleet.get_active_validators = original_lookup
+        fleet.get_connected_peers = original_peers
+        fleet._probe = original_probe
+        fleet._local_operator = original_local
         fleet._sites_cache = []
         fleet._sites_cached_at = 0.0
+        fleet._sites_cache_ttl = 0.0
 
 
 def test_analytics_identity_trust(backend):

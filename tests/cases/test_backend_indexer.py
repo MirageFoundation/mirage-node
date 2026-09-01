@@ -49,16 +49,16 @@ from tests.backend_helpers import (
 )
 
 
-def _topic_stats(owner: str, topic: str) -> tuple[int, int, int]:
-    """Return (vote_count, net_votes, post_count) for one (owner, topic) row."""
+def _community_stats(owner: str, community: str) -> tuple[int, int, int]:
+    """Return (vote_count, net_votes, post_count) for one (owner, community) row."""
     db_name = _get_indexer_db_name()
     rc, out = _docker_exec(
         f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT vote_count, net_votes, post_count
-FROM user_topic_stats WHERE owner = LOWER('{owner}') AND topic = LOWER('{topic}');\\" 2>&1" """,
+FROM user_community_stats WHERE owner = LOWER('{owner}') AND community = LOWER('{community}');\\" 2>&1" """,
         timeout=15,
     )
     if rc != 0:
-        raise RuntimeError(f"user_topic_stats query failed rc={rc} out={out}")
+        raise RuntimeError(f"user_community_stats query failed rc={rc} out={out}")
     line = out.strip()
     if not line:
         return (0, 0, 0)
@@ -66,18 +66,18 @@ FROM user_topic_stats WHERE owner = LOWER('{owner}') AND topic = LOWER('{topic}'
     return (int(vote_count), int(net_votes), int(post_count))
 
 
-def test_indexer_topic_edit(backend: str):
-    """Editing a root post's topic must carry the thread's standing with it.
+def test_indexer_community_edit(backend: str):
+    """Editing a root post's community must carry the thread's standing with it.
 
-    `user_topic_stats` is applied as deltas but means "votes whose post is in this
-    topic now", so before v1.34.0 a topic edit stranded every earlier delta —
-    including the author's post-time auto-upvote — on the old topic forever. The
-    comment is here because its own denormalised root_topic has to follow the root
-    too, otherwise a vote on it stays counted against the original topic.
+    `user_community_stats` is applied as deltas but means "votes whose post is in this
+    community now", so before v1.34.0 a community edit stranded every earlier delta —
+    including the author's post-time auto-upvote — on the old community forever. The
+    comment is here because its own denormalised root_community has to follow the root
+    too, otherwise a vote on it stays counted against the original community.
     """
 
     if not _check_local_docker():
-        _fail("topic_edit.reattribution", "local docker required")
+        _fail("community_edit.reattribution", "local docker required")
         return
 
     author = WALLETS["sub1"]
@@ -86,20 +86,22 @@ def test_indexer_topic_edit(backend: str):
     voter_addr = str(voter.address()).lower()
 
     suffix = _rand_str(6).lower()
-    old_topic = f"tea{suffix}"
-    new_topic = f"teb{suffix}"
+    old_community = f"tea{suffix}"
+    new_community = f"teb{suffix}"
 
-    root_hash = _do_post(backend, author, old_topic, f"Topic edit {suffix}", "reattribution probe", skip_pow=True)
+    root_hash = _do_post(
+        backend, author, old_community, f"Community edit {suffix}", "reattribution probe", skip_pow=True
+    )
     if not root_hash:
-        _fail("topic_edit.setup", "root post was not accepted")
+        _fail("community_edit.setup", "root post was not accepted")
         return
     if not _wait_indexed(backend, author_addr, root_hash):
-        _fail("topic_edit.setup", f"root post {root_hash[:12]} never indexed")
+        _fail("community_edit.setup", f"root post {root_hash[:12]} never indexed")
         return
 
     comment_hash = _do_post(backend, voter, "", "", "comment under the probe", target=root_hash, skip_pow=True)
     if not comment_hash or not _wait_indexed(backend, voter_addr, comment_hash):
-        _fail("topic_edit.setup", "comment under the root post never indexed")
+        _fail("community_edit.setup", "comment under the root post never indexed")
         return
 
     _do_vote(backend, voter, root_hash, 1, skip_pow=True)
@@ -107,37 +109,37 @@ def test_indexer_topic_edit(backend: str):
     _wait_next_block()
     time.sleep(3)
 
-    before_author = _topic_stats(author_addr, old_topic)
-    before_voter = _topic_stats(voter_addr, old_topic)
-    _debug(f"topic_edit: before edit {old_topic} author={before_author} voter={before_voter}")
+    before_author = _community_stats(author_addr, old_community)
+    before_voter = _community_stats(voter_addr, old_community)
+    _debug(f"community_edit: before edit {old_community} author={before_author} voter={before_voter}")
     if before_author == (0, 0, 0) and before_voter == (0, 0, 0):
-        _fail("topic_edit.setup", f"no standing recorded under {old_topic}; nothing to re-attribute")
+        _fail("community_edit.setup", f"no standing recorded under {old_community}; nothing to re-attribute")
         return
 
     edit = _do_edit(
         backend,
         author,
         root_hash,
-        new_topic,
-        f"Topic edit {suffix}",
+        new_community,
+        f"Community edit {suffix}",
         "reattribution probe",
         skip_pow=True,
     )
     edit_hash = str((edit or {}).get("tx_hash", "")).lower()
     delivered = _wait_tx_deliver(edit_hash) if edit_hash else None
     if not delivered or delivered[0] != 0:
-        _fail("topic_edit.setup", f"topic edit was not delivered cleanly: {edit} result={delivered}")
+        _fail("community_edit.setup", f"community edit was not delivered cleanly: {edit} result={delivered}")
         return
     _wait_next_block()
     time.sleep(3)
 
-    after_old_author = _topic_stats(author_addr, old_topic)
-    after_old_voter = _topic_stats(voter_addr, old_topic)
-    after_new_author = _topic_stats(author_addr, new_topic)
-    after_new_voter = _topic_stats(voter_addr, new_topic)
+    after_old_author = _community_stats(author_addr, old_community)
+    after_old_voter = _community_stats(voter_addr, old_community)
+    after_new_author = _community_stats(author_addr, new_community)
+    after_new_voter = _community_stats(voter_addr, new_community)
     _debug(
-        f"topic_edit: after edit {old_topic} author={after_old_author} voter={after_old_voter} "
-        f"| {new_topic} author={after_new_author} voter={after_new_voter}"
+        f"community_edit: after edit {old_community} author={after_old_author} voter={after_old_voter} "
+        f"| {new_community} author={after_new_author} voter={after_new_voter}"
     )
 
     stranded = [
@@ -146,32 +148,35 @@ def test_indexer_topic_edit(backend: str):
         if stats != (0, 0, 0)
     ]
     if stranded:
-        _fail("topic_edit.old_topic_released", f"standing left on {old_topic}: {', '.join(stranded)}")
+        _fail("community_edit.old_community_released", f"standing left on {old_community}: {', '.join(stranded)}")
     else:
-        _pass("topic_edit.old_topic_released")
+        _pass("community_edit.old_community_released")
 
     if after_new_author == before_author and after_new_voter == before_voter:
-        _pass("topic_edit.new_topic_holds_standing")
+        _pass("community_edit.new_community_holds_standing")
     else:
         _fail(
-            "topic_edit.new_topic_holds_standing",
+            "community_edit.new_community_holds_standing",
             f"expected author={before_author} voter={before_voter}, "
             f"got author={after_new_author} voter={after_new_voter}",
         )
 
-    # The whole thread must agree on the topic, or a vote on the comment keeps
-    # being counted against the topic the root left behind.
+    # The whole thread must agree on the community, or a vote on the comment keeps
+    # being counted against the community the root left behind.
     db_name = _get_indexer_db_name()
     rc, out = _docker_exec(
         f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT COALESCE(root_community, '')
 FROM posts WHERE LOWER(txhash) = LOWER('{comment_hash}');\\" 2>&1" """,
         timeout=15,
     )
-    comment_root_topic = out.strip().lower() if rc == 0 else f"query failed: {out}"
-    if comment_root_topic == new_topic:
-        _pass("topic_edit.comment_follows_root")
+    comment_root_community = out.strip().lower() if rc == 0 else f"query failed: {out}"
+    if comment_root_community == new_community:
+        _pass("community_edit.comment_follows_root")
     else:
-        _fail("topic_edit.comment_follows_root", f"comment root_topic={comment_root_topic!r}, expected {new_topic!r}")
+        _fail(
+            "community_edit.comment_follows_root",
+            f"comment root_community={comment_root_community!r}, expected {new_community!r}",
+        )
 
 
 def test_indexer(backend: str):
@@ -736,7 +741,7 @@ class _StubEditDB:
         self.writes: list[str] = []
 
     def get_post(self, txhash: str):
-        # (topic, title, content, target, paid, thumbnail_url, created_at, media, deleted)
+        # (community, title, content, target, paid, thumbnail_url, created_at, media, deleted)
         return ("technology", "original title", "original content", "", True, None, 1000, None, self._deleted)
 
     def get_post_owner(self, txhash: str) -> str:
@@ -764,6 +769,9 @@ class _StubCurationDB:
 
     def execute(self, sql, params=()):
         self.statements.append((" ".join(str(sql).split()), tuple(params)))
+
+    def executemany(self, sql, params):
+        self.statements.append((" ".join(str(sql).split()), tuple(tuple(row) for row in params)))
 
     def __enter__(self):
         return self
@@ -890,6 +898,83 @@ def test_indexer_hardening(backend: str):
         _fail("indexer_hardening.membership_event_fails_hard", "community_joined without address was accepted")
     except RuntimeError:
         _pass("indexer_hardening.membership_event_fails_hard")
+
+    # ── Creator payouts must reach the public indexer projection ─────────
+
+    class _CreatorChain:
+        @staticmethod
+        def query_creator_epoch(epoch_id):
+            return {
+                "epoch_id": epoch_id,
+                "pool": "1000",
+                "status": 3,
+                "phase": 1,
+                "gross_records": 1,
+                "active_engagers": 1,
+                "engager_slice": "1000",
+                "allocated_total": "1000",
+                "claimed_total": "0",
+                "finalized_epoch": epoch_id + 1,
+                "claim_window_days": 30,
+                "claim_deadline_epoch": epoch_id + 32,
+                "settlement_cursor": None,
+                "partial_actor": None,
+                "partial_count": 0,
+                "prune_pending": False,
+                "prune_complete": False,
+            }
+
+        @staticmethod
+        def query_creator_epoch_accruals(epoch_id):
+            return [
+                {
+                    "creator": "mirage1creator",
+                    "epoch_id": epoch_id,
+                    "earned": "1000",
+                    "claimed": "0",
+                    "claimed_height": None,
+                    "claimed_txhash": None,
+                }
+            ]
+
+    creator_db = _StubCurationDB()
+    creator_proc = MessageProcessor(creator_db, _CreatorChain(), lambda *a, **k: None, lambda t: "")
+    creator_proc.process_creator_events(
+        [
+            {
+                "type": "creator_epoch_claimable",
+                "attributes": [{"key": "epoch", "value": "20696"}],
+            }
+        ],
+        4244,
+    )
+    epoch_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_epochs" in s]
+    accrual_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_accruals" in s]
+    if (
+        len(epoch_writes) == 1
+        and epoch_writes[0][0] == 20696
+        and len(accrual_writes) == 1
+        and accrual_writes[0][0][0] == "mirage1creator"
+        and accrual_writes[0][0][2] == "1000"
+    ):
+        _pass("indexer_hardening.creator_rewards_projected")
+    else:
+        _fail(
+            "indexer_hardening.creator_rewards_projected",
+            f"epochs={epoch_writes!r} accruals={accrual_writes!r}",
+        )
+    begin_event = {
+        "type": "creator_epoch_claimable",
+        "attributes": [{"key": "epoch", "value": "20696"}],
+    }
+    merged_events = indexer_main.Indexer._all_block_events({"begin_block_events": [begin_event]})
+    if merged_events == [begin_event]:
+        _pass("indexer_hardening.creator_begin_block_events_included")
+    else:
+        _fail(
+            "indexer_hardening.creator_begin_block_events_included",
+            f"merged={merged_events!r}",
+        )
 
     # ── A curator's empty tag is a decision; only `cleared` removes the row ──
     #
@@ -1223,7 +1308,7 @@ def test_indexer_hardening(backend: str):
 
         # A soft delete is terminal. upsert_post writes `deleted` from an argument
         # that defaults to False, so an edit that does not check the stored flag
-        # republishes a post its author removed — and leaves user_topic_stats short,
+        # republishes a post its author removed — and leaves user_community_stats short,
         # because delete_post recomputed it from the canonical tables and an edit
         # applies no delta. The author is the one editing here, so this cannot pass
         # on the ownership check.
@@ -1315,7 +1400,7 @@ def test_indexer_hardening(backend: str):
 
     import inspect
 
-    stats_params = inspect.signature(DatabaseManager.update_user_topic_stats).parameters
+    stats_params = inspect.signature(DatabaseManager.update_user_community_stats).parameters
     if "net_votes_delta" in stats_params and "direction" not in stats_params:
         _pass("indexer_hardening.net_votes_delta_signature")
     else:
@@ -1603,10 +1688,10 @@ def test_indexer_hardening(backend: str):
             "SEEN_TXS_CLEANUP_BATCH",
             "DB_LIST_CAP_MULTIPLIER",
             "DB_MAX_FOLLOWED_USERS",
-            "DB_MAX_FOLLOWED_TOPICS",
+            "DB_MAX_FOLLOWED_COMMUNITYS",
             "DB_MAX_BLOCKED_USERS",
             "DB_MAX_BLOCKED_POSTS",
-            "DB_MAX_BLOCKED_TOPICS",
+            "DB_MAX_BLOCKED_COMMUNITYS",
         )
         if hasattr(indexer_settings, n)
     ]
@@ -1702,7 +1787,7 @@ def _indexer_hardening_2026_08_14_checks() -> None:
     # ── M-3: deleting a post retracts the standing it granted ────────────
     #
     # post_count and the author's own auto-upvote must both drop out of the
-    # canonical definition, or post-and-delete cycling manufactures the topic
+    # canonical definition, or post-and-delete cycling manufactures the community
     # standing that gates downvote weight while leaving no visible content.
     post_sql = " ".join(DatabaseManager._POST_STATS_FROM_CANONICAL.split())
     vote_sql = " ".join(DatabaseManager._VOTE_STATS_FROM_CANONICAL.split())
@@ -1907,7 +1992,7 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
         "indexer_hardening.legacy_backfill_uses_savepoint",
         "indexer_hardening.unblock_pattern_escaped",
         "indexer_hardening.ancestor_walk_bounded",
-        "indexer_hardening.delete_retracts_topic_standing",
+        "indexer_hardening.delete_retracts_community_standing",
     ]
 
     db_url = os.environ.get("INDEXER_DB_URL", "").strip()
@@ -1949,7 +2034,7 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
                 cur.execute("ALTER TABLE posts ADD CONSTRAINT no_backfill CHECK (root_community IS NULL)")
         try:
             with db.transaction(label="hardening_savepoint"):
-                resolved = db.get_root_topic_for_post("legacy1")
+                resolved = db.get_root_community_for_post("legacy1")
                 # The real assertion: the transaction is still usable afterwards.
                 with db._connect() as conn:
                     with conn.cursor() as cur:
@@ -1978,11 +2063,11 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
                     [("100%", 1), ("a_b", 2), ("spo*", 3)],
                 )
         wildcard_bugs = []
-        if db.unblock_topics_matching("u", "1000") != 0:
-            wildcard_bugs.append("stored % matched an unrelated topic")
-        if db.unblock_topics_matching("u", "axb") != 0:
-            wildcard_bugs.append("stored _ matched an unrelated topic")
-        if db.unblock_topics_matching("u", "sports") != 1:
+        if db.unblock_communities_matching("u", "1000") != 0:
+            wildcard_bugs.append("stored % matched an unrelated community")
+        if db.unblock_communities_matching("u", "axb") != 0:
+            wildcard_bugs.append("stored _ matched an unrelated community")
+        if db.unblock_communities_matching("u", "sports") != 1:
             wildcard_bugs.append("* no longer globs")
         if wildcard_bugs:
             _fail("indexer_hardening.unblock_pattern_escaped", "; ".join(wildcard_bugs))
@@ -2034,8 +2119,8 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
                     "INSERT INTO votes(txhash, owner, target, user_vote, created_at) "
                     "VALUES('vh','honest','p0',1.0,1)"
                 )
-                db._recompute_topic_stats(cur, ["attacker", "honest"], ["tech"])
-                cur.execute("SELECT post_count FROM user_topic_stats WHERE owner='attacker' AND topic='tech'")
+                db._recompute_community_stats(cur, ["attacker", "honest"], ["tech"])
+                cur.execute("SELECT post_count FROM user_community_stats WHERE owner='attacker' AND community='tech'")
                 seeded = cur.fetchone()
 
         for i in range(3):
@@ -2045,12 +2130,12 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT vote_count, net_votes, unique_root_posts, post_count "
-                    "FROM user_topic_stats WHERE owner='attacker' AND topic='tech'"
+                    "FROM user_community_stats WHERE owner='attacker' AND community='tech'"
                 )
                 attacker = cur.fetchone()
                 cur.execute(
                     "SELECT vote_count, net_votes, unique_root_posts "
-                    "FROM user_topic_stats WHERE owner='honest' AND topic='tech'"
+                    "FROM user_community_stats WHERE owner='honest' AND community='tech'"
                 )
                 honest = cur.fetchone()
 
@@ -2062,9 +2147,9 @@ def _indexer_hardening_sql_behaviour_checks() -> None:
         if honest != (1, 1, 1):
             problems.append(f"an unrelated voter lost standing they earned: {honest}")
         if problems:
-            _fail("indexer_hardening.delete_retracts_topic_standing", "; ".join(problems))
+            _fail("indexer_hardening.delete_retracts_community_standing", "; ".join(problems))
         else:
-            _pass("indexer_hardening.delete_retracts_topic_standing")
+            _pass("indexer_hardening.delete_retracts_community_standing")
 
     except Exception as e:
         _fail("indexer_hardening.sql_behaviour_harness", f"{type(e).__name__}: {e}")
@@ -2164,7 +2249,7 @@ WHERE COALESCE(deleted, FALSE) = FALSE AND deleted_height IS NOT NULL;\\" 2>&1" 
             )
 
     # net_votes must equal the sum of the user's current canonical vote signs in
-    # that topic. Re-votes and cleared votes are what used to break it.
+    # that community. Re-votes and cleared votes are what used to break it.
     #
     # The canonical sum below must exclude an author's own vote on their own
     # deleted post, matching _VOTE_STATS_FROM_CANONICAL in indexer/database.py.
@@ -2186,18 +2271,18 @@ WHERE COALESCE(deleted, FALSE) = FALSE AND deleted_height IS NOT NULL;\\" 2>&1" 
 
     rc2, out2 = _docker_exec(
         f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT count(*) FROM (
-SELECT s.owner, s.topic
-FROM user_topic_stats s
+SELECT s.owner, s.community
+FROM user_community_stats s
 LEFT JOIN (
   SELECT LOWER(v.owner) AS owner,
-         LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS topic,
+         LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) AS community,
          SUM(CASE WHEN v.user_vote > 0 THEN 1 WHEN v.user_vote < 0 THEN -1 ELSE 0 END)::int AS net
   FROM votes v
   JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
   WHERE COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
     AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
   GROUP BY 1, 2
-) d ON d.owner = s.owner AND d.topic = s.topic
+) d ON d.owner = s.owner AND d.community = s.community
 WHERE s.net_votes <> COALESCE(d.net, 0)
 ) mismatched;\\" 2>&1" """,
         timeout=20,
@@ -2215,7 +2300,7 @@ WHERE s.net_votes <> COALESCE(d.net, 0)
         else:
             _fail(
                 "invariants.net_votes_matches_canonical_votes",
-                f"{mismatched} (owner, topic) rows disagree with their canonical votes",
+                f"{mismatched} (owner, community) rows disagree with their canonical votes",
             )
 
 
@@ -2252,7 +2337,7 @@ def _indexer_hardening_startup_backfill_check() -> None:
     schema = f"hardening_probe_{_rand_str(8)}"
     scratch_url = f"{db_url}{'&' if '?' in db_url else '?'}options=-csearch_path%3D{schema}"
     owner = f"mirage1probe{_rand_str(20)}"
-    topic = f"probe{_rand_str(6)}"
+    community = f"probe{_rand_str(6)}"
     txhash = _rand_str(64)
 
     admin = None
@@ -2269,14 +2354,14 @@ def _indexer_hardening_startup_backfill_check() -> None:
                 cur.execute(
                     "INSERT INTO posts (txhash, owner, community, root_community, root_post_id, created_at, deleted) "
                     "VALUES (%s, %s, %s, %s, %s, %s, TRUE)",
-                    (txhash, owner, topic, topic, txhash, 1700000000),
+                    (txhash, owner, community, community, txhash, 1700000000),
                 )
                 cur.execute(
                     "INSERT INTO votes (txhash, owner, target, user_vote, created_at) VALUES (%s, %s, %s, %s, %s)",
                     (_rand_str(64), owner, txhash, 1, 1700000000),
                 )
                 # What the repair migration leaves behind: no stats row at all.
-                cur.execute("DELETE FROM user_topic_stats WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                cur.execute("DELETE FROM user_community_stats WHERE LOWER(owner) = LOWER(%s)", (owner,))
 
         # Second init is the restart.
         DatabaseManager(scratch_url)
@@ -2284,9 +2369,9 @@ def _indexer_hardening_startup_backfill_check() -> None:
         with psycopg.connect(scratch_url, autocommit=True) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT vote_count, net_votes, unique_root_posts FROM user_topic_stats "
-                    "WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
-                    (owner, topic),
+                    "SELECT vote_count, net_votes, unique_root_posts FROM user_community_stats "
+                    "WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s)",
+                    (owner, community),
                 )
                 row = cur.fetchone()
 
@@ -2951,8 +3036,8 @@ def test_tx_index(backend: str):
     _debug("tx_index: begin")
     free_addr = str(free.address())
     sub2_addr = str(WALLETS["sub2"].address())
-    agent1_addr = str(WALLETS["agent1"].address())
-    agent2_addr = str(WALLETS["agent2"].address())
+    agent1_addr = str(WALLETS["sub3"].address())
+    agent2_addr = str(WALLETS["sub4"].address())
 
     # Use sub1 (subscriber, level>=1) as actor — free (tier 0) has low limits.
 

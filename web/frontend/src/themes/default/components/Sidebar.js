@@ -175,7 +175,7 @@ const IconBox = styled.span`
     }
 `;
 
-const TopicLink = styled(Link)`
+const CommunityLink = styled(Link)`
     display: block;
     padding: 0.32rem 0.6rem;
     border-radius: 6px;
@@ -255,7 +255,7 @@ const ToggleMore = styled.button`
 const icons = {
     home: { outline: HiOutlineHome, filled: HiHome },
     following: { outline: HiOutlineHeart, filled: HiHeart },
-    topics: { outline: HiOutlineUserGroup, filled: HiUserGroup },
+    communities: { outline: HiOutlineUserGroup, filled: HiUserGroup },
     create: { outline: HiOutlinePlusCircle, filled: HiPlusCircle },
     search: { outline: HiOutlineMagnifyingGlass, filled: HiMagnifyingGlass },
     faq: { outline: HiOutlineQuestionMarkCircle, filled: HiQuestionMarkCircle },
@@ -284,12 +284,12 @@ function Sidebar({ state }) {
     const isLoggedIn = !!(state && state.publicKey);
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
 
-    const [topicsOpen, setTopicsOpen] = useState(true);
+    const [communitiesOpen, setCommunitiesOpen] = useState(true);
     const [usersOpen, setUsersOpen] = useState(true);
-    const [showAllTopics, setShowAllTopics] = useState(false);
+    const [showAllCommunities, setShowAllCommunities] = useState(false);
     const [showAllUsers, setShowAllUsers] = useState(false);
 
-    const [topics, setTopics] = useState(() => loadSubscriptions(viewerAddress));
+    const [communities, setCommunities] = useState(() => loadSubscriptions(viewerAddress));
     const [people, setPeople] = useState(() => loadFollowedAuthors(viewerAddress));
     const [usernamesMap, setUsernamesMap] = useState({});
     const { communities: curatedCommunities } = useViewerCuratorCommunities();
@@ -299,7 +299,7 @@ function Sidebar({ state }) {
     );
     // Curated communities first (including ones you curate but haven't joined),
     // then the rest of the joined list in its existing order.
-    const orderedTopics = useMemo(() => {
+    const orderedCommunities = useMemo(() => {
         const seen = new Set();
         const out = [];
         for (const slug of curatedCommunities) {
@@ -308,29 +308,29 @@ function Sidebar({ state }) {
             seen.add(key);
             out.push(key);
         }
-        for (const topic of topics) {
-            const key = String(topic || '').trim().toLowerCase();
+        for (const community of communities) {
+            const key = String(community || '').trim().toLowerCase();
             if (!key || key === 'all' || key === 'home' || seen.has(key)) continue;
             seen.add(key);
             out.push(key);
         }
         return out;
-    }, [curatedCommunities, topics]);
+    }, [curatedCommunities, communities]);
 
-    const [topicsLimit, setTopicsLimit] = useState(() => {
-        const v = Storage.load('sidebar_topics_limit', 10);
+    const [communitiesLimit, setCommunitiesLimit] = useState(() => {
+        const v = Storage.load('sidebar_communities_limit', 10);
         return Number.isFinite(Number(v)) ? Number(v) : 10;
     });
     const [peopleLimit, setPeopleLimit] = useState(() => {
-        const v = Storage.load('sidebar_people_limit', 10);
+        const v = Storage.load('sidebar_users_limit', 10);
         return Number.isFinite(Number(v)) ? Number(v) : 10;
     });
 
     useEffect(() => {
         const handleSettingsUpdated = () => {
-            const t = Storage.load('sidebar_topics_limit', 10);
-            const p = Storage.load('sidebar_people_limit', 10);
-            setTopicsLimit(Number.isFinite(Number(t)) ? Number(t) : 10);
+            const t = Storage.load('sidebar_communities_limit', 10);
+            const p = Storage.load('sidebar_users_limit', 10);
+            setCommunitiesLimit(Number.isFinite(Number(t)) ? Number(t) : 10);
             setPeopleLimit(Number.isFinite(Number(p)) ? Number(p) : 10);
         };
         window.addEventListener('sidebarSettingsUpdated', handleSettingsUpdated);
@@ -343,18 +343,18 @@ function Sidebar({ state }) {
         const loadFollows = async () => {
             if (!viewerAddress || viewerAddress === 'guest') {
                 if (mounted) {
-                    setTopics([]);
+                    setCommunities([]);
                     setPeople([]);
                 }
                 return;
             }
             try {
-                const [followedTopics, followedUsers] = await Promise.all([
+                const [followedCommunities, followedUsers] = await Promise.all([
                     fetchJoinedCommunities(viewerAddress),
                     fetchFollowedUsers(viewerAddress),
                 ]);
                 if (mounted) {
-                    setTopics(followedTopics || []);
+                    setCommunities(followedCommunities || []);
                     setPeople(followedUsers || []);
                 }
             } catch (_) {
@@ -367,11 +367,11 @@ function Sidebar({ state }) {
             if (detail.added) {
                 const t = String(detail.added).trim().toLowerCase();
                 if (t && t !== 'all' && t !== 'home') {
-                    setTopics(prev => prev.includes(t) ? prev : [...prev, t]);
+                    setCommunities(prev => prev.includes(t) ? prev : [...prev, t]);
                 }
             } else if (detail.removed) {
                 const t = String(detail.removed).trim().toLowerCase();
-                setTopics(prev => prev.filter(x => x.toLowerCase() !== t));
+                setCommunities(prev => prev.filter(x => x.toLowerCase() !== t));
             } else {
                 loadFollows();
             }
@@ -414,7 +414,7 @@ function Sidebar({ state }) {
         return () => { alive = false; };
     }, [people]);
 
-    const topicsToShow = showAllTopics ? orderedTopics : orderedTopics.slice(0, topicsLimit);
+    const communitiesToShow = showAllCommunities ? orderedCommunities : orderedCommunities.slice(0, communitiesLimit);
     const usersToShow = showAllUsers ? people : people.slice(0, peopleLimit);
 
     const renderUserLabel = (addr) => {
@@ -444,7 +444,7 @@ function Sidebar({ state }) {
             <Section>
                 <SidebarItem to="/home" icon={icons.home} label="Home" pathname={pathname} onClick={handleHomeClick} />
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
-                <SidebarItem to="/communities" icon={icons.topics} label="Communities" pathname={pathname} />
+                <SidebarItem to="/communities" icon={icons.communities} label="Communities" pathname={pathname} />
                 <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
                 <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
@@ -456,35 +456,35 @@ function Sidebar({ state }) {
                     <Section>
                         <SectionHeader
                             type="button"
-                            onClick={() => setTopicsOpen(v => !v)}
-                            aria-expanded={topicsOpen}
+                            onClick={() => setCommunitiesOpen(v => !v)}
+                            aria-expanded={communitiesOpen}
                         >
                             <span>Communities</span>
-                            <ChevronIcon expanded={topicsOpen} />
+                            <ChevronIcon expanded={communitiesOpen} />
                         </SectionHeader>
-                        {topicsOpen && (
+                        {communitiesOpen && (
                             <div>
-                                {topicsToShow.length === 0 ? (
+                                {communitiesToShow.length === 0 ? (
                                     <EmptyRow>None joined</EmptyRow>
                                 ) : (
-                                    topicsToShow.map((topic) => {
-                                        const curated = curatedSet.has(String(topic).toLowerCase());
+                                    communitiesToShow.map((community) => {
+                                        const curated = curatedSet.has(String(community).toLowerCase());
                                         return (
-                                            <TopicLink
-                                                key={topic}
-                                                to={communityPath(topic)}
+                                            <CommunityLink
+                                                key={community}
+                                                to={communityPath(community)}
                                                 $curated={curated}
                                                 title={curated ? 'You curate this community' : undefined}
                                             >
-                                                {communityLabel(topic)}
-                                            </TopicLink>
+                                                {communityLabel(community)}
+                                            </CommunityLink>
                                         );
                                     })
                                 )}
-                                {orderedTopics.length > topicsLimit && (
-                                    <ToggleMore type="button" onClick={() => setShowAllTopics(v => !v)}>
-                                        {showAllTopics ? 'Show less' : `+${orderedTopics.length - topicsLimit} more`}
-                                        <ChevronIcon expanded={showAllTopics} />
+                                {orderedCommunities.length > communitiesLimit && (
+                                    <ToggleMore type="button" onClick={() => setShowAllCommunities(v => !v)}>
+                                        {showAllCommunities ? 'Show less' : `+${orderedCommunities.length - communitiesLimit} more`}
+                                        <ChevronIcon expanded={showAllCommunities} />
                                     </ToggleMore>
                                 )}
                             </div>

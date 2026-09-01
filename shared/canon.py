@@ -9,7 +9,7 @@ that is relaying the transaction. It is set by the backend/node, NOT by the user
 Canonical bytes for relay signature verification EXCLUDE authority - they only include:
 - Envelope fields: envelope_pubkey(2), envelope_block_hash(3), envelope_difficulty(4),
   envelope_pow(5), envelope_timestamp(6)
-- Payload fields starting at tag 100: target(100), username(101), topic(101), etc.
+- Payload fields starting at tag 100: target(100), username(101), community(101), etc.
 
 Rules (for all messages):
 - Prefix: b"mirage.core.v1:" + MsgName + b"\x00"

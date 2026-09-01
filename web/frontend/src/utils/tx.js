@@ -310,14 +310,14 @@ export async function claimCreatorRewards(epochIds) {
     return h.claimCreatorRewards(epochIds);
 }
 
-export async function createPost(topic, title, content, tag = "", media = []) {
+export async function createPost(community, title, content, tag = "", media = []) {
     const h = await getHandler();
-    return h.createPost(topic, title, content, tag, media);
+    return h.createPost(community, title, content, tag, media);
 }
 
-export async function createPostAsync(topic, title, content, tag = "", media = []) {
+export async function createPostAsync(community, title, content, tag = "", media = []) {
     const h = await getHandler();
-    return h.createPostAsync(topic, title, content, tag, media);
+    return h.createPostAsync(community, title, content, tag, media);
 }
 
 export async function createComment(parentId, content) {

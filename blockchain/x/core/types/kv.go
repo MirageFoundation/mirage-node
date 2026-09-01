@@ -407,6 +407,10 @@ func KeyEpochCreatorAccrual(epoch int64, creator []byte) []byte {
 	return concat([]byte(PfxEpochCreatorAccrual), i64(epoch), creator)
 }
 
+func KeyEpochCreatorAccrualPrefix(epoch int64) []byte {
+	return concat([]byte(PfxEpochCreatorAccrual), i64(epoch))
+}
+
 func KeyCreatorEpochIdx(creator []byte, epoch int64) []byte {
 	return concat([]byte(PfxCreatorEpochIdx), creator, i64(epoch))
 }
@@ -455,7 +459,7 @@ func UTCEpoch(unix int64) int64 {
 	if unix < 0 {
 		return 0
 	}
-	return unix / 86400
+	return unix / SecondsPerUTCDay
 }
 
 func InvertedSupport(count uint64) uint64 {

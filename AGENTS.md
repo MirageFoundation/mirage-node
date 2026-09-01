@@ -59,7 +59,7 @@ separate, explicit per-task approval.
 
 **ALWAYS BE CONSISTENT.** Pick one term per concept and use it everywhere — UI copy, labels, settings, comments, error messages, docs.
 
-- **Platform members are "users", never "people".** Use "users" in all user-facing strings (`Follow users`, `Sidebar users`, `Lets users sign up`, etc.) and in code comments. The only exception: existing localStorage / API keys / wire formats (e.g. `sidebar_people_limit`) — never rename those because the data is already on disk. JS variable names that mirror those storage keys can stay too; just keep visible strings consistent.
+- **Platform members are "users", never "people".** Use "users" in all user-facing strings (`Follow users`, `Sidebar users`, `Lets users sign up`, etc.), in code, and in storage keys. Being on disk is not a reason to keep a stale name: rename the key and migrate the value (see `Storage.migrateRenamedKeys` for settings, or drop the key outright when it is only a cache).
 - Before adding a new term for an existing concept, search the codebase first. If a term already exists, reuse it.
 - When you spot a stray inconsistency adjacent to your work, fix it (with a one-line note in the summary). Don't leave a half-consistent codebase.
 
@@ -237,7 +237,8 @@ separate, explicit per-task approval.
 - `profiles`, `followed_users`, `blocked_users`, `blocked_posts`, `blocked_communities`, `community_curation_preferences`
 - There is **no** `joined_communities` table. A user's joined communities are derived from the rows they have in `community_curation_preferences` — joining a community *is* having a preference row for it. See `_build_user_followed` in `web/backend/routes/public.py`.
 - List tables have a `position` column for ordering and deque eviction (cap: `INDEXER_LIST_CAP` = 100k in `indexer/database.py`)
-- `topic_content_stats` and `user_topic_stats` keep their `topic` naming on purpose: renaming a table whose data is already on disk is never worth it.
+- `community_content_stats` and `user_community_stats` hold the per-community content labels and per-user standing. They were `topic_content_stats` / `user_topic_stats` until v1.39.0; the rename is done and no `topic` name survives anywhere.
+- **A stale name is not excused by being on disk.** Postgres renames are metadata-only, so rename the table/column and migrate any stored discriminator value (e.g. `preferences.pref_type`). The renames must go in `DatabaseManager._init_db` **before** the matching `CREATE TABLE IF NOT EXISTS`, because schema init runs ahead of `run_migrations()` — put a rename in a migration file instead and the CREATE will make an empty table and strand the populated one. Guard every rename with `information_schema` / `pg_class` existence checks so it is a no-op on a fresh database, and remember index and primary-key names do not follow a table rename.
 
 ### Docker Container Paths
 

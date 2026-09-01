@@ -57,7 +57,7 @@ _listener_lock_fp = None
 TRENDING_POLL_INTERVAL_SECONDS = 30 * 60
 TRENDING_UNIQUE_COMMENTERS_THRESHOLD = 10
 TRENDING_POST_MAX_AGE_SECONDS = 24 * 3600
-# Every push-enabled user gets at most one lively-topic push per day.
+# Every push-enabled user gets at most one lively-community push per day.
 TRENDING_DAILY_INTERVAL_SECONDS = 24 * 3600
 # How many top lively posts to consider when picking one each user can actually see.
 TRENDING_CANDIDATE_LIMIT = 25
@@ -811,7 +811,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
     """Return the top lively root posts (most unique commenters, recency-decayed).
 
     These are the global candidates; per-user visibility is applied later so each
-    user gets a lively topic they can actually see.
+    user gets a lively community they can actually see.
     """
     cutoff_ts = now_ts - TRENDING_POST_MAX_AGE_SECONDS
     threshold = TRENDING_UNIQUE_COMMENTERS_THRESHOLD
@@ -842,7 +842,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
         rows = cur.fetchall()
 
     candidates: list[dict] = []
-    for txhash, owner, title, topic, _unique_commenters in rows:
+    for txhash, owner, title, community, _unique_commenters in rows:
         txhash_lc = str(txhash or "").strip().lower()
         author_lc = str(owner or "").strip().lower()
         if not txhash_lc or not author_lc:
@@ -852,7 +852,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
                 "txhash": txhash_lc,
                 "author": author_lc,
                 "title": str(title or "").strip(),
-                "topic": str(topic or "").strip().lower(),
+                "community": str(community or "").strip().lower(),
             }
         )
     logger().debug("push.listener.trending.candidates count=%d", len(candidates))
@@ -860,7 +860,7 @@ def _fetch_lively_candidates(now_ts: int) -> list[dict]:
 
 
 def _select_due_users(now_ts: int, limit: int) -> list[str]:
-    """Push-token holders who haven't received a lively-topic push in the last day."""
+    """Push-token holders who haven't received a lively-community push in the last day."""
     cutoff = now_ts - TRENDING_DAILY_INTERVAL_SECONDS
     slot_key = str(now_ts // TRENDING_POLL_INTERVAL_SECONDS)
     with connect_backend_db() as conn:
@@ -885,15 +885,15 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
     """Pick the top lively candidate this user can see and doesn't dislike.
 
     Filters (mirrors feed visibility): not the user's own post, not blocked by the
-    user or an enabled agent (post / author / topic), and neither the author nor the
-    topic disliked (negative author/topic preference), not already seen, and not
+    user or an enabled agent (post / author / community), and neither the author nor the
+    community disliked (negative author/community preference), not already seen, and not
     already pushed as trending.
     """
-    from routes.public import _split_blocked_topics, _topic_is_blocked
+    from routes.public import _split_blocked_communities, _community_is_blocked
 
     cand_txs = [c["txhash"] for c in candidates]
     cand_authors = list({c["author"] for c in candidates})
-    cand_topics = list({c["topic"] for c in candidates if c["topic"]})
+    cand_communities = list({c["community"] for c in candidates if c["community"]})
 
     icur.execute(
         "SELECT DISTINCT LOWER(target) FROM blocked_posts WHERE LOWER(owner) = %s AND LOWER(target) = ANY(%s)",
@@ -914,32 +914,32 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
         "SELECT DISTINCT LOWER(target) FROM blocked_communities WHERE LOWER(owner) = %s",
         (owner_lc,),
     )
-    raw_blocked_topics = [str(r[0] or "").strip().lower() for r in icur.fetchall()]
-    blocked_topic_set: set[str] = set()
+    raw_blocked_communities = [str(r[0] or "").strip().lower() for r in icur.fetchall()]
+    blocked_community_set: set[str] = set()
     invalid_pattern_count = 0
-    for topic in raw_blocked_topics:
-        if not topic:
+    for community in raw_blocked_communities:
+        if not community:
             continue
-        if topic.replace("*", "") == "":
+        if community.replace("*", "") == "":
             invalid_pattern_count += 1
             continue
-        blocked_topic_set.add(topic)
+        blocked_community_set.add(community)
     if invalid_pattern_count > 0:
         logger().warning(
-            "push.listener.trending.invalid_blocked_topics owner=%s count=%d",
+            "push.listener.trending.invalid_blocked_communities owner=%s count=%d",
             owner_lc[:16],
             invalid_pattern_count,
         )
-    blocked_exact, blocked_patterns = _split_blocked_topics(blocked_topic_set)
+    blocked_exact, blocked_patterns = _split_blocked_communities(blocked_community_set)
 
-    disliked_topics: set[str] = set()
-    if cand_topics:
+    disliked_communities: set[str] = set()
+    if cand_communities:
         icur.execute(
             "SELECT LOWER(target) FROM preferences "
-            "WHERE LOWER(owner) = %s AND pref_type = 'topic' AND weight < 0 AND LOWER(target) = ANY(%s)",
-            (owner_lc, cand_topics),
+            "WHERE LOWER(owner) = %s AND pref_type = 'community' AND weight < 0 AND LOWER(target) = ANY(%s)",
+            (owner_lc, cand_communities),
         )
-        disliked_topics = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
+        disliked_communities = {str(r[0] or "").strip().lower() for r in icur.fetchall()}
 
     icur.execute(
         "SELECT LOWER(target) FROM preferences "
@@ -969,21 +969,21 @@ def _pick_visible_candidate(owner_lc: str, candidates: list[dict], icur, bcur) -
             continue
         if cand["author"] in blocked_authors or cand["author"] in disliked_authors:
             continue
-        topic = cand["topic"]
-        if topic and _topic_is_blocked(topic, blocked_exact, blocked_patterns):
+        community = cand["community"]
+        if community and _community_is_blocked(community, blocked_exact, blocked_patterns):
             continue
-        if topic and topic in disliked_topics:
+        if community and community in disliked_communities:
             continue
         return cand
     return None
 
 
 def _poll_trending() -> int:
-    """Send each push-enabled user at most one lively-topic push per day.
+    """Send each push-enabled user at most one lively-community push per day.
 
     Every token holder is eligible once per 24h. We pick the highest-ranked lively
-    post the user can actually see (not blocked by them or an enabled agent, topic
-    not blocked, author/topic not disliked, not already seen or pushed).
+    post the user can actually see (not blocked by them or an enabled agent, community
+    not blocked, author/community not disliked, not already seen or pushed).
     Users with no visible candidate remain eligible for future polls.
     """
     now_ts = int(time.time())
@@ -1051,11 +1051,11 @@ def _poll_trending() -> int:
                             _invalidate_inbox_cache(owner_lc)
                             processed += 1
                             logger().info(
-                                "push.listener.trending.sent owner=%s tx=%s author=%s topic=%r title=%r",
+                                "push.listener.trending.sent owner=%s tx=%s author=%s community=%r title=%r",
                                 owner_lc[:16],
                                 txhash_lc[:16],
                                 author_lc[:16],
-                                chosen["topic"][:40],
+                                chosen["community"][:40],
                                 title_str[:60],
                             )
                         except Exception:

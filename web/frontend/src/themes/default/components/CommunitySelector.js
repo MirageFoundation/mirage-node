@@ -12,7 +12,7 @@ const Container = styled.div`
 `;
 
 /*
- * default `TopicSelector` — neutral pill trigger.
+ * default `CommunitySelector` — neutral pill trigger.
  *
  * Design follows R5 (neutral input focus), R6 (HiChevronDown) and R7
  * (0.75rem / 500 input typography). Trigger height matches the search
@@ -67,7 +67,7 @@ const ButtonContent = styled.div`
     overflow: hidden;
 `;
 
-const TopicName = styled.span`
+const CommunityName = styled.span`
     font-size: inherit;
     line-height: inherit;
     overflow: hidden;
@@ -176,7 +176,7 @@ const SectionHeader = styled.div`
     background-color: transparent;
 `;
 
-const TopicItem = styled.div`
+const CommunityItem = styled.div`
     display: flex;
     align-items: center;
     gap: 0.6rem;
@@ -193,19 +193,19 @@ const TopicItem = styled.div`
     }
 `;
 
-const TopicItemName = styled.span`
+const CommunityItemName = styled.span`
     font-size: 0.75rem;
     font-weight: 500;
     color: inherit;
 `;
 
-const TopicItemMeta = styled.span`
+const CommunityItemMeta = styled.span`
     font-size: 0.62rem;
     color: ${({ theme }) => theme.colors.subtleText};
     margin-left: auto;
 `;
 
-const TopicMetaGroup = styled.div`
+const CommunityMetaGroup = styled.div`
     margin-left: auto;
     display: flex;
     align-items: center;
@@ -231,7 +231,7 @@ const CreateNewSection = styled.div`
     padding-top: 0.25rem;
 `;
 
-const CreateNewItem = styled(TopicItem)`
+const CreateNewItem = styled(CommunityItem)`
     color: ${({ theme }) => theme.colors.followBtnBg};
 
     &:hover {
@@ -265,7 +265,7 @@ const EmptyState = styled.div`
     font-size: 0.7rem;
 `;
 
-const CACHE_TTL_MS = 60 * 1000; // short-term cache for topics
+const CACHE_TTL_MS = 60 * 1000; // short-term cache for communities
 
 const FLAG_LABELS = {
     sensitive: 'Sensitive',
@@ -275,14 +275,14 @@ const FLAG_LABELS = {
     adult: 'Adult'
 };
 
-export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled, 'aria-label': ariaLabel = 'Community' }) => {
+export const CommunitySelector = ({ value, onChange, maxLength, minLength, disabled, 'aria-label': ariaLabel = 'Community' }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [searchValue, setSearchValue] = useState('');
-    const [followedTopics, setFollowedTopics] = useState([]);
-    const [allTopics, setAllTopics] = useState([]);
-    const [topicCounts, setTopicCounts] = useState({});
-    const [topicFlags, setTopicFlags] = useState({});
-    const [topicDominant, setTopicDominant] = useState({});
+    const [followedCommunities, setFollowedCommunities] = useState([]);
+    const [allCommunities, setAllCommunities] = useState([]);
+    const [communityCounts, setCommunityCounts] = useState({});
+    const [communityFlags, setCommunityFlags] = useState({});
+    const [communityDominant, setCommunityDominant] = useState({});
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -297,44 +297,44 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
     const effectiveMinLength = Number.isFinite(minLength) ? minLength : 3;
     const minSearchLength = Math.max(2, effectiveMinLength);
 
-    const applyTopics = useCallback((topicsWithCounts = []) => {
-        const topics = topicsWithCounts.map(t => t.topic).filter(t => t && t !== 'all');
-        const counts = topicsWithCounts.reduce((acc, t) => {
-            acc[t.topic] = t.count;
+    const applyCommunities = useCallback((communitiesWithCounts = []) => {
+        const communities = communitiesWithCounts.map(t => t.community).filter(t => t && t !== 'all');
+        const counts = communitiesWithCounts.reduce((acc, t) => {
+            acc[t.community] = t.count;
             return acc;
         }, {});
-        const flags = topicsWithCounts.reduce((acc, t) => {
-            acc[String(t.topic || '').toLowerCase()] = t.flags || {};
+        const flags = communitiesWithCounts.reduce((acc, t) => {
+            acc[String(t.community || '').toLowerCase()] = t.flags || {};
             return acc;
         }, {});
-        const dominant = topicsWithCounts.reduce((acc, t) => {
-            acc[String(t.topic || '').toLowerCase()] = t.dominant_tag || '';
+        const dominant = communitiesWithCounts.reduce((acc, t) => {
+            acc[String(t.community || '').toLowerCase()] = t.dominant_tag || '';
             return acc;
         }, {});
 
-        setAllTopics(topics);
-        setTopicCounts(counts);
-        setTopicFlags(flags);
-        setTopicDominant(dominant);
+        setAllCommunities(communities);
+        setCommunityCounts(counts);
+        setCommunityFlags(flags);
+        setCommunityDominant(dominant);
     }, []);
 
-    const maybeLoadCachedTopics = useCallback(() => {
+    const maybeLoadCachedCommunities = useCallback(() => {
         try {
-            const cached = Storage.load("topics", null);
-            if (!cached || !cached.lastFetched || !Array.isArray(cached.topicsWithCounts)) return false;
+            const cached = Storage.load("communities", null);
+            if (!cached || !cached.lastFetched || !Array.isArray(cached.communitiesWithCounts)) return false;
             const age = Date.now() - new Date(cached.lastFetched).getTime();
             if (age > CACHE_TTL_MS) return false;
             const allowed = new Set(getAllowedTags());
-            const filtered = cached.topicsWithCounts.filter((t) => {
+            const filtered = cached.communitiesWithCounts.filter((t) => {
                 const dom = String(t?.dominant_tag || '').toLowerCase();
                 return !dom || allowed.has(dom);
             });
-            applyTopics(filtered);
+            applyCommunities(filtered);
             return true;
         } catch (_) {
             return false;
         }
-    }, [applyTopics]);
+    }, [applyCommunities]);
 
     const sanitize = useCallback((val) => {
         try {
@@ -351,10 +351,10 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
 
     const viewerAddress = Storage.load('publicKey', '') || '';
 
-    // Load followed topics and all topics (use short-term cache, then refresh)
+    // Load followed communities and all communities (use short-term cache, then refresh)
     useEffect(() => {
-        const loadTopics = async () => {
-            const hadCache = maybeLoadCachedTopics();
+        const loadCommunities = async () => {
+            const hadCache = maybeLoadCachedCommunities();
             setIsLoading(!hadCache);
             try {
                 if (viewerAddress) {
@@ -362,28 +362,28 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                     const slugs = Array.isArray(joined?.items)
                         ? joined.items.map(i => String(i.community || '').trim()).filter(Boolean)
                         : [];
-                    setFollowedTopics(slugs);
+                    setFollowedCommunities(slugs);
                 }
 
                 try {
                     const data = await Api.get('communities', { limit: 100 });
                     if (data && Array.isArray(data.items)) {
-                        const topicsWithCounts = data.items
+                        const communitiesWithCounts = data.items
                             .filter(t => t && t.community && typeof t.community === 'string' && t.community.trim() !== '')
                             .map(t => ({
-                                topic: t.community,
+                                community: t.community,
                                 count: t.post_count,
                                 flags: {},
                                 dominant_tag: '',
                                 dominant_ratio: 0
                             }));
-                        Storage.save("topics", {
-                            topics: topicsWithCounts.map(t => t.topic),
-                            topicsWithCounts,
+                        Storage.save("communities", {
+                            communities: communitiesWithCounts.map(t => t.community),
+                            communitiesWithCounts,
                             lastFetched: new Date().toISOString()
                         });
 
-                        applyTopics(topicsWithCounts);
+                        applyCommunities(communitiesWithCounts);
                     }
                 } catch (_) { }
             } catch (_) { }
@@ -391,9 +391,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
         };
 
         if (isOpen) {
-            loadTopics();
+            loadCommunities();
         }
-    }, [isOpen, viewerAddress, maybeLoadCachedTopics, applyTopics]);
+    }, [isOpen, viewerAddress, maybeLoadCachedCommunities, applyCommunities]);
 
     // Focus search input when dropdown opens
     useEffect(() => {
@@ -401,7 +401,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
             setTimeout(() => searchInputRef.current?.focus(), 50);
         }
 
-        // When opening, show the current topic in the search box so it isn't blank
+        // When opening, show the current community in the search box so it isn't blank
         if (isOpen) {
             const current = String(value || '').trim();
             if (current && !searchValue) {
@@ -424,7 +424,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    // Filter topics based on search (strip leading # for matching)
+    // Filter communities based on search (strip leading # for matching)
     const searchLower = stripCommunityPrefix(searchValue.toLowerCase());
     const sanitizedSearch = sanitize(searchValue);
     const showSearchResults = isOpen && sanitizedSearch.length >= minSearchLength;
@@ -448,13 +448,13 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                 const normalized = items
                     .filter(t => t && t.community && typeof t.community === 'string')
                     .map(t => ({
-                        topic: t.community,
+                        community: t.community,
                         count: t.post_count,
                         flags: {},
                         dominant_tag: '',
                         dominant_ratio: 0
                     }))
-                    .sort((a, b) => (b.count - a.count) || String(a.topic).localeCompare(String(b.topic)));
+                    .sort((a, b) => (b.count - a.count) || String(a.community).localeCompare(String(b.community)));
                 setSearchResults(normalized);
             } catch (_) {
                 if (searchRequestId.current !== requestId) return;
@@ -475,77 +475,77 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
     const searchMeta = React.useMemo(() => {
         const map = {};
         searchResults.forEach(t => {
-            if (t && t.topic) {
-                map[String(t.topic).toLowerCase()] = t;
+            if (t && t.community) {
+                map[String(t.community).toLowerCase()] = t;
             }
         });
         return map;
     }, [searchResults]);
 
-    const filteredFollowed = followedTopics.filter(t =>
+    const filteredFollowed = followedCommunities.filter(t =>
         t.toLowerCase().includes(searchLower)
     );
 
     const filteredAll = showSearchResults
         ? searchResults.filter(t => {
-            const topic = String(t.topic || '');
-            return topic.toLowerCase().includes(searchLower) &&
-                !followedTopics.map(ft => ft.toLowerCase()).includes(topic.toLowerCase());
+            const community = String(t.community || '');
+            return community.toLowerCase().includes(searchLower) &&
+                !followedCommunities.map(ft => ft.toLowerCase()).includes(community.toLowerCase());
         })
-        : allTopics
+        : allCommunities
             .filter(t =>
-                t.toLowerCase().includes(searchLower) && !followedTopics.includes(t)
+                t.toLowerCase().includes(searchLower) && !followedCommunities.includes(t)
             )
-            .sort((a, b) => (topicCounts[b] || 0) - (topicCounts[a] || 0))
+            .sort((a, b) => (communityCounts[b] || 0) - (communityCounts[a] || 0))
             .slice(0, 20)
-            .map(topic => ({
-                topic,
-                count: topicCounts[topic] || 0,
-                flags: topicFlags[String(topic).toLowerCase()] || {},
-                dominant_tag: topicDominant[String(topic).toLowerCase()] || ''
+            .map(community => ({
+                community,
+                count: communityCounts[community] || 0,
+                flags: communityFlags[String(community).toLowerCase()] || {},
+                dominant_tag: communityDominant[String(community).toLowerCase()] || ''
             }));
 
-    const filteredAllTopics = filteredAll.map(t => t.topic || t);
+    const filteredAllCommunities = filteredAll.map(t => t.community || t);
 
-    // Check if search term is a valid new topic (not existing, meets length requirements)
-    const isNewTopic = sanitizedSearch.length >= effectiveMinLength &&
+    // Check if search term is a valid new community (not existing, meets length requirements)
+    const isNewCommunity = sanitizedSearch.length >= effectiveMinLength &&
         sanitizedSearch.length <= effectiveMaxLength &&
-        !allTopics.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
-        !followedTopics.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
-        !filteredAllTopics.map(t => String(t || '').toLowerCase()).includes(sanitizedSearch);
+        !allCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
+        !followedCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
+        !filteredAllCommunities.map(t => String(t || '').toLowerCase()).includes(sanitizedSearch);
 
     // Build flat list for keyboard navigation
     const allItems = [
-        ...filteredFollowed.map(t => ({ type: 'followed', topic: t })),
-        ...filteredAllTopics.map(t => ({ type: 'all', topic: t })),
-        ...(isNewTopic ? [{ type: 'new', topic: sanitizedSearch }] : [])
+        ...filteredFollowed.map(t => ({ type: 'followed', community: t })),
+        ...filteredAllCommunities.map(t => ({ type: 'all', community: t })),
+        ...(isNewCommunity ? [{ type: 'new', community: sanitizedSearch }] : [])
     ];
 
-    const getTopicFlags = useCallback((topic) => {
-        const key = String(topic || '').toLowerCase();
+    const getCommunityFlags = useCallback((community) => {
+        const key = String(community || '').toLowerCase();
         if (searchMeta[key] && searchMeta[key].flags) {
             return searchMeta[key].flags || {};
         }
-        return topicFlags[key] || {};
-    }, [searchMeta, topicFlags]);
+        return communityFlags[key] || {};
+    }, [searchMeta, communityFlags]);
 
-    const getTopicCount = useCallback((topic) => {
-        const key = String(topic || '').toLowerCase();
+    const getCommunityCount = useCallback((community) => {
+        const key = String(community || '').toLowerCase();
         if (searchMeta[key]) {
             return searchMeta[key].count || 0;
         }
-        return topicCounts[topic] || 0;
-    }, [searchMeta, topicCounts]);
+        return communityCounts[community] || 0;
+    }, [searchMeta, communityCounts]);
 
-    const getFlagLabels = useCallback((topic) => {
-        const flags = getTopicFlags(topic);
+    const getFlagLabels = useCallback((community) => {
+        const flags = getCommunityFlags(community);
         return Object.entries(flags || {})
             .filter(([, val]) => !!val)
             .map(([k]) => FLAG_LABELS[k] || k);
-    }, [getTopicFlags]);
+    }, [getCommunityFlags]);
 
-    const getTopicMeta = useCallback((topic) => {
-        const key = String(topic || '').toLowerCase();
+    const getCommunityMeta = useCallback((community) => {
+        const key = String(community || '').toLowerCase();
         const searchEntry = searchMeta[key];
         if (searchEntry) {
             return {
@@ -554,10 +554,10 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
             };
         }
         return {
-            flags: topicFlags[key] || {},
-            dominant_tag: topicDominant[key] || ''
+            flags: communityFlags[key] || {},
+            dominant_tag: communityDominant[key] || ''
         };
-    }, [searchMeta, topicFlags, topicDominant]);
+    }, [searchMeta, communityFlags, communityDominant]);
 
     const focusNextInput = useCallback(() => {
         setTimeout(() => {
@@ -571,12 +571,12 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
         }, 0);
     }, []);
 
-    const handleSelect = (topic, focusNext = false, isNew = false) => {
-        const sanitized = sanitize(topic);
-        if (isNew) console.debug('[TopicSelector] selected new slug', { slug: sanitized });
+    const handleSelect = (community, focusNext = false, isNew = false) => {
+        const sanitized = sanitize(community);
+        if (isNew) console.debug('[CommunitySelector] selected new slug', { slug: sanitized });
         onChange({
             target: { value: sanitized },
-            meta: { ...getTopicMeta(topic), isNew: !!isNew },
+            meta: { ...getCommunityMeta(community), isNew: !!isNew },
         });
         setIsOpen(false);
         setSearchValue('');
@@ -605,7 +605,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
             e.preventDefault();
             // Close dropdown and move focus to next input (title)
             if (sanitizedSearch && sanitizedSearch.length >= effectiveMinLength) {
-                handleSelect(sanitizedSearch, true, isNewTopic);
+                handleSelect(sanitizedSearch, true, isNewCommunity);
             } else {
                 setIsOpen(false);
                 setSearchValue('');
@@ -625,9 +625,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
             e.preventDefault();
             if (highlightedIndex >= 0 && highlightedIndex < allItems.length) {
                 const pick = allItems[highlightedIndex];
-                handleSelect(pick.topic, true, pick.type === 'new');
+                handleSelect(pick.community, true, pick.type === 'new');
             } else if (sanitizedSearch) {
-                handleSelect(sanitizedSearch, true, isNewTopic);
+                handleSelect(sanitizedSearch, true, isNewCommunity);
             }
         }
     };
@@ -667,7 +667,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                 >
                     <ButtonContent>
                         {value ? (
-                            <TopicName>{communityLabel(value)}</TopicName>
+                            <CommunityName>{communityLabel(value)}</CommunityName>
                         ) : (
                             <Placeholder>Select a community</Placeholder>
                         )}
@@ -707,28 +707,28 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                                     {filteredFollowed.length > 0 && (
                                         <>
                                             <SectionHeader>Your communities</SectionHeader>
-                                            {filteredFollowed.map((topic) => {
+                                            {filteredFollowed.map((community) => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
-                                                const count = getTopicCount(topic);
-                                                const flagLabels = getFlagLabels(topic);
+                                                const count = getCommunityCount(community);
+                                                const flagLabels = getFlagLabels(community);
                                                 return (
-                                                    <TopicItem
-                                                        key={`followed-${topic}`}
+                                                    <CommunityItem
+                                                        key={`followed-${community}`}
                                                         data-item-index={idx}
                                                         $highlighted={highlightedIndex === idx}
-                                                        onClick={() => handleSelect(topic)}
+                                                        onClick={() => handleSelect(community)}
                                                     >
-                                                        <TopicItemName>{communityLabel(topic)}</TopicItemName>
-                                                        <TopicMetaGroup>
+                                                        <CommunityItemName>{communityLabel(community)}</CommunityItemName>
+                                                        <CommunityMetaGroup>
                                                             {flagLabels.length > 0 && (
                                                                 <FlagBadge>{flagLabels.join(', ')}</FlagBadge>
                                                             )}
                                                             {count > 0 && (
-                                                                <TopicItemMeta>{formatCount(count)}</TopicItemMeta>
+                                                                <CommunityItemMeta>{formatCount(count)}</CommunityItemMeta>
                                                             )}
-                                                        </TopicMetaGroup>
-                                                    </TopicItem>
+                                                        </CommunityMetaGroup>
+                                                    </CommunityItem>
                                                 );
                                             })}
                                         </>
@@ -739,35 +739,35 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                                             <SectionHeader>
                                                 {searchLower ? 'Search Results' : 'Popular communities'}
                                             </SectionHeader>
-                                            {filteredAll.map((topicObj) => {
+                                            {filteredAll.map((communityObj) => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
-                                                const topic = topicObj.topic || topicObj;
-                                                const count = typeof topicObj.count === 'number' ? topicObj.count : getTopicCount(topic);
-                                                const flagLabels = getFlagLabels(topic);
+                                                const community = communityObj.community || communityObj;
+                                                const count = typeof communityObj.count === 'number' ? communityObj.count : getCommunityCount(community);
+                                                const flagLabels = getFlagLabels(community);
                                                 return (
-                                                    <TopicItem
-                                                        key={`all-${topic}`}
+                                                    <CommunityItem
+                                                        key={`all-${community}`}
                                                         data-item-index={idx}
                                                         $highlighted={highlightedIndex === idx}
-                                                        onClick={() => handleSelect(topic)}
+                                                        onClick={() => handleSelect(community)}
                                                     >
-                                                        <TopicItemName>{communityLabel(topic)}</TopicItemName>
-                                                        <TopicMetaGroup>
+                                                        <CommunityItemName>{communityLabel(community)}</CommunityItemName>
+                                                        <CommunityMetaGroup>
                                                             {flagLabels.length > 0 && (
                                                                 <FlagBadge>{flagLabels.join(', ')}</FlagBadge>
                                                             )}
                                                             {count > 0 && (
-                                                                <TopicItemMeta>{formatCount(count)}</TopicItemMeta>
+                                                                <CommunityItemMeta>{formatCount(count)}</CommunityItemMeta>
                                                             )}
-                                                        </TopicMetaGroup>
-                                                    </TopicItem>
+                                                        </CommunityMetaGroup>
+                                                    </CommunityItem>
                                                 );
                                             })}
                                         </>
                                     )}
 
-                                    {isNewTopic && (
+                                    {isNewCommunity && (
                                         <CreateNewSection>
                                             <SectionHeader>New slug</SectionHeader>
                                             {(() => {
@@ -787,7 +787,7 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
                                         </CreateNewSection>
                                     )}
 
-                                    {!isLoading && filteredFollowed.length === 0 && filteredAll.length === 0 && !isNewTopic && (
+                                    {!isLoading && filteredFollowed.length === 0 && filteredAll.length === 0 && !isNewCommunity && (
                                         <EmptyState>
                                             {searchLower ? 'No listed community found. Use any valid slug.' : 'Start typing to search or enter a community slug.'}
                                         </EmptyState>
@@ -802,4 +802,4 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled,
     );
 };
 
-export default TopicSelector;
+export default CommunitySelector;

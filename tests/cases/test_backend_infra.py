@@ -67,7 +67,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -104,10 +103,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
@@ -455,19 +454,8 @@ def test_bootstrap(backend: str):
 
 def test_search(backend: str):
 
-    # 8.1 get_topics is retired
-    code, topics = _get(f"{backend}/api/get_topics")
-    if code == 410:
-        _pass("search.get_topics gone")
-    else:
-        _fail("search.get_topics gone", f"code={code}")
-
-    # 8.2 search_topics is retired
-    code, st = _get(f"{backend}/api/search_topics", {"q": "test"})
-    if code == 410:
-        _pass("search.search_topics gone")
-    else:
-        _fail("search.search_topics gone", f"code={code}")
+    # The retired get_topics / search_topics paths are covered by
+    # tests/cases/test_backend_retired.py.
 
     # 8.3 search general
     code, sr = _get(f"{backend}/api/search", {"q": "test", "limit": 5})
@@ -476,12 +464,12 @@ def test_search(backend: str):
     else:
         _fail("search.general_search returns 200", f"code={code}")
 
-    # 8.4 get_posts with topic filter
+    # 8.4 get_posts with community filter
     code, fp = _get(f"{backend}/api/get_posts", {"community": "test", "limit": 5})
     if code == 200:
-        _pass("search.get_posts_by_topic returns 200")
+        _pass("search.get_posts_by_community returns 200")
     else:
-        _fail("search.get_posts_by_topic returns 200", f"code={code}")
+        _fail("search.get_posts_by_community returns 200", f"code={code}")
 
     # 8.5 get_posts pagination
     code1, p1 = _get(f"{backend}/api/get_posts", {"limit": 2, "page": 1})
@@ -631,10 +619,10 @@ def test_tx_status(backend: str):
         _fail("tx_status.missing_hash_rejected", f"code={code3}")
 
     # 28.4 Submit a post, wait for indexer, verify found=true with details
-    topic = "test"
+    community = "test"
     title = f"TxStatus Test {_rand_str(6)}"
     content = f"Content {_rand_str(10)}"
-    txh = _do_post(backend, free, topic, title, content)
+    txh = _do_post(backend, free, community, title, content)
     if not txh:
         _fail("tx_status.post_submit")
         return
@@ -643,7 +631,7 @@ def test_tx_status(backend: str):
     status = _wait_tx_status(backend, txh, expect_type="post")
     if status and status.get("found") and status.get("indexed"):
         details = status.get("details") or {}
-        if details.get("topic", "").lower() == topic.lower() and details.get("title") == title:
+        if details.get("community", "").lower() == community.lower() and details.get("title") == title:
             _pass("tx_status.post_found_indexed")
         else:
             _fail("tx_status.post_found_indexed", f"details={details}")
@@ -884,19 +872,19 @@ def test_tx_status_matrix(backend: str):
     free = WALLETS.get("free")
     sub1 = WALLETS.get("sub1")
     sub2 = WALLETS.get("sub2")
-    agent1 = WALLETS.get("agent1")
-    agent2 = WALLETS.get("agent2")
-    if not free or not sub1 or not sub2 or not agent1 or not agent2:
-        _skip("tx_matrix.setup", "free/sub1/sub2/agent1/agent2 wallets not available")
+    sub3 = WALLETS.get("sub3")
+    sub4 = WALLETS.get("sub4")
+    if not free or not sub1 or not sub2 or not sub3 or not sub4:
+        _skip("tx_matrix.setup", "free/sub1/sub2/sub3/sub4 wallets not available")
         return
 
     _debug("tx_matrix: begin")
     free_addr = str(free.address())
     sub2_addr = str(sub2.address())
-    agent1_addr = str(agent1.address())
-    agent2_addr = str(agent2.address())
-    post_topic = "test"
-    follow_topic = f"matrix{_rand_str(4)}"
+    agent1_addr = str(sub3.address())
+    agent2_addr = str(sub4.address())
+    post_community = "test"
+    follow_community = f"matrix{_rand_str(4)}"
 
     # Use sub1 (subscriber, level>=1) as primary actor — free (level 0) has
     # max_biography_length=0 and low follow limits that cause chain rejections.
@@ -986,16 +974,16 @@ def test_tx_status_matrix(backend: str):
     # 4. join_community (sub1 — higher limits). Every valid slug is joinable as
     # of v1.39.0: communities are not registered or claimed, so nothing has to
     # exist before the join.
-    ftopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=True, skip_pow=True)
-    ftopic_txh = _extract_tx_hash("join_community", ftopic_resp)
-    if ftopic_txh:
-        _check("join_community", ftopic_txh, "join_community")
+    fcommunity_resp = _do_follow_topic(backend, sub1, follow_community, follow=True, skip_pow=True)
+    fcommunity_txh = _extract_tx_hash("join_community", fcommunity_resp)
+    if fcommunity_txh:
+        _check("join_community", fcommunity_txh, "join_community")
 
     # 5. leave_community (clean up join)
-    utopic_resp = _do_follow_topic(backend, sub1, follow_topic, follow=False, skip_pow=True)
-    utopic_txh = _extract_tx_hash("leave_community", utopic_resp)
-    if utopic_txh:
-        _check("leave_community", utopic_txh, "leave_community")
+    ucommunity_resp = _do_follow_topic(backend, sub1, follow_community, follow=False, skip_pow=True)
+    ucommunity_txh = _extract_tx_hash("leave_community", ucommunity_resp)
+    if ucommunity_txh:
+        _check("leave_community", ucommunity_txh, "leave_community")
 
     # 6. send_tokens
     send_resp = _do_send_tokens(backend, sub1, free_addr, 1, skip_pow=True)
@@ -1004,7 +992,7 @@ def test_tx_status_matrix(backend: str):
         _check("send_tokens", send_txh, "send_tokens")
 
     # 7. post (should have details — free wallet, always works)
-    post_txh = _do_post(backend, free, post_topic, f"Matrix Post {_rand_str(6)}", f"Body {_rand_str(8)}")
+    post_txh = _do_post(backend, free, post_community, f"Matrix Post {_rand_str(6)}", f"Body {_rand_str(8)}")
     if not post_txh or len(post_txh) != 64:
         _fail("tx_matrix.post.submit", f"tx={post_txh}")
         return
@@ -1020,7 +1008,7 @@ def test_tx_status_matrix(backend: str):
     # 9. edit (needs indexed post)
     if post_txh and _wait_indexed(backend, free_addr, post_txh):
         edit_resp = _do_edit(
-            backend, free, post_txh, post_topic, f"Edited Title {_rand_str(4)}", f"Edited Body {_rand_str(6)}"
+            backend, free, post_txh, post_community, f"Edited Title {_rand_str(4)}", f"Edited Body {_rand_str(6)}"
         )
         edit_txh = _extract_tx_hash("edit", edit_resp)
         if edit_txh:
@@ -1057,16 +1045,16 @@ def test_failed_tx_non_post_vote(backend: str):
     free = WALLETS.get("free")
     sub1 = WALLETS.get("sub1")
     sub2 = WALLETS.get("sub2")
-    agent1 = WALLETS.get("agent1")
-    agent2 = WALLETS.get("agent2")
-    if not free or not sub1 or not sub2 or not agent1 or not agent2:
-        _skip("failed_npv.setup", "free/sub1/sub2/agent1/agent2 wallets not available")
+    sub3 = WALLETS.get("sub3")
+    sub4 = WALLETS.get("sub4")
+    if not free or not sub1 or not sub2 or not sub3 or not sub4:
+        _skip("failed_npv.setup", "free/sub1/sub2/sub3/sub4 wallets not available")
         return
 
     free_addr = str(free.address())
     sub2_addr = str(sub2.address())
-    agent1_addr = str(agent1.address())
-    agent2_addr = str(agent2.address())
+    agent1_addr = str(sub3.address())
+    agent2_addr = str(sub4.address())
 
     # Use sub1 (subscriber) as actor — free (tier 0) has low follow limits.
 
@@ -1637,7 +1625,7 @@ def test_indexer_profile_absent(backend):
             "indexer_profile_absent.load_returns_none", "_load_chain_profile invented a profile for a deleted account"
         )
 
-    for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_followed_topics"):
+    for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_followed_communities"):
         try:
             getattr(mp, helper)("mirage1deletedaccount", 0)
         except Exception as e:

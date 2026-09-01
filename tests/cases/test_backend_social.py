@@ -62,7 +62,6 @@ from tests.common import (
     _canon_base_edit_raw,
     _canon_base_set_username_raw,
     _canon_base_set_biography_raw,
-    _canon_base_annotate_raw,
     _canon_base_report_raw,
     canon_signed_with_pow,
     _generate_wallet,
@@ -78,7 +77,6 @@ from tests.backend_helpers import (
     _do_vote,
     _do_vote_with_nonce,
     _do_edit,
-    _do_annotate,
     _do_delete,
     _do_delete_user,
     _do_follow_user,
@@ -98,10 +96,10 @@ from tests.backend_helpers import (
     _wait_tx_status_failure,
     _wait_tx_deliver,
     _wait_followed_user,
-    _wait_followed_topic,
+    _wait_followed_community,
     _wait_blocked_user,
-    _wait_blocked_topic,
-    _wait_blocked_topic_state,
+    _wait_blocked_community,
+    _wait_blocked_community_state,
     _wait_comment_indexed,
     _feed_has_post,
     _feed_missing_post,
@@ -118,9 +116,9 @@ def test_social_graph(backend: str):
     sub_addr = str(sub_wallet.address())
     sub2_wallet = WALLETS["sub2"]
     sub2_addr = str(sub2_wallet.address())
-    agent1_wallet = WALLETS["agent1"]
+    agent1_wallet = WALLETS["sub3"]
     agent1_addr = str(agent1_wallet.address())
-    test_topic = f"testtopic{_rand_str(4)}"
+    test_community = f"testcommunity{_rand_str(4)}"
 
     # 5.1 follow_user
     resp = _do_follow_user(backend, wallet, sub_addr, follow=True)
@@ -198,103 +196,103 @@ def test_social_graph(backend: str):
     else:
         _fail("social.follow_user reflected in get_user_followed (mutual)", f"user={agent1_addr}")
 
-    # 5.4 follow_topic
-    resp = _do_follow_topic(backend, wallet, test_topic, follow=True)
+    # 5.4 follow_community
+    resp = _do_follow_topic(backend, wallet, test_community, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.follow_topic succeeds")
+        _pass("social.follow_community succeeds")
     else:
-        _fail("social.follow_topic succeeds", f"resp={resp}")
+        _fail("social.follow_community succeeds", f"resp={resp}")
 
     # The leave below is simulated against committed state, so a fixed sleep
     # raced the join into "not joined" whenever the block was slow.
     if txh:
         deliver = _wait_tx_deliver(txh)
         if deliver and deliver[0] != 0:
-            _fail("social.follow_topic delivered", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+            _fail("social.follow_community delivered", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
 
-    # 5.5 unfollow_topic
-    resp = _do_follow_topic(backend, wallet, test_topic, follow=False)
+    # 5.5 unfollow_community
+    resp = _do_follow_topic(backend, wallet, test_community, follow=False)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.unfollow_topic succeeds")
+        _pass("social.unfollow_community succeeds")
     else:
-        _fail("social.unfollow_topic succeeds", f"resp={resp}")
+        _fail("social.unfollow_community succeeds", f"resp={resp}")
 
-    # 5.5a follow->block topic removes follow
-    mutual_topic_fb = f"mutualtopic{_rand_str(4)}"
-    resp = _do_follow_topic(backend, wallet, mutual_topic_fb, follow=True)
+    # 5.5a follow->block community removes follow
+    mutual_community_fb = f"mutualcommunity{_rand_str(4)}"
+    resp = _do_follow_topic(backend, wallet, mutual_community_fb, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.follow_topic for block-removal setup")
+        _pass("social.follow_community for block-removal setup")
     else:
-        _fail("social.follow_topic for block-removal setup", f"resp={resp}")
+        _fail("social.follow_community for block-removal setup", f"resp={resp}")
     if txh:
         deliver = _wait_tx_deliver(txh)
         if deliver and deliver[0] != 0:
-            _fail("social.follow_topic reflected before block", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
-        elif _wait_followed_topic(backend, addr, mutual_topic_fb, True):
-            _pass("social.follow_topic reflected before block")
+            _fail("social.follow_community reflected before block", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_followed_community(backend, addr, mutual_community_fb, True):
+            _pass("social.follow_community reflected before block")
         else:
-            _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
+            _fail("social.follow_community reflected before block", f"community={mutual_community_fb}")
     else:
-        _fail("social.follow_topic reflected before block", "no tx_hash")
+        _fail("social.follow_community reflected before block", "no tx_hash")
 
-    resp = _do_block_topic(backend, wallet, mutual_topic_fb, block=True)
+    resp = _do_block_topic(backend, wallet, mutual_community_fb, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.block_topic after follow succeeds")
+        _pass("social.block_community after follow succeeds")
     else:
-        _fail("social.block_topic after follow succeeds", f"resp={resp}")
+        _fail("social.block_community after follow succeeds", f"resp={resp}")
     if txh:
         deliver = _wait_tx_deliver(txh)
         if deliver and deliver[0] != 0:
-            _fail("social.block_topic removes followed topic", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+            _fail("social.block_community removes followed community", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
         else:
-            if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
-                _pass("social.block_topic keeps join")
+            if _wait_followed_community(backend, addr, mutual_community_fb, True):
+                _pass("social.block_community keeps join")
             else:
-                _fail("social.block_topic keeps join", f"topic={mutual_topic_fb}")
-            if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
-                _pass("social.block_topic reflected in get_user_blocked (mutual)")
+                _fail("social.block_community keeps join", f"community={mutual_community_fb}")
+            if _wait_blocked_community_state(backend, addr, mutual_community_fb, True):
+                _pass("social.block_community reflected in get_user_blocked (mutual)")
             else:
-                _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
+                _fail("social.block_community reflected in get_user_blocked (mutual)", f"community={mutual_community_fb}")
     else:
-        _fail("social.block_topic removes followed topic", "no tx_hash")
+        _fail("social.block_community removes followed community", "no tx_hash")
 
-    # 5.5b block->follow topic removes block
-    mutual_topic_bf = f"mutualtopic{_rand_str(4)}"
-    resp = _do_block_topic(backend, wallet, mutual_topic_bf, block=True)
+    # 5.5b block->follow community removes block
+    mutual_community_bf = f"mutualcommunity{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, mutual_community_bf, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.block_topic for follow-removal setup")
+        _pass("social.block_community for follow-removal setup")
     else:
-        _fail("social.block_topic for follow-removal setup", f"resp={resp}")
+        _fail("social.block_community for follow-removal setup", f"resp={resp}")
     if txh:
         deliver = _wait_tx_deliver(txh)
         if deliver and deliver[0] != 0:
-            _fail("social.block_topic reflected before follow", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
-        elif _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
-            _pass("social.block_topic reflected before follow")
+            _fail("social.block_community reflected before follow", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+        elif _wait_blocked_community_state(backend, addr, mutual_community_bf, True):
+            _pass("social.block_community reflected before follow")
         else:
-            _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
+            _fail("social.block_community reflected before follow", f"community={mutual_community_bf}")
     else:
-        _fail("social.block_topic reflected before follow", "no tx_hash")
+        _fail("social.block_community reflected before follow", "no tx_hash")
 
-    resp = _do_follow_topic(backend, wallet, mutual_topic_bf, follow=True)
+    resp = _do_follow_topic(backend, wallet, mutual_community_bf, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.follow_topic after block succeeds")
+        _pass("social.follow_community after block succeeds")
     else:
-        _fail("social.follow_topic after block succeeds", f"resp={resp}")
-    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
-        _pass("social.follow_topic keeps block")
+        _fail("social.follow_community after block succeeds", f"resp={resp}")
+    if _wait_blocked_community_state(backend, addr, mutual_community_bf, True):
+        _pass("social.follow_community keeps block")
     else:
-        _fail("social.follow_topic keeps block", f"topic={mutual_topic_bf}")
-    if _wait_followed_topic(backend, addr, mutual_topic_bf, True):
-        _pass("social.follow_topic reflected in get_user_followed (mutual)")
+        _fail("social.follow_community keeps block", f"community={mutual_community_bf}")
+    if _wait_followed_community(backend, addr, mutual_community_bf, True):
+        _pass("social.follow_community reflected in get_user_followed (mutual)")
     else:
-        _fail("social.follow_topic reflected in get_user_followed (mutual)", f"topic={mutual_topic_bf}")
+        _fail("social.follow_community reflected in get_user_followed (mutual)", f"community={mutual_community_bf}")
 
     # 5.6 block_post — need a post to block (subscriber skip_pow; the block itself is free-tier)
     test_post = _do_post(backend, sub_wallet, "test", f"Blockable {_rand_str(4)}", "body", skip_pow=True)
@@ -343,43 +341,43 @@ def test_social_graph(backend: str):
     else:
         _fail("social.unblock_user succeeds", f"resp={resp}")
 
-    # 5.11 block_topic
-    block_topic = f"blocktopic{_rand_str(4)}"
-    resp = _do_block_topic(backend, wallet, block_topic, block=True)
+    # 5.11 block_community
+    block_community = f"blockcommunity{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, block_community, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.block_topic succeeds")
+        _pass("social.block_community succeeds")
     else:
-        _fail("social.block_topic succeeds", f"resp={resp}")
+        _fail("social.block_community succeeds", f"resp={resp}")
     deliver = _wait_tx_deliver(txh) if txh else None
     if deliver and deliver[0] != 0:
-        _fail("social.block_topic reflected in get_user_blocked", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
-    elif _wait_blocked_topic(backend, addr, block_topic):
-        _pass("social.block_topic reflected in get_user_blocked")
+        _fail("social.block_community reflected in get_user_blocked", f"deliver_code={deliver[0]} log={deliver[1][:200]}")
+    elif _wait_blocked_community(backend, addr, block_community):
+        _pass("social.block_community reflected in get_user_blocked")
     else:
-        _fail("social.block_topic reflected in get_user_blocked", f"topic={block_topic}")
+        _fail("social.block_community reflected in get_user_blocked", f"community={block_community}")
 
-    # 5.12 duplicate block_topic is idempotent (no error, no-op)
-    resp_dup = _do_block_topic(backend, wallet, block_topic, block=True)
+    # 5.12 duplicate block_community is idempotent (no error, no-op)
+    resp_dup = _do_block_topic(backend, wallet, block_community, block=True)
     dup_txh = str(resp_dup.get("tx_hash", "")).lower()
     if resp_dup.get("error") or dup_txh:
-        _pass("social.block_topic duplicate idempotent", tx=dup_txh or "rejected")
+        _pass("social.block_community duplicate idempotent", tx=dup_txh or "rejected")
     else:
-        _fail("social.block_topic duplicate idempotent", f"resp={resp_dup}")
+        _fail("social.block_community duplicate idempotent", f"resp={resp_dup}")
 
-    # 5.13 blocked topic filtered from get_posts
+    # 5.13 blocked community filtered from get_posts
     blocked_post = _do_post(
         backend,
         sub_wallet,
-        block_topic,
-        f"Blocked {block_topic}",
+        block_community,
+        f"Blocked {block_community}",
         "body",
         skip_pow=True,  # subscriber should post without PoW
     )
     if not blocked_post:
-        _fail("social.block_topic filters get_posts", "post creation failed (sub_wallet may not be subscriber)")
+        _fail("social.block_community filters get_posts", "post creation failed (sub_wallet may not be subscriber)")
     elif not _wait_indexed(backend, sub_addr, blocked_post):
-        _fail("social.block_topic filters get_posts", f"post {blocked_post[:16]} not indexed after timeout")
+        _fail("social.block_community filters get_posts", f"post {blocked_post[:16]} not indexed after timeout")
     else:
         code, feed = _get(
             f"{backend}/api/get_posts",
@@ -388,48 +386,48 @@ def test_social_graph(backend: str):
         if code == 200:
             posts = (feed or {}).get("posts") or []
             if not any(str(p.get("post_id", "")).lower() == blocked_post for p in posts):
-                _pass("social.block_topic filters get_posts")
+                _pass("social.block_community filters get_posts")
             else:
-                _fail("social.block_topic filters get_posts", f"found blocked post {blocked_post}")
+                _fail("social.block_community filters get_posts", f"found blocked post {blocked_post}")
         else:
-            _fail("social.block_topic filters get_posts", f"code={code}")
+            _fail("social.block_community filters get_posts", f"code={code}")
 
-    # 5.13a wildcard block_topic filters get_posts
+    # 5.13a wildcard block_community filters get_posts
     wildcard_mid = f"m{_rand_str(4)}"
     wildcard_pattern = f"*{wildcard_mid}*"
-    _debug(f"block_topic wildcard pattern={wildcard_pattern}")
+    _debug(f"block_community wildcard pattern={wildcard_pattern}")
     resp = _do_block_topic(backend, wallet, wildcard_pattern, block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.block_topic wildcard succeeds")
+        _pass("social.block_community wildcard succeeds")
     else:
-        _fail("social.block_topic wildcard succeeds", f"resp={resp}")
+        _fail("social.block_community wildcard succeeds", f"resp={resp}")
     deliver = _wait_tx_deliver(txh) if txh else None
     if deliver and deliver[0] != 0:
         _fail(
-            "social.block_topic wildcard reflected in get_user_blocked",
+            "social.block_community wildcard reflected in get_user_blocked",
             f"deliver_code={deliver[0]} log={deliver[1][:200]}",
         )
-    elif _wait_blocked_topic(backend, addr, wildcard_pattern):
-        _pass("social.block_topic wildcard reflected in get_user_blocked")
+    elif _wait_blocked_community(backend, addr, wildcard_pattern):
+        _pass("social.block_community wildcard reflected in get_user_blocked")
     else:
-        _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+        _fail("social.block_community wildcard reflected in get_user_blocked", f"community={wildcard_pattern}")
 
-    match_topic = f"{_rand_str(2)}{wildcard_mid}{_rand_str(2)}"
-    nonmatch_topic = f"x{_rand_str(8)}"
+    match_community = f"{_rand_str(2)}{wildcard_mid}{_rand_str(2)}"
+    nonmatch_community = f"x{_rand_str(8)}"
     match_post = _do_post(
         backend,
         sub_wallet,
-        match_topic,
-        f"Blocked wildcard {match_topic}",
+        match_community,
+        f"Blocked wildcard {match_community}",
         "body",
         skip_pow=True,
     )
     nonmatch_post = _do_post(
         backend,
         sub_wallet,
-        nonmatch_topic,
-        f"Unblocked {nonmatch_topic}",
+        nonmatch_community,
+        f"Unblocked {nonmatch_community}",
         "body",
         skip_pow=True,
     )
@@ -445,39 +443,39 @@ def test_social_graph(backend: str):
         has_unblocked = _feed_has_post(backend, addr, nonmatch_post)
         blocked_filtered = _feed_missing_post(backend, addr, match_post)
         if has_unblocked and blocked_filtered:
-            _pass("social.block_topic wildcard filters get_posts")
+            _pass("social.block_community wildcard filters get_posts")
         else:
             _fail(
-                "social.block_topic wildcard filters get_posts",
+                "social.block_community wildcard filters get_posts",
                 f"blocked_present={not blocked_filtered} unblocked_present={has_unblocked}",
             )
     else:
-        _fail("social.block_topic wildcard filters get_posts", "post not indexed")
+        _fail("social.block_community wildcard filters get_posts", "post not indexed")
 
     # cleanup wildcard block
     resp = _do_block_topic(backend, wallet, wildcard_pattern, block=False)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.unblock_topic wildcard succeeds")
+        _pass("social.unblock_community wildcard succeeds")
     else:
-        _fail("social.unblock_topic wildcard succeeds", f"resp={resp}")
-    if _wait_blocked_topic_state(backend, addr, wildcard_pattern, False):
-        _pass("social.unblock_topic wildcard reflected in get_user_blocked")
+        _fail("social.unblock_community wildcard succeeds", f"resp={resp}")
+    if _wait_blocked_community_state(backend, addr, wildcard_pattern, False):
+        _pass("social.unblock_community wildcard reflected in get_user_blocked")
     else:
-        _fail("social.unblock_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+        _fail("social.unblock_community wildcard reflected in get_user_blocked", f"community={wildcard_pattern}")
 
-    # 5.14 unblock_topic
-    resp = _do_block_topic(backend, wallet, block_topic, block=False)
+    # 5.14 unblock_community
+    resp = _do_block_topic(backend, wallet, block_community, block=False)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
-        _pass("social.unblock_topic succeeds")
+        _pass("social.unblock_community succeeds")
     else:
-        _fail("social.unblock_topic succeeds", f"resp={resp}")
+        _fail("social.unblock_community succeeds", f"resp={resp}")
 
-    if _wait_blocked_topic_state(backend, addr, block_topic, False):
-        _pass("social.unblock_topic reflected in get_user_blocked")
+    if _wait_blocked_community_state(backend, addr, block_community, False):
+        _pass("social.unblock_community reflected in get_user_blocked")
     else:
-        _fail("social.unblock_topic reflected in get_user_blocked", f"topic={block_topic}")
+        _fail("social.unblock_community reflected in get_user_blocked", f"community={block_community}")
 
 
 # =========================================================================
@@ -595,22 +593,22 @@ def test_hard_cap_vs_deque(backend: str):
         else:
             _pass("hardcap.fu_follow_after_unfollow (skipped — no new targets to unfollow)")
 
-    # ── 19.2 Follow topics up to free limit, then verify rejection ──
-    existing_ft = len((fu_data or {}).get("joined_communities") or (fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
+    # ── 19.2 Follow communities up to free limit, then verify rejection ──
+    existing_ft = len((fu_data or {}).get("joined_communities") or (fu_data or {}).get("joined_communities") or []) if code_fu == 200 else 0
     remaining_ft = max(0, max_ft_free - existing_ft)
     _debug(f"free-tier max_joined_communities={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
 
     def _ft_op(i: int):
-        topic = f"hct{_rand_str(4)}{i}"
-        resp = _do_follow_topic(backend, free_wallet, topic, follow=True, skip_pow=False)
-        return topic, resp
+        community = f"hct{_rand_str(4)}{i}"
+        resp = _do_follow_topic(backend, free_wallet, community, follow=True, skip_pow=False)
+        return community, resp
 
     ft_results = _parallel_backend_pow_ops(remaining_ft, _ft_op, "joined communities")
-    topic_targets: list[str] = []
+    community_targets: list[str] = []
     ft_fill_ok = True
     for i, item in enumerate(ft_results):
-        topic, resp = item
-        topic_targets.append(topic)
+        community, resp = item
+        community_targets.append(community)
         txh = str((resp or {}).get("tx_hash", "")).lower()
         if not txh:
             err = str((resp or {}).get("error", ""))[:100]
@@ -630,8 +628,8 @@ def test_hard_cap_vs_deque(backend: str):
         actual_ft = _wait_list_count(backend, free_addr, "joined_communities", max_ft_free, timeout=30.0)
         _debug(f"joined_communities after fill: {actual_ft}/{max_ft_free}")
 
-        overflow_topic = f"hctover{_rand_str(4)}"
-        resp = _do_follow_topic(backend, free_wallet, overflow_topic, follow=True, skip_pow=False)
+        overflow_community = f"hctover{_rand_str(4)}"
+        resp = _do_follow_topic(backend, free_wallet, overflow_community, follow=True, skip_pow=False)
         overflow_txh = str(resp.get("tx_hash", "")).lower()
         if overflow_txh:
             _wait_tx_deliver(overflow_txh, timeout=15.0)
@@ -726,25 +724,25 @@ def test_indexer_deque_storage(backend: str):
     else:
         _fail("indexer_deque.blocked_users_stored", f"matched={matched}/{test_count} total={total}")
 
-    # Block some topics too
-    test_topic_count = 4
-    blocked_topics: list[str] = []
-    for i in range(test_topic_count):
-        topic = f"idq{_rand_str(4)}{i}"
-        blocked_topics.append(topic)
-        resp = _do_block_topic(backend, sub1, topic, block=True, skip_pow=True)
+    # Block some communities too
+    test_community_count = 4
+    blocked_communities: list[str] = []
+    for i in range(test_community_count):
+        community = f"idq{_rand_str(4)}{i}"
+        blocked_communities.append(community)
+        resp = _do_block_topic(backend, sub1, community, block=True, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if not txh:
-            _fail(f"indexer_deque.block_topic_{i}", str(resp.get("error", ""))[:100])
+            _fail(f"indexer_deque.block_community_{i}", str(resp.get("error", ""))[:100])
             break
     else:
-        _pass(f"indexer_deque.block_topics ({test_topic_count} blocked)")
+        _pass(f"indexer_deque.block_communities ({test_community_count} blocked)")
 
-    matched, total = _wait_indexer_blocked("topics", blocked_topics, test_topic_count - 1, INDEX_TIMEOUT_SEC)
-    if matched >= test_topic_count - 1:
-        _pass(f"indexer_deque.blocked_topics_stored ({matched}/{test_topic_count})")
+    matched, total = _wait_indexer_blocked("communities", blocked_communities, test_community_count - 1, INDEX_TIMEOUT_SEC)
+    if matched >= test_community_count - 1:
+        _pass(f"indexer_deque.blocked_communities_stored ({matched}/{test_community_count})")
     else:
-        _fail("indexer_deque.blocked_topics_stored", f"matched={matched}/{test_topic_count} total={total}")
+        _fail("indexer_deque.blocked_communities_stored", f"matched={matched}/{test_community_count} total={total}")
 
 
 # =========================================================================

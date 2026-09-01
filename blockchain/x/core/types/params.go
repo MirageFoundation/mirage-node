@@ -40,6 +40,9 @@ const (
 	MaxMintInterval = 10_512_000
 	// MaxSubscriptionPeriodMinutes is one year.
 	MaxSubscriptionPeriodMinutes = 525_600
+	SecondsPerUTCDay             = 86_400
+	MinCreatorEpochSeconds       = 300
+	MaxCreatorEpochBucketsPerTranche = 1_024
 	// MaxEnvelopeAgeSeconds is one day.
 	MaxEnvelopeAgeSeconds = 86_400
 	// MaxProfileListEntries keeps uint64 governance values representable by
@@ -329,6 +332,7 @@ func DefaultParams() Params {
 		SubscriptionRenewalAttemptsPerBlock: 100,
 		SubscriberDailyRelayLimit:           250,
 		MaxSubscriptionPeriodsPerPurchase:   12,
+		CreatorEpochSeconds:                 SecondsPerUTCDay,
 	}
 }
 
@@ -356,6 +360,7 @@ func HistoricalDefaultParams() Params {
 	p.SubscriptionRenewalAttemptsPerBlock = 0
 	p.SubscriberDailyRelayLimit = 0
 	p.MaxSubscriptionPeriodsPerPurchase = 0
+	p.CreatorEpochSeconds = 0
 	return p
 }
 
@@ -560,8 +565,8 @@ func (p Params) ValidateV139() error {
 	if p.SubscriptionPeriod < 1 || p.SubscriptionPeriod > MaxSubscriptionPeriodMinutes {
 		return fmt.Errorf("subscription_period must be in [1,%d]", MaxSubscriptionPeriodMinutes)
 	}
-	if p.SubscriptionEarlyRenewalDays < 1 || p.SubscriptionEarlyRenewalDays > 30 {
-		return fmt.Errorf("subscription_early_renewal_days must be in [1,30]")
+	if p.SubscriptionEarlyRenewalDays > 30 {
+		return fmt.Errorf("subscription_early_renewal_days must be in [0,30]")
 	}
 	if p.SubscriptionEarlyRenewalDays*1440 >= p.SubscriptionPeriod {
 		return fmt.Errorf("subscription_early_renewal_days must be strictly shorter than subscription_period")
@@ -586,6 +591,25 @@ func (p Params) ValidateV139() error {
 	}
 	if p.SubscriptionPeriod > 527040/p.MaxSubscriptionPeriodsPerPurchase {
 		return fmt.Errorf("subscription_period * max_subscription_periods_per_purchase exceeds 527040 minutes")
+	}
+	if p.CreatorEpochSeconds < MinCreatorEpochSeconds || p.CreatorEpochSeconds > SecondsPerUTCDay {
+		return fmt.Errorf(
+			"creator_epoch_seconds must be in [%d,%d]",
+			MinCreatorEpochSeconds,
+			SecondsPerUTCDay,
+		)
+	}
+	if SecondsPerUTCDay%p.CreatorEpochSeconds != 0 {
+		return fmt.Errorf("creator_epoch_seconds must divide %d exactly", SecondsPerUTCDay)
+	}
+	durationSeconds := p.SubscriptionPeriod * 60 * p.MaxSubscriptionPeriodsPerPurchase
+	maxBuckets := (durationSeconds+p.CreatorEpochSeconds-1)/p.CreatorEpochSeconds + 1
+	if maxBuckets > MaxCreatorEpochBucketsPerTranche {
+		return fmt.Errorf(
+			"subscription settings can span %d creator epochs; maximum is %d",
+			maxBuckets,
+			MaxCreatorEpochBucketsPerTranche,
+		)
 	}
 	required := []struct {
 		name string

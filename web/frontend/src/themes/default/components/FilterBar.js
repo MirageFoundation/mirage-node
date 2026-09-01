@@ -156,20 +156,20 @@ function FilterBar({
     onTabClick,
     onSortChange,
     selectedSort,
-    customTopicName,
+    customCommunityName,
     inline = false,
     prefixLabel = '',
     textStyle = 'normal',
-    subscribedTopics = [],
+    subscribedCommunities = [],
     hasFollowedUsers = false,
     rightActionLabel = null,
     onRightAction = null
 }) {
-    const topicOptions = {
+    const communityOptions = {
         'all': 'all communities',
         'home': 'home feed',
         'following': 'following feed',
-        // 'popular': 'popular topics', // disabled for now
+        // 'popular': 'popular communities', // disabled for now
         'manage': 'manage subscriptions'
     };
 
@@ -179,40 +179,40 @@ function FilterBar({
         'newest': 'sorted by newest'
     };
 
-    const [selectedTopic, setSelectedTopic] = useState(customTopicName || currentTab || 'all');
+    const [selectedCommunity, setSelectedCommunity] = useState(customCommunityName || currentTab || 'all');
     const [sortBy, setSortBy] = useState('magic');
 
-    const topicMeasureRef = useRef(null);
+    const communityMeasureRef = useRef(null);
     const sortMeasureRef = useRef(null);
-    const [topicWidth, setTopicWidth] = useState('auto');
+    const [communityWidth, setCommunityWidth] = useState('auto');
     const [sortWidth, setSortWidth] = useState('auto');
 
-    const selectedValue = customTopicName
-        ? customTopicName
+    const selectedValue = customCommunityName
+        ? customCommunityName
         : ((() => {
-            const hasSubs = (Array.isArray(subscribedTopics) && subscribedTopics.length > 0) || hasFollowedUsers;
+            const hasSubs = (Array.isArray(subscribedCommunities) && subscribedCommunities.length > 0) || hasFollowedUsers;
             const allowed = ['all', 'home', 'following', ...(hasSubs ? ['manage'] : [])];
-            return allowed.includes(selectedTopic) ? selectedTopic : 'all';
+            return allowed.includes(selectedCommunity) ? selectedCommunity : 'all';
         })());
-    const topicDisplayText = customTopicName ? communityLabel(customTopicName) : (topicOptions[selectedValue] || 'all communities');
+    const communityDisplayText = customCommunityName ? communityLabel(customCommunityName) : (communityOptions[selectedValue] || 'all communities');
     const sortDisplayText = sortOptions[sortBy] || 'sorted by newest';
 
     useEffect(() => {
-        const validTopics = ['all', 'home', 'following', /* 'popular', */ 'manage']; // popular disabled for now
-        if (customTopicName) {
-            setSelectedTopic(customTopicName);
-        } else if (currentTab && validTopics.includes(currentTab)) {
-            setSelectedTopic(currentTab);
+        const validCommunities = ['all', 'home', 'following', /* 'popular', */ 'manage']; // popular disabled for now
+        if (customCommunityName) {
+            setSelectedCommunity(customCommunityName);
+        } else if (currentTab && validCommunities.includes(currentTab)) {
+            setSelectedCommunity(currentTab);
         } else if (!currentTab) {
-            setSelectedTopic('all');
+            setSelectedCommunity('all');
         }
-    }, [customTopicName, currentTab]);
+    }, [customCommunityName, currentTab]);
 
     useEffect(() => {
         const measureWidth = () => {
-            if (topicMeasureRef.current) {
-                const width = topicMeasureRef.current.offsetWidth;
-                setTopicWidth(`${width}px`);
+            if (communityMeasureRef.current) {
+                const width = communityMeasureRef.current.offsetWidth;
+                setCommunityWidth(`${width}px`);
             }
             if (sortMeasureRef.current) {
                 const width = sortMeasureRef.current.offsetWidth;
@@ -222,7 +222,7 @@ function FilterBar({
         measureWidth();
         const timeoutId = setTimeout(measureWidth, 0);
         return () => clearTimeout(timeoutId);
-    }, [topicDisplayText, sortDisplayText, customTopicName]);
+    }, [communityDisplayText, sortDisplayText, customCommunityName]);
 
     // Sync local sort state with external selection (from MainView)
     useEffect(() => {
@@ -232,10 +232,10 @@ function FilterBar({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedSort]);
 
-    const handleTopicChange = (e) => {
+    const handleCommunityChange = (e) => {
         const value = e.target.value;
         if (value === 'divider') return;
-        setSelectedTopic(value);
+        setSelectedCommunity(value);
         if (onTabClick) {
             onTabClick(value);
         }
@@ -259,15 +259,15 @@ function FilterBar({
                 ) : null}
                 <FilterItem>
                     <SelectWrapper $textStyle={textStyle}>
-                        <HiddenMeasure $textStyle={textStyle} ref={topicMeasureRef}>{topicDisplayText}</HiddenMeasure>
-                        <StyledSelect $textStyle={textStyle} value={selectedValue} onChange={handleTopicChange} width={topicWidth}>
-                            {customTopicName ? (
+                        <HiddenMeasure $textStyle={textStyle} ref={communityMeasureRef}>{communityDisplayText}</HiddenMeasure>
+                        <StyledSelect $textStyle={textStyle} value={selectedValue} onChange={handleCommunityChange} width={communityWidth}>
+                            {customCommunityName ? (
                                 <>
-                                    <option value={customTopicName}>{communityLabel(customTopicName)}</option>
+                                    <option value={customCommunityName}>{communityLabel(customCommunityName)}</option>
                                     <option disabled value="divider-custom">────</option>
                                 </>
                             ) : null}
-                            {(Array.isArray(subscribedTopics) && subscribedTopics.length > 0) || hasFollowedUsers ? (
+                            {(Array.isArray(subscribedCommunities) && subscribedCommunities.length > 0) || hasFollowedUsers ? (
                                 <>
                                     <option value="manage">manage subscriptions</option>
                                     <option disabled value="divider">────</option>
@@ -276,11 +276,11 @@ function FilterBar({
                             <option value="all">all communities</option>
                             <option value="home">home feed</option>
                             <option value="following">following feed</option>
-                            {/* <option value="popular">popular topics</option> */}
-                            {Array.isArray(subscribedTopics) && subscribedTopics.length > 0 ? (
+                            {/* <option value="popular">popular communities</option> */}
+                            {Array.isArray(subscribedCommunities) && subscribedCommunities.length > 0 ? (
                                 <>
                                     <option disabled value="divider-2">────</option>
-                                    {subscribedTopics.map((t) => (
+                                    {subscribedCommunities.map((t) => (
                                         <option key={`sub-${t}`} value={t}>{communityLabel(t)}</option>
                                     ))}
                                 </>

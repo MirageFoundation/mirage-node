@@ -36,8 +36,6 @@ function optimisticCacheKey(community, teamId, postId) {
 }
 
 function postCommunity(post) {
-    const topic = typeof post?.topic === 'string' ? post.topic.trim() : '';
-    if (topic) return topic.toLowerCase();
     const community = typeof post?.community === 'string' ? post.community.trim() : '';
     return community.toLowerCase();
 }

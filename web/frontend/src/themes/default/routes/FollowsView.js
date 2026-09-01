@@ -173,7 +173,7 @@ const AvatarImg = ({ src: _src, ...rest }) => (
     <UserAvatar size={32} {...rest} />
 );
 
-const TopicIcon = styled.span`
+const CommunityIcon = styled.span`
     width: 32px;
     height: 32px;
     border-radius: 50%;
@@ -317,7 +317,7 @@ const StateMessage = styled.div`
 `;
 
 const TABS = [
-    { id: 'topics', label: 'Communities' },
+    { id: 'communities', label: 'Communities' },
     { id: 'users', label: 'Users' },
 ];
 
@@ -334,12 +334,12 @@ function makeRowClickHandler(navigate, url) {
 }
 
 export default function FollowsView({ state }) {
-    const [activeTab, setActiveTab] = useState('topics');
+    const [activeTab, setActiveTab] = useState('communities');
     const debugState = useDebugStateOverride();
     const {
         navigate,
         followedUsers,
-        followedTopics,
+        followedCommunities,
         followedUsernames,
         listsLoading: listsLoadingRaw,
         listsError: listsErrorRaw,
@@ -357,7 +357,7 @@ export default function FollowsView({ state }) {
         ? 'Simulated error — appended ?_state=error to preview the error UI.'
         : listsErrorRaw;
     const forceEmpty = debugState === 'empty';
-    const visibleTopics = forceEmpty ? [] : followedTopics;
+    const visibleCommunities = forceEmpty ? [] : followedCommunities;
     const visibleUsers = forceEmpty ? [] : followedUsers;
 
     const viewerAddress = state && state.publicKey ? state.publicKey : '';
@@ -387,7 +387,7 @@ export default function FollowsView({ state }) {
     }
 
     const tabCounts = {
-        topics: visibleTopics.length,
+        communities: visibleCommunities.length,
         users: visibleUsers.length,
     };
 
@@ -445,17 +445,17 @@ export default function FollowsView({ state }) {
         );
     }
 
-    const showTopics = activeTab === 'topics';
+    const showCommunities = activeTab === 'communities';
     const showUsers = activeTab === 'users';
 
-    const topicsEmpty = visibleTopics.length === 0;
+    const communitiesEmpty = visibleCommunities.length === 0;
     const usersEmpty = visibleUsers.length === 0;
 
     return renderShell(
         <>
             {headerBlock}
 
-            {showTopics && topicsEmpty && (
+            {showCommunities && communitiesEmpty && (
                 <StateBlock>
                     <StateIcon>
                         <HiHashtag />
@@ -467,27 +467,27 @@ export default function FollowsView({ state }) {
                 </StateBlock>
             )}
 
-            {showTopics && !topicsEmpty && (
+            {showCommunities && !communitiesEmpty && (
                 <List>
-                    {visibleTopics.map(topic => {
-                        const isPending = isCommunityPending(topic);
-                        const status = formatCommunityStatus(topic);
-                        const topicUrl = communityPath(topic);
+                    {visibleCommunities.map(community => {
+                        const isPending = isCommunityPending(community);
+                        const status = formatCommunityStatus(community);
+                        const communityUrl = communityPath(community);
                         return (
                             <Row
-                                key={topic}
+                                key={community}
                                 role="link"
                                 tabIndex={0}
-                                onClick={makeRowClickHandler(navigate, topicUrl)}
+                                onClick={makeRowClickHandler(navigate, communityUrl)}
                                 onKeyDown={e => {
-                                    if (e.key === 'Enter') navigate(topicUrl);
+                                    if (e.key === 'Enter') navigate(communityUrl);
                                 }}
                             >
-                                <TopicIcon aria-hidden="true">
+                                <CommunityIcon aria-hidden="true">
                                     <HiHashtag />
-                                </TopicIcon>
+                                </CommunityIcon>
                                 <Identity>
-                                    <IdentityTitle>{communityLabel(topic)}</IdentityTitle>
+                                    <IdentityTitle>{communityLabel(community)}</IdentityTitle>
                                 </Identity>
                                 <RowActions onClick={e => e.stopPropagation()}>
                                     <FollowingButton
@@ -498,7 +498,7 @@ export default function FollowsView({ state }) {
                                         onClick={e => {
                                             e.preventDefault();
                                             e.stopPropagation();
-                                            handleLeaveCommunity(e, topic);
+                                            handleLeaveCommunity(e, community);
                                         }}
                                     >
                                         <JoinedLabel status={status} />

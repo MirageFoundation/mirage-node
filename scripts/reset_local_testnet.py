@@ -657,9 +657,9 @@ def find_validator_by_consensus_pubkey(validators: list, cons_pub_b64: str) -> d
 def load_profiles_from_indexer_db() -> list:
     """Load user profiles from the SQL dump file.
 
-    Returns profiles in InitialProfile format matching the IMAGE binary's schema.
-    The image binary may predate field renames (e.g. followed_moderators → enabled_agents),
-    so we detect which proto fields the image knows and use the matching names.
+    Returns profiles in InitialProfile format: scalar core fields only. The list
+    fields the old agent/topic schema carried were retired in v1.39 and their
+    InitialProfile tags are reserved, so writing them would be an unknown field.
     """
     status("Loading profiles from indexer dump...")
     # Parse the SQL dump file directly instead of querying PostgreSQL
@@ -704,17 +704,6 @@ except Exception as e:
     exit(0)
 
 profiles_data = parse_copy_data(content, "profiles", [])
-# Support both new (enabled_agents) and old (followed_mods) schema for backup compatibility
-enabled_agents_data = parse_copy_data(content, "enabled_agents", [])
-if not enabled_agents_data:
-    enabled_agents_data = parse_copy_data(content, "followed_mods", [])
-
-agents_map = {}
-for row in enabled_agents_data:
-    owner = (row.get("owner") or "").lower()
-    agent = row.get("agent") or row.get("moderator") or ""  # moderator for old schema
-    if owner and agent:
-        agents_map.setdefault(owner, []).append(agent)
 
 profiles = []
 now = int(time.time())
@@ -729,7 +718,6 @@ for row in profiles_data:
         lvl = 0
     bio = row.get("biography") or ""
     avatar = row.get("avatar") or ""
-    owner_key = owner.lower()
     profiles.append({
         "core": {
             "owner": owner,
@@ -738,7 +726,6 @@ for row in profiles_data:
             "biography": bio,
             "avatar": avatar,
         },
-        "enabled_agents": agents_map.get(owner_key, []),
     })
 
 print(json.dumps(profiles))

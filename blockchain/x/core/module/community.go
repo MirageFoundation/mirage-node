@@ -132,7 +132,7 @@ func (am AppModule) BlockCommunity(ctx context.Context, req *types.MsgBlockCommu
 		return nil, fmt.Errorf("tier config not found")
 	}
 	pat := strings.TrimSpace(req.GetCommunity())
-	if err := validateBlockedTopicPattern(pat, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
+	if err := validateBlockedCommunityPattern(pat, uint64(params.MaxCommunitySize), uint64(params.MinCommunitySize)); err != nil {
 		return nil, err
 	}
 	// A zero cap means the list is disabled, exactly as it does for blocked

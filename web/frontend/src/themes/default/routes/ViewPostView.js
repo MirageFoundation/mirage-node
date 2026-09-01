@@ -612,18 +612,18 @@ const ContinueThreadLink = styled(Link)`
     }
 `;
 
-// Topic hero container aligned with ModernPostFeed width
-const TopicHeroWrapper = styled.div`
+// Community hero container aligned with ModernPostFeed width
+const CommunityHeroWrapper = styled.div`
     width: 100%;
     margin: 0;
 `;
 /**
  * Flat header row above the root post — holds the back button (left) and
- * follow-topic button (right). No card background; separated from the
+ * follow-community button (right). No card background; separated from the
  * post below via the `PostCard` bottom divider (R3). Matches the Inbox /
  * Search header rhythm.
  */
-const TopicHeroCard = styled.div`
+const CommunityHeroCard = styled.div`
     width: 100%;
     background: transparent;
     border: none;
@@ -642,7 +642,7 @@ const TopicHeroCard = styled.div`
         padding: 0.35rem 0 0.5rem;
     }
 `;
-const TopicHeroTopRow = styled.div`
+const CommunityHeroTopRow = styled.div`
     display: none;
     
     @media (max-width: 600px) {
@@ -652,13 +652,13 @@ const TopicHeroTopRow = styled.div`
         justify-content: space-between;
     }
 `;
-const TopicHeroMobileActions = styled.div`
+const CommunityHeroMobileActions = styled.div`
     display: flex;
     align-items: center;
     gap: 0.2rem;
     margin-left: auto;
 `;
-const TopicHeroBackSection = styled.div`
+const CommunityHeroBackSection = styled.div`
     display: flex;
     align-items: center;
     flex-shrink: 0;
@@ -667,7 +667,7 @@ const TopicHeroBackSection = styled.div`
         display: none;
     }
 `;
-const TopicAction = styled.div`
+const CommunityAction = styled.div`
     display: flex;
     align-items: center;
     gap: 0.2rem;
@@ -705,7 +705,7 @@ const TitleDivider = styled.div`
     display: none;
 `;
 
-// Reuse the same visual style as topic links in the feed
+// Reuse the same visual style as community links in the feed
 // BreadcrumbLink removed (unused)
 
 const StyledProfileLink = styled(Link)`
@@ -724,7 +724,7 @@ const StyledProfileLink = styled(Link)`
 }) => $tierColor} !important;
     }
 `;
-const StyledTopicLink = styled(Link)`
+const StyledCommunityLink = styled(Link)`
     color: ${({
     theme
 }) => theme.colors.link};
@@ -769,7 +769,7 @@ const BackButton = styled.button`
 /**
  * Header row — matches `CardView::HeaderRow` so the post-details screen
  * reads the same as the feed card. Left side holds the metadata cluster
- * (topic · user · time · tag). Right side holds the actions (follow,
+ * (community · user · time · tag). Right side holds the actions (follow,
  * menu). Flat row, no border, no margin — parent gap handles spacing.
  */
 const MetaInfoRow = styled.div`
@@ -787,7 +787,7 @@ const MetaInfoRow = styled.div`
     }
 `;
 /**
- * Metadata cluster (topic · user · time · tag) on the left side of the
+ * Metadata cluster (community · user · time · tag) on the left side of the
  * header row. Ported 1:1 from `CardView::HeaderMeta`: 0.62rem font,
  * `feedCtrlText` color, flex-wrap, tight gap.
  */
@@ -1222,7 +1222,7 @@ const StyledReply = styled.div`
     }
 
     /* --- Submit / Cancel buttons --------------------------------------
-     * Submit: flat pill in followBtnBg (matches the topic Follow pill in
+     * Submit: flat pill in followBtnBg (matches the community Follow pill in
      * CardView and the post-details header) so the primary CTA across the
      * theme reads with the same blue. Cancel: ghost pill, lighter weight.
      */
@@ -1476,7 +1476,7 @@ const VPStateMessage = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
 `;
 /**
- * Blocked-post state — visual twin of `MainView`'s `BlockedTopicState`.
+ * Blocked-post state — visual twin of `MainView`'s `BlockedCommunityState`.
  * Shown when the viewer navigates to `/p/<id>` for a post they have
  * blocked. Sits on the main feed canvas (`theme.colors.bg`) with no
  * divider so it reads as part of the feed column, not a separate panel.
@@ -2316,8 +2316,8 @@ function ViewPostView({
                 {(() => {
                     const isRootPost = !!(post.title && String(post.title).trim() !== '');
                     const itemLabel = isRootPost ? 'post' : 'comment';
-                    const topicLower = (post && typeof post.topic === 'string') ? post.topic.trim().toLowerCase() : '';
-                    const joinedCommunity = topicLower ? isJoinedCommunity(topicLower) : false;
+                    const communityLower = (post && typeof post.community === 'string') ? post.community.trim().toLowerCase() : '';
+                    const joinedCommunity = communityLower ? isJoinedCommunity(communityLower) : false;
                     const postLinkPath = isRootPost
                         ? `/p/${post.post_id}`
                         : `/p/${post.post_id}`;
@@ -2395,12 +2395,12 @@ function ViewPostView({
                                 {isFollowingThisAuthor ? <HiOutlineUserMinus /> : <HiOutlineUserPlus />}
                                 <span>{isUserPending(authorAddr) ? formatUserStatus(authorAddr) : isFollowingThisAuthor ? 'Unfollow user' : 'Follow user'}</span>
                             </MenuItem>
-                            {isRootPost && post?.topic && <MenuItem disabled={isCommunityPending(topicLower)} onClick={() => {
+                            {isRootPost && post?.community && <MenuItem disabled={isCommunityPending(communityLower)} onClick={() => {
                                 setOpenMenuId(null);
-                                handleCommunityJoinToggle(post.topic);
+                                handleCommunityJoinToggle(post.community);
                             }}>
                                 <HiOutlineHashtag />
-                                <span>{isCommunityPending(topicLower) ? formatCommunityStatus(topicLower) : joinedCommunity ? 'Leave community' : 'Join community'}</span>
+                                <span>{isCommunityPending(communityLower) ? formatCommunityStatus(communityLower) : joinedCommunity ? 'Leave community' : 'Join community'}</span>
                             </MenuItem>}
                             <MenuItem onClick={() => {
                                 setOpenMenuId(null);
@@ -2441,10 +2441,10 @@ function ViewPostView({
             </MenuDropdown>, document.body)}
         </MenuContainer>;
     };
-    const renderHeaderLensPicker = topicLabel => {
-        if (!topicLabel) return null;
+    const renderHeaderLensPicker = communityLabel => {
+        if (!communityLabel) return null;
         return <PostLensPicker
-            community={topicLabel}
+            community={communityLabel}
             viewer={viewerAddress}
             hintLens={mergedRoot?.lens || root?.lens}
             onChange={handleThreadLensChange}
@@ -2870,7 +2870,7 @@ function ViewPostView({
         });
     };
 
-    // Merge root with any optimistic/local updates from state.posts for immediate UI reflection (title/topic/content edits)
+    // Merge root with any optimistic/local updates from state.posts for immediate UI reflection (title/community/content edits)
     const mergedRoot = (() => {
         try {
             if (!root || !root.post_id) return root;
@@ -2880,8 +2880,8 @@ function ViewPostView({
                 ...root
             };
             if (sp.title !== undefined) out.title = sp.title;
-            if (sp.topic !== undefined) out.topic = sp.topic;
-            if (sp.root_topic !== undefined) out.root_topic = sp.root_topic;
+            if (sp.community !== undefined) out.community = sp.community;
+            if (sp.root_community !== undefined) out.root_community = sp.root_community;
             if (sp.tag !== undefined) out.tag = sp.tag;
             if (sp.thread_locked !== undefined) out.thread_locked = sp.thread_locked;
             if (sp.content !== undefined) out.content = sp.content;
@@ -2989,17 +2989,17 @@ function ViewPostView({
                             <meta name="twitter:image" content={imageUrl} />
                         </Helmet>
                         <ModernPostFeed>
-                            {/* Topic Hero Card */}
+                            {/* Community Hero Card */}
                             {(() => {
-                                const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                const topicLower = displayTopic.toLowerCase();
-                                const isJoined = isJoinedCommunity(topicLower);
-                                const isCommunityInProgress = isCommunityPending(topicLower);
+                                const displayCommunity = mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
+                                const communityLower = displayCommunity.toLowerCase();
+                                const isJoined = isJoinedCommunity(communityLower);
+                                const isCommunityInProgress = isCommunityPending(communityLower);
                                 const hasValidAccount = state.publicKey && state.publicKey !== 'guest';
-                                return <TopicHeroWrapper>
-                                    <TopicHeroCard role="region" aria-label="Community context">
+                                return <CommunityHeroWrapper>
+                                    <CommunityHeroCard role="region" aria-label="Community context">
                                         {/* Mobile: Top row with Back button and Follow button */}
-                                        <TopicHeroTopRow>
+                                        <CommunityHeroTopRow>
                                             <BackButton onClick={goBackToFeed} style={{
                                                 padding: 0,
                                                 margin: 0,
@@ -3014,19 +3014,19 @@ function ViewPostView({
                                                 </svg>
                                                 Back
                                             </BackButton>
-                                            <TopicHeroMobileActions>
+                                            <CommunityHeroMobileActions>
                                                 {hasValidAccount && <CommunityMembershipButton
                                                     joined={isJoined}
                                                     pending={isCommunityInProgress}
-                                                    statusLabel={formatCommunityStatus(topicLower)}
-                                                    onToggle={() => handleCommunityJoinToggle(displayTopic)}
+                                                    statusLabel={formatCommunityStatus(communityLower)}
+                                                    onToggle={() => handleCommunityJoinToggle(displayCommunity)}
                                                 />}
-                                                {renderHeaderLensPicker(displayTopic)}
-                                            </TopicHeroMobileActions>
-                                        </TopicHeroTopRow>
+                                                {renderHeaderLensPicker(displayCommunity)}
+                                            </CommunityHeroMobileActions>
+                                        </CommunityHeroTopRow>
 
                                         {/* Desktop: Back section */}
-                                        <TopicHeroBackSection>
+                                        <CommunityHeroBackSection>
                                             <BackButton onClick={goBackToFeed} style={{
                                                 padding: 0,
                                                 margin: 0,
@@ -3041,21 +3041,21 @@ function ViewPostView({
                                                 </svg>
                                                 Back
                                             </BackButton>
-                                        </TopicHeroBackSection>
+                                        </CommunityHeroBackSection>
 
                                         {/* Desktop: Follow button */}
-                                        <TopicAction>
+                                        <CommunityAction>
                                             {hasValidAccount && <CommunityMembershipButton
                                                 joined={isJoined}
                                                 pending={isCommunityInProgress}
-                                                statusLabel={formatCommunityStatus(topicLower)}
-                                                communityLabel={communityLabel(displayTopic)}
-                                                onToggle={() => handleCommunityJoinToggle(displayTopic)}
+                                                statusLabel={formatCommunityStatus(communityLower)}
+                                                communityLabel={communityLabel(displayCommunity)}
+                                                onToggle={() => handleCommunityJoinToggle(displayCommunity)}
                                             />}
-                                            {renderHeaderLensPicker(displayTopic)}
-                                        </TopicAction>
-                                    </TopicHeroCard>
-                                </TopicHeroWrapper>;
+                                            {renderHeaderLensPicker(displayCommunity)}
+                                        </CommunityAction>
+                                    </CommunityHeroCard>
+                                </CommunityHeroWrapper>;
                             })()}
                             {(() => {
                                 const visibleAnnotated = annotated.filter(p => (
@@ -3087,9 +3087,9 @@ function ViewPostView({
                                                     <MobileRootMetaTop>
                                                         <MobileRootMetaPrimary>
                                                             {(() => {
-                                                                const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                                return topicLabel ? <>
-                                                                    <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                                const communityLabel = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
+                                                                return communityLabel ? <>
+                                                                    <StyledCommunityLink to={communityPath(encodeURIComponent(communityLabel.toLowerCase()))}>{communityLabel(communityLabel)}</StyledCommunityLink>
                                                                     <MetaSeparator>·</MetaSeparator>
                                                                 </> : null;
                                                             })()}
@@ -3136,7 +3136,7 @@ function ViewPostView({
                                                     $clickable={!isRoot}
                                                     onClick={!isRoot ? (e) => {
                                                         // Ignore clicks that landed on interactive children
-                                                        // (author/topic links, menu button, tooltips with handlers).
+                                                        // (author/community links, menu button, tooltips with handlers).
                                                         if (e.target.closest && e.target.closest('a,button')) return;
                                                         toggleCollapsed(post.post_id, !!post.collapsed);
                                                     } : undefined}
@@ -3165,9 +3165,9 @@ function ViewPostView({
                                                          * [community] · @author · time. Comments
                                                          * have no community chip (inherited). */}
                                                         {isRoot && (() => {
-                                                            const topicLabel = post.topic || post.root_topic || mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || '';
-                                                            return topicLabel ? <>
-                                                                <StyledTopicLink to={communityPath(encodeURIComponent(topicLabel.toLowerCase()))}>{communityLabel(topicLabel)}</StyledTopicLink>
+                                                            const communityLabel = post.community || post.root_community || mergedRoot?.community || mergedRoot?.root_community || root?.community || root?.root_community || '';
+                                                            return communityLabel ? <>
+                                                                <StyledCommunityLink to={communityPath(encodeURIComponent(communityLabel.toLowerCase()))}>{communityLabel(communityLabel)}</StyledCommunityLink>
                                                                 <MetaSeparator>·</MetaSeparator>
                                                             </> : null;
                                                         })()}
@@ -3370,7 +3370,7 @@ function ViewPostView({
             </FeedRailRow>
             {renderMobileReplyOverlay()}
             {/**
-              * Destructive-action dialogs (block post/user/topic + report).
+              * Destructive-action dialogs (block post/user/community + report).
               * Rendered at the route root so a single `ConfirmDialog` owns
               * the modal UI for the whole page. The existing state machine
               * in `useViewPost` (`confirmBlockPost`, `confirmBlockUser`,

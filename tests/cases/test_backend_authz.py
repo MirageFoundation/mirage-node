@@ -74,6 +74,9 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_username_from_address": PUBLIC,
     "/api/get_users": PUBLIC,
     "/api/get_welcome_stats": PUBLIC,
+    # Unauthenticated by design: it exists so anyone can check that a site listed
+    # on /network belongs to the validator named beside it.
+    "/api/node_identity": PUBLIC,
     "/api/search": PUBLIC,
     "/api/search_username": PUBLIC,
     "/api/stats/visitor_attribution": PUBLIC,

@@ -7,9 +7,9 @@ import Api from "../utils/api";
  * Drives the TopBar search dropdown sheet for the default theme.
  *
  * Mirrors `mirage-mobile-app/src/pages/search-screen.tsx` behavior:
- *  - When the input is empty, surface **recent searches** + **trending topics**.
+ *  - When the input is empty, surface **recent searches** + **trending communities**.
  *  - When the user types, debounce and surface **live results** (posts,
- *    topics, users) inside the sheet.
+ *    communities, users) inside the sheet.
  *  - On submit, record the query as a recent search and let the caller
  *    navigate to `/search?q=...` for the full results page.
  *
@@ -21,7 +21,7 @@ import Api from "../utils/api";
  */
 
 const RECENTS_KEY = "mirage_recent_searches";
-const TRENDING_CACHE_KEY = "mirage_trending_topics_cache";
+const TRENDING_CACHE_KEY = "mirage_trending_communities_cache";
 const TRENDING_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_RECENTS = 8;
 const DEBOUNCE_MS = 300;
@@ -36,17 +36,17 @@ function loadTrendingCache(viewerKey) {
         if (!parsed || typeof parsed !== "object") return null;
         if (parsed.viewer !== viewerKey) return null;
         if (Date.now() - Number(parsed.at || 0) > TRENDING_CACHE_TTL_MS) return null;
-        return Array.isArray(parsed.topics) ? parsed.topics : null;
+        return Array.isArray(parsed.communities) ? parsed.communities : null;
     } catch (_) {
         return null;
     }
 }
 
-function persistTrendingCache(viewerKey, topics) {
+function persistTrendingCache(viewerKey, communities) {
     try {
         localStorage.setItem(
             TRENDING_CACHE_KEY,
-            JSON.stringify({ viewer: viewerKey, at: Date.now(), topics })
+            JSON.stringify({ viewer: viewerKey, at: Date.now(), communities })
         );
     } catch (_) { }
 }
@@ -79,7 +79,7 @@ function persistRecents(list) {
 
 export function useSearchDropdown(options = {}) {
     // `trendingEnabled`: when true (e.g. on the /search results route), trending
-    // topics load eagerly on mount — the user is already on a search-focused
+    // communities load eagerly on mount — the user is already on a search-focused
     // surface, no point waiting. When false (e.g. the TopBar search dropdown,
     // which mounts on every page), trending stays dormant and the caller fires
     // `loadTrending()` on first focus / dropdown-open. Defaults to true to
@@ -95,11 +95,11 @@ export function useSearchDropdown(options = {}) {
     const [liveResults, setLiveResults] = useState({
         posts: [],
         users: [],
-        topics: [],
+        communities: [],
     });
     const [liveError, setLiveError] = useState("");
 
-    const [trendingTopics, setTrendingTopics] = useState(() => loadTrendingCache(viewerKey) || []);
+    const [trendingCommunities, setTrendingCommunities] = useState(() => loadTrendingCache(viewerKey) || []);
     const [isLoadingTrending, setIsLoadingTrending] = useState(false);
     const trendingFetchedRef = useRef(false);
 
@@ -121,7 +121,7 @@ export function useSearchDropdown(options = {}) {
         const trimmed = rawQuery.trim();
         if (!trimmed) {
             setDebouncedQuery("");
-            setLiveResults({ posts: [], users: [], topics: [] });
+            setLiveResults({ posts: [], users: [], communities: [] });
             setIsSearching(false);
             setLiveError("");
             return undefined;
@@ -156,7 +156,7 @@ export function useSearchDropdown(options = {}) {
                 setLiveResults({
                     posts: Array.isArray(data?.posts) ? data.posts : [],
                     users: Array.isArray(data?.users) ? data.users : [],
-                    topics: Array.isArray(data?.topics) ? data.topics : [],
+                    communities: Array.isArray(data?.communities) ? data.communities : [],
                 });
                 setIsSearching(false);
             })
@@ -171,7 +171,7 @@ export function useSearchDropdown(options = {}) {
         };
     }, [debouncedQuery, viewerAddress]);
 
-    // Lazy trending-topics fetch. Single-shot per hook instance, with a 5-min
+    // Lazy trending-communities fetch. Single-shot per hook instance, with a 5-min
     // localStorage cache to avoid re-fetching across re-mounts inside the
     // session. Callers that care (TopBar) invoke `loadTrending()` when the
     // user opens the dropdown; callers that don't (SearchResultsView, mobile
@@ -181,7 +181,7 @@ export function useSearchDropdown(options = {}) {
         const cached = loadTrendingCache(viewerKey);
         if (cached && cached.length > 0) {
             trendingFetchedRef.current = true;
-            setTrendingTopics(cached);
+            setTrendingCommunities(cached);
             return;
         }
         trendingFetchedRef.current = true;
@@ -199,18 +199,18 @@ export function useSearchDropdown(options = {}) {
                 const sorted = [...list]
                     .filter((t) => t && t.community)
                     .map((t) => ({
-                        topic: t.community,
+                        community: t.community,
                         post_count: 0,
                         count: 0,
                     }))
                     .slice(0, TRENDING_LIMIT);
-                setTrendingTopics(sorted);
+                setTrendingCommunities(sorted);
                 setIsLoadingTrending(false);
                 persistTrendingCache(viewerKey, sorted);
             })
             .catch(() => {
                 if (!mountedRef.current) return;
-                setTrendingTopics([]);
+                setTrendingCommunities([]);
                 setIsLoadingTrending(false);
                 // Allow retry on next caller-initiated open.
                 trendingFetchedRef.current = false;
@@ -219,7 +219,7 @@ export function useSearchDropdown(options = {}) {
 
     useEffect(() => {
         trendingFetchedRef.current = false;
-        setTrendingTopics(loadTrendingCache(viewerKey) || []);
+        setTrendingCommunities(loadTrendingCache(viewerKey) || []);
     }, [viewerKey]);
 
     useEffect(() => {
@@ -264,7 +264,7 @@ export function useSearchDropdown(options = {}) {
     const resetQuery = useCallback(() => {
         setRawQuery("");
         setDebouncedQuery("");
-        setLiveResults({ posts: [], users: [], topics: [] });
+        setLiveResults({ posts: [], users: [], communities: [] });
         setIsSearching(false);
         setLiveError("");
     }, []);
@@ -274,7 +274,7 @@ export function useSearchDropdown(options = {}) {
         () =>
             liveResults.posts.length > 0 ||
             liveResults.users.length > 0 ||
-            liveResults.topics.length > 0,
+            liveResults.communities.length > 0,
         [liveResults]
     );
 
@@ -288,7 +288,7 @@ export function useSearchDropdown(options = {}) {
         liveError,
         hasQuery,
         hasLiveResults,
-        trendingTopics,
+        trendingCommunities,
         isLoadingTrending,
         loadTrending,
         recentSearches,

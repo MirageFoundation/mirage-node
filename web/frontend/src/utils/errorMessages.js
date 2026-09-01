@@ -40,6 +40,8 @@ const ERROR_MAP = {
     forbidden: "You do not have permission to perform this action.",
     unauthorized: "Unauthorized.",
     signature_required: "A signed request is required.",
+    // Node-to-node: a person only reaches this by calling the endpoint by hand.
+    invalid_identity_challenge: "An identity challenge needs an origin and a nonce.",
     not_found: "Not found.",
 
     // Server state
@@ -77,11 +79,11 @@ const ERROR_MAP = {
     // Content / posts
     title_too_long: "Your title exceeds the maximum length.",
     content_too_long: "Your post exceeds the maximum length.",
-    topic_too_short: "Community name is too short.",
-    topic_too_long: "Community name is too long.",
-    topic_invalid_format: "Community name contains invalid characters.",
-    topic_too_many_wildcards: "Too many * wildcards in that community pattern.",
-    topic_required: "A community is required for new posts.",
+    community_too_short: "Community name is too short.",
+    community_too_long: "Community name is too long.",
+    community_invalid_format: "Community name contains invalid characters.",
+    community_too_many_wildcards: "Too many * wildcards in that community pattern.",
+    post_community_required: "A community is required for new posts.",
     comment_content_required: "Comment text is required.",
     comment_not_found: "Comment not found.",
     post_not_found: "Post not found.",
@@ -89,7 +91,7 @@ const ERROR_MAP = {
     invalid_target_format: "Invalid target format.",
     target_not_found: "The target post or comment was not found.",
     target_mismatch: "Cannot change the parent of an existing post.",
-    comment_must_not_include_topic: "Comments must not include a community.",
+    comment_must_not_include_community: "Comments must not include a community.",
     tag_too_long: "Tag is too long.",
     invalid_tag: "Invalid tag.",
     invalid_override: "Invalid override.",
@@ -145,9 +147,8 @@ const ERROR_MAP = {
     post_already_blocked: "You already blocked this post.",
     user_already_blocked: "You already blocked this user.",
     community_already_blocked: "You already blocked this community.",
-    topic_already_blocked: "You already blocked this community.",
     user_already_followed: "You already follow this user.",
-    topic_already_followed: "You already joined this community.",
+    community_already_joined: "You already joined this community.",
     user_must_be_mirage1: "User must be a valid mirage1 address.",
     block_post_in_progress: "Block post request already in progress.",
     unblock_post_in_progress: "Unblock post request already in progress.",
@@ -162,18 +163,8 @@ const ERROR_MAP = {
     vote_already_pending: "Vote already pending.",
     delete_in_progress: "Delete account request already in progress.",
 
-    // Retired agent APIs (kept so leftover chain errors stay readable)
-    invalid_agent_address: "That agent feature is no longer available.",
-    duplicate_agent: "That agent feature is no longer available.",
-    too_many_agents: "That agent feature is no longer available.",
-    agent_already_enabled: "That agent feature is no longer available.",
-    cannot_enable_self_as_agent: "That agent feature is no longer available.",
-    cannot_set_self_as_agent: "That agent feature is no longer available.",
-    agent_tier_required: "That agent feature is no longer available.",
     missing_tier_config: "Subscription tier configuration is missing.",
     missing_profile_level: "Profile level is missing.",
-    missing_max_agents: "That agent feature is no longer available.",
-    pow_not_allowed_agents: "That agent feature is no longer available.",
 
     // Subscription
     not_subscriber: "This action requires an active subscription or an admin account.",

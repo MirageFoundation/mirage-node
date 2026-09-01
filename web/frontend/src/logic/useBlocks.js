@@ -18,7 +18,7 @@ export function useBlocks({
   const address = state && state.publicKey ? state.publicKey : Storage.load('publicKey', '');
   const [blockedUsers, setBlockedUsers] = useState([]);
   const [blockedPosts, setBlockedPosts] = useState([]);
-  const [blockedTopics, setBlockedTopics] = useState([]);
+  const [blockedCommunities, setBlockedCommunities] = useState([]);
   const [blockedUsernames, setBlockedUsernames] = useState({});
   const [listsLoading, setListsLoading] = useState(false);
   const [listsError, setListsError] = useState('');
@@ -43,7 +43,7 @@ export function useBlocks({
         if (cancelled) return;
         setBlockedUsers(data?.blocked_users || []);
         setBlockedPosts(data?.blocked_posts || []);
-        setBlockedTopics(data?.blocked_communities || []);
+        setBlockedCommunities(data?.blocked_communities || []);
       } catch (err) {
         if (!cancelled) {
           setListsError(err?.message || 'Failed to load blocked items');
@@ -93,14 +93,14 @@ export function useBlocks({
       cancelled = true;
     };
   }, [blockedUsers]);
-  const handleUnblockCommunity = async (e, topic) => {
+  const handleUnblockCommunity = async (e, community) => {
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-    const topicTrimmed = String(topic || '').trim().toLowerCase();
-    if (!topicTrimmed) return;
+    const communityTrimmed = String(community || '').trim().toLowerCase();
+    if (!communityTrimmed) return;
     try {
-      const result = await tx.unblockCommunity(topicTrimmed);
+      const result = await tx.unblockCommunity(communityTrimmed);
       if (result && result.success) {
-        setBlockedTopics(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
+        setBlockedCommunities(prev => prev.filter(t => String(t || '').trim().toLowerCase() !== communityTrimmed));
       } else {
         alert(`Failed to unblock community: ${result?.error || 'Unknown error'}`);
       }
@@ -143,7 +143,7 @@ export function useBlocks({
     location,
     blockedUsers,
     blockedPosts,
-    blockedTopics,
+    blockedCommunities,
     blockedUsernames,
     listsLoading,
     listsError,

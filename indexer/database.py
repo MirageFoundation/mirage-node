@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 INDEXER_LIST_CAP = 100_000
 TX_INDEX_CAP = 5000
 
-# Matches the max_depth of the root walk in get_root_topic_for_post.
+# Matches the max_depth of the root walk in get_root_community_for_post.
 MAX_ANCESTOR_WALK_DEPTH = 100
 
 # Meta keys forming the atomic block checkpoint.
@@ -43,8 +43,8 @@ def format_db_target(url: str) -> str:
 class DatabaseManager:
     """Manages all database operations for the indexer."""
 
-    # Allowed content tags for topic safety classification
-    _ALLOWED_TOPIC_TAGS = {"sensitive", "gore", "violence", "death", "adult"}
+    # Allowed content tags for community safety classification
+    _ALLOWED_COMMUNITY_TAGS = {"sensitive", "gore", "violence", "death", "adult"}
 
     # TODO: remove "porn" alias once all clients send "adult"
     _TAG_ALIASES = {"porn": "adult"}
@@ -198,7 +198,7 @@ class DatabaseManager:
                     """
                 )
 
-                # v1.6: Drop post_topics table (cross-posting removed)
+                # v1.6: Drop post_communities table (cross-posting removed)
                 cur.execute("DROP TABLE IF EXISTS post_topics")
 
                 # votes
@@ -267,7 +267,7 @@ class DatabaseManager:
                             ALTER TABLE votes ADD COLUMN user_weight DOUBLE PRECISION NOT NULL DEFAULT 0;
                             UPDATE votes SET user_weight = user_vote;
                         END IF;
-                        -- Note: user_topic_stats.net_votes is intentionally kept as-is.
+                        -- Note: user_community_stats.net_votes is intentionally kept as-is.
                     END $$;
                     """
                 )
@@ -346,7 +346,7 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_created_at ON awards(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_relayer_lower ON awards(LOWER(relayer))")
 
-                # Per-user preferences for topics and authors (for home feed recommendations)
+                # Per-user preferences for communities and authors (for home feed recommendations)
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS preferences (
@@ -369,7 +369,7 @@ class DatabaseManager:
                     BEGIN
                         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'topic_preferences') THEN
                             INSERT INTO preferences(owner, pref_type, target, weight, updated_at)
-                            SELECT owner, 'topic', topic, weight, updated_at FROM topic_preferences
+                            SELECT owner, 'community', topic, weight, updated_at FROM topic_preferences
                             ON CONFLICT DO NOTHING;
                         END IF;
                         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'author_preferences') THEN
@@ -435,13 +435,17 @@ class DatabaseManager:
 
                 # v1.14.0: soft-delete support for MsgDeleteUser
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
-                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS effective_paid BOOLEAN NOT NULL DEFAULT FALSE")
+                cur.execute(
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS effective_paid BOOLEAN NOT NULL DEFAULT FALSE"
+                )
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS subscriber_quota_epoch BIGINT")
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS subscriber_quota_used NUMERIC(20,0)")
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_next_attempt BIGINT")
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_last_attempt_epoch BIGINT")
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_warning_expiry BIGINT")
-                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_warning_sent BOOLEAN NOT NULL DEFAULT FALSE")
+                cur.execute(
+                    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS renewal_warning_sent BOOLEAN NOT NULL DEFAULT FALSE"
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_deleted_at ON profiles(deleted_at)")
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_profiles_username_active "
@@ -513,7 +517,7 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_owner_lower ON blocked_users(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_target_lower ON blocked_users(LOWER(target))")
 
-                # blocked_communities (was blocked_topics)
+                # blocked_communities (was blocked_communities)
                 cur.execute(
                     """
                     DO $$
@@ -535,8 +539,12 @@ class DatabaseManager:
                     )
                     """
                 )
-                cur.execute("ALTER TABLE blocked_communities ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_communities_owner_lower ON blocked_communities(LOWER(owner))")
+                cur.execute(
+                    "ALTER TABLE blocked_communities ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_blocked_communities_owner_lower ON blocked_communities(LOWER(owner))"
+                )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_blocked_communities_target_lower ON blocked_communities(LOWER(target))"
                 )
@@ -600,11 +608,89 @@ class DatabaseManager:
                 cur.execute("ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_minted_total BIGINT")
                 cur.execute("ALTER TABLE supply_history ADD COLUMN IF NOT EXISTS node_fees_total BIGINT")
 
-                # topic_content_stats: per-topic content labels derived from post tags
+                # v1.39.0: these two tables kept their `topic` names through the
+                # community rename because their rows were already on disk. They are
+                # renamed here rather than in a migration file: schema init runs
+                # before run_migrations(), so the CREATE TABLE below would otherwise
+                # create an empty community_content_stats and strand the populated
+                # topic_content_stats beside it. Renames are metadata-only, and index
+                # and primary-key names do not follow a table rename, so they are
+                # renamed explicitly too. Every branch is guarded, so this is a no-op
+                # on a fresh database and on every startup after the first.
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS topic_content_stats (
-                        topic TEXT PRIMARY KEY,
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'topic_content_stats'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'community_content_stats'
+                        ) THEN
+                            ALTER TABLE topic_content_stats RENAME TO community_content_stats;
+                        END IF;
+
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'user_topic_stats'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_name = 'user_community_stats'
+                        ) THEN
+                            ALTER TABLE user_topic_stats RENAME TO user_community_stats;
+                        END IF;
+
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'community_content_stats' AND column_name = 'topic'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'community_content_stats' AND column_name = 'community'
+                        ) THEN
+                            ALTER TABLE community_content_stats RENAME COLUMN topic TO community;
+                        END IF;
+
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'user_community_stats' AND column_name = 'topic'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'user_community_stats' AND column_name = 'community'
+                        ) THEN
+                            ALTER TABLE user_community_stats RENAME COLUMN topic TO community;
+                        END IF;
+
+                        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'idx_topic_content_stats_topic_lower')
+                           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'idx_community_content_stats_community_lower') THEN
+                            ALTER INDEX idx_topic_content_stats_topic_lower
+                                RENAME TO idx_community_content_stats_community_lower;
+                        END IF;
+
+                        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'idx_user_topic_stats_owner')
+                           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'idx_user_community_stats_owner') THEN
+                            ALTER INDEX idx_user_topic_stats_owner
+                                RENAME TO idx_user_community_stats_owner;
+                        END IF;
+
+                        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'topic_content_stats_pkey')
+                           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'community_content_stats_pkey') THEN
+                            ALTER INDEX topic_content_stats_pkey RENAME TO community_content_stats_pkey;
+                        END IF;
+
+                        IF EXISTS (SELECT 1 FROM pg_class WHERE relname = 'user_topic_stats_pkey')
+                           AND NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'user_community_stats_pkey') THEN
+                            ALTER INDEX user_topic_stats_pkey RENAME TO user_community_stats_pkey;
+                        END IF;
+                    END $$;
+                    """
+                )
+
+                # community_content_stats: per-community content labels derived from post tags
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS community_content_stats (
+                        community TEXT PRIMARY KEY,
                         total_posts INTEGER NOT NULL DEFAULT 0,
                         sensitive_count INTEGER NOT NULL DEFAULT 0,
                         gore_count INTEGER NOT NULL DEFAULT 0,
@@ -617,11 +703,11 @@ class DatabaseManager:
                     """
                 )
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_topic_content_stats_topic_lower ON topic_content_stats(LOWER(topic))"
+                    "CREATE INDEX IF NOT EXISTS idx_community_content_stats_community_lower ON community_content_stats(LOWER(community))"
                 )
                 # v1.22.4: rename porn -> adult
                 cur.execute(
-                    "ALTER TABLE topic_content_stats ADD COLUMN IF NOT EXISTS adult_count INTEGER NOT NULL DEFAULT 0"
+                    "ALTER TABLE community_content_stats ADD COLUMN IF NOT EXISTS adult_count INTEGER NOT NULL DEFAULT 0"
                 )
 
                 # NOTE: Data migrations have been moved to indexer/migrations/
@@ -671,21 +757,23 @@ class DatabaseManager:
 
                 # TODO: backend-owned tables removed — see web/backend/db.py init_backend_schema()
 
-                # user_topic_stats: per-user per-topic voting stats for vote weighting
+                # user_community_stats: per-user per-community voting stats for vote weighting
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS user_topic_stats (
+                    CREATE TABLE IF NOT EXISTS user_community_stats (
                         owner TEXT NOT NULL,
-                        topic TEXT NOT NULL,
+                        community TEXT NOT NULL,
                         vote_count INTEGER NOT NULL DEFAULT 0,
                         net_votes INTEGER NOT NULL DEFAULT 0,
                         unique_root_posts INTEGER NOT NULL DEFAULT 0,
                         post_count INTEGER NOT NULL DEFAULT 0,
-                        PRIMARY KEY (owner, topic)
+                        PRIMARY KEY (owner, community)
                     )
                     """
                 )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_user_topic_stats_owner ON user_topic_stats(LOWER(owner))")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_user_community_stats_owner ON user_community_stats(LOWER(owner))"
+                )
                 # Legacy safety: if a past migration created 'score' instead of 'net_votes', rename it back.
                 cur.execute(
                     """
@@ -693,18 +781,18 @@ class DatabaseManager:
                     BEGIN
                         IF EXISTS (
                             SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'user_topic_stats' AND column_name = 'score'
+                            WHERE table_name = 'user_community_stats' AND column_name = 'score'
                         ) AND NOT EXISTS (
                             SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'user_topic_stats' AND column_name = 'net_votes'
+                            WHERE table_name = 'user_community_stats' AND column_name = 'net_votes'
                         ) THEN
-                            ALTER TABLE user_topic_stats RENAME COLUMN score TO net_votes;
+                            ALTER TABLE user_community_stats RENAME COLUMN score TO net_votes;
                         END IF;
                         IF NOT EXISTS (
                             SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'user_topic_stats' AND column_name = 'net_votes'
+                            WHERE table_name = 'user_community_stats' AND column_name = 'net_votes'
                         ) THEN
-                            ALTER TABLE user_topic_stats ADD COLUMN net_votes INTEGER NOT NULL DEFAULT 0;
+                            ALTER TABLE user_community_stats ADD COLUMN net_votes INTEGER NOT NULL DEFAULT 0;
                         END IF;
                     END $$;
                     """
@@ -726,7 +814,7 @@ class DatabaseManager:
                 # Backfill post_count from existing posts
                 cur.execute(
                     """
-                    INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+                    INSERT INTO user_community_stats (owner, community, vote_count, net_votes, unique_root_posts, post_count)
                     SELECT
                         LOWER(owner),
                         LOWER(root_community),
@@ -735,7 +823,7 @@ class DatabaseManager:
                     FROM posts
                     WHERE root_community IS NOT NULL AND root_community != '' AND deleted = FALSE
                     GROUP BY LOWER(owner), LOWER(root_community)
-                    ON CONFLICT (owner, topic) DO UPDATE SET
+                    ON CONFLICT (owner, community) DO UPDATE SET
                         post_count = EXCLUDED.post_count
                     """
                 )
@@ -827,7 +915,7 @@ class DatabaseManager:
     def get_post(self, txhash: str):
         """Get post by txhash.
 
-        Returns (topic, title, content, target, paid, thumbnail_url, created_at,
+        Returns (community, title, content, target, paid, thumbnail_url, created_at,
         media, deleted). `deleted` is last so positional readers keep working.
         The edit handler needs it: a soft delete is terminal, and an edit that
         does not check it republishes the post.
@@ -840,14 +928,14 @@ class DatabaseManager:
                 )
                 return cur.fetchone()
 
-    def get_root_topic_for_post(self, txhash: str):
+    def get_root_community_for_post(self, txhash: str):
         """
-        Return (root_topic, root_post_id) for a given post/comment, or (None, None) if not found.
+        Return (root_community, root_post_id) for a given post/comment, or (None, None) if not found.
 
-        - For new data the posts table stores root_topic/root_post_id directly, so this is a
+        - For new data the posts table stores root_community/root_post_id directly, so this is a
           single-row lookup.
         - For older rows without these fields populated we fall back to a bounded parent walk,
-          and opportunistically backfill root_topic/root_post_id for the discovered root.
+          and opportunistically backfill root_community/root_post_id for the discovered root.
         """
         current_id = (txhash or "").strip().lower()
         if not current_id:
@@ -878,19 +966,19 @@ class DatabaseManager:
                     row = cur.fetchone()
                     if not row:
                         break
-                    root_topic, root_post_id, topic, target, _deleted = row
-                    root_topic_str = str(root_topic or "").strip().lower()
+                    root_community, root_post_id, community, target, _deleted = row
+                    root_community_str = str(root_community or "").strip().lower()
                     root_post_str = str(root_post_id or "").strip().lower()
-                    topic_str = str(topic or "").strip()
+                    community_str = str(community or "").strip()
                     parent = str(target or "").strip().lower()
 
                     # Fast path: already denormalised.
-                    if root_topic_str and root_post_str:
-                        return root_topic_str, root_post_str
+                    if root_community_str and root_post_str:
+                        return root_community_str, root_post_str
 
-                    # Reached a root post (no parent) – derive and persist root_topic/root_post_id.
+                    # Reached a root post (no parent) – derive and persist root_community/root_post_id.
                     if not parent:
-                        final_topic = topic_str.lower() if topic_str else None
+                        final_community = community_str.lower() if community_str else None
                         final_root_id = current_id
                         # Best-effort backfill for legacy rows. This runs inside the
                         # block transaction, where a failed statement aborts the whole
@@ -898,18 +986,18 @@ class DatabaseManager:
                         # the caller alive, and the block would die later pointing at
                         # the wrong statement. The savepoint is what actually makes it
                         # best-effort.
-                        cur.execute("SAVEPOINT root_topic_backfill")
+                        cur.execute("SAVEPOINT root_community_backfill")
                         try:
                             cur.execute(
                                 "UPDATE posts SET root_community = %s, root_post_id = %s WHERE LOWER(txhash) = LOWER(%s)",
-                                (final_topic, final_root_id, current_id),
+                                (final_community, final_root_id, current_id),
                             )
                         except Exception:
-                            cur.execute("ROLLBACK TO SAVEPOINT root_topic_backfill")
-                            logger.warning("root_topic backfill failed for %s; continuing", current_id)
+                            cur.execute("ROLLBACK TO SAVEPOINT root_community_backfill")
+                            logger.warning("root_community backfill failed for %s; continuing", current_id)
                         else:
-                            cur.execute("RELEASE SAVEPOINT root_topic_backfill")
-                        return final_topic, final_root_id
+                            cur.execute("RELEASE SAVEPOINT root_community_backfill")
+                        return final_community, final_root_id
 
                     # Otherwise, walk up the parent chain.
                     current_id = parent
@@ -988,7 +1076,7 @@ class DatabaseManager:
         txhash: str,
         owner: str,
         created_at: int,
-        topic: str,
+        community: str,
         title: str,
         content: str,
         target: str,
@@ -998,7 +1086,7 @@ class DatabaseManager:
         deleted: bool = False,
         thumbnail_url: Optional[str] = None,
         tag: str = "",
-        root_topic: Optional[str] = None,
+        root_community: Optional[str] = None,
         root_post_id: Optional[str] = None,
         media: Optional[list[str]] = None,
         protocol_version: int = 0,
@@ -1006,13 +1094,13 @@ class DatabaseManager:
         """Insert or update a post."""
         import json as _json
 
-        topic = self._strip_nul(topic) or ""
+        community = self._strip_nul(community) or ""
         title = self._strip_nul(title) or ""
         content = self._strip_nul(content) or ""
         target = self._strip_nul(target) or ""
         tag = self._strip_nul(tag) or ""
         thumbnail_url = self._strip_nul(thumbnail_url)
-        root_topic = self._strip_nul(root_topic)
+        root_community = self._strip_nul(root_community)
         root_post_id = self._strip_nul(root_post_id)
         relayer = self._strip_nul(relayer)
         media_json = _json.dumps(media or [])
@@ -1068,7 +1156,7 @@ class DatabaseManager:
                     (
                         txhash,
                         owner,
-                        topic or "",
+                        community or "",
                         title,
                         content,
                         target,
@@ -1078,7 +1166,7 @@ class DatabaseManager:
                         bool(deleted),
                         thumbnail_url,
                         tag or "",
-                        (root_topic or None),
+                        (root_community or None),
                         (root_post_id or None),
                         media_json,
                         relayer,
@@ -1155,6 +1243,7 @@ class DatabaseManager:
         """Persist quota and renewal state in the existing profile columns."""
         with self._connect() as conn:
             with conn.cursor() as cur:
+
                 def _opt_int(key: str):
                     value = runtime[key]
                     return None if value is None else int(value)
@@ -1214,7 +1303,7 @@ class DatabaseManager:
         """Return a normalized tag if allowed, else empty string."""
         t = str(tag or "").strip().lower()
         t = cls._TAG_ALIASES.get(t, t)
-        if t in cls._ALLOWED_TOPIC_TAGS:
+        if t in cls._ALLOWED_COMMUNITY_TAGS:
             return t
         return ""
 
@@ -1248,15 +1337,15 @@ class DatabaseManager:
                 dominant_ratio = ratio
         return dominant_tag, dominant_ratio
 
-    def update_topic_content_stats(self, topic: str, tag: str) -> None:
-        """Increment per-topic content stats based on a new root post tag.
+    def update_community_content_stats(self, community: str, tag: str) -> None:
+        """Increment per-community content stats based on a new root post tag.
 
         Counters here are cumulative and have no per-post guard, so callers MUST invoke
         this only for a root post that is genuinely new to the index. Calling it on an
         edit or a replay double-counts the post.
         """
-        topic_norm = str(topic or "").strip().lower()
-        if not topic_norm:
+        community_norm = str(community or "").strip().lower()
+        if not community_norm:
             return
         tag_norm = self._normalize_tag(tag)
         sensitive_inc = 1 if tag_norm == "sensitive" else 0
@@ -1269,8 +1358,8 @@ class DatabaseManager:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO topic_content_stats(
-                        topic,
+                    INSERT INTO community_content_stats(
+                        community,
                         total_posts,
                         sensitive_count,
                         gore_count,
@@ -1278,17 +1367,17 @@ class DatabaseManager:
                         death_count,
                         adult_count
                     ) VALUES(%s, 1, %s, %s, %s, %s, %s)
-                    ON CONFLICT(topic) DO UPDATE SET
-                        total_posts = topic_content_stats.total_posts + 1,
-                        sensitive_count = topic_content_stats.sensitive_count + EXCLUDED.sensitive_count,
-                        gore_count = topic_content_stats.gore_count + EXCLUDED.gore_count,
-                        violence_count = topic_content_stats.violence_count + EXCLUDED.violence_count,
-                        death_count = topic_content_stats.death_count + EXCLUDED.death_count,
-                        adult_count = topic_content_stats.adult_count + EXCLUDED.adult_count
+                    ON CONFLICT(community) DO UPDATE SET
+                        total_posts = community_content_stats.total_posts + 1,
+                        sensitive_count = community_content_stats.sensitive_count + EXCLUDED.sensitive_count,
+                        gore_count = community_content_stats.gore_count + EXCLUDED.gore_count,
+                        violence_count = community_content_stats.violence_count + EXCLUDED.violence_count,
+                        death_count = community_content_stats.death_count + EXCLUDED.death_count,
+                        adult_count = community_content_stats.adult_count + EXCLUDED.adult_count
                     RETURNING total_posts, sensitive_count, gore_count, violence_count, death_count, adult_count
                     """,
                     (
-                        topic_norm,
+                        community_norm,
                         sensitive_inc,
                         gore_inc,
                         violence_inc,
@@ -1305,18 +1394,18 @@ class DatabaseManager:
                 )
                 cur.execute(
                     """
-                    UPDATE topic_content_stats
+                    UPDATE community_content_stats
                     SET dominant_tag = %s,
                         dominant_ratio = %s
-                    WHERE topic = %s
+                    WHERE community = %s
                     """,
-                    (dominant_tag, float(dominant_ratio), topic_norm),
+                    (dominant_tag, float(dominant_ratio), community_norm),
                 )
 
-    def recompute_topic_content_stats(self, topic: str) -> None:
-        """Recompute stats for a topic from the posts table (root posts only)."""
-        topic_norm = str(topic or "").strip().lower()
-        if not topic_norm:
+    def recompute_community_content_stats(self, community: str) -> None:
+        """Recompute stats for a community from the posts table (root posts only)."""
+        community_norm = str(community or "").strip().lower()
+        if not community_norm:
             return
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1334,22 +1423,22 @@ class DatabaseManager:
                       AND deleted = FALSE
                       AND LOWER(COALESCE(community, '')) = %s
                     """,
-                    (topic_norm,),
+                    (community_norm,),
                 )
                 row = cur.fetchone()
                 if not row:
                     return
                 total_posts, sensitive, gore, violence, death, adult = [int(x or 0) for x in row]
                 if total_posts <= 0:
-                    cur.execute("DELETE FROM topic_content_stats WHERE topic = %s", (topic_norm,))
+                    cur.execute("DELETE FROM community_content_stats WHERE community = %s", (community_norm,))
                     return
                 dominant_tag, dominant_ratio = self._compute_dominant_tag(
                     total_posts, sensitive, gore, violence, death, adult
                 )
                 cur.execute(
                     """
-                    INSERT INTO topic_content_stats(
-                        topic,
+                    INSERT INTO community_content_stats(
+                        community,
                         total_posts,
                         sensitive_count,
                         gore_count,
@@ -1359,7 +1448,7 @@ class DatabaseManager:
                         dominant_tag,
                         dominant_ratio
                     ) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT(topic) DO UPDATE SET
+                    ON CONFLICT(community) DO UPDATE SET
                         total_posts = EXCLUDED.total_posts,
                         sensitive_count = EXCLUDED.sensitive_count,
                         gore_count = EXCLUDED.gore_count,
@@ -1370,7 +1459,7 @@ class DatabaseManager:
                         dominant_ratio = EXCLUDED.dominant_ratio
                     """,
                     (
-                        topic_norm,
+                        community_norm,
                         total_posts,
                         sensitive,
                         gore,
@@ -1563,7 +1652,7 @@ class DatabaseManager:
         """Insert or update a vote.
 
         user_vote: The user's vote direction (-1, 0, +1).
-        user_weight: Weighted contribution to post points (0 if user doesn't follow topic).
+        user_weight: Weighted contribution to post points (0 if user doesn't follow community).
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1679,17 +1768,17 @@ class DatabaseManager:
                     ),
                 )
 
-    def is_topic_followed(self, owner: str, topic: str) -> bool:
-        """Return True if the owner currently follows the given topic."""
+    def is_community_joined(self, owner: str, community: str) -> bool:
+        """Return True if the owner currently follows the given community."""
         owner_norm = str(owner or "").strip()
-        topic_norm = str(topic or "").strip()
-        if not owner_norm or not topic_norm:
+        community_norm = str(community or "").strip()
+        if not owner_norm or not community_norm:
             return False
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT 1 FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s) LIMIT 1",
-                    (owner_norm, topic_norm),
+                    (owner_norm, community_norm),
                 )
                 return cur.fetchone() is not None
 
@@ -1707,17 +1796,17 @@ class DatabaseManager:
                 )
                 return cur.fetchone() is not None
 
-    def get_user_topic_stats(self, owner: str, topic: str):
-        """Get user's voting stats in a topic. Returns (vote_count, net_votes, unique_root_posts, post_count) or None."""
+    def get_user_community_stats(self, owner: str, community: str):
+        """Get user's voting stats in a community. Returns (vote_count, net_votes, unique_root_posts, post_count) or None."""
         owner_norm = str(owner or "").strip().lower()
-        topic_norm = str(topic or "").strip().lower()
-        if not owner_norm or not topic_norm:
+        community_norm = str(community or "").strip().lower()
+        if not owner_norm or not community_norm:
             return None
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT vote_count, net_votes, unique_root_posts, post_count FROM user_topic_stats WHERE owner = %s AND topic = %s",
-                    (owner_norm, topic_norm),
+                    "SELECT vote_count, net_votes, unique_root_posts, post_count FROM user_community_stats WHERE owner = %s AND community = %s",
+                    (owner_norm, community_norm),
                 )
                 return cur.fetchone()
 
@@ -1740,17 +1829,17 @@ class DatabaseManager:
                 )
                 return cur.fetchone() is not None
 
-    def update_user_topic_stats(
+    def update_user_community_stats(
         self,
         owner: str,
-        topic: str,
+        community: str,
         net_votes_delta: int,
         root_post_id: str,
         is_new_vote: bool = True,
         post_increment: int = 0,
     ) -> None:
         """
-        Update user's voting stats in a topic after a vote or post.
+        Update user's voting stats in a community after a vote or post.
 
         vote_count: Only incremented for NEW votes (first vote on a target), not re-votes.
                     This prevents gaming by toggling votes on the same post.
@@ -1761,12 +1850,12 @@ class DatabaseManager:
         post_count: Incremented when post_increment > 0 (for new posts/comments).
         """
         owner_norm = str(owner or "").strip().lower()
-        topic_norm = str(topic or "").strip().lower()
+        community_norm = str(community or "").strip().lower()
         root_norm = str(root_post_id or "").strip().lower()
-        if not owner_norm or not topic_norm:
+        if not owner_norm or not community_norm:
             return
 
-        # Check if this root post is new for this user in this topic
+        # Check if this root post is new for this user in this community
         is_new_root = False
         if root_norm:
             is_new_root = not self.has_voted_on_root_post(owner_norm, root_norm)
@@ -1778,17 +1867,17 @@ class DatabaseManager:
                 root_increment = 1 if is_new_root else 0
                 cur.execute(
                     """
-                    INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+                    INSERT INTO user_community_stats (owner, community, vote_count, net_votes, unique_root_posts, post_count)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (owner, topic) DO UPDATE SET
-                        vote_count = user_topic_stats.vote_count + %s,
-                        net_votes = user_topic_stats.net_votes + %s,
-                        unique_root_posts = user_topic_stats.unique_root_posts + %s,
-                        post_count = user_topic_stats.post_count + %s
+                    ON CONFLICT (owner, community) DO UPDATE SET
+                        vote_count = user_community_stats.vote_count + %s,
+                        net_votes = user_community_stats.net_votes + %s,
+                        unique_root_posts = user_community_stats.unique_root_posts + %s,
+                        post_count = user_community_stats.post_count + %s
                     """,
                     (
                         owner_norm,
-                        topic_norm,
+                        community_norm,
                         vote_increment,
                         net_votes_delta,
                         root_increment,
@@ -1800,19 +1889,19 @@ class DatabaseManager:
                     ),
                 )
 
-    # Canonical definition of a (owner, topic) stats row, shared by the live
+    # Canonical definition of a (owner, community) stats row, shared by the live
     # re-attribution below and indexer/migrations/v1_33_0_rebuild_derived_stats.
     # Both must agree with tests indexer_hardening.net_votes_matches_canonical_votes.
     #
     # A deleted post grants its author no standing: post_count excludes deleted rows,
     # and so does the author's own vote on them (the post-time auto-upvote). Without
-    # that, posting and deleting in a loop is a free way to manufacture the topic
+    # that, posting and deleting in a loop is a free way to manufacture the community
     # standing that gates downvote weight, leaving no visible content behind.
     # Votes cast by OTHER users on a post that was later deleted are deliberately
     # kept: they were earned by participating, and retracting them would let an
     # author strip a voter's standing by deleting their own content.
     _VOTE_STATS_FROM_CANONICAL = """
-        INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+        INSERT INTO user_community_stats (owner, community, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
             LOWER(v.owner),
             LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)),
@@ -1834,7 +1923,7 @@ class DatabaseManager:
     """
 
     _POST_STATS_FROM_CANONICAL = """
-        INSERT INTO user_topic_stats (owner, topic, vote_count, net_votes, unique_root_posts, post_count)
+        INSERT INTO user_community_stats (owner, community, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
             LOWER(p.owner),
             LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)),
@@ -1845,49 +1934,49 @@ class DatabaseManager:
           AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
           AND COALESCE(p.deleted, FALSE) = FALSE
         GROUP BY 1, 2
-        ON CONFLICT (owner, topic) DO UPDATE SET
+        ON CONFLICT (owner, community) DO UPDATE SET
             post_count = EXCLUDED.post_count
     """
 
-    def _recompute_topic_stats(self, cur, owners: list[str], topics: list[str]) -> None:
-        """Rebuild user_topic_stats for these (owner, topic) pairs from the canonical rows.
+    def _recompute_community_stats(self, cur, owners: list[str], communities: list[str]) -> None:
+        """Rebuild user_community_stats for these (owner, community) pairs from the canonical rows.
 
-        Used by every mutation that invalidates an already-applied delta — a topic
+        Used by every mutation that invalidates an already-applied delta — a community
         edit, or a delete — so the result is identical to a full rebuild instead of
         depending on a guessed reversal.
         """
-        if not owners or not topics:
+        if not owners or not communities:
             return
         cur.execute(
-            "DELETE FROM user_topic_stats WHERE owner = ANY(%s) AND topic = ANY(%s)",
-            (owners, topics),
+            "DELETE FROM user_community_stats WHERE owner = ANY(%s) AND community = ANY(%s)",
+            (owners, communities),
         )
-        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, topics))
-        cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, topics))
+        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, communities))
+        cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, communities))
 
-    def reattribute_topic_stats(self, root_post_id: str, old_topic: str, new_topic: str) -> int:
-        """Move a thread's vote/post standing after its root topic changed.
+    def reattribute_community_stats(self, root_post_id: str, old_community: str, new_community: str) -> int:
+        """Move a thread's vote/post standing after its root community changed.
 
-        `user_topic_stats` is maintained by deltas, but its meaning is defined by
-        the topic the post row carries *now*. An edit that changes a root post's
-        topic therefore silently invalidates every delta already applied under the
-        old topic — including the author's post-time auto-upvote — and the drift
+        `user_community_stats` is maintained by deltas, but its meaning is defined by
+        the community the post row carries *now*. An edit that changes a root post's
+        community therefore silently invalidates every delta already applied under the
+        old community — including the author's post-time auto-upvote — and the drift
         is permanent because nothing revisits it. Descendant comments denormalise
-        `root_topic` at creation, so they have to follow the root as well or the
-        thread ends up split across two topics.
+        `root_community` at creation, so they have to follow the root as well or the
+        thread ends up split across two communities.
 
-        Both affected topics are recomputed from the canonical tables rather than
+        Both affected communities are recomputed from the canonical tables rather than
         patched by a guessed delta, so the result is identical to a full rebuild
         no matter how many votes or edits came before. Returns the number of rows
         rewritten.
         """
         root_norm = str(root_post_id or "").strip().lower()
-        old_norm = str(old_topic or "").strip().lower()
-        new_norm = str(new_topic or "").strip().lower()
+        old_norm = str(old_community or "").strip().lower()
+        new_norm = str(new_community or "").strip().lower()
         if not root_norm or not new_norm or old_norm == new_norm:
             return 0
 
-        topics = [t for t in (old_norm, new_norm) if t]
+        communities = [t for t in (old_norm, new_norm) if t]
         with self._connect() as conn:
             with conn.cursor() as cur:
                 # The root and every descendant share root_post_id, so the whole
@@ -1913,10 +2002,10 @@ class DatabaseManager:
                 if not owners:
                     return threads_moved
 
-                self._recompute_topic_stats(cur, owners, topics)
+                self._recompute_community_stats(cur, owners, communities)
 
         logger.info(
-            "user_topic_stats reattributed root=%s %s->%s posts_moved=%d owners=%d",
+            "user_community_stats reattributed root=%s %s->%s posts_moved=%d owners=%d",
             root_norm[:12],
             old_norm or "(none)",
             new_norm,
@@ -1927,10 +2016,10 @@ class DatabaseManager:
 
     def update_preference(self, owner: str, pref_type: str, target: str, delta: float, updated_at: int) -> None:
         """
-        Update per-user preference (topic or author) using exponential decay.
+        Update per-user preference (community or author) using exponential decay.
 
-        pref_type: 'topic' or 'author'
-        target: topic name or author address
+        pref_type: 'community' or 'author'
+        target: community name or author address
 
         Uses a rolling score where recent votes matter more and old votes fade:
             new_weight = (old_weight * DECAY) + new_vote
@@ -2234,19 +2323,19 @@ class DatabaseManager:
                         (owner, user_addr, pos),
                     )
 
-    def set_followed_topics(self, owner: str, topics: list[str]) -> None:
-        """Replace joined-community preferences from historical followed-topic state."""
+    def set_joined_communities(self, owner: str, communities: list[str]) -> None:
+        """Replace joined-community preferences from the chain's joined-community list."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                for topic in topics:
+                for community in communities:
                     cur.execute(
                         """
                         INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
                         VALUES(%s, %s, 0, NULL, 0)
                         ON CONFLICT(owner, community) DO NOTHING
                         """,
-                        (owner, topic),
+                        (owner, community),
                     )
 
     def follow_user(self, owner: str, target: str) -> None:
@@ -2276,9 +2365,9 @@ class DatabaseManager:
                     (owner, target),
                 )
 
-    def follow_topic(self, owner: str, topic: str) -> None:
+    def join_community(self, owner: str, community: str) -> None:
         """Join a community (LIVE_DEFAULT). Historical MsgFollowTopic writes here on reindex."""
-        topic = self._strip_nul(topic) or ""
+        community = self._strip_nul(community) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -2287,21 +2376,21 @@ class DatabaseManager:
                     VALUES(%s, %s, 0, NULL, 0)
                     ON CONFLICT(owner, community) DO NOTHING
                     """,
-                    (owner, topic),
+                    (owner, community),
                 )
 
-    def unfollow_topic(self, owner: str, topic: str) -> None:
+    def leave_community(self, owner: str, community: str) -> None:
         """Leave a community."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s) AND LOWER(community) = LOWER(%s)",
-                    (owner, topic),
+                    (owner, community),
                 )
 
-    def unfollow_topics_matching(self, owner: str, topic_pattern: str) -> int:
+    def leave_communities_matching(self, owner: str, community_pattern: str) -> int:
         """Leave communities matching a glob pattern (* maps to SQL %)."""
-        pattern = str(topic_pattern or "").strip().lower()
+        pattern = str(community_pattern or "").strip().lower()
         if not pattern:
             raise ValueError("community pattern cannot be empty")
         with self._connect() as conn:
@@ -2375,8 +2464,8 @@ class DatabaseManager:
                     (owner, target),
                 )
 
-    def block_topic(self, owner: str, target: str, blocked_at: int = 0) -> None:
-        """Block a topic (add to blocked_topics with next position, evict oldest beyond cap)."""
+    def block_community(self, owner: str, target: str, blocked_at: int = 0) -> None:
+        """Block a community (add to blocked_communities with next position, evict oldest beyond cap)."""
         target = self._strip_nul(target) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -2395,8 +2484,8 @@ class DatabaseManager:
                 )
                 self._evict_oldest(cur, "blocked_communities", "target", owner)
 
-    def unblock_topic(self, owner: str, target: str) -> None:
-        """Unblock a topic (remove from blocked_topics)."""
+    def unblock_community(self, owner: str, target: str) -> None:
+        """Unblock a community (remove from blocked_communities)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -2404,11 +2493,11 @@ class DatabaseManager:
                     (owner, target),
                 )
 
-    def unblock_topics_matching(self, owner: str, topic: str) -> int:
-        """Unblock topics whose pattern matches the topic."""
-        t = str(topic or "").strip().lower()
+    def unblock_communities_matching(self, owner: str, community: str) -> int:
+        """Unblock communities whose pattern matches the community."""
+        t = str(community or "").strip().lower()
         if not t:
-            raise ValueError("topic cannot be empty")
+            raise ValueError("community cannot be empty")
         with self._connect() as conn:
             with conn.cursor() as cur:
                 # `target` is stored user content, so a literal % or _ in it would act
@@ -2492,16 +2581,16 @@ class DatabaseManager:
                         self._update_ancestor_comment_counts(cur, parent_id, delta=-(1 + subtree_count))
 
                     # A deleted post grants no standing to its author, so every
-                    # (owner, topic) it contributed to has to be recomputed rather
+                    # (owner, community) it contributed to has to be recomputed rather
                     # than left carrying the delta applied when it was indexed.
                     owners = sorted({o for o, _ in affected})
-                    topics = sorted({t for _, t in affected})
-                    self._recompute_topic_stats(cur, owners, topics)
+                    communities = sorted({t for _, t in affected})
+                    self._recompute_community_stats(cur, owners, communities)
                     logger.debug(
-                        "user_topic_stats recomputed after delete target=%s owners=%d topics=%d",
+                        "user_community_stats recomputed after delete target=%s owners=%d communities=%d",
                         str(target)[:12],
                         len(owners),
-                        len(topics),
+                        len(communities),
                     )
                 return deleted_count
 
@@ -2527,7 +2616,7 @@ class DatabaseManager:
         if not post_id or delta == 0:
             return
         # Walk up the chain and update the post and its ancestors. Bounded like the
-        # root walk in get_root_topic_for_post: this runs one UPDATE per level inside
+        # root walk in get_root_community_for_post: this runs one UPDATE per level inside
         # the block transaction, so an unbounded chain makes indexing cost grow with
         # thread depth on every new comment.
         visited = set()

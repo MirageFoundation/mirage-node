@@ -107,7 +107,7 @@ export const ContentGrid = styled.div`
     }
 `;
 
-/** Max-width column for submit, topics, profile, etc. Main home feed stays full-bleed. */
+/** Max-width column for submit, communities, profile, etc. Main home feed stays full-bleed. */
 export const CappedPageColumn = styled.div`
     width: 100%;
     max-width: 1200px;

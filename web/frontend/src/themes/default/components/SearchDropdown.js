@@ -17,8 +17,8 @@ import PostPlaceholderAvatar from "./PostPlaceholderAvatar.js";
 /**
  * Dropdown sheet rendered below the TopBar search input. Mirrors the
  * `mirage-mobile-app/src/pages/search-screen.tsx` behaviour: shows recent
- * searches + trending topics when the query is empty, and live search
- * results (posts / topics / users) while the user is typing.
+ * searches + trending communities when the query is empty, and live search
+ * results (posts / communities / users) while the user is typing.
  *
  * Visual only — all data comes from `useSearchDropdown` which the TopBar
  * owns. Click on any row → delegates to the handler passed in.
@@ -153,7 +153,7 @@ const RowIcon = styled.span`
 
 /**
  * Dicebear avatar used for search-result user rows. Same 22x22 footprint
- * as `RowIcon` so columns remain aligned with the topic/post rows. Thin
+ * as `RowIcon` so columns remain aligned with the community/post rows. Thin
  * alias around the shared `UserAvatar` so the bg color and 20% inner
  * padding stay in sync with the rest of the app's avatar surfaces.
  */
@@ -164,7 +164,7 @@ const RowAvatar = ({ src: _src, ...rest }) => (
 /**
  * Post-row thumbnail slot: shows the post image if one is available,
  * otherwise renders a gradient tile with the first letter of the author's
- * username. Same 28px size as the topic/user row icon block so columns
+ * username. Same 28px size as the community/user row icon block so columns
  * stay aligned.
  */
 const PostThumb = styled.span`
@@ -348,7 +348,7 @@ export default function SearchDropdown({
     liveResults,
     liveError,
     hasLiveResults,
-    trendingTopics,
+    trendingCommunities,
     isLoadingTrending,
     recentSearches,
     onRecentClick,
@@ -411,15 +411,15 @@ export default function SearchDropdown({
                     <EmptyBlock>Loading trending communities…</EmptyBlock>
                 )}
 
-                {!isLoadingTrending && trendingTopics.length === 0 && (
+                {!isLoadingTrending && trendingCommunities.length === 0 && (
                     <EmptyBlock>No trending communities available</EmptyBlock>
                 )}
 
                 {!isLoadingTrending &&
-                    trendingTopics.map((topic) => (
+                    trendingCommunities.map((community) => (
                         <RowLink
-                            key={`trending-${topic.topic}`}
-                            to={communityPath(topic.topic)}
+                            key={`trending-${community.community}`}
+                            to={communityPath(community.community)}
                             onMouseDown={(e) => e.preventDefault()}
                             onClick={() => onResultNavigate && onResultNavigate()}
                         >
@@ -427,9 +427,9 @@ export default function SearchDropdown({
                                 <HiOutlineFire />
                             </RowIcon>
                             <RowMain>
-                                <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
+                                <RowPrimary>{communityLabel(community.community)}</RowPrimary>
                                 <RowSecondary>
-                                    {formatPostCount(topic.post_count || topic.count)}
+                                    {formatPostCount(community.post_count || community.count)}
                                 </RowSecondary>
                             </RowMain>
                         </RowLink>
@@ -438,7 +438,7 @@ export default function SearchDropdown({
         ),
         [
             recentSearches,
-            trendingTopics,
+            trendingCommunities,
             isLoadingTrending,
             onClearRecents,
             onRecentClick,
@@ -449,7 +449,7 @@ export default function SearchDropdown({
 
     // --- Typing state: live results ---------------------------------------
     const liveView = useMemo(() => {
-        const { posts, topics, users } = liveResults;
+        const { posts, communities, users } = liveResults;
 
         if (liveError) return <ErrorBlock>{liveError}</ErrorBlock>;
 
@@ -470,15 +470,15 @@ export default function SearchDropdown({
 
         return (
             <>
-                {topics.length > 0 && (
+                {communities.length > 0 && (
                     <>
                         <SectionLabelRow>
                             <SectionLabel>Communities</SectionLabel>
                         </SectionLabelRow>
-                        {topics.map((topic) => (
+                        {communities.map((community) => (
                             <RowLink
-                                key={`live-topic-${topic.topic}`}
-                                to={communityPath(topic.topic)}
+                                key={`live-community-${community.community}`}
+                                to={communityPath(community.community)}
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => onResultNavigate && onResultNavigate()}
                             >
@@ -486,10 +486,10 @@ export default function SearchDropdown({
                                     <HiOutlineHashtag />
                                 </RowIcon>
                                 <RowMain>
-                                    <RowPrimary>{communityLabel(topic.topic)}</RowPrimary>
-                                    {(topic.post_count || topic.count) && (
+                                    <RowPrimary>{communityLabel(community.community)}</RowPrimary>
+                                    {(community.post_count || community.count) && (
                                         <RowSecondary>
-                                            {formatPostCount(topic.post_count || topic.count)}
+                                            {formatPostCount(community.post_count || community.count)}
                                         </RowSecondary>
                                     )}
                                 </RowMain>
@@ -500,7 +500,7 @@ export default function SearchDropdown({
 
                 {users.length > 0 && (
                     <>
-                        {topics.length > 0 && <SectionDivider />}
+                        {communities.length > 0 && <SectionDivider />}
                         <SectionLabelRow>
                             <SectionLabel>Users</SectionLabel>
                         </SectionLabelRow>
@@ -539,7 +539,7 @@ export default function SearchDropdown({
 
                 {posts.length > 0 && (
                     <>
-                        {(topics.length > 0 || users.length > 0) && <SectionDivider />}
+                        {(communities.length > 0 || users.length > 0) && <SectionDivider />}
                         <SectionLabelRow>
                             <SectionLabel>Posts</SectionLabel>
                         </SectionLabelRow>
@@ -585,7 +585,7 @@ export default function SearchDropdown({
                                             <TierUsername $tierColor={tierColor}>
                                                 @{post.username || "anonymous"}
                                             </TierUsername>
-                                            {post.topic && ` · ${communityLabel(post.topic)}`}
+                                            {post.community && ` · ${communityLabel(post.community)}`}
                                         </RowSecondary>
                                     </RowMain>
                                 </RowLink>

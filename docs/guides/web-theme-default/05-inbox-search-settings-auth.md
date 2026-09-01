@@ -60,7 +60,7 @@ Reference: mobile `src/pages/search-screen.tsx`, web `themes/oldreddit/routes/Se
 
 Requirements:
 - Search input prominent at top of the content column.
-- Tabbed results (posts / users / topics) using the new tab style.
+- Tabbed results (posts / users / communities) using the new tab style.
 - Result cards reuse Plan 03 card primitives where appropriate.
 - Desktop shortcut: `/search` is the destination for the TopBar search button from Plan 02.
 - Empty state, loading state, and error state styled consistently.
@@ -86,7 +86,7 @@ Reference: mobile `src/pages/create-screen.tsx`, web `themes/onyx/routes/CreateP
 
 Requirements:
 - Form container styled like a panel.
-- Topic selector using theme-local `TopicSelector`.
+- Community selector using theme-local `CommunitySelector` (renamed from `TopicSelector` in v1.39.0).
 - Title + body inputs aligned with mobile typography.
 - `MarkdownEditor` with sticky toolbar on desktop.
 - Media attach row styled with theme tokens.

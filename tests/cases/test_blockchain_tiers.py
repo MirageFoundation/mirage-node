@@ -64,7 +64,6 @@ from tests.common import (
     _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
 )
 from tests.blockchain_helpers import (
@@ -95,7 +94,6 @@ from tests.blockchain_helpers import (
     _build_msg_delete_user,
     _build_msg_award,
     _build_msg_edit,
-    _build_msg_annotate,
     _build_msg_block_post,
     _build_msg_block_user,
     _build_msg_block_topic,
@@ -156,7 +154,6 @@ from shared.datatypes import (
     MsgUnfollowUser,
     MsgSubscribe,
     MsgVote,
-    MsgAnnotate,
 )
 
 
@@ -175,19 +172,19 @@ def test_tier_enforcement(backend: str) -> None:
 
         # Compute PoW for free user
         if level == 0:
-            topic = f"tier{_rand_str(4)}"
+            community = f"tier{_rand_str(4)}"
             over_content = "x" * (max_content + 25)
             pub = w.public_key().public_key_bytes
             nonce = _gen_nonce()
             base = _canon_base_post_raw(
-                pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [], nonce=nonce
+                pub, _lb_bytes(lb), diff, ts, "", community, "Title", over_content, "", 0, [], nonce=nonce
             )
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_post(w, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=nonce)
+            msg = _build_msg_post(w, lb, diff, ts, community, "Title", over_content, pow_val=int(proof), nonce=nonce)
         else:
-            topic = f"tier{_rand_str(4)}"
+            community = f"tier{_rand_str(4)}"
             over_content = "x" * (max_content + 25)
-            msg = _build_msg_post(w, lb, 0, ts, topic, "Title", over_content, pow_val=0, nonce=_gen_nonce())
+            msg = _build_msg_post(w, lb, 0, ts, community, "Title", over_content, pow_val=0, nonce=_gen_nonce())
 
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],
@@ -200,18 +197,18 @@ def test_tier_enforcement(backend: str) -> None:
 
         # Oversized title
         if level == 0:
-            topic2 = f"tier{_rand_str(4)}"
+            community2 = f"tier{_rand_str(4)}"
             over_title = "T" * (max_title + 25)
             nonce2 = _gen_nonce()
             base2 = _canon_base_post_raw(
-                pub, _lb_bytes(lb), diff, ts, "", topic2, over_title, "body", "", 0, [], nonce=nonce2
+                pub, _lb_bytes(lb), diff, ts, "", community2, over_title, "body", "", 0, [], nonce=nonce2
             )
             proof2 = compute_pow(base2, diff, base_bits, pow_factor, lb)
-            msg2 = _build_msg_post(w, lb, diff, ts, topic2, over_title, "body", pow_val=int(proof2), nonce=nonce2)
+            msg2 = _build_msg_post(w, lb, diff, ts, community2, over_title, "body", pow_val=int(proof2), nonce=nonce2)
         else:
-            topic2 = f"tier{_rand_str(4)}"
+            community2 = f"tier{_rand_str(4)}"
             over_title = "T" * (max_title + 25)
-            msg2 = _build_msg_post(w, lb, 0, ts, topic2, over_title, "body", pow_val=0, nonce=_gen_nonce())
+            msg2 = _build_msg_post(w, lb, 0, ts, community2, over_title, "body", pow_val=0, nonce=_gen_nonce())
 
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg2, "/mirage.core.v1.MsgPost")],
@@ -511,13 +508,13 @@ def test_tier_features(backend: str) -> None:
     fw = WALLETS["free"]
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
     ts = _now_ms()
-    topic = f"tf{_rand_str(4)}"
+    community = f"tf{_rand_str(4)}"
     over_content = "x" * 1050
     pub = fw.public_key().public_key_bytes
     nonce = _gen_nonce()
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [], nonce=nonce)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", community, "Title", over_content, "", 0, [], nonce=nonce)
     proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    msg = _build_msg_post(fw, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=nonce)
+    msg = _build_msg_post(fw, lb, diff, ts, community, "Title", over_content, pow_val=int(proof), nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -531,9 +528,9 @@ def test_tier_features(backend: str) -> None:
     sw = WALLETS["sub1"]
     lb, _, _, _ = _get_pow_params(backend, str(sw.address()))
     ts = _now_ms()
-    topic2 = f"tf{_rand_str(4)}"
+    community2 = f"tf{_rand_str(4)}"
     long_content = "x" * 1050
-    msg = _build_msg_post(sw, lb, 0, ts, topic2, "Title", long_content, pow_val=0, nonce=_gen_nonce())
+    msg = _build_msg_post(sw, lb, 0, ts, community2, "Title", long_content, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,

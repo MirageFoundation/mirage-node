@@ -33,9 +33,9 @@
   - Padding tuned per level: outer rows get `1rem`, nested rows get `0.85rem` left padding so the text aligns with the rail.
   - `.inbox-highlight` no longer paints a full yellow card — it draws a `#FACC15` left-rail accent (inset box-shadow) + a very subtle `rgba(250,204,21,0.06)` background tint. Visible at a glance, R1-compliant.
 
-- **`TopicHeroCard` (back + follow header row)**
+- **`CommunityHeroCard` (back + join header row)**
   - Flattened: no background, no border, no radius, no box-shadow. Now reads as a thin feed-style header row above the root post, identical tone to `InboxView` / `SearchResultsView` headers. The `PostCard` bottom divider underneath separates it from the post body.
-  - `TopicHeroWrapper` margin dropped to `0` so the header hugs the column top.
+  - `CommunityHeroWrapper` margin dropped to `0` so the header hugs the column top.
 
 - **`StyledThreadReminder`** (single-comment sub-thread banner)
   - Flattened to a flat row with a bottom divider. Reads as a subtle notification above the root post, not a lifted card.
@@ -55,13 +55,13 @@
 
 ### Preserved behaviour (no regressions)
 
-- Every `useViewPost` hook return + every handler (vote, donate, award, block, report, delete, edit, reply submit, menus, mobile reply overlay, follow topic, follow user) is **untouched**.
+- Every `useViewPost` hook return + every handler (vote, donate, award, block, report, delete, edit, reply submit, menus, mobile reply overlay, join community, follow user) is **untouched**.
 - `annotated` comment-tree render loop, collapse/expand, focused-comment view, "Continue this thread", parent-chain context comments, deeplink scroll-to-hash, flash highlighting, and inbox-linked `.inbox-highlight` class all still work.
 - Menu dropdowns (`MenuDropdown`, `MenuItem`) still use `menuBg` / `menuItemHoverBg` per R1 (contained-surface carve-out).
 
 ### Rules compliance
 
-- ✅ **R1** — post card, comment rows, topic hero, thread reminder, continue-thread, and reply composer all sit on `theme.colors.bg`. No component paints a full column background. Only contained menu popovers still use `panel` / `menuBg`, which is allowed.
+- ✅ **R1** — post card, comment rows, community hero, thread reminder, continue-thread, and reply composer all sit on `theme.colors.bg`. No component paints a full column background. Only contained menu popovers still use `panel` / `menuBg`, which is allowed.
 - ✅ **R2** — every color now routed through an existing token (`border`, `link`, `linkHover`, `text`, `subtleText`, `focusBlue`, `hoverBg`). Only `#FACC15` for the inbox highlight accent remains as a raw hex — kept because it's an existing inbox-linked visual signal and neither dark nor light tokens currently cover yellow. **Open follow-up:** add an `inboxHighlightRail` token pair to R2 before the next iteration so this last raw hex can be retired.
 - ✅ **R3** — every divider is `1px solid theme.colors.border`. No ad-hoc rgba dividers, no double borders, no gradients.
 - ✅ **R4** — reference read-through done before coding: bluemoon `ViewPostView.js` (data parity — every field/flow preserved), mobile `src/components/molecules/comment-item.tsx` (visuals: thread rail per depth, indent math, flat no-card layout, action row language). Pragmatic interpretation of "same post card view": the root post's restyled `PostCard` now visually matches `CardView` (flat, single canvas, `border-bottom` divider, same typography tokens).
@@ -69,7 +69,7 @@
 ### Files changed
 
 - `web/frontend/src/themes/default/routes/ViewPostView.js`
-  - `PostCard`, `CommentCard`, `StyledThreadReminder`, `ContinueThreadLink`, `TopicHeroCard`, `TopicHeroWrapper`, `StyledReply`, `RootTitleRow`, `TitleDivider`, `StyledContentArea` all restyled in place.
+  - `PostCard`, `CommentCard`, `StyledThreadReminder`, `ContinueThreadLink`, `CommunityHeroCard`, `CommunityHeroWrapper`, `StyledReply`, `RootTitleRow`, `TitleDivider`, `StyledContentArea` all restyled in place.
   - Unused `pickCard` import dropped (no longer referenced after the flatten).
 
 No other files touched. No token changes. No RULES.md changes this iteration.
@@ -106,7 +106,7 @@ All six polish items from the initial pass have been addressed:
 
 ## Scope (in)
 
-1. **Header + back control.** Mobile-style top bar with a back chevron (goes back in history, falls back to `/home`) and the screen title ("Post" or topic) — inside the Plan 02 shell, not overlapping the TopBar.
+1. **Header + back control.** Mobile-style top bar with a back chevron (goes back in history, falls back to `/home`) and the screen title ("Post" or the community) — inside the Plan 02 shell, not overlapping the TopBar.
 2. **Post card.** Reuse the theme-local `CardView` for the root post so typography, action row, media, and vote pill stay identical to the feed. Any post-details-only affordances (full content expansion, deeplinked anchor, share menu) layered on top of `CardView` via props — **never fork `CardView`**.
 3. **Comments thread.** Full-bleed threaded comments styled to match mobile:
    - Nested indentation using a single left border rail (`1px solid theme.colors.border`, R3) per depth level — no card-in-card backgrounds, single `bg` canvas (R1).

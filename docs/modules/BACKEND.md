@@ -521,9 +521,8 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/get_profile` | User profile with lists + `following_count` / `follower_count` |
 | `GET /api/search` | Full-text search |
 | `GET /api/get_welcome_stats` | Public stats: registered users, posts 24h, 7d active |
-| `GET /api/get_stats` | Admin stats (overview, signups tabs) |
-| `POST /api/signup` | Account creation |
-| `GET /api/get_inbox` | Push notification inbox |
+| `GET /api/get_stats` | Admin stats. The `signups`, `rewards` and `rewards_history` tabs answer 410 Gone — the invite, referral and quest tables behind them were dropped in v1.39.0 |
+| `GET /api/get_inbox` | Replies, @mentions, awards, and profile notifications |
 | `POST /api/mark_inbox_viewed` | Mark inbox items as read |
 
 ### Core Endpoints (Write)
@@ -546,7 +545,8 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/accept_curator_invite` | MsgAcceptCuratorInvite |
 | `POST /api/core/block_post` | MsgBlockPost |
 | `POST /api/core/block_user` | MsgBlockUser |
-| `POST /api/core/delete` | MsgDelete |
+| `POST /api/core/delete_post` | MsgDelete |
+| `POST /api/core/delete_user` | MsgDeleteUser |
 | `POST /api/core/send_tokens` | MsgSendTokens |
 | `POST /api/core/subscribe` | MsgSubscribe |
 | `POST /api/core/set_auto_renewal` | MsgSetAutoRenewal |

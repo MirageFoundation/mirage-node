@@ -8,7 +8,7 @@ Endpoints:
 - GET /api/get_node_config: Per-node static settings (validator info, feature flags).
 - GET /api/get_tx_status: Unified tx status with type-specific enrichment.
 - GET /api/get_address_from_username: Get address for a username if it exists.
-- GET /api/get_topics: List most active topics, excluding deleted messages.
+- GET /api/communities: List most active communities, excluding deleted messages.
 - GET /api/get_posts: List recent posts with aggregates.
 - GET /api/get_user_posts: List recent posts for a specific owner.
 - GET /api/get_comments: Root post and nested comments tree.
@@ -35,7 +35,7 @@ from fleet_url import post_json as fleet_post_json, validate_fleet_endpoint
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
-from topic_glob import MAX_TOPIC_WILDCARDS, count_wildcards, topic_matches_pattern
+from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards, community_matches_pattern
 from user_last_seen import update_user_last_seen
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
 from curation import (
@@ -71,7 +71,8 @@ from chain import (
     get_pow_factor as _get_pow_factor,
     is_node_catching_up as _is_catching_up,
 )
-from fleet import active_node_sites
+from fleet import active_node_entries
+from node_identity import build_local_identity
 
 
 def _now_epoch() -> int:
@@ -552,16 +553,16 @@ def _track_image_impressions(posts: list[dict], rid: int, context: str) -> None:
     log_event(rid, "image_impressions.ok", count=len(image_ids), context=context)
 
 
-# Allowed content tags used for topic safety classification
-_TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "adult")
+# Allowed content tags used for community safety classification
+_COMMUNITY_TAGS = ("sensitive", "gore", "violence", "death", "adult")
 
 # TODO: remove "porn" alias once all clients send "adult"
 _TAG_ALIASES = {"porn": "adult"}
 
 
-def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
-    """Return dominant tag info for a list of lowercase topics, computed live from posts."""
-    if not topics_lower:
+def _compute_dominant_flags(cur, communities_lower: list[str]) -> dict[str, dict]:
+    """Return dominant tag info for a list of lowercase communities, computed live from posts."""
+    if not communities_lower:
         return {}
     try:
         cur.execute(
@@ -581,11 +582,11 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
               AND p.deleted = FALSE
             GROUP BY LOWER(TRIM(p.community))
             """,
-            (topics_lower,),
+            (communities_lower,),
         )
         result = {}
         for row in cur.fetchall():
-            topic = row[0]
+            community = row[0]
             total = float(row[1] or 0)
             counts = {
                 "sensitive": float(row[2] or 0),
@@ -602,7 +603,7 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
                     if ratio >= 0.5 and ratio > dominant_ratio:
                         dominant_tag = k
                         dominant_ratio = ratio
-            result[topic] = {"dominant_tag": dominant_tag or None, "dominant_ratio": dominant_ratio}
+            result[community] = {"dominant_tag": dominant_tag or None, "dominant_ratio": dominant_ratio}
         return result
     except Exception:
         return {}
@@ -715,65 +716,65 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
-def _get_blocked_topics(cur, address: str) -> set[str]:
-    """Get all topics blocked by the viewer and their enabled agents."""
+def _get_blocked_communities(cur, address: str) -> set[str]:
+    """Get all communities blocked by the viewer and their enabled agents."""
     if not address:
         return set()
 
-    blocked_topics = set()
+    blocked_communities = set()
 
     # Get viewer's own blocked communities
     cur.execute("SELECT target FROM blocked_communities WHERE owner = %s", (address.lower(),))
-    blocked_topics.update(row[0].lower() for row in cur.fetchall())
+    blocked_communities.update(row[0].lower() for row in cur.fetchall())
 
-    return blocked_topics
+    return blocked_communities
 
 
-def _split_blocked_topics(blocked_topics: set[str] | None) -> tuple[set[str], tuple[str, ...]]:
-    """Split blocked topics into exact matches and glob patterns (containing *)."""
-    if not blocked_topics:
+def _split_blocked_communities(blocked_communities: set[str] | None) -> tuple[set[str], tuple[str, ...]]:
+    """Split blocked communities into exact matches and glob patterns (containing *)."""
+    if not blocked_communities:
         return set(), tuple()
     exact: set[str] = set()
     patterns: list[str] = []
-    for raw in blocked_topics:
+    for raw in blocked_communities:
         t = str(raw or "").strip().lower()
         if not t:
-            raise ValueError("blocked topic cannot be empty")
+            raise ValueError("blocked community cannot be empty")
         if "*" in t:
             alpha = t.replace("*", "")
             if not alpha:
-                raise ValueError("blocked topic pattern must contain letters")
+                raise ValueError("blocked community pattern must contain letters")
             patterns.append(t)
         else:
             exact.add(t)
     if patterns:
         import logging
 
-        logging.getLogger(__name__).debug("blocked_topics wildcards active: %d", len(patterns))
+        logging.getLogger(__name__).debug("blocked_communities wildcards active: %d", len(patterns))
     return exact, tuple(patterns)
 
 
-def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tuple[str, ...]) -> bool:
-    if not topic:
+def _community_is_blocked(community: str, blocked_exact: set[str], blocked_patterns: tuple[str, ...]) -> bool:
+    if not community:
         return False
-    if blocked_exact and topic in blocked_exact:
+    if blocked_exact and community in blocked_exact:
         return True
     for pat in blocked_patterns:
-        if topic_matches_pattern(topic, pat):
+        if community_matches_pattern(community, pat):
             return True
     return False
 
 
-def _blocked_topics_sql(
+def _blocked_communities_sql(
     blocked_exact: set[str],
     blocked_patterns: tuple[str, ...],
-    topic_col: str = "p.community",
+    community_col: str = "p.community",
     viewer: str = "",
     owner_col: str = "p.owner",
 ) -> tuple[str, list[str]]:
-    """Return (sql_fragment, params) to exclude blocked topics in a WHERE clause.
+    """Return (sql_fragment, params) to exclude blocked communities in a WHERE clause.
 
-    Returns an empty string and empty list when there are no blocked topics,
+    Returns an empty string and empty list when there are no blocked communities,
     so callers can unconditionally splice it into queries:
 
         f"... WHERE ... {bt_clause} ..."
@@ -784,7 +785,7 @@ def _blocked_topics_sql(
     if blocked_exact:
         bt_list = list(blocked_exact)
         ph = ",".join(["%s"] * len(bt_list))
-        clauses.append(f"LOWER(TRIM({topic_col})) NOT IN ({ph})")
+        clauses.append(f"LOWER(TRIM({community_col})) NOT IN ({ph})")
         params.extend(bt_list)
     if blocked_patterns:
         for pat in blocked_patterns:
@@ -792,29 +793,29 @@ def _blocked_topics_sql(
             # so a pattern with many wildcards is as expensive here as it was
             # there. Patterns over the cap are left out of the pre-filter rather
             # than bounded: every caller routes its rows through _row_to_post,
-            # whose _topic_is_blocked call is linear and authoritative, so the
+            # whose _community_is_blocked call is linear and authoritative, so the
             # only cost of omitting one is that a few more rows are fetched.
-            if count_wildcards(pat) > MAX_TOPIC_WILDCARDS:
-                logger.debug("blocked_topics_sql skipping over-cap pattern wildcards=%d", count_wildcards(pat))
+            if count_wildcards(pat) > MAX_COMMUNITY_WILDCARDS:
+                logger.debug("blocked_communities_sql skipping over-cap pattern wildcards=%d", count_wildcards(pat))
                 continue
             # Escape SQL LIKE metacharacters then convert glob * to %
             like_pat = pat.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
-            clauses.append(f"LOWER(TRIM({topic_col})) NOT LIKE %s")
+            clauses.append(f"LOWER(TRIM({community_col})) NOT LIKE %s")
             params.append(like_pat)
     if not clauses:
         return "", []
 
-    topic_cond = " AND ".join(clauses)
+    community_cond = " AND ".join(clauses)
     viewer_lower = (viewer or "").strip().lower()
     if viewer_lower and viewer_lower != "guest":
         logger.debug(
-            "blocked_topics_sql viewer bypass viewer=%s exact=%d patterns=%d",
+            "blocked_communities_sql viewer bypass viewer=%s exact=%d patterns=%d",
             viewer_lower[:12],
             len(blocked_exact),
             len(blocked_patterns),
         )
-        return f"AND (LOWER({owner_col}) = %s OR ({topic_cond}))", [viewer_lower] + params
-    return f"AND {topic_cond}", params
+        return f"AND (LOWER({owner_col}) = %s OR ({community_cond}))", [viewer_lower] + params
+    return f"AND {community_cond}", params
 
 
 # ---- Inbox count cache (60s TTL per address; stores count + last_viewed_at) ----
@@ -984,9 +985,9 @@ def get_profile():
 
 
 def _load_user_preferences(cur, viewer: str) -> tuple[dict, dict]:
-    """Load topic and author preferences for a user."""
+    """Load community and author preferences for a user."""
     viewer_lower = viewer.strip().lower()
-    topic_prefs: dict[str, float] = {}
+    community_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
 
     cur.execute(
@@ -1001,12 +1002,14 @@ def _load_user_preferences(cur, viewer: str) -> tuple[dict, dict]:
             w = float(weight or 0.0)
         except Exception:
             continue
-        if pref_type == "topic":
-            topic_prefs[t] = w
+        # 'community' is the pref_type value written into rows already on disk; the
+        # concept is a community everywhere above the storage layer.
+        if pref_type == "community":
+            community_prefs[t] = w
         elif pref_type == "author":
             author_prefs[t] = w
 
-    return topic_prefs, author_prefs
+    return community_prefs, author_prefs
 
 
 def _load_candidate_posts(
@@ -1015,21 +1018,21 @@ def _load_candidate_posts(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    blocked_topics: set[str] | None = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] | None = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
 ) -> list[dict]:
     """Load recent candidate posts for home feed."""
     deleted_clause = _deleted_filter()
-    bt_clause, bt_params = _blocked_topics_sql(
-        blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
+    bt_clause, bt_params = _blocked_communities_sql(
+        blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer
     )
 
     cur.execute(
         f"""
         SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') AS tag,
-               COALESCE(p.root_community, p.community, '') AS root_topic,
+               COALESCE(p.root_community, p.community, '') AS root_community,
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
@@ -1051,7 +1054,7 @@ def _load_candidate_posts(
     )
     rows = cur.fetchall()
 
-    # Filter blocked posts/users and blocked topics
+    # Filter blocked posts/users and blocked communities
     viewer_lower = (viewer or "").strip().lower()
     candidates = []
     for row in rows:
@@ -1059,11 +1062,11 @@ def _load_candidate_posts(
             txhash,
             owner,
             ts,
-            topic,
+            community,
             title,
             content,
             tag,
-            root_topic,
+            root_community,
             root_post_id,
             username,
             edited_at,
@@ -1081,10 +1084,10 @@ def _load_candidate_posts(
         author = (owner or "").lower()
         tag = _normalize_api_tag(tag or "")
         relayer_lower = (relayer or "").strip().lower()
-        topic_raw = (topic or "").strip()
-        topic_lower = topic_raw.lower()
-        root_topic_raw = (root_topic or topic or "").strip()
-        root_topic_lower = root_topic_raw.lower()
+        community_raw = (community or "").strip()
+        community_lower = community_raw.lower()
+        root_community_raw = (root_community or community or "").strip()
+        root_community_lower = root_community_raw.lower()
 
         is_own = viewer_lower and author == viewer_lower
         post_ts = int(ts) if ts else 0
@@ -1092,9 +1095,11 @@ def _load_candidate_posts(
             is_own = False
         if not is_own and (pid in blocked_posts or author in blocked_users):
             continue
-        if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
+        if not is_own and _community_is_blocked(
+            community_lower, blocked_communities or set(), blocked_community_prefixes or tuple()
+        ):
             continue
-        if not topic_lower:
+        if not community_lower:
             continue
 
         candidates.append(
@@ -1106,11 +1111,11 @@ def _load_candidate_posts(
                 "author_level": int(author_level) if author_level else 0,
                 "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": post_ts,
-                "topic": topic_raw,
-                "community": topic_raw,
-                "topic_lower": topic_lower,
-                "root_topic": root_topic_raw,
-                "root_topic_lower": root_topic_lower,
+                "community": community_raw,
+                "community": community_raw,
+                "community_lower": community_lower,
+                "root_community": root_community_raw,
+                "root_community_lower": root_community_lower,
                 "root_post_id": (root_post_id or pid).lower(),
                 "title": title or "",
                 "content": content or "",
@@ -1383,12 +1388,12 @@ def _load_following_candidates(
     blocked_users: set[str],
     allowed_tags: set[str],
     max_candidates: int,
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
 ) -> tuple[list[dict], set[str], set[str]]:
     """
     Load candidate posts for the following feed.
-    Returns (candidates, followed_topics, followed_users).
+    Returns (candidates, joined_communities, followed_users).
     """
     cur.execute("SELECT target FROM followed_users WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_users = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
@@ -1405,15 +1410,15 @@ def _load_following_candidates(
 
     where_clause = " OR ".join(conditions)
     deleted_clause = _deleted_filter()
-    bt_clause, bt_params = _blocked_topics_sql(
-        blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer_lower
+    bt_clause, bt_params = _blocked_communities_sql(
+        blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer_lower
     )
 
     cur.execute(
         f"""
         SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') AS tag,
-               COALESCE(p.root_community, p.community, '') AS root_topic,
+               COALESCE(p.root_community, p.community, '') AS root_community,
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
@@ -1443,8 +1448,8 @@ def _load_following_candidates(
             blocked_posts,
             blocked_users,
             seen,
-            blocked_topics,
-            blocked_topic_prefixes,
+            blocked_communities,
+            blocked_community_prefixes,
             viewer=viewer_lower,
         )
         if post:
@@ -1463,13 +1468,13 @@ def _get_following_feed(
     blocked_users: set[str],
     allowed_tags: set[str],
     sort_mode: str = "magic",
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
     Following feed:
-    - Candidates: root posts from followed users + posts in followed topics + your own posts
+    - Candidates: root posts from followed users + posts in followed communities + your own posts
     - Sorting:
       - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
       - newest: fast chronological path
@@ -1484,8 +1489,8 @@ def _get_following_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
-            blocked_topics=blocked_topics,
-            blocked_topic_prefixes=blocked_topic_prefixes,
+            blocked_communities=blocked_communities,
+            blocked_community_prefixes=blocked_community_prefixes,
         )
 
     sort_mode = (sort_mode or "magic").strip().lower()
@@ -1494,15 +1499,15 @@ def _get_following_feed(
 
     factor = _seen_overfetch_factor(seen_posts, 4)
     max_candidates = min(limit * page * factor, MAX_CANDIDATE_POOL)
-    candidates, followed_topics, followed_users = _load_following_candidates(
+    candidates, joined_communities, followed_users = _load_following_candidates(
         cur,
         viewer_lower,
         blocked_posts,
         blocked_users,
         allowed_tags,
         max_candidates,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
+        blocked_communities=blocked_communities,
+        blocked_community_prefixes=blocked_community_prefixes,
     )
 
     if not candidates:
@@ -1545,7 +1550,7 @@ def _get_following_feed(
             elif by_followed_user:
                 reason = "From a followed user"
             else:
-                reason = "From a followed topic"
+                reason = "From a followed community"
             if sc > 0:
                 reason += " · You've seen this before"
 
@@ -1587,7 +1592,7 @@ def _get_following_feed(
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
     unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
     now_ts = int(time.time())
-    topic_prefs: dict[str, float] = {}
+    community_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
 
     seen_penalized = 0
@@ -1597,12 +1602,12 @@ def _get_following_feed(
         comments = int(comment_counts.get(pid, 0) or 0)
 
         author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
-        post_topic = (post.get("topic") or "").strip().lower()
+        post_community = (post.get("community") or "").strip().lower()
         is_own_post = author_lower == viewer_lower
         by_followed_user = author_lower in followed_users if author_lower else False
-        in_followed_topic = post_topic in followed_topics if post_topic else False
+        in_joined_community = post_community in joined_communities if post_community else False
 
-        if not (is_own_post or by_followed_user or in_followed_topic):
+        if not (is_own_post or by_followed_user or in_joined_community):
             raise RuntimeError(f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]}")
 
         score, debug, should_hide = _score_magic(
@@ -1611,7 +1616,7 @@ def _get_following_feed(
             similar_upvotes,
             unique_commenters,
             vote_totals,
-            topic_prefs,
+            community_prefs,
             author_prefs,
             now_ts,
             False,
@@ -1631,7 +1636,7 @@ def _get_following_feed(
         elif by_followed_user:
             reason = "From a followed user"
         else:
-            reason = "From a followed topic"
+            reason = "From a followed community"
 
         post["_score"] = score
         post["points"] = pts
@@ -1682,8 +1687,8 @@ def _get_home_feed(
     blocked_users: set[str],
     allowed_tags: set[str],
     sort_mode: str = "magic",
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
@@ -1708,8 +1713,8 @@ def _get_home_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
-            blocked_topics=blocked_topics,
-            blocked_topic_prefixes=blocked_topic_prefixes,
+            blocked_communities=blocked_communities,
+            blocked_community_prefixes=blocked_community_prefixes,
             seen_posts=seen_posts,
         )
 
@@ -1722,8 +1727,8 @@ def _get_home_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
-            blocked_topics=blocked_topics,
-            blocked_topic_prefixes=blocked_topic_prefixes,
+            blocked_communities=blocked_communities,
+            blocked_community_prefixes=blocked_community_prefixes,
         )
 
     # Logged-in users: Magic (unified score).
@@ -1735,8 +1740,8 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
+        blocked_communities=blocked_communities,
+        blocked_community_prefixes=blocked_community_prefixes,
         seen_posts=seen_posts,
     )
 
@@ -1749,8 +1754,8 @@ def _get_home_feed_newest(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
@@ -1766,10 +1771,10 @@ def _get_home_feed_newest(
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _TOPIC_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
+    _COMMUNITY_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
 
-    bt_clause, bt_params = _blocked_topics_sql(
-        blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
+    bt_clause, bt_params = _blocked_communities_sql(
+        blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer
     )
 
     # Fetch in batches using cursor-based pagination (created_at < ?).
@@ -1791,7 +1796,7 @@ def _get_home_feed_newest(
             f"""SELECT {_POST_COLS}
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-            WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+            WHERE {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
             {bt_clause} {ts_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
@@ -1807,8 +1812,8 @@ def _get_home_feed_newest(
                 blocked_posts,
                 blocked_users,
                 seen,
-                blocked_topics,
-                blocked_topic_prefixes,
+                blocked_communities,
+                blocked_community_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -1878,8 +1883,8 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     seen_posts: dict[str, int] | None = None,
 ) -> dict:
     """
@@ -1891,7 +1896,7 @@ def _get_home_feed_magic(
     - S = similarity boost from similar users who upvoted
     - V = vote score (sqrt scaling)
     - U = unique commenter score (sqrt scaling)
-    - P = preference boost from topic/author prefs (sqrt scaling)
+    - P = preference boost from community/author prefs (sqrt scaling)
     - A = award score
     - R = recency decay (exponential)
     - N = novelty factor from seen view_count
@@ -1911,7 +1916,7 @@ def _get_home_feed_magic(
 
     # 1. Load user preferences
     _t = time.monotonic()
-    topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
+    community_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
     timings["prefs_ms"] = _ms_since(_t)
 
     with connect_backend_db() as backend_conn:
@@ -1937,8 +1942,8 @@ def _get_home_feed_magic(
                 allowed_tags,
                 per_source,
                 now_ts,
-                blocked_topics=blocked_topics,
-                blocked_topic_prefixes=blocked_topic_prefixes,
+                blocked_communities=blocked_communities,
+                blocked_community_prefixes=blocked_community_prefixes,
             )
             timings["cand_ms"] = _ms_since(_t)
             timings["cand_count"] = len(candidates)
@@ -1996,7 +2001,7 @@ def _get_home_feed_magic(
             similar_upvotes,
             unique_commenters,
             vote_totals,
-            topic_prefs,
+            community_prefs,
             author_prefs,
             now_ts,
             True,
@@ -2085,7 +2090,7 @@ def _score_magic(
     similar_upvotes: dict[str, list[str]],
     unique_commenters: dict[str, int],
     vote_totals: dict[str, float],
-    topic_prefs: dict[str, float],
+    community_prefs: dict[str, float],
     author_prefs: dict[str, float],
     now_ts: int,
     use_prefs: bool = True,
@@ -2101,7 +2106,7 @@ def _score_magic(
     - S = sqrt(similarity_sum)
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
-    - P = sqrt(max(0, topic_pref + author_pref))
+    - P = sqrt(max(0, community_pref + author_pref))
     - A = sqrt(unique_award_givers)
     - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
     - N = 1 / (1 + 3 * view_count) — novelty: unseen=1.0, seen once=0.25
@@ -2125,20 +2130,20 @@ def _score_magic(
         logger.debug("feed.hide_downvoted context=magic pid=%s", (pid or "")[:12])
         return 0.0, {}, True
     author = post["author"]
-    topic_lower = (post.get("topic") or "").strip().lower()
+    community_lower = (post.get("community") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
 
     if use_prefs:
         # Check user preference - hide severely disliked content
-        topic_pref = _clamp_pref_raw(float(topic_prefs.get(topic_lower, 0) or 0.0))
+        community_pref = _clamp_pref_raw(float(community_prefs.get(community_lower, 0) or 0.0))
         author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
-        combined_pref = topic_pref + author_pref
+        combined_pref = community_pref + author_pref
 
         if combined_pref <= HIDE_THRESHOLD:
             return 0.0, {}, True
     else:
         # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
-        topic_pref = 0.0
+        community_pref = 0.0
         author_pref = 0.0
         combined_pref = 0.0
 
@@ -2161,7 +2166,7 @@ def _score_magic(
     unique_count = unique_commenters.get(pid, 0)
     U = math.sqrt(max(0.0, float(unique_count)))
 
-    # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
+    # P = Preference boost (signed sqrt: disliked communities/authors hurt the score)
     P = _sqrt_signed(combined_pref)
 
     # A = Award score (unique awarders, always >= 0)
@@ -2188,12 +2193,12 @@ def _score_magic(
         reason = "Similar users liked this"
         bucket = "similar"
     elif dominant[0] == "P" and P > 0.3:
-        if topic_pref > author_pref:
-            reason = f"You like #{topic_lower}" if topic_lower else "You like this topic"
-        elif author_pref > topic_pref:
+        if community_pref > author_pref:
+            reason = f"You like #{community_lower}" if community_lower else "You like this community"
+        elif author_pref > community_pref:
             reason = "You like this author"
         else:
-            reason = "You like this topic & author"
+            reason = "You like this community & author"
         bucket = "liked"
     elif dominant[0] == "V" and net_vote >= 3:
         reason = "Popular post"
@@ -2222,7 +2227,7 @@ def _score_magic(
         "N": round(N, 4),
         "seen_count": seen_count,
         "age_hours": round(age_hours, 1),
-        "t_pref": round(topic_pref, 1),
+        "t_pref": round(community_pref, 1),
         "a_pref": round(author_pref, 1),
         "source": post.get("_source", "unknown"),
     }
@@ -2361,8 +2366,8 @@ def _load_home_candidates(
     allowed_tags: set[str],
     max_posts: int,
     now_ts: int,
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
 ) -> tuple[list[dict], dict]:
     """
     Load candidate posts for home feed from multiple sources:
@@ -2390,9 +2395,9 @@ def _load_home_candidates(
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _TOPIC_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
-    bt_clause, bt_params = _blocked_topics_sql(
-        blocked_topics or set(), blocked_topic_prefixes or tuple(), viewer=viewer
+    _COMMUNITY_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
+    bt_clause, bt_params = _blocked_communities_sql(
+        blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer
     )
 
     min_ts = int(now_ts) - 86400
@@ -2404,7 +2409,7 @@ def _load_home_candidates(
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE LOWER(p.owner) = %s
-          AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
           AND p.created_at >= %s
           {bt_clause}
         ORDER BY p.created_at DESC
@@ -2418,8 +2423,8 @@ def _load_home_candidates(
             blocked_posts,
             blocked_users,
             seen,
-            blocked_topics,
-            blocked_topic_prefixes,
+            blocked_communities,
+            blocked_community_prefixes,
             viewer=viewer,
         )
         if post:
@@ -2440,7 +2445,7 @@ def _load_home_candidates(
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
-              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
               {bt_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
@@ -2452,8 +2457,8 @@ def _load_home_candidates(
                 blocked_posts,
                 blocked_users,
                 seen,
-                blocked_topics,
-                blocked_topic_prefixes,
+                blocked_communities,
+                blocked_community_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -2482,7 +2487,7 @@ def _load_home_candidates(
                   AND LOWER(v.owner) IN ({placeholders})
                   AND v.user_vote > 0
               )
-              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
               {bt_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
@@ -2494,8 +2499,8 @@ def _load_home_candidates(
                 blocked_posts,
                 blocked_users,
                 seen,
-                blocked_topics,
-                blocked_topic_prefixes,
+                blocked_communities,
+                blocked_community_prefixes,
                 viewer=viewer,
             )
             if post:
@@ -2511,7 +2516,7 @@ def _load_home_candidates(
         f"""SELECT {_POST_COLS}
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+        WHERE {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
         {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
@@ -2524,8 +2529,8 @@ def _load_home_candidates(
             blocked_posts,
             blocked_users,
             seen,
-            blocked_topics,
-            blocked_topic_prefixes,
+            blocked_communities,
+            blocked_community_prefixes,
             viewer=viewer,
         )
         if post:
@@ -2543,8 +2548,8 @@ def _row_to_post(
     blocked_posts,
     blocked_users,
     seen,
-    blocked_topics: set[str] | None = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] | None = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
 ) -> dict | None:
     """Convert a DB row to a post dict, or None if should be skipped."""
@@ -2556,11 +2561,11 @@ def _row_to_post(
             txhash,
             owner,
             ts,
-            topic,
+            community,
             title,
             content,
             tag,
-            root_topic,
+            root_community,
             root_post_id,
             username,
             edited_at,
@@ -2576,11 +2581,11 @@ def _row_to_post(
             txhash,
             owner,
             ts,
-            topic,
+            community,
             title,
             content,
             tag,
-            root_topic,
+            root_community,
             root_post_id,
             username,
             edited_at,
@@ -2595,11 +2600,11 @@ def _row_to_post(
             txhash,
             owner,
             ts,
-            topic,
+            community,
             title,
             content,
             tag,
-            root_topic,
+            root_community,
             root_post_id,
             username,
             edited_at,
@@ -2624,8 +2629,10 @@ def _row_to_post(
         return None
     if not is_own and (pid in blocked_posts or author in blocked_users):
         return None
-    topic_lower = (topic or "").strip().lower()
-    if not is_own and _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
+    community_lower = (community or "").strip().lower()
+    if not is_own and _community_is_blocked(
+        community_lower, blocked_communities or set(), blocked_community_prefixes or tuple()
+    ):
         return None
     # The author's tag is not filtered here: a curator override or the community
     # tag can raise or clear it, and neither is known until the lens is
@@ -2647,8 +2654,8 @@ def _row_to_post(
         "author_level": int(author_level) if author_level else 0,
         "author_is_new": _is_new_user(int(author_created_at or 0)),
         "timestamp": int(ts) if ts else 0,
-        "topic": (topic or "").strip(),
-        "root_topic": (root_topic or topic or "").strip(),
+        "community": (community or "").strip(),
+        "root_community": (root_community or community or "").strip(),
         "root_post_id": (root_post_id or pid).lower(),
         "title": title or "",
         "content": content or "",
@@ -2839,8 +2846,8 @@ def _get_guest_feed(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
     """Simple chronological feed for guest users."""
     max_candidates = min(limit * page * 2, MAX_CANDIDATE_POOL)
@@ -2850,8 +2857,8 @@ def _get_guest_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
+        blocked_communities=blocked_communities,
+        blocked_community_prefixes=blocked_community_prefixes,
     )
 
     if not candidates:
@@ -2898,8 +2905,8 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
     """
     Guest home feed, Magic-style:
@@ -2915,8 +2922,8 @@ def _get_guest_feed_magic(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        blocked_topics=blocked_topics,
-        blocked_topic_prefixes=blocked_topic_prefixes,
+        blocked_communities=blocked_communities,
+        blocked_community_prefixes=blocked_community_prefixes,
     )
 
     if not candidates:
@@ -2930,7 +2937,7 @@ def _get_guest_feed_magic(
     now_ts = int(time.time())
     sim_lookup: dict[str, float] = {}
     similar_upvotes: dict[str, list[str]] = {}
-    topic_prefs: dict[str, float] = {}
+    community_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
 
     scored_posts = []
@@ -2943,7 +2950,7 @@ def _get_guest_feed_magic(
             similar_upvotes,
             unique_commenters,
             vote_totals,
-            topic_prefs,
+            community_prefs,
             author_prefs,
             now_ts,
             False,
@@ -3057,7 +3064,7 @@ def get_tx_status():
                     tx_type = "post"
                     details = {
                         "post_id": post_row[0],
-                        "topic": post_row[1] or "",
+                        "community": post_row[1] or "",
                         "title": post_row[2] or "",
                         "relayer": (post_row[3] or "").strip().lower(),
                     }
@@ -3386,7 +3393,7 @@ def _build_user_blocked(addr: str) -> dict:
 
 @public_bp.route("/api/get_user_blocked")
 def get_user_blocked():
-    """Get user's block lists (posts, users, topics)."""
+    """Get user's block lists (posts, users, communities)."""
     rid = next_request_id()
     addr = request.args.get("address", default=None, type=str)
     log_event(rid, "get_user_blocked.begin", address=addr)
@@ -3408,7 +3415,7 @@ def get_user_blocked():
 
 @public_bp.route("/api/get_preferences")
 def get_preferences():
-    """Get user's topic/user preference weights."""
+    """Get user's community/user preference weights."""
     rid = next_request_id()
     addr = request.args.get("address", default=None, type=str)
     log_event(rid, "get_preferences.begin", address=addr)
@@ -3416,7 +3423,7 @@ def get_preferences():
         if not addr:
             return jsonify({"error": "address required"}), 400
 
-        topics: list[dict] = []
+        communities: list[dict] = []
         authors: list[dict] = []
 
         try:
@@ -3436,19 +3443,19 @@ def get_preferences():
                     continue
                 if w == 0:
                     continue
-                if pref_type == "topic":
-                    topics.append({"topic": t, "weight": w})
+                if pref_type == "community":
+                    communities.append({"community": t, "weight": w})
                 elif pref_type == "author":
                     authors.append({"user": t, "weight": w})
             conn.close()
         except Exception:
             pass
 
-        topics.sort(key=lambda x: x["weight"], reverse=True)
+        communities.sort(key=lambda x: x["weight"], reverse=True)
         authors.sort(key=lambda x: x["weight"], reverse=True)
 
-        resp = {"topics": topics, "authors": authors}
-        log_event(rid, "get_preferences.ok", topics=len(topics), authors=len(authors))
+        resp = {"communities": communities, "authors": authors}
+        log_event(rid, "get_preferences.ok", communities=len(communities), authors=len(authors))
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_preferences.err", error=str(e))
@@ -3717,10 +3724,10 @@ _CIRCULATION_CACHE_TTL = 60  # 60 seconds
 _welcome_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
 
 # Short-lived cache for unauthenticated full-table aggregations. get_welcome_stats
-# next door already had one; the topic listing did not, so every anonymous request
+# next door already had one; the community listing did not, so every anonymous request
 # ran two GROUP BY aggregations over the whole posts table with a 10s statement
 # timeout and no rate limit. 30s matches the sibling and is well inside the window
-# where a newly created topic still appears promptly.
+# where a newly created community still appears promptly.
 AGG_CACHE_TTL_SECONDS = 30
 _agg_cache: Dict[str, tuple[int, Any]] = {}
 _agg_cache_lock = threading.Lock()
@@ -3961,8 +3968,8 @@ def _build_chain_config() -> dict:
     resp: Dict[str, Any] = {
         "max_username_size": p["max_username_size"],
         "min_username_size": p["min_username_size"],
-        "max_topic_size": p["max_topic_size"],
-        "min_topic_size": p["min_topic_size"],
+        "max_community_size": p["max_community_size"],
+        "min_community_size": p["min_community_size"],
         "subscription_period": p["subscription_period"],
         "subscription_reserve_bps": p["subscription_reserve_bps"],
         "mint_interval": p["mint_interval"],
@@ -4092,7 +4099,7 @@ def _build_bootstrap_view(
     addr = (address or "").strip()
     sort_mode = sort_mode if sort_mode in ("magic", "newest") else "magic"
     limit = min(max(1, int(limit or 15)), 100)
-    community_hint = view[len("topic:") :].strip() if view.startswith("topic:") else None
+    community_hint = view[len("community:") :].strip() if view.startswith("community:") else None
     lens, team_id, scope = _lens_request_args(community_hint, allow_team_without_community=view.startswith("thread:"))
 
     # ── thread:<post_id> ──────────────────────────────────────────────
@@ -4105,16 +4112,16 @@ def _build_bootstrap_view(
             cur = conn.cursor()
             blocked_posts = _get_blocked_posts(cur, addr)
             blocked_users = _get_blocked_users(cur, addr)
-            blocked_topics = _get_blocked_topics(cur, addr)
-            blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+            blocked_communities = _get_blocked_communities(cur, addr)
+            blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
             thread = _build_thread(
                 cur,
                 post_id,
                 addr,
                 blocked_posts,
                 blocked_users,
-                blocked_topics_exact,
-                blocked_topic_prefixes,
+                blocked_communities_exact,
+                blocked_community_prefixes,
                 rid,
                 lens=lens,
                 team_id=team_id,
@@ -4126,16 +4133,16 @@ def _build_bootstrap_view(
         finally:
             conn.close()
 
-    # ── feed:home / feed:following / topic:<name> ─────────────────────
+    # ── feed:home / feed:following / community:<name> ─────────────────────
     feed_name = None
-    topic_name = None
+    community_name = None
     if view == "feed:home":
         feed_name = "home"
     elif view == "feed:following":
         feed_name = "following"
-    elif view.startswith("topic:"):
-        topic_name = view[len("topic:") :].strip()
-        if not topic_name:
+    elif view.startswith("community:"):
+        community_name = view[len("community:") :].strip()
+        if not community_name:
             return None
         # Own connection inside get_posts — do not hold an idle conn here.
         from flask import current_app
@@ -4143,7 +4150,7 @@ def _build_bootstrap_view(
         with current_app.test_request_context(
             "/api/get_posts",
             query_string={
-                "community": topic_name,
+                "community": community_name,
                 "limit": str(limit),
                 "page": "1",
                 "by": sort_mode,
@@ -4157,10 +4164,10 @@ def _build_bootstrap_view(
             posts_resp = get_posts()
             data = posts_resp.get_json(silent=True) if hasattr(posts_resp, "get_json") else None
             if not isinstance(data, dict) or "posts" not in data:
-                raise RuntimeError("topic_view_failed")
+                raise RuntimeError("community_view_failed")
             return {
                 "kind": "feed",
-                "topic": topic_name,
+                "community": community_name,
                 "posts": data.get("posts") or [],
                 "total": data.get("total", 0),
                 "page": data.get("page", 1),
@@ -4231,8 +4238,8 @@ def _build_bootstrap_view(
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, addr)
         blocked_users = _get_blocked_users(cur, addr)
-        blocked_topics = _get_blocked_topics(cur, addr)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, addr)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         persisted_seen: dict[str, int] = {}
         if addr and addr.lower() != "guest":
             try:
@@ -4250,8 +4257,8 @@ def _build_bootstrap_view(
                 blocked_users=blocked_users,
                 allowed_tags=allowed_tags,
                 sort_mode=sort_mode,
-                blocked_topics=blocked_topics_exact,
-                blocked_topic_prefixes=blocked_topic_prefixes,
+                blocked_communities=blocked_communities_exact,
+                blocked_community_prefixes=blocked_community_prefixes,
                 seen_posts=persisted_seen,
             )
         else:
@@ -4264,8 +4271,8 @@ def _build_bootstrap_view(
                 blocked_users=blocked_users,
                 allowed_tags=allowed_tags,
                 sort_mode=sort_mode,
-                blocked_topics=blocked_topics_exact,
-                blocked_topic_prefixes=blocked_topic_prefixes,
+                blocked_communities=blocked_communities_exact,
+                blocked_community_prefixes=blocked_community_prefixes,
                 seen_posts=persisted_seen,
             )
         if resp.get("posts"):
@@ -4498,13 +4505,61 @@ def get_peers():
     forwards the admin proof only to destinations it can authenticate — see
     `fleet.authenticated_node_sites`.
 
-    A validator whose moniker names nowhere reachable is still omitted, because
-    there is no address to send a visitor to.
+    A node whose operator published no address at all is found from this node's
+    own P2P connections and listed once it proves itself, so choosing a nickname
+    no longer makes a running node invisible.
+
+    `verified` says the address answered a signed challenge as the validator it
+    is listed under. An unverified entry is a claim the chain carries but the
+    address has not backed, and the page says so rather than presenting the two
+    as equivalent.
     """
     try:
-        return jsonify({"peers": [{"ip": "", "moniker": url} for url in active_node_sites()]})
+        return jsonify(
+            {
+                "peers": [
+                    {
+                        "ip": "",
+                        "moniker": site.url,
+                        "site": site.url,
+                        "operator_address": site.operator_address,
+                        "verified": site.verified,
+                    }
+                    for site in active_node_entries()
+                ]
+            }
+        )
     except Exception as e:
         return safe_error(e)
+
+
+@public_bp.route("/api/node_identity")
+def node_identity():
+    """Prove this node is the validator it claims, at the address the caller dialed.
+
+    Public and unauthenticated on purpose: it is how any node, or anyone at all,
+    checks that a site on /network belongs to the validator named beside it. The
+    response commits to a caller-chosen nonce and origin, so it is worthless
+    replayed at another address or at another time.
+
+    See `node_identity` for why signing a caller-supplied origin is safe: both
+    inputs are validated against narrow grammars first, and the framed payload
+    cannot be read as a transaction.
+    """
+    rid = next_request_id()
+    try:
+        doc = build_local_identity(
+            request.args.get("origin", default="", type=str),
+            request.args.get("nonce", default="", type=str),
+        )
+    except ValueError as e:
+        log_event(rid, "node_identity.bad_challenge", error=str(e))
+        return api_error_code("invalid_identity_challenge", 400)
+    except Exception as e:
+        log_event(rid, "node_identity.err", error=str(e))
+        return safe_error(e)
+    log_event(rid, "node_identity.ok", origin=doc["origin"])
+    return jsonify(doc)
 
 
 # Cache for difficulty history (1 minute TTL)
@@ -4808,12 +4863,12 @@ def search():
     """
     Unified search endpoint.
     - @username: Search users by username, return user + their posts
-    - #topic: Search topics by prefix
-    - Otherwise: Search topics, users, and posts with substring matching
+    - #community: Search communities by prefix
+    - Otherwise: Search communities, users, and posts with substring matching
 
     Query Parameters:
       - q (required): Search query
-      - type: Filter to 'topics', 'users', or 'posts' (for Load More)
+      - type: Filter to 'communities', 'users', or 'posts' (for Load More)
       - limit (default: 10, max: 50): Results per type
       - offset (default: 0): For pagination
       - address: Viewer address for filtering blocked content
@@ -4840,7 +4895,7 @@ def search():
         search_type = "user"
         query = q_raw[1:].strip()
     elif q_raw.startswith("#"):
-        search_type = "topic"
+        search_type = "community"
         query = q_raw[1:].strip()
     else:
         search_type = "general"
@@ -4851,10 +4906,10 @@ def search():
             {
                 "query": q_raw,
                 "search_type": search_type,
-                "topics": [],
+                "communities": [],
                 "users": [],
                 "posts": [],
-                "has_more_topics": False,
+                "has_more_communities": False,
                 "has_more_users": False,
                 "has_more_posts": False,
             }
@@ -4865,18 +4920,18 @@ def search():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, viewer) if viewer else set()
         blocked_users = _get_blocked_users(cur, viewer) if viewer else set()
-        blocked_topics = _get_blocked_topics(cur, viewer) if viewer else set()
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, viewer) if viewer else set()
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         deleted_clause = _deleted_filter()
         deleted_bare = _deleted_filter_bare()
 
         result = {
             "query": q_raw,
             "search_type": search_type,
-            "topics": [],
+            "communities": [],
             "users": [],
             "posts": [],
-            "has_more_topics": False,
+            "has_more_communities": False,
             "has_more_users": False,
             "has_more_posts": False,
         }
@@ -4957,21 +5012,21 @@ def search():
                     blocked_users,
                     viewer,
                     deleted_bare,
-                    blocked_topics_exact,
-                    blocked_topic_prefixes,
+                    blocked_communities_exact,
+                    blocked_community_prefixes,
                     allowed_tags=allowed_tags,
                 )
                 result["posts"] = posts
 
-        # ========== TOPIC SEARCH (#topic) ==========
-        elif search_type == "topic":
+        # ========== COMMUNITY SEARCH (#community) ==========
+        elif search_type == "community":
             p = expect_params()
-            min_topic = p.get("min_topic_size", 3)
-            max_topic = p.get("max_topic_size", 50)
+            min_community = int(p["min_community_size"])
+            max_community = int(p["max_community_size"])
 
             cur.execute(
                 f"""
-                WITH topic_base AS (
+                WITH community_base AS (
                     SELECT LOWER(TRIM(p.community)) AS community,
                            COUNT(1) AS post_count
                     FROM posts p
@@ -4991,54 +5046,56 @@ def search():
                     tb.post_count,
                     COALESCE(tcs.dominant_tag, '') AS dominant_tag,
                     COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
-                FROM topic_base tb
-                LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
+                FROM community_base tb
+                LEFT JOIN community_content_stats tcs ON LOWER(tcs.community) = tb.community
                 """,
-                (min_topic, max_topic, f"{like_query}%", limit + 1, offset),
+                (min_community, max_community, f"{like_query}%", limit + 1, offset),
             )
-            topic_rows = cur.fetchall()
-            has_more_topics = len(topic_rows) > limit
-            topic_rows = topic_rows[:limit]
+            community_rows = cur.fetchall()
+            has_more_communities = len(community_rows) > limit
+            community_rows = community_rows[:limit]
 
-            topics = []
-            topic_rows = [
+            communities = []
+            community_rows = [
                 row
-                for row in topic_rows
-                if not _topic_is_blocked((row[0] or "").lower(), blocked_topics_exact, blocked_topic_prefixes)
+                for row in community_rows
+                if not _community_is_blocked(
+                    (row[0] or "").lower(), blocked_communities_exact, blocked_community_prefixes
+                )
             ]
-            topic_list = [row[0] for row in topic_rows]
-            stats = _compute_dominant_flags(cur, topic_list) if topic_list else {}
+            community_list = [row[0] for row in community_rows]
+            stats = _compute_dominant_flags(cur, community_list) if community_list else {}
 
-            for row in topic_rows:
-                topic, post_count, dominant_tag, dominant_ratio = row
-                stat = stats.get(topic, {}) if stats else {}
+            for row in community_rows:
+                community, post_count, dominant_tag, dominant_ratio = row
+                stat = stats.get(community, {}) if stats else {}
                 dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
                 dom_ratio = float(stat.get("dominant_ratio") or 0)
                 if dom_tag and dom_tag not in allowed_tags:
                     continue
-                topics.append(
+                communities.append(
                     {
-                        "topic": topic,
+                        "community": community,
                         "post_count": int(post_count or 0),
                         "dominant_tag": dom_tag or None,
                         "dominant_ratio": dom_ratio,
                     }
                 )
 
-            result["topics"] = topics
-            result["has_more_topics"] = has_more_topics
+            result["communities"] = communities
+            result["has_more_communities"] = has_more_communities
 
         # ========== GENERAL SEARCH ==========
         else:
-            # Search topics (if not filtering or filtering to topics)
-            if not search_type_filter or search_type_filter == "topics":
+            # Search communities (if not filtering or filtering to communities)
+            if not search_type_filter or search_type_filter == "communities":
                 p = expect_params()
-                min_topic = p.get("min_topic_size", 3)
-                max_topic = p.get("max_topic_size", 50)
+                min_community = int(p["min_community_size"])
+                max_community = int(p["max_community_size"])
 
                 cur.execute(
                     f"""
-                    WITH topic_base AS (
+                    WITH community_base AS (
                         SELECT LOWER(TRIM(p.community)) AS community,
                                COUNT(1) AS post_count
                         FROM posts p
@@ -5058,42 +5115,44 @@ def search():
                         tb.post_count,
                         COALESCE(tcs.dominant_tag, '') AS dominant_tag,
                         COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
-                    FROM topic_base tb
-                    LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.community
+                    FROM community_base tb
+                    LEFT JOIN community_content_stats tcs ON LOWER(tcs.community) = tb.community
                     """,
-                    (min_topic, max_topic, f"%{like_query}%", limit + 1, offset),
+                    (min_community, max_community, f"%{like_query}%", limit + 1, offset),
                 )
-                topic_rows = cur.fetchall()
-                has_more_topics = len(topic_rows) > limit
-                topic_rows = topic_rows[:limit]
+                community_rows = cur.fetchall()
+                has_more_communities = len(community_rows) > limit
+                community_rows = community_rows[:limit]
 
-                topics = []
-                topic_rows = [
+                communities = []
+                community_rows = [
                     row
-                    for row in topic_rows
-                    if not _topic_is_blocked((row[0] or "").lower(), blocked_topics_exact, blocked_topic_prefixes)
+                    for row in community_rows
+                    if not _community_is_blocked(
+                        (row[0] or "").lower(), blocked_communities_exact, blocked_community_prefixes
+                    )
                 ]
-                topic_list = [row[0] for row in topic_rows]
-                stats = _compute_dominant_flags(cur, topic_list) if topic_list else {}
+                community_list = [row[0] for row in community_rows]
+                stats = _compute_dominant_flags(cur, community_list) if community_list else {}
 
-                for row in topic_rows:
-                    topic, post_count, dominant_tag, dominant_ratio = row
-                    stat = stats.get(topic, {}) if stats else {}
+                for row in community_rows:
+                    community, post_count, dominant_tag, dominant_ratio = row
+                    stat = stats.get(community, {}) if stats else {}
                     dom_tag = _normalize_api_tag(stat.get("dominant_tag") or "")
                     dom_ratio = float(stat.get("dominant_ratio") or 0)
                     if dom_tag and dom_tag not in allowed_tags:
                         continue
-                    topics.append(
+                    communities.append(
                         {
-                            "topic": topic,
+                            "community": community,
                             "post_count": int(post_count or 0),
                             "dominant_tag": dom_tag or None,
                             "dominant_ratio": dom_ratio,
                         }
                     )
 
-                result["topics"] = topics
-                result["has_more_topics"] = has_more_topics
+                result["communities"] = communities
+                result["has_more_communities"] = has_more_communities
 
             # Search users (if not filtering or filtering to users)
             if not search_type_filter or search_type_filter == "users":
@@ -5169,8 +5228,8 @@ def search():
                     blocked_users,
                     viewer,
                     deleted_bare,
-                    blocked_topics_exact,
-                    blocked_topic_prefixes,
+                    blocked_communities_exact,
+                    blocked_community_prefixes,
                     allowed_tags=allowed_tags,
                 )
                 result["posts"] = posts
@@ -5206,24 +5265,26 @@ def _format_search_posts(
     blocked_users,
     viewer,
     deleted_bare,
-    blocked_topics=None,
-    blocked_topic_prefixes=None,
+    blocked_communities=None,
+    blocked_community_prefixes=None,
     allowed_tags=None,
 ):
     """Format post rows for search results with vote counts."""
     if allowed_tags is None:
         allowed_tags = {"sensitive"}
     viewer_lower = (viewer or "").strip().lower()
-    # Filter blocked posts, users, topics, and disallowed tags
+    # Filter blocked posts, users, communities, and disallowed tags
     filtered = []
     for r in rows:
         txhash = (r[0] or "").lower()
         owner = (r[1] or "").lower()
-        topic = (r[3] or "").strip().lower() if len(r) > 3 else ""
+        community = (r[3] or "").strip().lower() if len(r) > 3 else ""
         is_own = viewer_lower and owner == viewer_lower
         if not is_own and (txhash in blocked_posts or owner in blocked_users):
             continue
-        if not is_own and _topic_is_blocked(topic, blocked_topics or set(), blocked_topic_prefixes or tuple()):
+        if not is_own and _community_is_blocked(
+            community, blocked_communities or set(), blocked_community_prefixes or tuple()
+        ):
             continue
         # Tags are filtered by the caller once the lens has resolved the
         # effective tag; the author's own tag is not the final answer.
@@ -5322,7 +5383,7 @@ def _format_search_posts(
                 txhash,
                 owner,
                 ts,
-                topic,
+                community,
                 title,
                 content,
                 username,
@@ -5339,7 +5400,7 @@ def _format_search_posts(
                 txhash,
                 owner,
                 ts,
-                topic,
+                community,
                 title,
                 content,
                 username,
@@ -5352,12 +5413,12 @@ def _format_search_posts(
             ) = row[:13]
             relayer = ""
         elif len(row) >= 12:
-            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
-                :12
-            ]
+            txhash, owner, ts, community, title, content, username, target, tag, thumbnail, author_level, media_raw = (
+                row[:12]
+            )
             relayer = ""
         else:
-            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
+            txhash, owner, ts, community, title, content, username, target, tag, thumbnail, author_level = row
             media_raw = "[]"
             relayer = ""
         try:
@@ -5376,7 +5437,7 @@ def _format_search_posts(
                 "author_level": int(author_level) if author_level else 0,
                 "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": int(ts) if ts else None,
-                "topic": topic,
+                "community": community,
                 "title": title,
                 "content": content,
                 "tag": _normalize_api_tag(tag or ""),
@@ -5405,13 +5466,14 @@ def get_posts():
     page = _clamp_page(page)
     offset = (page - 1) * limit
     community = request.args.get("community", default=None, type=str)
+    # An outdated client sends `topic=`, so that is the param this rejects. It is
+    # deliberately not `community=`, which is the live one every caller uses.
     if request.args.get("topic") is not None:
         log_event(rid, "get_posts.topic_retired", topic=request.args.get("topic"), page=page)
         return api_error_code("topic_retired")
-    topic = community
     address = request.args.get("address", default="", type=str)
     try:
-        lens, team_id, scope = _lens_request_args(topic)
+        lens, team_id, scope = _lens_request_args(community)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -5438,7 +5500,7 @@ def get_posts():
             limit,
             allowed_tags,
             viewer="guest",
-            community=(topic or "").strip().lower(),
+            community=(community or "").strip().lower(),
             scope=scope,
             lens=lens,
             team_id=team_id,
@@ -5461,8 +5523,8 @@ def get_posts():
         _t_blocked = time.monotonic()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        blocked_topics = _get_blocked_topics(cur, address)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, address)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         blocked_ms = round((time.monotonic() - _t_blocked) * 1000, 2)
 
         deleted_clause = _deleted_filter()
@@ -5503,8 +5565,8 @@ def get_posts():
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
                     sort_mode=sort_mode,
-                    blocked_topics=blocked_topics_exact,
-                    blocked_topic_prefixes=blocked_topic_prefixes,
+                    blocked_communities=blocked_communities_exact,
+                    blocked_community_prefixes=blocked_community_prefixes,
                     seen_posts=persisted_seen,
                 )
             else:
@@ -5517,8 +5579,8 @@ def get_posts():
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
                     sort_mode=sort_mode,
-                    blocked_topics=blocked_topics_exact,
-                    blocked_topic_prefixes=blocked_topic_prefixes,
+                    blocked_communities=blocked_communities_exact,
+                    blocked_community_prefixes=blocked_community_prefixes,
                     seen_posts=persisted_seen,
                 )
             feed_ms = round((time.monotonic() - _t_feed) * 1000, 2)
@@ -5579,23 +5641,23 @@ def get_posts():
             conn.close()
             return jsonify(resp)
 
-        # Blocked-topic SQL clause (only applied for "all" / no topic; explicit topic visits are not filtered)
+        # Blocked-community SQL clause (only applied for "all" / no community; explicit community visits are not filtered)
         bt_clause, bt_params = (
             ("", [])
-            if (topic and topic != "all")
-            else _blocked_topics_sql(blocked_topics_exact, blocked_topic_prefixes, viewer=address)
+            if (community and community != "all")
+            else _blocked_communities_sql(blocked_communities_exact, blocked_community_prefixes, viewer=address)
         )
 
         # First, get total count for pagination
         t_count = time.monotonic()
-        if topic and topic != "all":
+        if community and community != "all":
             cur.execute(
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
                 WHERE COALESCE(p.target, '') = '' AND LOWER(p.community) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 """,
-                (topic,),
+                (community,),
             )
         else:
             cur.execute(
@@ -5610,12 +5672,12 @@ def get_posts():
         count_ms = (time.monotonic() - t_count) * 1000
 
         # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
-        # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
+        # (Eligibility comes from the community filter; ranking is always via `_score_magic`.)
         max_candidates = min(max(500, limit * page * _seen_overfetch_factor(persisted_seen, 3)), MAX_CANDIDATE_POOL)
         order_clause = "ORDER BY p.created_at DESC"
 
         t_select = time.monotonic()
-        if topic and topic != "all":
+        if community and community != "all":
             cur.execute(
                 f"""
                 SELECT p.txhash,
@@ -5625,7 +5687,7 @@ def get_posts():
                        p.title,
                        p.content,
                        COALESCE(p.tag, '') AS tag,
-                       COALESCE(p.root_community, p.community, '') AS root_topic,
+                       COALESCE(p.root_community, p.community, '') AS root_community,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
@@ -5640,7 +5702,7 @@ def get_posts():
                 {order_clause}
                 LIMIT %s
                 """,
-                (topic, max_candidates),
+                (community, max_candidates),
             )
         else:
             cur.execute(
@@ -5652,7 +5714,7 @@ def get_posts():
                        p.title,
                        p.content,
                        COALESCE(p.tag, '') AS tag,
-                       COALESCE(p.root_community, p.community, '') AS root_topic,
+                       COALESCE(p.root_community, p.community, '') AS root_community,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
@@ -5672,7 +5734,7 @@ def get_posts():
         rows = cur.fetchall()
         select_ms = (time.monotonic() - t_select) * 1000
 
-        # Filter blocked posts, posts from blocked users, and blocked topics
+        # Filter blocked posts, posts from blocked users, and blocked communities
         # Own posts always pass through (never hidden by agent blocks)
         address_lower = (address or "").strip().lower()
         rows = [
@@ -5682,7 +5744,9 @@ def get_posts():
             or (
                 (r[0] or "").lower() not in blocked_posts
                 and (r[1] or "").lower() not in blocked_users
-                and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
+                and not _community_is_blocked(
+                    (r[3] or "").strip().lower(), blocked_communities_exact, blocked_community_prefixes
+                )
             )
         ]
         post_ids = [r[0].lower() for r in rows]
@@ -5771,22 +5835,22 @@ def get_posts():
                 blocked_posts,
                 blocked_users,
                 seen,
-                blocked_topics_exact,
-                blocked_topic_prefixes,
+                blocked_communities_exact,
+                blocked_community_prefixes,
                 viewer=address,
             )
             if not post:
                 continue
-            post["_source"] = "topic" if (topic and topic != "all") else "all"
+            post["_source"] = "community" if (community and community != "all") else "all"
             candidates.append(post)
 
-        # Attach feed metadata for topic/global feeds.
-        topic_lower = (topic or "").strip().lower()
-        is_global_topic_feed = (not topic_lower) or (topic_lower == "all")
-        topic_feed_type = "all" if is_global_topic_feed else "topic"
+        # Attach feed metadata for community/global feeds.
+        community_lower = (community or "").strip().lower()
+        is_global_community_feed = (not community_lower) or (community_lower == "all")
+        community_feed_type = "all" if is_global_community_feed else "community"
 
         if sort_mode == "magic":
-            # Rank via the same Magic scorer (no prefs in topic feeds, P=0).
+            # Rank via the same Magic scorer (no prefs in community feeds, P=0).
             from similarity import get_or_compute_similarities
 
             address_lower = (address or "").strip().lower()
@@ -5801,7 +5865,7 @@ def get_posts():
             similar_upvotes, _ = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
             unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
-            topic_prefs: dict[str, float] = {}
+            community_prefs: dict[str, float] = {}
             author_prefs: dict[str, float] = {}
             now_ts = int(time.time())
 
@@ -5813,7 +5877,7 @@ def get_posts():
                     similar_upvotes,
                     unique_commenters,
                     vote_totals,
-                    topic_prefs,
+                    community_prefs,
                     author_prefs,
                     now_ts,
                     False,
@@ -5832,7 +5896,7 @@ def get_posts():
                 post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
                 post["awards"] = award_details.get(pid, [])
                 post["children"] = []
-                post["feed_type"] = topic_feed_type
+                post["feed_type"] = community_feed_type
                 post["feed_bucket"] = debug.get("bucket", "discovery")
                 post["user_vote"] = user_votes.get(pid, 0)
                 post["user_weight"] = user_weight_map.get(pid, 0.0)
@@ -5846,7 +5910,9 @@ def get_posts():
                 p.pop("_score", None)
         else:
             # newest: pure chronological
-            candidates = _drop_viewer_downvotes(candidates, user_votes, context=f"topic.newest.{topic_feed_type}")
+            candidates = _drop_viewer_downvotes(
+                candidates, user_votes, context=f"community.newest.{community_feed_type}"
+            )
             for c in candidates:
                 c["_N"] = 1.0
                 c["_seen_count"] = 0
@@ -5868,7 +5934,7 @@ def get_posts():
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
                 post["awards"] = award_details.get(pid, [])
                 post["children"] = []
-                post["feed_type"] = topic_feed_type
+                post["feed_type"] = community_feed_type
                 post["feed_bucket"] = "newest"
                 post["user_vote"] = user_votes.get(pid, 0)
                 post["user_weight"] = user_weight_map.get(pid, 0.0)
@@ -5895,10 +5961,10 @@ def get_posts():
                 result,
                 allowed_tags,
                 rid=rid,
-                context=f"get_posts.topic.{topic or 'all'}",
+                context=f"get_posts.community.{community or 'all'}",
                 viewer=address,
             )
-            _track_image_impressions(result, rid, context=f"get_posts.topic.{topic or 'all'}")
+            _track_image_impressions(result, rid, context=f"get_posts.community.{community or 'all'}")
 
         has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
@@ -5907,7 +5973,7 @@ def get_posts():
             log_event(
                 rid,
                 "get_posts.slow",
-                topic=topic or "all",
+                community=community or "all",
                 page=page,
                 limit=limit,
                 count_ms=round(count_ms, 1),
@@ -5961,8 +6027,8 @@ def get_user_posts():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, viewer)
         blocked_users = _get_blocked_users(cur, viewer)
-        blocked_topics = _get_blocked_topics(cur, viewer)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, viewer)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
 
         deleted_clause = _deleted_filter()
 
@@ -6005,7 +6071,9 @@ def get_user_posts():
             or (
                 (r[0] or "").lower() not in blocked_posts
                 and (r[1] or "").lower() not in blocked_users
-                and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
+                and not _community_is_blocked(
+                    (r[3] or "").strip().lower(), blocked_communities_exact, blocked_community_prefixes
+                )
             )
         ]
         root_tag_map: dict[str, str] = {}
@@ -6022,7 +6090,7 @@ def get_user_posts():
                 list(comment_root_ids),
             )
             root_posts = [
-                {"post_id": pid, "tag": _normalize_api_tag(tag or ""), "topic": community}
+                {"post_id": pid, "tag": _normalize_api_tag(tag or ""), "community": community}
                 for pid, tag, community in cur.fetchall()
             ]
             if root_posts:
@@ -6143,7 +6211,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6163,7 +6231,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6182,7 +6250,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6200,7 +6268,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6218,7 +6286,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6235,7 +6303,7 @@ def get_user_posts():
                     txhash,
                     owner_addr,
                     ts,
-                    topic,
+                    community,
                     title,
                     content,
                     uname,
@@ -6247,7 +6315,7 @@ def get_user_posts():
                 ) = row[:12]
                 relayer = ""
             else:
-                txhash, owner_addr, ts, topic, title, content, uname, target = row[:8]
+                txhash, owner_addr, ts, community, title, content, uname, target = row[:8]
                 edited, edited_at = 0, 0
                 thumbnail = ""
                 author_level = 0
@@ -6270,7 +6338,7 @@ def get_user_posts():
                     "author_level": int(author_level) if author_level else 0,
                     "author_is_new": _is_new_user(int(author_created_at or 0)),
                     "timestamp": int(ts) if ts is not None else None,
-                    "topic": topic,
+                    "community": community,
                     "title": title,
                     "content": content,
                     "tag": _normalize_api_tag(tag or ""),
@@ -6361,8 +6429,8 @@ def get_recent_content():
                        p.owner,
                        COALESCE(pr.username, '') AS username,
                        p.created_at,
-                       COALESCE(p.community, '') AS topic,
-                       COALESCE(p.root_community, p.community, '') AS root_topic,
+                       COALESCE(p.community, '') AS community,
+                       COALESCE(p.root_community, p.community, '') AS root_community,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(p.target, '') AS target,
                        COALESCE(p.title, '') AS title,
@@ -6393,8 +6461,8 @@ def get_recent_content():
                     "author": r[1],
                     "username": r[2] or "",
                     "timestamp": int(r[3]) if r[3] is not None else 0,
-                    "topic": r[4] or "",
-                    "root_topic": r[5] or "",
+                    "community": r[4] or "",
+                    "root_community": r[5] or "",
                     "root_post_id": r[6] or "",
                     "target": target,
                     "title": r[8] or "",
@@ -6531,8 +6599,8 @@ def _fetch_post(
     blocked_posts: set[str] = None,
     blocked_users: set[str] = None,
     use_stored_counts: bool = False,
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
 ):
     """Fetch a single post with aggregates.
@@ -6561,7 +6629,7 @@ def _fetch_post(
                p.title,
                p.content,
                COALESCE(p.tag, '') as tag,
-               COALESCE(p.root_community, p.community, '') as root_topic,
+               COALESCE(p.root_community, p.community, '') as root_community,
                COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                COALESCE(p.target, '') as target,
                COALESCE(pr.username, '') AS username,
@@ -6585,11 +6653,11 @@ def _fetch_post(
     pid = (row[0] or "").lower()
     owner = (row[1] or "").lower()
     created_at = row[2]
-    topic_val = row[3]
+    community_val = row[3]
     title_val = row[4]
     content_val = row[5]
     tag_val = _normalize_api_tag((row[6] or "").strip())
-    root_topic_val = (row[7] or "").strip()
+    root_community_val = (row[7] or "").strip()
     root_post_id_val = (row[8] or "").strip().lower()
     target_val = (row[9] or "").strip().lower()
     username_val = row[10] or ""
@@ -6619,8 +6687,8 @@ def _fetch_post(
             return None
         if owner in blocked_users:
             return None
-        if _topic_is_blocked(
-            (topic_val or "").strip().lower(), blocked_topics or set(), blocked_topic_prefixes or tuple()
+        if _community_is_blocked(
+            (community_val or "").strip().lower(), blocked_communities or set(), blocked_community_prefixes or tuple()
         ):
             return None
 
@@ -6670,8 +6738,8 @@ def _fetch_post(
         "author_level": author_level_val,
         "author_is_new": _is_new_user(author_created_at_val),
         "timestamp": int(created_at) if created_at is not None else None,
-        "topic": topic_val,
-        "root_topic": root_topic_val,
+        "community": community_val,
+        "root_community": root_community_val,
         "root_post_id": root_post_id_val,
         "title": title_val,
         "content": content_val,
@@ -6728,8 +6796,8 @@ def _post_row_to_dict(row) -> dict:
         "author_level": int(row[14]) if row[14] else 0,
         "author_is_new": _is_new_user(int(row[16]) if row[16] else 0),
         "timestamp": int(created_at) if created_at is not None else None,
-        "topic": row[3],
-        "root_topic": (row[7] or "").strip(),
+        "community": row[3],
+        "root_community": (row[7] or "").strip(),
         "root_post_id": (row[8] or "").strip().lower(),
         "title": row[4],
         "content": row[5],
@@ -6754,8 +6822,8 @@ def _fetch_comment_tree_batch(
     blocked_posts: set[str],
     blocked_users: set[str],
     max_depth: int = 6,
-    blocked_topics: set[str] = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
 ) -> tuple[dict | None, list[dict]]:
     """
@@ -6828,14 +6896,16 @@ def _fetch_comment_tree_batch(
         # Visible descendant count is computed later via count_descendants.
         post["comments"] = 0
 
-        # Skip if this post or its owner is blocked, or topic is blocked
+        # Skip if this post or its owner is blocked, or community is blocked
         # Own posts always bypass block filters
         is_own = viewer_lower and owner == viewer_lower
-        topic_lower = (post["topic"] or "").strip().lower()
+        community_lower = (post["community"] or "").strip().lower()
         if not is_own and (
             pid in blocked_posts
             or owner in blocked_users
-            or _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple())
+            or _community_is_blocked(
+                community_lower, blocked_communities or set(), blocked_community_prefixes or tuple()
+            )
         ):
             blocked_ids.add(pid)
             continue
@@ -6970,8 +7040,8 @@ def _fetch_ancestor_chain(
     comment_id: str,
     blocked_posts: set[str],
     blocked_users: set[str],
-    blocked_topics: set[str] | None = None,
-    blocked_topic_prefixes: tuple[str, ...] | None = None,
+    blocked_communities: set[str] | None = None,
+    blocked_community_prefixes: tuple[str, ...] | None = None,
     viewer: str = "",
     near_limit: int = 5,
     hard_cap: int = 100,
@@ -7004,7 +7074,7 @@ def _fetch_ancestor_chain(
         )
         SELECT p.txhash, p.owner, p.created_at, p.community, p.title, p.content,
                COALESCE(p.tag, '') as tag,
-               COALESCE(p.root_community, p.community, '') as root_topic,
+               COALESCE(p.root_community, p.community, '') as root_community,
                COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
                COALESCE(p.target, '') as target,
                COALESCE(p.thumbnail_url, '') as thumbnail,
@@ -7042,10 +7112,10 @@ def _fetch_ancestor_chain(
         if not is_own and (
             post["post_id"] in blocked_posts
             or post["user_id"] in blocked_users
-            or _topic_is_blocked(
-                (post["topic"] or "").strip().lower(),
-                blocked_topics or set(),
-                blocked_topic_prefixes or tuple(),
+            or _community_is_blocked(
+                (post["community"] or "").strip().lower(),
+                blocked_communities or set(),
+                blocked_community_prefixes or tuple(),
             )
         ):
             continue
@@ -7114,8 +7184,8 @@ def _build_thread(
     address: str,
     blocked_posts: set[str],
     blocked_users: set[str],
-    blocked_topics_exact: set[str],
-    blocked_topic_prefixes: tuple[str, ...],
+    blocked_communities_exact: set[str],
+    blocked_community_prefixes: tuple[str, ...],
     rid: str,
     lens: str = "effective",
     team_id: int | None = None,
@@ -7128,8 +7198,8 @@ def _build_thread(
         blocked_posts,
         blocked_users,
         max_depth=6,
-        blocked_topics=blocked_topics_exact,
-        blocked_topic_prefixes=blocked_topic_prefixes,
+        blocked_communities=blocked_communities_exact,
+        blocked_community_prefixes=blocked_community_prefixes,
         viewer=address,
     )
     if not root:
@@ -7141,8 +7211,8 @@ def _build_thread(
             root["post_id"],
             blocked_posts,
             blocked_users,
-            blocked_topics=blocked_topics_exact,
-            blocked_topic_prefixes=blocked_topic_prefixes,
+            blocked_communities=blocked_communities_exact,
+            blocked_community_prefixes=blocked_community_prefixes,
             viewer=address,
         )
     else:
@@ -7269,12 +7339,12 @@ def _build_thread(
     root["comments"] = recount_visible(children)
 
     lens_team_id = (root.get("lens") or {}).get("effective_team_id")
-    root["thread_locked"] = thread_locked_for_lens(cur, root.get("topic") or "", root["post_id"], lens_team_id)
+    root["thread_locked"] = thread_locked_for_lens(cur, root.get("community") or "", root["post_id"], lens_team_id)
     if root["thread_locked"]:
         logger.debug(
             "[lock] thread locked for lens root=%s community=%s team=%s",
             str(root["post_id"])[:12],
-            root.get("topic"),
+            root.get("community"),
             lens_team_id,
         )
 
@@ -7306,8 +7376,8 @@ def get_comments():
         t_blocked = time.time()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        blocked_topics = _get_blocked_topics(cur, address)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, address)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
@@ -7317,8 +7387,8 @@ def get_comments():
             address,
             blocked_posts,
             blocked_users,
-            blocked_topics_exact,
-            blocked_topic_prefixes,
+            blocked_communities_exact,
+            blocked_community_prefixes,
             rid,
             lens=lens,
             team_id=team_id,
@@ -7437,8 +7507,8 @@ def get_comment_context():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        blocked_topics = _get_blocked_topics(cur, address)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, address)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         # Parent-first order for legacy callers (they reverse on the client).
         # hard_cap=max_depth matches old _fetch_parent_chain: at most N parents,
         # no forced root inclusion.
@@ -7447,8 +7517,8 @@ def get_comment_context():
             comment_id,
             blocked_posts,
             blocked_users,
-            blocked_topics=blocked_topics_exact,
-            blocked_topic_prefixes=blocked_topic_prefixes,
+            blocked_communities=blocked_communities_exact,
+            blocked_community_prefixes=blocked_community_prefixes,
             viewer=address,
             near_limit=max_depth,
             hard_cap=max_depth,
@@ -7499,8 +7569,8 @@ def get_inbox():
         t_blocked = time.time()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        blocked_topics = _get_blocked_topics(cur, address)
-        blocked_topics_exact, blocked_topic_prefixes = _split_blocked_topics(blocked_topics)
+        blocked_communities = _get_blocked_communities(cur, address)
+        blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         logger.info(
             f"[get_inbox] Blocked query: {(time.time() - t_blocked)*1000:.1f}ms, posts={len(blocked_posts)}, users={len(blocked_users)}"
         )
@@ -7538,7 +7608,7 @@ def get_inbox():
                     COALESCE(pr.level, 0) as actor_level,
                     '' as item_award_type,
                     'reply' as item_type,
-                    COALESCE(r.root_community, r.community, '') as item_topic,
+                    COALESCE(r.root_community, r.community, '') as item_community,
                     COALESCE(pr.created_at, 0) as actor_created_at
                 FROM posts r
                 INNER JOIN posts p ON p.txhash = r.target
@@ -7574,7 +7644,7 @@ def get_inbox():
                     COALESCE(mpr.level, 0) as actor_level,
                     '' as item_award_type,
                     'mention' as item_type,
-                    COALESCE(mp.root_community, mp.community, '') as item_topic,
+                    COALESCE(mp.root_community, mp.community, '') as item_community,
                     COALESCE(mpr.created_at, 0) as actor_created_at
                 FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
@@ -7604,7 +7674,7 @@ def get_inbox():
                     COALESCE(apr.level, 0) as actor_level,
                     a.award_type as item_award_type,
                     'award' as item_type,
-                    COALESCE(p.root_community, p.community, '') as item_topic,
+                    COALESCE(p.root_community, p.community, '') as item_community,
                     COALESCE(apr.created_at, 0) as actor_created_at
                 FROM awards a
                 INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
@@ -7676,7 +7746,7 @@ def get_inbox():
                         "title": prow[1] or "",
                         "content": prow[2] or "",
                         "owner": prow[3] or "",
-                        "topic": prow[4] or "",
+                        "community": prow[4] or "",
                     }
                 for row in backend_rows:
                     if (row[2] or "") != "trending":
@@ -7758,7 +7828,7 @@ def get_inbox():
                     "actor_level": int(row[11]) if row[11] else 0,
                     "item_award_type": row[12] or "",
                     "item_type": row[13] or "reply",
-                    "item_topic": (row[14] or "").strip().lower() if len(row) > 14 else "",
+                    "item_community": (row[14] or "").strip().lower() if len(row) > 14 else "",
                     "actor_created_at": int(row[15]) if len(row) > 15 and row[15] else 0,
                     "amount": None,
                 }
@@ -7797,7 +7867,7 @@ def get_inbox():
             context_title = ""
             context_owner = viewer_lower
             root_post_id = ""
-            item_topic = ""
+            item_community = ""
             if event_type == "trending":
                 post = trending_posts.get(tx_hash_lc)
                 if not post:
@@ -7807,7 +7877,7 @@ def get_inbox():
                 context_content = post["content"]
                 context_owner = post["owner"]
                 root_post_id = tx_hash_lc
-                item_topic = post["topic"]
+                item_community = post["community"]
 
             items.append(
                 {
@@ -7825,7 +7895,7 @@ def get_inbox():
                     "actor_level": profile.get("level", 0),
                     "item_award_type": "",
                     "item_type": event_type,
-                    "item_topic": item_topic,
+                    "item_community": item_community,
                     "actor_created_at": profile.get("created_at", 0),
                     "amount": amount,
                 }
@@ -7850,7 +7920,7 @@ def get_inbox():
             actor_level = item["actor_level"]
             item_award_type = item["item_award_type"]
             item_type = item["item_type"] or "reply"
-            item_topic = item["item_topic"]
+            item_community = item["item_community"]
             actor_created_at = item["actor_created_at"]
             amount = item["amount"]
 
@@ -7864,7 +7934,9 @@ def get_inbox():
                     continue
                 if not is_own_context and (context_id in blocked_posts or context_owner in blocked_users):
                     continue
-                if not is_own_context and _topic_is_blocked(item_topic, blocked_topics_exact, blocked_topic_prefixes):
+                if not is_own_context and _community_is_blocked(
+                    item_community, blocked_communities_exact, blocked_community_prefixes
+                ):
                     continue
                 if not root_post_id:
                     continue
@@ -9069,7 +9141,7 @@ def get_stats():
             else:
                 stats["average_comments_per_post"] = 0.0
 
-            # Most active topics (top 5)
+            # Most active communities (top 5)
             cur.execute(
                 """
                 SELECT community, COUNT(*) as count
@@ -9083,7 +9155,7 @@ def get_stats():
                 LIMIT 5
                 """
             )
-            stats["most_active_topics"] = [{"topic": row[0], "count": row[1]} for row in cur.fetchall()]
+            stats["most_active_communities"] = [{"community": row[0], "count": row[1]} for row in cur.fetchall()]
 
             # Content tags breakdown
             cur.execute(

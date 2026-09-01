@@ -9,7 +9,7 @@ import Storage from './Storage';
  * `bootstrap_rewards_summary`, and `bootstrap_view` with a
  * `{ data, at, pk }` envelope.
  *
- * Consumer hooks (useMain blocked topics / feed, invite codes; useQuests
+ * Consumer hooks (useMain blocked communities / feed, invite codes; useQuests
  * fetchAll; useViewPost; useInbox) read the stash on mount instead of
  * firing their own request — but only once, and only within a short TTL
  * after bootstrap. If the stash is missing, expired, or for a different

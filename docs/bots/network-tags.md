@@ -8,7 +8,7 @@ without the relay's secret can work out which network a tag refers to.
 This exists so that anyone can build a vote-farm detector. Collusion has an
 obvious signature — many accounts, one network, lockstep voting — but until now
 that signature was only visible to whoever ran the frontend and could read the
-access logs. The tag puts it on chain, where a permissionless agent can see it.
+access logs. The tag puts it on chain, where anyone can see it.
 
 ## Reading a tag
 

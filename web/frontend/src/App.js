@@ -134,8 +134,8 @@ const restorableRoutePrefixes = [
 ];
 
 function CommunityTeamsRedirect() {
-    const { topic } = useParams();
-    return <Navigate to={`/c/${encodeURIComponent(topic || '')}`} replace />;
+    const { community } = useParams();
+    return <Navigate to={`/c/${encodeURIComponent(community || '')}`} replace />;
 }
 
 // Component to track and restore the last route
@@ -241,13 +241,13 @@ class App extends Component {
             posts: [],
             deletedPosts: new Set(), // Track locally deleted post IDs to filter them out
             shouldWarnOnLeave: false,
-            topic: "all",
+            community: "all",
         };
 
         this.setPosts = this.setPosts.bind(this);
         this.updatePost = this.updatePost.bind(this);
         this.getPost = this.getPost.bind(this);
-        this.setTopic = this.setTopic.bind(this);
+        this.setCommunity = this.setCommunity.bind(this);
         this.applyVotesToExistingPosts = this.applyVotesToExistingPosts.bind(this);
 
         this.setCredentials = this.setCredentials.bind(this);
@@ -431,7 +431,7 @@ class App extends Component {
         // and must not outlive the session that fetched them.
         this._removeSessionResetSub = onSessionReset(({ reason }) => {
             try { console.debug('[App] clearing post state on session reset', { reason }); } catch (_) { /* noop */ }
-            this.setState({ posts: [], deletedPosts: new Set(), topic: 'all' });
+            this.setState({ posts: [], deletedPosts: new Set(), community: 'all' });
         });
 
         // A failed vault write leaves a session that renders as signed in but cannot
@@ -676,7 +676,7 @@ class App extends Component {
         // the existing caches so consumer hooks see the data on their first effect.
         // For logged-out users only node_config/chain_config (+ optional view) come
         // back; user_* sections are null. On failure, the per-endpoint hooks
-        // (useMain blocked-topics fetcher, useQuests fetchAll, etc.) keep their
+        // (useMain blocked-communities fetcher, useQuests fetchAll, etc.) keep their
         // existing fetch logic and pick up the slack.
         const delays = [0, 1000, 3000, 7000];
         if (attempt >= delays.length) {
@@ -755,7 +755,7 @@ class App extends Component {
                             console.debug('[Bootstrap] stashed view', {
                                 kind: resp.view.kind,
                                 feed: resp.view.feed,
-                                topic: resp.view.topic,
+                                community: resp.view.community,
                             });
                         } catch (_) { }
                     }
@@ -1063,8 +1063,8 @@ class App extends Component {
         this.setState({ shouldWarnOnLeave: flag });
     }
 
-    setTopic(topic) {
-        this.setState({ topic: topic });
+    setCommunity(community) {
+        this.setState({ community: community });
     }
 
     // Handler for the "beforeunload" event
@@ -1157,31 +1157,31 @@ class App extends Component {
                                         <Routes>
                                             <Route
                                                 path="/"
-                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="home" />}
+                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setCommunity={this.setCommunity} routeCommunity="home" />}
                                             />
                                             <Route
                                                 path="/home"
-                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="home" />}
+                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setCommunity={this.setCommunity} routeCommunity="home" />}
                                             />
                                             <Route
                                                 path="/following"
-                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} routeTopic="following" />}
+                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setCommunity={this.setCommunity} routeCommunity="following" />}
                                             />
                                             <Route
-                                                path="/c/:topic/teams/new"
+                                                path="/c/:community/teams/new"
                                                 element={<CurationTeamsView />}
                                             />
                                             <Route
-                                                path="/c/:topic/teams/:teamId"
+                                                path="/c/:community/teams/:teamId"
                                                 element={<CurationTeamView />}
                                             />
                                             <Route
-                                                path="/c/:topic/teams"
+                                                path="/c/:community/teams"
                                                 element={<CommunityTeamsRedirect />}
                                             />
                                             <Route
-                                                path="/c/:topic"
-                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setTopic={this.setTopic} />}
+                                                path="/c/:community"
+                                                element={<MainView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} setCommunity={this.setCommunity} />}
                                             />
 
                                             <Route path="/create_post" element={<CreatePostView state={this.state} setPosts={this.setPosts} updatePost={this.updatePost} />} />

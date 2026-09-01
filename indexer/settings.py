@@ -1,7 +1,7 @@
 """
 Indexer configuration constants.
 
-NOTE: Validation constants (topic size, username size, content size, title size)
+NOTE: Validation constants (community size, username size, content size, title size)
 are NOT defined here - they come from chain params loaded at startup via gRPC.
 See indexer/params.py for the param loading logic.
 """
@@ -15,11 +15,11 @@ WEIGHTED_VOTES = True
 
 # Community vote weight algorithm
 COMMUNITY_VOTE_BASELINE = 0.0  # Downvotes from outsiders don't affect community score
-COMMUNITY_VOTE_MAX_TOPIC_VOTES = 10  # Votes in topic needed for full weight
+COMMUNITY_VOTE_MAX_COMMUNITY_VOTES = 10  # Votes in community needed for full weight
 COMMUNITY_VOTE_MIN_NET_VOTES = -10  # Min net votes required for full formula; below this = baseline only
 COMMUNITY_VOTE_MATURITY_DAYS = 7  # Account age (days) to reach full potential
 COMMUNITY_VOTE_MIN_ROOT_POSTS = 3  # Unique root posts voted required for full weight
-COMMUNITY_VOTE_MAX_POSTS = 3  # Posts/comments in topic needed for full weight (0 = baseline only)
+COMMUNITY_VOTE_MAX_POSTS = 3  # Posts/comments in community needed for full weight (0 = baseline only)
 COMMUNITY_VOTE_BOOST_MULTIPLIER = 1  # No boost - upvotes always full, downvotes gated by activity
 
 # Network timeouts

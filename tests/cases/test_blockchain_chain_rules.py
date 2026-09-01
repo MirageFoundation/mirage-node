@@ -67,7 +67,6 @@ from tests.common import (
     _canon_base_subscribe_raw,
     _canon_base_set_auto_renewal_raw,
     _canon_base_award_raw,
-    _canon_base_annotate_raw,
     _request_with_retries,
     _faucet,
     _get_spendable_balance,
@@ -102,7 +101,6 @@ from tests.blockchain_helpers import (
     _build_msg_delete_user,
     _build_msg_award,
     _build_msg_edit,
-    _build_msg_annotate,
     _build_msg_block_post,
     _build_msg_block_user,
     _build_msg_block_community,
@@ -161,7 +159,6 @@ from shared.datatypes import (
     MsgUnfollowUser,
     MsgSubscribe,
     MsgVote,
-    MsgAnnotate,
 )
 
 
@@ -477,8 +474,8 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.send_tokens_zero_amount", ccode, dcode, dlog)
 
-    # 6.3 MsgPost invalid topic
-    msg = _build_msg_post(w1, lb, 0, ts, "BadTopic", "Title", "content", pow_val=0, nonce=_gen_nonce())
+    # 6.3 MsgPost invalid community
+    msg = _build_msg_post(w1, lb, 0, ts, "BadCommunity", "Title", "content", pow_val=0, nonce=_gen_nonce())
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -486,11 +483,11 @@ def test_msg_validation(backend: str) -> None:
         w1.public_key().public_key_bytes,
         wait_deliver=True,
     )
-    _check_deliver_reject("msg.post_invalid_topic", ccode, dcode, dlog)
+    _check_deliver_reject("msg.post_invalid_community", ccode, dcode, dlog)
 
     # 6.3a MsgBlockTopic wildcard patterns accepted
     base = f"t{_rand_str(4)}"
-    _debug(f"block_topic wildcard base={base}")
+    _debug(f"block_community wildcard base={base}")
     patterns = {
         "trailing": f"{base}*",
         "leading": f"*{base}",
@@ -506,7 +503,7 @@ def test_msg_validation(backend: str) -> None:
             w2.public_key().public_key_bytes,
             wait_deliver=True,
         )
-        _check_deliver_accept(f"msg.block_topic_wildcard_{label}", ccode, dcode, dlog)
+        _check_deliver_accept(f"msg.block_community_wildcard_{label}", ccode, dcode, dlog)
 
     # 6.3b MsgBlockTopic invalid wildcard
     msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), "*", pow_val=0, nonce=_gen_nonce())
@@ -517,7 +514,7 @@ def test_msg_validation(backend: str) -> None:
         w2.public_key().public_key_bytes,
         wait_deliver=True,
     )
-    _check_deliver_reject("msg.block_topic_invalid_wildcard", ccode, dcode, dlog)
+    _check_deliver_reject("msg.block_community_invalid_wildcard", ccode, dcode, dlog)
 
     # 6.4 MsgPost oversized content
     tier1 = _get_tier_config(1)
@@ -568,8 +565,8 @@ def test_msg_validation(backend: str) -> None:
 
     # 6.7 MsgDelete is author-only from v1.39; MsgEdit is still permitted on chain
     # and screened by the indexer instead (see _handle_edit's ownership check).
-    post_topic = f"own{_rand_str(4)}"
-    post = _build_msg_post(w1, lb, 0, ts, post_topic, "Title", "content", pow_val=0, nonce=_gen_nonce())
+    post_community = f"own{_rand_str(4)}"
+    post = _build_msg_post(w1, lb, 0, ts, post_community, "Title", "content", pow_val=0, nonce=_gen_nonce())
     txh, ccode, clog, dcode, dlog = _submit_tx(
         [(post, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -595,7 +592,7 @@ def test_msg_validation(backend: str) -> None:
         _check_deliver_reject("msg.delete_foreign_rejected", ccode, dcode, dlog)
 
         edit_msg = _build_msg_edit(
-            w2, lb, 0, ts, "", post_topic, "Edited", "edited content", "", txh, pow_val=0, nonce=_gen_nonce()
+            w2, lb, 0, ts, "", post_community, "Edited", "edited content", "", txh, pow_val=0, nonce=_gen_nonce()
         )
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(edit_msg, "/mirage.core.v1.MsgEdit")],
@@ -692,11 +689,11 @@ def test_msg_validation(backend: str) -> None:
     else:
         _fail("msg.unblock_user_happy", "setup block failed")
 
-    # 6.13 Unblock topic (happy path)
+    # 6.13 Unblock community (happy path)
     lb, _, _, _ = _get_pow_params(backend, str(w2.address()))
     ts = _now_ms()
-    block_topic_target = f"ub{_rand_str(4)}"
-    msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0, nonce=_gen_nonce())
+    block_community_target = f"ub{_rand_str(4)}"
+    msg = _build_msg_block_community(w2, lb, 0, ts, str(w2.address()), block_community_target, pow_val=0, nonce=_gen_nonce())
     _, ccode, _, dcode, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgBlockCommunity")],
         DEFAULT_GAS_LIMIT,
@@ -706,7 +703,7 @@ def test_msg_validation(backend: str) -> None:
     )
     if ccode == 0 and dcode == 0:
         msg = _build_msg_unblock_community(
-            w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0, nonce=_gen_nonce()
+            w2, lb, 0, ts, str(w2.address()), block_community_target, pow_val=0, nonce=_gen_nonce()
         )
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgUnblockCommunity")],
@@ -715,9 +712,9 @@ def test_msg_validation(backend: str) -> None:
             w2.public_key().public_key_bytes,
             wait_deliver=True,
         )
-        _check_deliver_accept("msg.unblock_topic_happy", ccode, dcode, dlog)
+        _check_deliver_accept("msg.unblock_community_happy", ccode, dcode, dlog)
     else:
-        _fail("msg.unblock_topic_happy", "setup block failed")
+        _fail("msg.unblock_community_happy", "setup block failed")
 
     # Refresh for remaining tests
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
@@ -772,7 +769,7 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.vote_invalid_target_format", ccode, dcode, dlog)
 
-    # 6.18 Root post with empty topic (should fail)
+    # 6.18 Root post with empty community (should fail)
     msg = _build_msg_post(w1, lb, 0, ts, "", "Title", "content", pow_val=0, nonce=_gen_nonce())
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
@@ -781,7 +778,7 @@ def test_msg_validation(backend: str) -> None:
         w1.public_key().public_key_bytes,
         wait_deliver=True,
     )
-    _check_deliver_reject("msg.post_empty_topic", ccode, dcode, dlog)
+    _check_deliver_reject("msg.post_empty_community", ccode, dcode, dlog)
 
     # 6.19 Edit with invalid override format
     msg = _build_msg_edit(
@@ -1040,16 +1037,16 @@ def test_block_list_cap_fills(backend: str) -> None:
 
     _debug(f"free-tier max_blocked_communities={max_blocked_communities}")
     fill_ok = True
-    blocked_topic_targets: list[str] = []
+    blocked_community_targets: list[str] = []
     for i in range(max_blocked_communities):
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
-        topic = f"t{_rand_str(6)}{i}"
-        blocked_topic_targets.append(topic)
+        community = f"t{_rand_str(6)}{i}"
+        blocked_community_targets.append(community)
         nonce = _gen_nonce()
-        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, community, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, community, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockCommunity")],
             FILL_GAS_LIMIT,
@@ -1058,20 +1055,20 @@ def test_block_list_cap_fills(backend: str) -> None:
             wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
-            _fail("msg.block_topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("msg.block_community_fill", f"index={i} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     else:
-        _pass(f"msg.block_topic_fill ({max_blocked_communities} blocked)")
+        _pass(f"msg.block_community_fill ({max_blocked_communities} blocked)")
 
     if fill_ok:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
-        over_topic = f"t{_rand_str(6)}over"
+        over_community = f"t{_rand_str(6)}over"
         nonce = _gen_nonce()
-        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
+        base = _canon_base_block_community_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_community, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
+        msg = _build_msg_block_community(bw, lb, diff, ts, bw_addr, over_community, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockCommunity")],
             FILL_GAS_LIMIT,
@@ -1079,13 +1076,13 @@ def test_block_list_cap_fills(backend: str) -> None:
             bw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
+        _check_deliver_accept("msg.block_community_overflow (capped)", ccode, dcode, dlog)
         chain_profile = _get_chain_profile(bw_addr)
         got = [
             str(v).lower() for v in (chain_profile.get("blocked_communities") or chain_profile.get("blockedCommunities") or [])
         ]
-        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_communities:]
-        _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
+        expected = (blocked_community_targets + [over_community.lower()])[-max_blocked_communities:]
+        _assert_capped_deque("msg.block_community_overflow_deque", got, expected)
 
 
 def _required_validator_fee_budget_umirage() -> int:
@@ -1175,8 +1172,8 @@ def test_msg_format(backend: str) -> None:
         )
         _check_deliver_reject(f"format.username_{label}", ccode, dcode, dlog)
 
-    # ─── Topic at chain level ─────────────────────────────────────
-    bad_topics = [
+    # ─── Community at chain level ─────────────────────────────────────
+    bad_communities = [
         ("UPPER", "uppercase"),
         ("with spaces", "spaces"),
         ("special!@#", "special_chars"),
@@ -1186,8 +1183,8 @@ def test_msg_format(backend: str) -> None:
         ("a", "too_short"),
         ("a" * 200, "too_long"),
     ]
-    for topic, label in bad_topics:
-        msg = _build_msg_post(w1, lb, 0, ts, topic, "Title", "content", pow_val=0, nonce=_gen_nonce())
+    for community, label in bad_communities:
+        msg = _build_msg_post(w1, lb, 0, ts, community, "Title", "content", pow_val=0, nonce=_gen_nonce())
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],
             DEFAULT_GAS_LIMIT,
@@ -1195,7 +1192,7 @@ def test_msg_format(backend: str) -> None:
             w1.public_key().public_key_bytes,
             wait_deliver=True,
         )
-        _check_deliver_reject(f"format.topic_{label}", ccode, dcode, dlog)
+        _check_deliver_reject(f"format.community_{label}", ccode, dcode, dlog)
 
     # Refresh lb/ts for remaining format tests
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
@@ -1334,9 +1331,9 @@ def test_malicious_inputs(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
     ts = _now_ms()
 
-    def _submit_post(label, topic="", title="", content="", tag=""):
+    def _submit_post(label, community="", title="", content="", tag=""):
         nonlocal lb, ts
-        msg = _build_msg_post(w1, lb, 0, ts, topic, title, content, tag=tag, pow_val=0, nonce=_gen_nonce())
+        msg = _build_msg_post(w1, lb, 0, ts, community, title, content, tag=tag, pow_val=0, nonce=_gen_nonce())
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],
             DEFAULT_GAS_LIMIT,
@@ -1347,12 +1344,12 @@ def test_malicious_inputs(backend: str) -> None:
         _check_deliver_reject(f"malicious.{label}", ccode, dcode, dlog)
 
     # ─── NUL bytes (\x00) in every text field ─────────────────────
-    _submit_post("nul_in_topic", topic=f"nul\x00topic", title="Title", content="body")
-    _submit_post("nul_in_title", topic=f"t{_rand_str(4)}", title="Nul\x00Title", content="body")
-    _submit_post("nul_in_content", topic=f"t{_rand_str(4)}", title="Title", content="Has\x00Nul")
-    _submit_post("nul_in_tag", topic=f"t{_rand_str(4)}", title="Title", content="body", tag="gore\x00")
-    _submit_post("embedded_nul", topic=f"t{_rand_str(4)}", title="Normal Title", content="Looks normal\x00hidden")
-    _submit_post("only_nul_bytes", topic=f"t{_rand_str(4)}", title="\x00\x00\x00", content="\x00\x00\x00")
+    _submit_post("nul_in_community", community=f"nul\x00community", title="Title", content="body")
+    _submit_post("nul_in_title", community=f"t{_rand_str(4)}", title="Nul\x00Title", content="body")
+    _submit_post("nul_in_content", community=f"t{_rand_str(4)}", title="Title", content="Has\x00Nul")
+    _submit_post("nul_in_tag", community=f"t{_rand_str(4)}", title="Title", content="body", tag="gore\x00")
+    _submit_post("embedded_nul", community=f"t{_rand_str(4)}", title="Normal Title", content="Looks normal\x00hidden")
+    _submit_post("only_nul_bytes", community=f"t{_rand_str(4)}", title="\x00\x00\x00", content="\x00\x00\x00")
 
     # ─── Other C0 control characters ──────────────────────────────
     for byte_val, label in [
@@ -1368,14 +1365,14 @@ def test_malicious_inputs(backend: str) -> None:
     ]:
         _submit_post(
             f"control_{label}_in_content",
-            topic=f"t{_rand_str(4)}",
+            community=f"t{_rand_str(4)}",
             title="Title",
             content=f"has {byte_val} control char",
         )
 
     # ─── DEL character (\x7F) ─────────────────────────────────────
-    _submit_post("del_in_content", topic=f"t{_rand_str(4)}", title="Title", content=f"has \x7f del")
-    _submit_post("del_in_title", topic=f"t{_rand_str(4)}", title=f"Del\x7fTitle", content="body")
+    _submit_post("del_in_content", community=f"t{_rand_str(4)}", title="Title", content=f"has \x7f del")
+    _submit_post("del_in_title", community=f"t{_rand_str(4)}", title=f"Del\x7fTitle", content="body")
 
     # ─── NUL bytes in username ────────────────────────────────────
     msg = _build_msg_set_username(w1, lb, 0, ts, str(w1.address()), f"user\x00name", pow_val=0, nonce=_gen_nonce())

@@ -1927,7 +1927,7 @@ class TransactionHandler {
     /**
      * Edit an existing post/comment
      * @param {string} overrideId - txhash of the post/comment being edited
-     * @param {{target?: string, topic?: string, title?: string, content: string, tag?: string, media?: string[]}} changes
+     * @param {{target?: string, community?: string, title?: string, content: string, tag?: string, media?: string[]}} changes
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
     async editPost(overrideId, changes) {
@@ -1936,7 +1936,7 @@ class TransactionHandler {
             if (!overrideLower || overrideLower.length !== 64) return this._fail("invalid override");
             const content = String(changes?.content || "").trim();
             const title = String(changes?.title || "").trim();
-            const topic = String(changes?.topic || "").trim();
+            const community = String(changes?.community || "").trim();
             const target = String(changes?.target || "").trim();
             const tagRaw = String(changes?.tag || "").trim().toLowerCase();
             const media = Array.isArray(changes?.media) ? changes.media : [];
@@ -1946,7 +1946,7 @@ class TransactionHandler {
                 action: 'edit_post',
                 override: overrideLower,
                 target,
-                topic,
+                community,
                 title,
                 content,
                 tag: tagRaw,
@@ -2101,7 +2101,7 @@ class TransactionHandler {
         });
     }
 
-    createPost(topic, title, content, tag = "", media = []) {
+    createPost(community, title, content, tag = "", media = []) {
         let action = "create_post";
 
         let publicKey = Storage.load("publicKey", "");
@@ -2120,7 +2120,7 @@ class TransactionHandler {
         let transaction = {
             action: action,
             userId: publicKey,
-            topic: topic,
+            community: community,
             title: title,
             content: content,
             tag: cleanTag,
@@ -2132,13 +2132,13 @@ class TransactionHandler {
 
     /**
      * Create a post and wait for completion (PoW + broadcast)
-     * @param {string} topic
+     * @param {string} community
      * @param {string} title
      * @param {string} content
      * @param {string} tag
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string}>}
      */
-    async createPostAsync(topic, title, content, tag = "", media = []) {
+    async createPostAsync(community, title, content, tag = "", media = []) {
         try {
             const publicKey = Storage.load("publicKey", "");
             const seedPhrase = seedVault.getSeed() || "";
@@ -2154,7 +2154,7 @@ class TransactionHandler {
             return this._enqueueBoundTransaction({
                 action: 'create_post',
                 userId: publicKey,
-                topic,
+                community,
                 title,
                 content,
                 tag: cleanTag,
@@ -2354,7 +2354,7 @@ class TransactionHandler {
                 final_transaction = {
                     action: transaction.action,
                     target: "",
-                    topic: transaction.topic,
+                    community: transaction.community,
                     title: transaction.title,
                     content: transaction.content,
                     tag: transaction.tag || "",
@@ -2536,7 +2536,7 @@ class TransactionHandler {
                     action: transaction.action,
                     override: transaction.override,
                     target: transaction.target || "",
-                    topic: transaction.topic || "",
+                    community: transaction.community || "",
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
@@ -2761,7 +2761,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgPost
-    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, community, title, content, tag, media, nonce, protocol_version }) {
+    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, community, title, content, tag, media, nonce, protocol_version }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2801,7 +2801,7 @@ class TransactionHandler {
         const tag5 = Uint8Array.from([5]);
         const tag6 = Uint8Array.from([6]);   // envelope_timestamp
         const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]); // topic
+        const tag101 = Uint8Array.from([101]); // community
         const tag102 = Uint8Array.from([102]);
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
@@ -2816,7 +2816,7 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
-            tag101, encStr(community || topic || ""),
+            tag101, encStr(community || community || ""),
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
@@ -2832,7 +2832,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgEdit (must match chain ante)
-    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override, media, nonce }) {
+    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, community, title, content, tag, override, media, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2872,7 +2872,7 @@ class TransactionHandler {
         const tag5 = Uint8Array.from([5]);
         const tag6 = Uint8Array.from([6]);   // envelope_timestamp
         const tag100 = Uint8Array.from([100]);
-        const tag101 = Uint8Array.from([101]); // topic
+        const tag101 = Uint8Array.from([101]); // community
         const tag102 = Uint8Array.from([102]);
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
@@ -2893,7 +2893,7 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
-            tag101, encStr(topic || ""),
+            tag101, encStr(community || ""),
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
@@ -4321,7 +4321,7 @@ class TransactionHandler {
                 endpoint = 'core/report';
             } else if (msgName === 'MsgPost') {
                 // Sign relay for post
-                const topic = transaction.community || transaction.topic || "";
+                const community = transaction.community || transaction.community || "";
                 const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
@@ -4330,8 +4330,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
-                    community: topic,
-                    topic: topic,
+                    community: community,
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
@@ -4346,8 +4345,7 @@ class TransactionHandler {
                 toRelay = {
                     ...toRelay,
                     signature: sigB64,
-                    topic: topic,
-                    community: topic,
+                    community: community,
                     protocol_version: 1,
                     tag: transaction.tag || "",
                     media: mediaArr,
@@ -4355,7 +4353,7 @@ class TransactionHandler {
                 endpoint = 'core/post';
             } else if (msgName === 'MsgEdit') {
                 // Sign relay for edit
-                const topic = transaction.topic || "";
+                const community = transaction.community || "";
                 const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalEdit({
                     pub_bytes: pubBytes,
@@ -4364,7 +4362,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
-                    topic: topic,
+                    community: community,
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
@@ -4379,7 +4377,7 @@ class TransactionHandler {
                 toRelay = {
                     ...toRelay,
                     signature: sigB64,
-                    topic: topic,
+                    community: community,
                     tag: transaction.tag || "",
                     media: mediaArr,
                 };
@@ -4807,7 +4805,7 @@ class TransactionHandler {
                             };
                             if (isRoot) {
                                 patch.title = transaction.title || '';
-                                patch.topic = transaction.topic || '';
+                                patch.community = transaction.community || '';
                             }
                             if (Array.isArray(transaction.media)) {
                                 patch.media = transaction.media;
@@ -4824,17 +4822,17 @@ class TransactionHandler {
                         }
                     } catch (_) { }
 
-                    // Ensure the new topic is available immediately in the topics list
+                    // Ensure the new community is available immediately in the communities list
                     try {
-                        const t = (transaction && typeof transaction.topic === 'string') ? transaction.topic.trim() : '';
+                        const t = (transaction && typeof transaction.community === 'string') ? transaction.community.trim() : '';
                         if (t) {
-                            const stored = Storage.load('topics', { topics: [], lastSorted: null }) || {};
-                            const existing = Array.isArray(stored.topics) ? stored.topics : [];
+                            const stored = Storage.load('communities', { communities: [], lastSorted: null }) || {};
+                            const existing = Array.isArray(stored.communities) ? stored.communities : [];
                             const set = new Set(existing.filter((x) => typeof x === 'string' && x));
                             set.add('all');
                             set.add(t);
-                            const nextTopics = ['all', ...Array.from(set).filter((x) => x !== 'all')];
-                            Storage.save('topics', { topics: nextTopics, lastSorted: new Date() });
+                            const nextCommunities = ['all', ...Array.from(set).filter((x) => x !== 'all')];
+                            Storage.save('communities', { communities: nextCommunities, lastSorted: new Date() });
                         }
                     } catch (_) { }
                     // No-op: vote highlight is keyed by post_id and is handled by VoteSection + create_vote handler.
@@ -5065,12 +5063,12 @@ class TransactionHandler {
                 const tag3 = Uint8Array.from([3]);
                 const tag4 = Uint8Array.from([4]);
                 const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]); // topic
+                const tag101 = Uint8Array.from([101]); // community
                 const tag102 = Uint8Array.from([102]);
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
                 const tag105 = Uint8Array.from([105]); // media (v1.12.0)
-                const topic = transaction.community || transaction.topic || "";
+                const community = transaction.community || transaction.community || "";
                 const mediaParts = [];
                 for (const m of (transaction.media || [])) {
                     mediaParts.push(tag105);
@@ -5084,7 +5082,7 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
-                    tag101, encStr(topic),
+                    tag101, encStr(community),
                     tag102, encStr(transaction.title || ""),
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
@@ -5343,13 +5341,13 @@ class TransactionHandler {
                 const tag4 = Uint8Array.from([4]);
                 const tag6 = Uint8Array.from([6]);   // envelope_timestamp
                 const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]); // topic
+                const tag101 = Uint8Array.from([101]); // community
                 const tag102 = Uint8Array.from([102]);
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
                 const tag105 = Uint8Array.from([105]); // override
                 const tag106 = Uint8Array.from([106]); // media
-                const topic = transaction.topic || "";
+                const community = transaction.community || "";
                 const mediaParts = [];
                 for (const m of (transaction.media || [])) {
                     mediaParts.push(tag106);
@@ -5363,7 +5361,7 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
-                    tag101, encStr(topic),
+                    tag101, encStr(community),
                     tag102, encStr(transaction.title || ""),
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),

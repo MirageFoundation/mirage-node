@@ -40,7 +40,7 @@ import { updateNotification } from "../../../utils/notifications";
  *
  * Exports:
  *   • MoreMenuChip — 3-dot ellipsis button with Copy link + Follow
- *     user/topic + Give Award + Gift Mirage + Gift Subscription, plus
+ *     user/community + Give Award + Gift Mirage + Gift Subscription, plus
  *     admin Delete network wide. Matches the `MoreButton` menu in CardView.
  *   • BlockChip — filled circle chip. For ordinary viewers: slashed-circle
  *     icon with Block user / Block post / Block community / Report post.
@@ -252,7 +252,7 @@ function usePostIdentity(post, state) {
     const viewerAddress = state?.publicKey || Storage.load('publicKey', '') || '';
     const isLoggedIn = !!viewerAddress && viewerAddress !== 'guest';
     const postId = post && post.post_id ? String(post.post_id) : '';
-    const topic = post && typeof post.topic === 'string' ? post.topic : '';
+    const community = post && typeof post.community === 'string' ? post.community : '';
     const authorAddress = (post && (post.user_id || post.author)) || '';
     const isOwnPost = isLoggedIn
         && !!authorAddress
@@ -260,7 +260,7 @@ function usePostIdentity(post, state) {
     const authorLabel = (post && typeof post.username === 'string' && post.username.trim())
         ? `@${post.username.trim()}`
         : (authorAddress ? `${String(authorAddress).slice(0, 10)}…` : 'this user');
-    return { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost, authorLabel };
+    return { viewerAddress, isLoggedIn, postId, community, authorAddress, isOwnPost, authorLabel };
 }
 
 function useOutsidePopover(rootRef, open, onClose) {
@@ -284,7 +284,7 @@ const stop = e => { if (e && typeof e.stopPropagation === 'function') e.stopProp
 // ─── MoreMenuChip ───────────────────────────────────────────────────────────
 //
 // Mirrors the `MoreButton` popover in CardView: Copy link, Follow user,
-// Follow topic, Give Award, Gift Mirage, Gift Subscription. Gift / award
+// Follow community, Give Award, Gift Mirage, Gift Subscription. Gift / award
 // flows open their modals in-place via `usePostGifts` — identical behavior
 // to CardView's MoreButton — so the compact list view no longer hijacks
 // the viewer into the author's profile on click.
@@ -306,7 +306,7 @@ export function MoreMenuChip({
     const [networkDeleteOpen, setNetworkDeleteOpen] = useState(false);
     const [deletePending, setDeletePending] = useState(false);
 
-    const { viewerAddress, isLoggedIn, postId, topic, authorAddress, isOwnPost } = usePostIdentity(post, state);
+    const { viewerAddress, isLoggedIn, postId, community, authorAddress, isOwnPost } = usePostIdentity(post, state);
     const {
         isCommunityPending,
         isUserPending,
@@ -315,7 +315,7 @@ export function MoreMenuChip({
     } = usePendingFollows();
     const isAdminVisible = isNetworkAdmin(isLoggedIn, isOwnPost);
     const linkTarget = postId ? `/p/${postId}` : '#';
-    const communityJoinPending = isCommunityPending(topic);
+    const communityJoinPending = isCommunityPending(community);
     const userFollowPending = isUserPending(authorAddress);
 
     const computedFollowingUser = (() => {
@@ -326,8 +326,8 @@ export function MoreMenuChip({
     const followingUser = followOverride !== null ? followOverride : computedFollowingUser;
 
     const computedJoinedCommunity = (() => {
-        if (!isLoggedIn || !topic) return false;
-        try { return isJoinedCommunity(viewerAddress, topic); }
+        if (!isLoggedIn || !community) return false;
+        try { return isJoinedCommunity(viewerAddress, community); }
         catch (_) { return false; }
     })();
     const joinedCommunity = communityJoinOverride !== null ? communityJoinOverride : computedJoinedCommunity;
@@ -427,15 +427,15 @@ export function MoreMenuChip({
 
     const handleJoinCommunity = useCallback(async e => {
         stop(e); setOpen(false);
-        if (!topic) return;
+        if (!community) return;
         if (!requireAccount('join communities')) return;
         const next = !joinedCommunity;
         setCommunityJoinOverride(next);
         try {
-            if (next) await joinCommunity(viewerAddress, topic);
-            else await leaveCommunity(viewerAddress, topic);
+            if (next) await joinCommunity(viewerAddress, community);
+            else await leaveCommunity(viewerAddress, community);
         } catch (_) { setCommunityJoinOverride(!next); }
-    }, [topic, joinedCommunity, viewerAddress]);
+    }, [community, joinedCommunity, viewerAddress]);
 
     /* Gift Mirage / Gift Subscription / Give Award — open in-place via
      * `usePostGifts` so the viewer stays on the current feed (previously
@@ -538,7 +538,7 @@ export function MoreMenuChip({
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" disabled={communityJoinPending} onClick={handleJoinCommunity}>
                                     <HiOutlineHashtag />
-                                    <span>{formatCommunityStatus(topic) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
+                                    <span>{formatCommunityStatus(community) || (joinedCommunity ? 'Leave community' : 'Join community')}</span>
                                 </MenuItemBtn>
                                 <MenuItemBtn type="button" onClick={handleGiveAward}>
                                     <HiOutlineSparkles />
@@ -673,7 +673,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     const [activeDialog, setActiveDialog] = useState(null); // 'block_user' | 'block_post' | 'block_community' | 'report'
     const [pending, setPending] = useState(false);
 
-    const { isLoggedIn, postId, topic, authorAddress, isOwnPost, authorLabel } = usePostIdentity(post, state);
+    const { isLoggedIn, postId, community, authorAddress, isOwnPost, authorLabel } = usePostIdentity(post, state);
     const { visible: curateVisible } = usePostCurateActions(post);
     const canReport = isLoggedIn && !isOwnPost;
 
@@ -727,11 +727,11 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
     }, [postId, updatePost, closeDialog]);
 
     const confirmBlockCommunity = useCallback(async () => {
-        if (!topic) { closeDialog(); return; }
+        if (!community) { closeDialog(); return; }
         setPending(true);
-        try { await tx.blockCommunity(topic); } catch (_) { /* noop */ }
+        try { await tx.blockCommunity(community); } catch (_) { /* noop */ }
         closeDialog();
-    }, [topic, closeDialog]);
+    }, [community, closeDialog]);
 
     const confirmReport = useCallback(async (reason) => {
         const trimmed = String(reason || '').trim();
@@ -824,7 +824,7 @@ export function BlockChip({ post, state, updatePost, align = 'right' }) {
             />
             <ConfirmDialog
                 open={activeDialog === 'block_community'}
-                title={`Block ${communityLabel(topic || 'community')}?`}
+                title={`Block ${communityLabel(community || 'community')}?`}
                 message="Posts in this community will stop appearing in your Home and discovery feeds."
                 confirmLabel="Block community"
                 confirmVariant="danger"

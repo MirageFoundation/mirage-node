@@ -1,104 +1,94 @@
 {
- "min_difficulty": "10",
- "pow_message_window": "20",
- "pow_message_limit": "15",
- "pow_calm_period_definition": "10",
- "pow_calm_sequence_threshold": "100",
- "mint_interval": "200",
- "mint_quantity": "5800000000",
- "block_hash_window": "10",
- "pow_difficulty_allowance": "2",
- "max_username_size": "30",
- "max_topic_size": "35",
- "min_username_size": "3",
- "min_topic_size": "2",
- "mint_dynamic_credit_cap": "100",
- "mint_dynamic_split": 0.75,
- "subscription_period": "43200",
- "tiers": [
-  {
-   "period_fee": "0",
-   "max_enabled_agents": "5",
-   "max_followed_users": "25",
-   "max_followed_topics": "25",
-   "max_blocked_users": "25",
-   "max_blocked_posts": "25",
-   "max_blocked_topics": "25",
-   "max_title_length": "150",
-   "max_content_length": "1000",
-   "editing_time_mins": "10",
-   "vote_weight": 1,
-   "can_be_agent": false,
-   "can_remove_anon": false,
-   "can_have_biography": false,
-   "can_have_avatar": false,
-   "can_have_banner": false,
-   "can_have_flair": false,
-   "max_biography_length": "0"
-  },
-  {
-   "period_fee": "100000000000",
-   "max_enabled_agents": "50",
-   "max_followed_users": "500",
-   "max_followed_topics": "500",
-   "max_blocked_users": "500",
-   "max_blocked_posts": "500",
-   "max_blocked_topics": "500",
-   "max_title_length": "300",
-   "max_content_length": "20000",
-   "editing_time_mins": "360",
-   "vote_weight": 1.33,
-   "can_be_agent": false,
-   "can_remove_anon": true,
-   "can_have_biography": true,
-   "can_have_avatar": true,
-   "can_have_banner": true,
-   "can_have_flair": true,
-   "max_biography_length": "512"
-  },
-  {
-   "period_fee": "500000000000",
-   "max_enabled_agents": "50",
-   "max_followed_users": "500",
-   "max_followed_topics": "500",
-   "max_blocked_users": "500",
-   "max_blocked_posts": "500",
-   "max_blocked_topics": "500",
-   "max_title_length": "300",
-   "max_content_length": "20000",
-   "editing_time_mins": "360",
-   "vote_weight": 1.33,
-   "can_be_agent": true,
-   "can_remove_anon": true,
-   "can_have_biography": true,
-   "can_have_avatar": true,
-   "can_have_banner": true,
-   "can_have_flair": true,
-   "max_biography_length": "512"
-  }
- ],
- "subscription_reserve_percent": 0.95,
- "subscription_reserve_bps": "9500",
- "relay_min_gas_price": "1000",
- "relay_max_gas_fee": "500000000",
- "max_envelope_age": "60",
- "pow_difficulty_step": 0.25,
- "award_configs": [
-  {
-   "name": "quality_post",
-   "cost": "10000000000"
-  },
-  {
-   "name": "original_content",
-   "cost": "5000000000"
-  },
-  {
-   "name": "based",
-   "cost": "5000000000"
-  },
-  {
-   "name": "receipts",
-   "cost": "5000000000"
-  }
- ]
+    "min_difficulty": "10",
+    "pow_message_window": "20",
+    "pow_message_limit": "15",
+    "pow_calm_period_definition": "10",
+    "pow_calm_sequence_threshold": "100",
+    "mint_interval": "200",
+    "mint_quantity": "5800000000",
+    "block_hash_window": "10",
+    "pow_difficulty_allowance": "2",
+    "max_username_size": "30",
+    "max_community_size": "35",
+    "min_username_size": "3",
+    "min_community_size": "2",
+    "mint_dynamic_credit_cap": "100",
+    "mint_dynamic_split": 0.75,
+    "subscription_period": "43200",
+    "tiers": [
+        {
+            "period_fee": "0",
+            "max_followed_users": "25",
+            "max_joined_communities": "25",
+            "max_blocked_users": "25",
+            "max_blocked_posts": "25",
+            "max_blocked_communities": "25",
+            "max_title_length": "150",
+            "max_content_length": "1000",
+            "editing_time_mins": "10",
+            "vote_weight": 1,
+            "can_have_biography": false,
+            "can_have_avatar": false,
+            "can_have_banner": false,
+            "can_have_flair": false,
+            "max_biography_length": "0"
+        },
+        {
+            "period_fee": "100000000000",
+            "max_followed_users": "500",
+            "max_joined_communities": "500",
+            "max_blocked_users": "500",
+            "max_blocked_posts": "500",
+            "max_blocked_communities": "500",
+            "max_title_length": "300",
+            "max_content_length": "20000",
+            "editing_time_mins": "360",
+            "vote_weight": 1.33,
+            "can_have_biography": true,
+            "can_have_avatar": true,
+            "can_have_banner": true,
+            "can_have_flair": true,
+            "max_biography_length": "512"
+        },
+        {
+            "period_fee": "500000000000",
+            "max_followed_users": "500",
+            "max_joined_communities": "500",
+            "max_blocked_users": "500",
+            "max_blocked_posts": "500",
+            "max_blocked_communities": "500",
+            "max_title_length": "300",
+            "max_content_length": "20000",
+            "editing_time_mins": "360",
+            "vote_weight": 1.33,
+            "can_have_biography": true,
+            "can_have_avatar": true,
+            "can_have_banner": true,
+            "can_have_flair": true,
+            "max_biography_length": "512"
+        }
+    ],
+    "subscription_reserve_bps": "9500",
+    "relay_min_gas_price": "1000",
+    "relay_max_gas_fee": "500000000",
+    "max_envelope_age": "60",
+    "pow_difficulty_step": 0.25,
+    "award_configs": [
+        {
+            "name": "quality_post",
+            "cost": "10000000000"
+        },
+        {
+            "name": "original_content",
+            "cost": "5000000000"
+        },
+        {
+            "name": "based",
+            "cost": "5000000000"
+        },
+        {
+            "name": "receipts",
+            "cost": "5000000000"
+        }
+    ]
 }

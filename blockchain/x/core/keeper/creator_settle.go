@@ -369,7 +369,15 @@ func (k Keeper) finishAllocate(ctx sdk.Context, ce *types.CreatorEpoch, allocate
 	params := k.GetParams(ctx)
 	ce.FinalizedEpoch = clock
 	ce.ClaimWindowDays = int64(params.CreatorClaimWindowDays)
-	ce.ClaimDeadlineEpoch = clock + ce.ClaimWindowDays + 1
+	deadline, err := types.CreatorClaimDeadline(
+		clock,
+		params.CreatorClaimWindowDays,
+		params.CreatorEpochSeconds,
+	)
+	if err != nil {
+		return remaining, err
+	}
+	ce.ClaimDeadlineEpoch = deadline
 	ce.Status = types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE
 	ce.SettlementCursor = nil
 	if err := k.setProto(ctx, types.KeyCreatorEpoch(ce.EpochId), ce); err != nil {
@@ -396,6 +404,9 @@ func (k Keeper) expireEpochUnallocated(ctx sdk.Context, ce *types.CreatorEpoch, 
 	ce.Status = types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_EXPIRED
 	ce.PrunePending = true
 	ce.SettlementCursor = nil
+	if ce.EngagerSlice == "" {
+		ce.EngagerSlice = "0"
+	}
 	if ce.AllocatedTotal == "" {
 		ce.AllocatedTotal = "0"
 	}

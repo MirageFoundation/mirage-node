@@ -1,6 +1,6 @@
 # Plan 03 — Feed, CardView, Vote & Action Row
 
-**Goal:** Replace the home/following/topic feed rendering and the post card visuals inside `default` so the most-visited surface matches the mobile app feel.
+**Goal:** Replace the home/following/community feed rendering and the post card visuals inside `default` so the most-visited surface matches the mobile app feel.
 
 **Depends on:** Plans 01 and 02.
 **Unblocks:** Plan 04 (post detail reuses these primitives).
@@ -48,12 +48,11 @@ Inside `web/frontend/src/themes/default/`:
 Reference: `mirage-mobile-app/src/components/molecules/post-card.tsx` + `post-card-header.tsx` + `post-actions.tsx`.
 
 Layout from top to bottom:
-1. **Header row** — `#topic • time ago • @username` with follow affordance on the right.
+1. **Header row** — `community • time ago • @username` with join affordance on the right.
 2. **Award badges row** (only if awards exist).
 3. **Title + body** — title bold, markdown body trimmed to ~700 chars in feed, full in detail.
 4. **Media block** — image/video/gallery with optional blur for sensitive content.
-5. **Appendices / agent-edited badge** (if present).
-6. **Action row** — upvote, score, downvote, comment count, share, more menu.
+5. **Action row** — upvote, score, downvote, comment count, share, more menu.
 
 Styling rules:
 - Subtle bottom border between posts instead of heavy card shadows.
@@ -100,7 +99,7 @@ Requirements:
 ## Verification checklist
 
 - [x] Home feed on `default` renders posts using the new card layout.
-- [x] Following and topic feeds use the same layout.
+- [x] Following and community feeds use the same layout.
 - [x] Upvote/downvote buttons work and persist color state.
 - [x] Comment count, share, and more menu open correctly.
 - [x] Markdown body is truncated in feed and full on detail (Plan 04 will verify detail view).
@@ -123,12 +122,12 @@ Beyond the original scope, the following refinements were applied during iterati
 - **Feed header** — Home/Following tabs and Create-post button removed. Only a Sort button (`Best` / `New`) and a View icon-button (Card / Compact) remain, both styled as transparent chevron buttons with `feedCtrlText` / `feedCtrlHoverBg` tokens. View mode persists via `Storage` at `default_feed_view_mode`.
 - **Compact mode** — 2-column grid (84px thumbnail + stacked text), inline expand chip that reveals `InlineMedia` + `MarkdownRenderer` in place without navigating away. Comment/Share buttons share the 32px filled-chip height with the vote pill.
 - **Shared dropdown system** — Sort / View / Follow / Post-options / Block popovers share one style (`menuBg`, `menuSelectedBg`, `menuHeaderText`, `menuItemHoverBg/Text`, `menuDangerText`), edge-to-edge option bg, `max-content` width, `z-index: 100`.
-- **Post card** — Pressable whole-card navigation (`isInteractiveTarget` skips links/buttons/popovers), follow pill opens a Follow topic / Follow user popover, dedicated red Block icon opens a Block & report popover, 3-dot menu carries Copy / Edit / Delete / Follow / Unfollow / Gift flows (Award/Gift Mirage/Gift Subscription currently navigate to `/u/:user?action=...` instead of opening inline modals — flagged as a follow-up).
+- **Post card** — Pressable whole-card navigation (`isInteractiveTarget` skips links/buttons/popovers), follow pill opens a Join community / Follow user popover, dedicated red Block icon opens a Block & report popover, 3-dot menu carries Copy / Edit / Delete / Follow / Unfollow / Gift flows (Award/Gift Mirage/Gift Subscription currently navigate to `/u/:user?action=...` instead of opening inline modals — flagged as a follow-up).
 - **Divider** — rendered by `RowSlot` in `ListFeedView` so it sits outside the card's rounded hover area.
 - **Tokens added** — `feedCtrlText/HoverBg`, `menuBg/SelectedBg/HeaderText/ItemHoverBg/ItemHoverText/DangerText`, `followBtnBg/BgHover/Border/BorderHover`, `actionIconBg/HoverBg`.
 - **Hidden-sidebar feed behavior** — when the desktop sidebar is collapsed, card view stays centered while compact view stays left-aligned and stretches to `80%` width.
 - **Compact-row polish** — compact mode now shows the same inline feed-bucket label as card mode, uses the Mirage gradient for the no-media placeholder tile, and swaps the old expand glyphs for a smaller chevron that is hidden when there is no extra media/body content to reveal.
-- **Metadata polish** — the top metadata row in both card and compact views now uses the compact action-row text color for topic / time / separators / feed tag, keeps usernames tier-colored, and uses a slightly smaller separator dot.
+- **Metadata polish** — the top metadata row in both card and compact views now uses the compact action-row text color for community / time / separators / feed tag, keeps usernames tier-colored, and uses a slightly smaller separator dot.
 
 ### Known follow-ups
 

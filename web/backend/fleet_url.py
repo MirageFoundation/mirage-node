@@ -169,6 +169,45 @@ def validate_fleet_endpoint(raw: str, allow_ip_literal: bool = False) -> Optiona
     )
 
 
+def get_json(endpoint: FleetEndpoint, path: str, params: dict, timeout: float) -> Optional[dict]:
+    """GET a JSON document from a validated endpoint at a validated address.
+
+    Used to challenge a node for its signed identity, so the reply is untrusted
+    by construction: the signature inside it is what is checked, and a body that
+    is missing, oversized or not an object is simply no answer. Redirects are
+    not followed -- a node that answers elsewhere has not answered here.
+    """
+    ip = endpoint.ips[0]
+    address = f"[{ip}]" if ":" in ip else ip
+    netloc = f"{address}:{endpoint.port}" if endpoint.port else address
+    url = f"{endpoint.scheme}://{netloc}/{path.lstrip('/')}"
+
+    session = requests.Session()
+    session.trust_env = False
+    if endpoint.scheme == "https":
+        session.mount(f"https://{netloc}", _PinnedHostAdapter(endpoint.hostname))
+    logger.debug("fleet_url.get host=%s ip=%s path=%s", endpoint.hostname, ip, path)
+    try:
+        resp = session.get(
+            url,
+            params=params,
+            headers={"Host": endpoint.host_header, "Accept": "application/json"},
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if resp.status_code != 200:
+            return None
+        if len(resp.content) > 8192:
+            return None
+        body = resp.json()
+        return body if isinstance(body, dict) else None
+    except Exception as e:
+        logger.debug("fleet_url.get_failed host=%s path=%s err=%s", endpoint.hostname, path, e)
+        return None
+    finally:
+        session.close()
+
+
 def post_json(endpoint: FleetEndpoint, path: str, payload: dict, timeout: float) -> requests.Response:
     """POST to a validated endpoint at a validated address.
 

@@ -246,7 +246,7 @@ function MobileBottomNav({ state }) {
     const isInboxActive = pathname === '/inbox';
     const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/blocks']);
 
-    const currentTopic = React.useMemo(() => {
+    const currentCommunity = React.useMemo(() => {
         try {
             const m = pathname.match(/^\/t\/([^/]+)/);
             const t = m && m[1] ? decodeURIComponent(m[1]) : '';
@@ -392,8 +392,8 @@ function MobileBottomNav({ state }) {
     // Always route to /create_post so CreatePostView can render the same
     // LoggedOutPromptCard logged-out users see on large screens — avoids
     // dumping them straight onto the signup form.
-    const createLink = hasPublicKey && currentTopic
-        ? `/create_post?community=${encodeURIComponent(currentTopic)}`
+    const createLink = hasPublicKey && currentCommunity
+        ? `/create_post?community=${encodeURIComponent(currentCommunity)}`
         : '/create_post';
 
     return ReactDOM.createPortal(

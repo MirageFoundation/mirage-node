@@ -55,14 +55,14 @@ func ensureUsername(t *testing.T, mk *mockKeeper, ctx sdk.Context, owner, userna
 	require.NoError(t, mk.SetProfileCore(ctx, owner, bz))
 }
 
-func TestValidateTopic(t *testing.T) {
+func TestValidateCommunity(t *testing.T) {
 	tests := []struct {
-		name    string
-		topic   string
-		minLen  uint64
-		maxLen  uint64
-		wantErr bool
-		errPart string
+		name      string
+		community string
+		minLen    uint64
+		maxLen    uint64
+		wantErr   bool
+		errPart   string
 	}{
 		{"valid", "abc123", 2, 10, false, ""},
 		{"too short", "a", 2, 10, true, "below minimum"},
@@ -70,12 +70,12 @@ func TestValidateTopic(t *testing.T) {
 		{"uppercase", "Abc", 2, 10, true, "lowercase alphanumeric"},
 		{"internal hyphen", "ab-c", 2, 10, false, ""},
 		{"consecutive hyphens", "ab--c", 2, 10, true, "consecutive hyphens"},
-		{"empty", " ", 2, 10, true, "topic required"},
+		{"empty", " ", 2, 10, true, "community required"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateTopic(tt.topic, tt.maxLen, tt.minLen)
+			err := validateCommunity(tt.community, tt.maxLen, tt.minLen)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errPart != "" {
@@ -88,14 +88,14 @@ func TestValidateTopic(t *testing.T) {
 	}
 }
 
-func TestValidateBlockedTopicPattern(t *testing.T) {
+func TestValidateBlockedCommunityPattern(t *testing.T) {
 	tests := []struct {
-		name    string
-		topic   string
-		minLen  uint64
-		maxLen  uint64
-		wantErr bool
-		errPart string
+		name      string
+		community string
+		minLen    uint64
+		maxLen    uint64
+		wantErr   bool
+		errPart   string
 	}{
 		{"exact valid", "beer123", 3, 10, false, ""},
 		{"wildcard trailing", "beer*", 3, 10, false, ""},
@@ -111,7 +111,7 @@ func TestValidateBlockedTopicPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateBlockedTopicPattern(tt.topic, tt.maxLen, tt.minLen)
+			err := validateBlockedCommunityPattern(tt.community, tt.maxLen, tt.minLen)
 			if tt.wantErr {
 				require.Error(t, err)
 				if tt.errPart != "" {
@@ -134,20 +134,20 @@ func TestBlockCommunityNormalizesAndDedups(t *testing.T) {
 
 	_, err := am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Community:      "  topic1 ",
+		Community:      "  beer1 ",
 	})
 	require.NoError(t, err)
 
 	_, err = am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Community:      "topic1",
+		Community:      "beer1",
 	})
 	require.NoError(t, err)
 
 	blocked, err := mk.ListBlockedCommunities(ctx, owner)
 	require.NoError(t, err)
 	t.Logf("[debug] blocked communities=%v", blocked)
-	require.Equal(t, []string{"topic1"}, blocked)
+	require.Equal(t, []string{"beer1"}, blocked)
 }
 
 func TestBlockCommunityInvalidSlug(t *testing.T) {
@@ -159,7 +159,7 @@ func TestBlockCommunityInvalidSlug(t *testing.T) {
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	_, err := am.BlockCommunity(ctx, &types.MsgBlockCommunity{
 		EnvelopePubkey: pub,
-		Community:      "bad_topic",
+		Community:      "bad_slug",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lowercase alphanumeric")
@@ -277,11 +277,11 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	require.Equal(t, []string{target}, blocked)
 }
 
-// TestRetiredTopicAndAgentHandlersReject pins the v1.39.0 retirement at the
+// TestRetiredMessageHandlersReject pins the v1.39.0 retirement at the
 // msg-server level. The ante decorator already rejects these type URLs, but a
 // handler that still wrote to the drained legacy stores would silently produce
 // state nothing reads if that decorator were ever removed.
-func TestRetiredTopicAndAgentHandlersReject(t *testing.T) {
+func TestRetiredMessageHandlersReject(t *testing.T) {
 	_, ctx, am := setupModule(t)
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{})

@@ -111,7 +111,6 @@ from shared.canon import (
     canon_base_set_username as _canon_base_set_username,
     canon_base_post as _canon_base_post,
     canon_base_vote as _canon_base_vote,
-    canon_base_annotate as _canon_base_annotate,
     canon_base_edit as _canon_base_edit,
     canon_base_block_post as _canon_base_block_post,
     canon_base_unblock_post as _canon_base_unblock_post,
@@ -252,15 +251,15 @@ def canon_base_post(
     last_block_hash_hex: str,
     difficulty: int,
     target: str,
-    topic: str,
+    community: str,
     title: str,
     content: str,
 ) -> bytes:
     """
     Backwards-compatible wrapper for shared.canon.canon_base_post.
 
-    Older callers passed (pubkey, last_block_hash_hex, difficulty, target, topic, title, content)
-    with a single topic string. We now:
+    Older callers passed (pubkey, last_block_hash_hex, difficulty, target, community, title, content)
+    with a single community string. We now:
     - derive envelope_timestamp from wall-clock time
     - use empty tag and pow_val=0
     """
@@ -271,7 +270,7 @@ def canon_base_post(
         int(difficulty),
         ts_ms,
         target,
-        topic or "",
+        community or "",
         title,
         content,
         "",
@@ -569,7 +568,7 @@ def set_username(
 def post(
     backend: str,
     wallet: LocalWallet,
-    topic: str,
+    community: str,
     title: str,
     content: str,
     target: str = "",
@@ -583,7 +582,7 @@ def post(
     Args:
         backend: Backend URL
         wallet: User's wallet
-        topic: Topic/subreddit name
+        community: Community/subreddit name
         title: Post title
         content: Post content
         target: Parent post hash (for comments) or empty for top-level
@@ -621,7 +620,7 @@ def post(
             0,
             ts_ms,
             target or "",
-            topic or "",
+            community or "",
             safe_title,
             content,
             tag or "",
@@ -639,7 +638,7 @@ def post(
             "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "target": target,
-            "topic": topic or "",
+            "community": community or "",
             "title": safe_title,
             "content": content,
             "tag": tag or "",
@@ -653,7 +652,7 @@ def post(
             diff,
             ts_ms,
             target or "",
-            topic or "",
+            community or "",
             safe_title,
             content,
             tag or "",
@@ -673,7 +672,7 @@ def post(
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": target,
-            "topic": topic or "",
+            "community": community or "",
             "title": safe_title,
             "content": content,
             "tag": tag or "",
@@ -784,7 +783,7 @@ def comment(
     return post(
         backend=backend,
         wallet=wallet,
-        topic="",
+        community="",
         title="",
         content=content,
         target=parent,
@@ -901,47 +900,12 @@ def delete_post(backend: str, wallet: LocalWallet, target: str, skip_pow: Option
     )
 
 
-def annotate(
-    backend: str,
-    wallet: LocalWallet,
-    override: str,
-    topic: str = ".",
-    title: str = ".",
-    content: str = ".",
-    tag: str = ".",
-    media: list[str] | None = None,
-    appendix: str = ".",
-    skip_pow: Optional[bool] = None,
-) -> dict:
-    """Annotate (overlay) a post. Sentinel '.' means no change."""
-    if media is None:
-        media = ["."]
-    return _submit_envelope(
-        backend,
-        wallet,
-        "/api/core/annotate",
-        _canon_base_annotate,
-        (topic, title, content, tag, override),
-        {
-            "topic": topic,
-            "title": title,
-            "content": content,
-            "tag": tag,
-            "override": override,
-            "media": media,
-            "appendix": appendix,
-        },
-        skip_pow,
-        canon_kwargs={"media": media, "appendix": appendix},
-    )
-
-
 def edit(
     backend: str,
     wallet: LocalWallet,
     override: str,
     target: str = "",
-    topic: str = "",
+    community: str = "",
     title: str = "",
     content: str = "",
     tag: str = "",
@@ -957,10 +921,10 @@ def edit(
         wallet,
         "/api/core/edit",
         _canon_base_edit,
-        (target, topic, title, content, tag, override),
+        (target, community, title, content, tag, override),
         {
             "target": target,
-            "topic": topic,
+            "community": community,
             "title": title,
             "content": content,
             "tag": tag,
