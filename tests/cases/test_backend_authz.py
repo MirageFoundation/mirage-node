@@ -103,7 +103,6 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/get_reports": SIGNED_ADMIN,  # signed read + level; no nonce row
     "/api/get_stats": SIGNED_ADMIN,
     # --- Relay endpoints: chain verifies the envelope -----------------------
-    "/api/core/annotate": ENVELOPE,
     "/api/core/award": ENVELOPE,
     "/api/core/block_post": ENVELOPE,
     "/api/core/block_user": ENVELOPE,

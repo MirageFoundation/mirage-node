@@ -1625,7 +1625,7 @@ def test_indexer_profile_absent(backend):
             "indexer_profile_absent.load_returns_none", "_load_chain_profile invented a profile for a deleted account"
         )
 
-    for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_followed_communities"):
+    for helper in ("_refresh_enabled_agents", "_refresh_followed_users", "_refresh_joined_communities"):
         try:
             getattr(mp, helper)("mirage1deletedaccount", 0)
         except Exception as e:

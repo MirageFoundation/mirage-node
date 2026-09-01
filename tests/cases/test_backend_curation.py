@@ -174,9 +174,13 @@ def test_curation_backend(backend: str) -> None:
     else:
         _pass("curation.backend_policy_param_retired")
 
-    # Post + hide under team lens; raw still shows it.
-    post_tx = _do_post(backend, sub, slug, f"Hidden {_rand_str(4)}", "body", skip_pow=True)
-    if not post_tx or not _wait_indexed(backend, sub_addr, post_tx):
+    # Post + hide under team lens; raw still shows it. sub owns the team here, and
+    # the chain will not let any lens hide the post of someone holding a live team
+    # membership in the community, so the author has to be an outsider.
+    author = WALLETS["sub3"]
+    author_addr = str(author.address()).lower()
+    post_tx = _do_post(backend, author, slug, f"Hidden {_rand_str(4)}", "body", skip_pow=True)
+    if not post_tx or not _wait_indexed(backend, author_addr, post_tx):
         _fail("curation.backend_seed_post", f"tx={post_tx}")
         return
     _pass("curation.backend_seed_post")
@@ -650,14 +654,18 @@ def test_curation_team_lifecycle(backend: str) -> None:
         _fail("curation_team.community_tag_indexed", f"detail={last_detail}")
 
     # A non-owner curator may still moderate, and the /moderation read is the
-    # only way the UI learns the team's current decision for one post.
-    post_tx = _do_post(backend, owner_wallet, slug, f"Mod {_rand_str(4)}", "body", skip_pow=True)
-    if not post_tx or not _wait_indexed(backend, owner_addr, post_tx):
+    # only way the UI learns the team's current decision for one post. Both
+    # owner_wallet and curator_wallet sit on this team, and a curator's own posts
+    # are protected from every lens, so the moderated post comes from an outsider.
+    author_wallet = WALLETS["sub3"]
+    author_addr = str(author_wallet.address()).lower()
+    post_tx = _do_post(backend, author_wallet, slug, f"Mod {_rand_str(4)}", "body", skip_pow=True)
+    if not post_tx or not _wait_indexed(backend, author_addr, post_tx):
         _fail("curation_team.seed_post", f"tx={post_tx}")
         return
     _pass("curation_team.seed_post")
 
-    code, forbidden = _moderation(backend, slug, team_id, str(WALLETS["free"].address()).lower(), post_tx, owner_addr)
+    code, forbidden = _moderation(backend, slug, team_id, str(WALLETS["free"].address()).lower(), post_tx, author_addr)
     if code == 403 and isinstance(forbidden, dict) and forbidden.get("error_code") == "forbidden":
         _pass("curation_team.moderation_curator_only")
     else:
@@ -665,7 +673,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
 
     code, no_post = _get(
         f"{backend}/api/communities/{slug}/teams/{team_id}/moderation",
-        {"viewer": curator_addr, "author": owner_addr},
+        {"viewer": curator_addr, "author": author_addr},
     )
     if code == 400 and isinstance(no_post, dict) and no_post.get("error_code") == "missing_post_id":
         _pass("curation_team.moderation_requires_post_id")
@@ -677,18 +685,33 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_hidden(backend, curator_wallet, slug, team_id, post_tx, hidden=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "post_hidden", True)
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_hidden", True)
     if ok:
         _pass("curation_team.moderation_reports_post_hidden")
     else:
         _fail("curation_team.moderation_reports_post_hidden", f"body={body}")
+
+    # The same call against a curator's own post is refused by the chain, so a
+    # team cannot bury the people moderating alongside it.
+    curator_post = _do_post(backend, owner_wallet, slug, f"Curator {_rand_str(4)}", "body", skip_pow=True)
+    if not curator_post or not _wait_indexed(backend, owner_addr, curator_post):
+        _fail("curation_team.curator_post_seeded", f"tx={curator_post}")
+    else:
+        _pass("curation_team.curator_post_seeded")
+        _expect_rejected(
+            "curation_team.curator_post_protected",
+            backend,
+            _do_set_curation_post_hidden(
+                backend, curator_wallet, slug, team_id, curator_post, hidden=True, skip_pow=True
+            ),
+        )
 
     _expect_accepted(
         "curation_team.curator_locks_thread",
         backend,
         _do_set_curation_thread_locked(backend, curator_wallet, slug, team_id, post_tx, locked=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "thread_locked", True)
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "thread_locked", True)
     if ok:
         _pass("curation_team.moderation_reports_thread_locked")
     else:
@@ -699,7 +722,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_thread_locked(backend, curator_wallet, slug, team_id, post_tx, locked=False, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "thread_locked", False)
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "thread_locked", False)
     if ok:
         _pass("curation_team.moderation_reports_thread_unlocked")
     else:
@@ -710,7 +733,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, tag="gore", skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "post_tag", "gore")
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", "gore")
     if ok:
         _pass("curation_team.moderation_reports_post_tag")
     else:
@@ -724,7 +747,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, tag="", skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "post_tag", "")
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", "")
     if ok:
         _pass("curation_team.moderation_reports_empty_post_tag")
     else:
@@ -735,7 +758,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, clear=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, owner_addr, "post_tag", None)
+    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", None)
     if ok:
         _pass("curation_team.moderation_reports_cleared_post_tag")
     else:
