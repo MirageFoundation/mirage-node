@@ -74,6 +74,7 @@ ERRORS = {
     "missing_viewer": "viewer is required",
     "missing_post_id": "post_id is required",
     "missing_author": "author is required",
+    "missing_creator": "creator is required",
     "invalid_offset": "offset must be a non-negative integer",
     "invalid_limit": "limit must be an integer from 1 to 50",
     "invalid_cursor": "cursor must be post_count:community",

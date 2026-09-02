@@ -61,6 +61,7 @@ const ERROR_MAP = {
     invalid_offset: "That request wasn't valid. Please try again.",
     invalid_cursor: "That request wasn't valid. Please try again.",
     missing_author: "An author is required.",
+    missing_creator: "A creator is required.",
 
     // PoW
     insufficient_pow_precheck: "Proof-of-work is insufficient. Please try again.",

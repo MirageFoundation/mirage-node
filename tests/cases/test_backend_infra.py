@@ -1265,12 +1265,13 @@ def test_error_registry(backend):
     if backend_src not in sys.path:
         sys.path.insert(0, backend_src)
     try:
-        from error_utils import _MSG_TO_CODE
+        from error_utils import ERRORS, _MSG_TO_CODE
     except Exception as e:
         _skip("error_registry.unmapped_messages", f"backend modules not importable: {e}")
         return
 
     unregistered = []
+    unknown_codes = []
     for root, _dirs, files in os.walk(backend_src):
         for name in files:
             if not name.endswith(".py"):
@@ -1281,8 +1282,19 @@ def test_error_registry(backend):
             except SyntaxError as e:
                 _fail("error_registry.unmapped_messages", f"cannot parse {path}: {e}")
                 return
+            rel = os.path.relpath(path, backend_src)
             for node in ast.walk(tree):
-                if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "jsonify"):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = getattr(node.func, "id", None)
+                # api_error_code() looks up the code and raises KeyError on a
+                # miss, so an unregistered code is a 500 on a validation path.
+                if fn == "api_error_code" and node.args:
+                    code = node.args[0]
+                    if isinstance(code, ast.Constant) and code.value not in ERRORS:
+                        unknown_codes.append(f"{rel}:{node.lineno} {code.value!r}")
+                    continue
+                if fn != "jsonify":
                     continue
                 for arg in node.args:
                     if not isinstance(arg, ast.Dict):
@@ -1294,13 +1306,17 @@ def test_error_registry(backend):
                         if not (isinstance(key, ast.Constant) and key.value == "error"):
                             continue
                         if isinstance(val, ast.Constant) and val.value not in _MSG_TO_CODE:
-                            rel = os.path.relpath(path, backend_src)
                             unregistered.append(f"{rel}:{node.lineno} {val.value!r}")
 
     if unregistered:
         _fail("error_registry.unmapped_messages", f"{len(unregistered)} unregistered: {'; '.join(unregistered[:6])}")
     else:
         _pass("error_registry.unmapped_messages", checked=len(_MSG_TO_CODE))
+
+    if unknown_codes:
+        _fail("error_registry.api_error_code", f"{len(unknown_codes)} unregistered: {'; '.join(unknown_codes[:6])}")
+    else:
+        _pass("error_registry.api_error_code", checked=len(ERRORS))
 
     # Every code must have user-facing copy, or the UI renders "Unknown error code: x".
     js_path = os.path.join(os.path.dirname(backend_src), "frontend", "src", "utils", "errorMessages.js")

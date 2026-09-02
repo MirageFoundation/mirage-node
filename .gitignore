@@ -93,13 +93,13 @@ scripts/*
 !scripts/reset_statesync.sh
 !scripts/reset_local_testnet.sh
 !scripts/reset_local_testnet.py
-!scripts/enable_five_minute_creator_rewards.py
 !scripts/test_upgrade.sh
 !scripts/list_validators.sh
 !scripts/show_balances.py
 !scripts/migrate_pebbledb.py
 !scripts/submit_proposal.py
 !scripts/verify_upgrade.py
+!scripts/verify_creator_payout.py
 !scripts/finalize_release_manifest.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
