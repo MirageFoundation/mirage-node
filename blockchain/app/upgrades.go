@@ -60,6 +60,7 @@ func validateV1340Params(params coretypes.Params) error {
 type upgradeAccountKeeper interface {
 	GetAccount(context.Context, sdk.AccAddress) sdk.AccountI
 	SetAccount(context.Context, sdk.AccountI)
+	NewAccount(context.Context, sdk.AccountI) sdk.AccountI
 }
 
 func ensureCreatorModuleAccount(ctx context.Context, accounts upgradeAccountKeeper) error {
@@ -68,7 +69,12 @@ func ensureCreatorModuleAccount(ctx context.Context, accounts upgradeAccountKeep
 	var moduleAccount *authtypes.ModuleAccount
 	switch account := existing.(type) {
 	case nil:
-		moduleAccount = authtypes.NewEmptyModuleAccount(coretypes.CreatorPoolName, authtypes.Burner)
+		created := accounts.NewAccount(ctx, authtypes.NewEmptyModuleAccount(coretypes.CreatorPoolName, authtypes.Burner))
+		var ok bool
+		moduleAccount, ok = created.(*authtypes.ModuleAccount)
+		if !ok {
+			return fmt.Errorf("creator module account constructor returned %T", created)
+		}
 	case *authtypes.ModuleAccount:
 		if account.GetName() != coretypes.CreatorPoolName || !account.GetAddress().Equals(addr) {
 			return fmt.Errorf("creator module address contains unexpected module account %q", account.GetName())

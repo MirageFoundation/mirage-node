@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -34,7 +35,30 @@ func (m *upgradeAccountKeeperMock) GetAccount(_ context.Context, addr sdk.AccAdd
 }
 
 func (m *upgradeAccountKeeperMock) SetAccount(_ context.Context, account sdk.AccountI) {
+	for addr, existing := range m.accounts {
+		if addr != account.GetAddress().String() && existing.GetAccountNumber() == account.GetAccountNumber() {
+			panic(fmt.Sprintf("collections: conflict: index uniqueness constraint violation: %d", account.GetAccountNumber()))
+		}
+	}
 	m.accounts[account.GetAddress().String()] = account
+}
+
+func (m *upgradeAccountKeeperMock) NewAccount(_ context.Context, acc sdk.AccountI) sdk.AccountI {
+	used := make(map[uint64]struct{}, len(m.accounts))
+	for _, existing := range m.accounts {
+		used[existing.GetAccountNumber()] = struct{}{}
+	}
+	n := uint64(1)
+	for {
+		if _, exists := used[n]; !exists {
+			break
+		}
+		n++
+	}
+	if err := acc.SetAccountNumber(n); err != nil {
+		panic(err)
+	}
+	return acc
 }
 
 func TestValidateV1340Params(t *testing.T) {
@@ -85,12 +109,17 @@ func TestEnsureCreatorModuleAccountConvertsSquattedBaseAccount(t *testing.T) {
 
 func TestEnsureCreatorModuleAccountCreatesMissingAccount(t *testing.T) {
 	addr := authtypes.NewModuleAddress(coretypes.CreatorPoolName)
-	accounts := &upgradeAccountKeeperMock{accounts: map[string]sdk.AccountI{}}
+	occupied := authtypes.NewBaseAccountWithAddress(sdk.AccAddress("occupied-account-0"))
+	require.NoError(t, occupied.SetAccountNumber(0))
+	accounts := &upgradeAccountKeeperMock{accounts: map[string]sdk.AccountI{
+		occupied.GetAddress().String(): occupied,
+	}}
 	require.Nil(t, accounts.GetAccount(context.Background(), addr))
 	require.NoError(t, ensureCreatorModuleAccount(context.Background(), accounts))
 	created, ok := accounts.GetAccount(context.Background(), addr).(*authtypes.ModuleAccount)
 	require.True(t, ok)
 	require.Equal(t, coretypes.CreatorPoolName, created.GetName())
+	require.NotEqual(t, uint64(0), created.GetAccountNumber(), "must not reuse account number 0")
 }
 
 // TestStoreLoaderWithExistingStore tests that using StoreUpgrades.Added for
