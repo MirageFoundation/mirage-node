@@ -3613,10 +3613,11 @@ activate_if_halted
         "v1.38.11:release/manifest.json" not in rehearsal
         or "verify_proto_generation_parity" not in rehearsal
         or "LCD params after reset" not in rehearsal
+        or "pre_upgrade_financial.json" not in rehearsal
     ):
         _fail(
             "install.upgrade.rehearsal_preflight",
-            "test_upgrade.sh must pin the backup image to the signed v1.38.11 digest, check protobuf parity, and wait for LCD after reset",
+            "test_upgrade.sh must pin the backup image to the signed v1.38.11 digest, check protobuf parity, wait for LCD after reset, and snapshot legacy payout rows",
         )
         return
     reset_src = Path(os.path.join(REPO_ROOT, "scripts", "reset_local_testnet.py")).read_text(encoding="utf-8")

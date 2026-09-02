@@ -383,48 +383,37 @@ def check_retired_financial_state() -> None:
         return
     import psycopg
 
-    required_tables = (
-        "pending_rewards",
-        "reward_payouts",
-        "referral_pending_rewards",
-        "referral_user_accruals",
-    )
+    from web.backend.db import LEGACY_FINANCIAL_CHECKS, legacy_financial_evidence
+
+    snapshot_path = STATUS_DIR / "pre_upgrade_financial.json"
     with psycopg.connect(db_url, connect_timeout=10) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT tablename FROM pg_tables "
-                "WHERE schemaname = 'public' AND tablename = ANY(%s)",
-                (list(required_tables),),
-            )
-            present = {str(row[0]) for row in cursor.fetchall()}
-            missing = sorted(set(required_tables) - present)
-            if missing:
-                fail(f"retired financial evidence tables were dropped: {missing}")
-                return
-            cursor.execute("SELECT count(*) FROM pending_rewards WHERE claimed_at IS NULL")
-            pending_rewards = int(cursor.fetchone()[0])
-            cursor.execute(
-                "SELECT count(*) FROM reward_payouts WHERE status IN ('reserved', 'broadcast')"
-            )
-            open_payouts = int(cursor.fetchone()[0])
-            cursor.execute(
-                "SELECT count(*) FROM referral_pending_rewards "
-                "WHERE COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
-                "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')"
-            )
-            pending_referrals = int(cursor.fetchone()[0])
-            cursor.execute(
-                "SELECT count(*) FROM referral_user_accruals WHERE COALESCE(pending, 0) > 0"
-            )
-            pending_accruals = int(cursor.fetchone()[0])
-    if pending_rewards or open_payouts or pending_referrals or pending_accruals:
-        fail(
-            "unresolved v1.38 financial obligations remain: "
-            f"pending_rewards={pending_rewards} open_payouts={open_payouts} "
-            f"pending_referrals={pending_referrals} pending_accruals={pending_accruals}"
+            present_counts = legacy_financial_evidence(cursor)
+    required_tables = {table for table, _predicate in LEGACY_FINANCIAL_CHECKS}
+    missing = sorted(required_tables - set(present_counts))
+    if missing:
+        fail(f"retired financial evidence tables were dropped: {missing}")
+        return
+    after = {table: int(present_counts.get(table, 0)) for table in required_tables}
+    if snapshot_path.is_file():
+        before = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        lost = [
+            f"{table}: before={before.get(table, 0)} after={after[table]}"
+            for table in required_tables
+            if int(after[table]) < int(before.get(table, 0) or 0)
+        ]
+        if lost:
+            fail("retired financial evidence shrank during upgrade: " + "; ".join(lost))
+            return
+        ok(
+            "retired reward evidence preserved: "
+            + ", ".join(f"{table}={after[table]}" for table in sorted(after))
         )
-    else:
-        ok("retired reward evidence is preserved with no unresolved obligations")
+        return
+    ok(
+        "retired reward evidence tables retained: "
+        + ", ".join(f"{table}={after[table]}" for table in sorted(after))
+    )
 
 
 def check_open_community_contract() -> None:

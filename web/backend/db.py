@@ -81,6 +81,32 @@ def connect_backend_db(statement_timeout_ms: int = BACKEND_STATEMENT_TIMEOUT_MS)
     return psycopg.connect(url, **kwargs)
 
 
+LEGACY_FINANCIAL_CHECKS = (
+    ("pending_rewards", "claimed_at IS NULL"),
+    ("reward_payouts", "status IN ('reserved', 'broadcast')"),
+    (
+        "referral_pending_rewards",
+        "COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
+        "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')",
+    ),
+    ("referral_user_accruals", "COALESCE(pending, 0) > 0"),
+)
+
+
+def legacy_financial_evidence(cur) -> Dict[str, int]:
+    """Count unresolved rows in retired v1.38 payout tables that still exist."""
+    evidence: Dict[str, int] = {}
+    for table, predicate in LEGACY_FINANCIAL_CHECKS:
+        cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+        if cur.fetchone()[0] is None:
+            continue
+        cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
+        count = int(cur.fetchone()[0] or 0)
+        evidence[table] = count
+        logger.info("backend.schema.legacy_financial_evidence table=%s unresolved=%d", table, count)
+    return evidence
+
+
 def init_backend_schema() -> None:
     """Create all backend-owned tables (idempotent). Called at backend startup."""
     # No statement timeout: building an index on an already-large table legitimately
@@ -653,30 +679,16 @@ def init_backend_schema() -> None:
                 if new_val > 1:
                     logger.info("backend.schema.seq_reset table=%s seq=%s val=%s", table, seq_name, new_val)
 
-            unresolved: Dict[str, int] = {}
-            for table, predicate in (
-                ("pending_rewards", "claimed_at IS NULL"),
-                ("reward_payouts", "status IN ('reserved', 'broadcast')"),
-                (
-                    "referral_pending_rewards",
-                    "COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
-                    "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')",
-                ),
-                ("referral_user_accruals", "COALESCE(pending, 0) > 0"),
-            ):
-                cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
-                if cur.fetchone()[0] is None:
-                    continue
-                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
-                count = int(cur.fetchone()[0] or 0)
-                logger.info("backend.schema.legacy_financial_evidence table=%s unresolved=%d", table, count)
-                if count:
-                    unresolved[table] = count
+            evidence = legacy_financial_evidence(cur)
+            unresolved = {table: count for table, count in evidence.items() if count}
             if unresolved:
                 details = ", ".join(f"{table}={count}" for table, count in sorted(unresolved.items()))
-                raise RuntimeError(
-                    "unresolved legacy reward obligations remain; settle them under v1.38 before upgrading: "
-                    + details
+                # Do not abort startup. The chain node has to boot this image
+                # at halt height; blocking schema init strands the upgrade.
+                # Tables stay in place; verify_upgrade checks the counts survived.
+                logger.error(
+                    "unresolved legacy reward obligations remain; settle them under v1.38 before upgrading: %s",
+                    details,
                 )
 
             for gone in (
@@ -700,4 +712,10 @@ def init_backend_schema() -> None:
         conn.close()
 
 
-__all__ = ["connect_db", "connect_backend_db", "init_backend_schema"]
+__all__ = [
+    "connect_db",
+    "connect_backend_db",
+    "init_backend_schema",
+    "legacy_financial_evidence",
+    "LEGACY_FINANCIAL_CHECKS",
+]

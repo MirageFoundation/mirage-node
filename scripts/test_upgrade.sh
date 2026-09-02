@@ -268,6 +268,47 @@ print(f"captured {len(params)} pre-upgrade params in {path}")
 '
 }
 
+capture_pre_upgrade_financial() {
+  local py
+  py=$(cat <<'PY'
+import json
+import os
+from pathlib import Path
+
+import psycopg
+
+checks = (
+    ("pending_rewards", "claimed_at IS NULL"),
+    ("reward_payouts", "status IN ('reserved', 'broadcast')"),
+    (
+        "referral_pending_rewards",
+        "COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
+        "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')",
+    ),
+    ("referral_user_accruals", "COALESCE(pending, 0) > 0"),
+)
+url = os.environ.get("BACKEND_DB_URL", "").strip()
+if not url:
+    raise SystemExit("BACKEND_DB_URL missing from restored environment")
+evidence = {}
+with psycopg.connect(url, connect_timeout=10) as connection:
+    with connection.cursor() as cursor:
+        for table, predicate in checks:
+            cursor.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+            if cursor.fetchone()[0] is None:
+                raise SystemExit(f"pre-upgrade financial table missing: {table}")
+            cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
+            evidence[table] = int(cursor.fetchone()[0] or 0)
+path = Path("/root/.mirage/upgrade_tests/pre_upgrade_financial.json")
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+tmp.replace(path)
+print("captured pre-upgrade financial evidence " + json.dumps(evidence, sort_keys=True))
+PY
+)
+  docker exec "$CONTAINER" bash -lc "set -a; for f in /root/.mirage/env/*.env; do . \"\$f\"; done; set +a; python3 -c $(printf '%q' "$py")"
+}
+
 rpc_height() {
   python3 - <<'PY'
 import json, urllib.request, sys
@@ -937,6 +978,7 @@ run_pipeline() {
   wait_until "$RPC_BUDGET_SEC" "RPC after reset" rpc_is_up
   wait_until "$RPC_BUDGET_SEC" "LCD params after reset" lcd_is_up
   capture_pre_upgrade_params
+  capture_pre_upgrade_financial
 
   if (( NO_CHAIN_UPGRADE )); then
     assert_no_pending_plan

@@ -496,6 +496,8 @@ def _test_v139_backend_contracts() -> None:
     ):
         if needle not in db:
             problems.append(f"legacy obligation guard missing {needle!r}")
+    if 'raise RuntimeError' in db.split("unresolved legacy reward obligations remain", 1)[0][-80:]:
+        problems.append("legacy obligation guard still aborts container startup")
     for needle in (
         '"max_creator_claim_epochs"',
         "claim_deadline_unix ASC, epoch_id ASC",
