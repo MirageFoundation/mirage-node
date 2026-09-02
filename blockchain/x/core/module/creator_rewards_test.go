@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -37,12 +38,10 @@ func settleCreatorReward(t *testing.T, directReply bool, epochSeconds uint64, de
 	ensureUsername(t, mk, ctx, creator, "reward-creator")
 
 	params := mk.GetParams(ctx)
+	// Subscription length is deliberately left at the 30-day default even for
+	// five-minute epochs. Shortening it used to be mandatory, because a tranche
+	// pre-split its creator share into one record per epoch spanned.
 	params.CreatorEpochSeconds = epochSeconds
-	if epochSeconds < types.SecondsPerUTCDay {
-		params.SubscriptionPeriod = 60
-		params.SubscriptionEarlyRenewalDays = 0
-		params.MaxSubscriptionPeriodsPerPurchase = 1
-	}
 	require.NoError(t, mk.SetParams(ctx, params))
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
@@ -188,16 +187,54 @@ func TestCreatorRewardFiveMinuteSettlementAndClaim(t *testing.T) {
 	)
 }
 
+func countPrefix(mk *mockKeeper, prefix string) int {
+	n := 0
+	for key := range mk.storeService.store {
+		if strings.HasPrefix(key, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
+// advanceCreatorClockTo runs BeginBlock at the given wall time until the
+// creator clock stops moving, which is how a real chain catches up after the
+// clock falls behind block time. Bounded so a stalled clock fails the test
+// instead of hanging it.
+func advanceCreatorClockTo(t *testing.T, mk *mockKeeper, base sdk.Context, at int64) sdk.Context {
+	t.Helper()
+	const maxBlocks = 10_000
+	ctx := base
+	last := int64(-1)
+	for i := 0; i < maxBlocks; i++ {
+		ctx = ctx.
+			WithBlockHeight(ctx.BlockHeight() + 1).
+			WithBlockTime(time.Unix(at, 0)).
+			WithEventManager(sdk.NewEventManager())
+		require.NoError(t, mk.ProcessBeginBlockV139(ctx))
+		clock, err := mk.GetCreatorClock(ctx)
+		require.NoError(t, err)
+		if clock == last {
+			return ctx
+		}
+		last = clock
+	}
+	t.Fatalf("creator clock did not settle within %d blocks", maxBlocks)
+	return ctx
+}
+
 func TestCreatorRewardDirectReplyExpiresAfterClaimWindow(t *testing.T) {
 	reward := settleCreatorReward(t, true, 300, false)
 	require.Equal(t, reward.epoch+2+(30*288), reward.deadline)
 	expiryTime, err := types.CreatorEpochStart(reward.deadline, 300)
 	require.NoError(t, err)
-	expiryCtx := reward.ctx.
-		WithBlockHeight(reward.ctx.BlockHeight() + 1).
-		WithBlockTime(time.Unix(expiryTime, 0)).
-		WithEventManager(sdk.NewEventManager())
-	require.NoError(t, reward.mk.ProcessBeginBlockV139(expiryCtx))
+	// The clock walks epoch boundaries rather than jumping, because each
+	// boundary is where a streaming tranche hands its slice to an epoch.
+	// Skipping to the deadline in one block would skip that money, so drive
+	// blocks until the clock actually arrives. At creator_epoch_closures_per_block
+	// this is ~2160 blocks for a 30-day window on 5-minute epochs; a real chain
+	// covers the same span in real time with ~400x headroom.
+	expiryCtx := advanceCreatorClockTo(t, reward.mk, reward.ctx, expiryTime)
 
 	epochResponse, err := reward.am.CreatorEpoch(
 		expiryCtx,
@@ -211,6 +248,119 @@ func TestCreatorRewardDirectReplyExpiresAfterClaimWindow(t *testing.T) {
 		"is not claimable",
 	)
 	require.True(t, reward.mk.bank.sentModuleToAccount.Empty())
+}
+
+// TestCreatorStreamPaysOutExactlyTheCreatorShare is the conservation check the
+// whole streaming design rests on. addCreatorLiability books the full creator
+// share the moment a subscription is bought, so the accumulator must eventually
+// hand epochs that exact number: short by any amount and the pool holds tokens
+// nobody can ever claim, over by any amount and the pool is insolvent.
+//
+// Rounding is where this would break. A per-second rate cannot divide most
+// amounts evenly, so each epoch takes a difference of floors and each tranche
+// carries its own leftover on its end breakpoint.
+func TestCreatorStreamPaysOutExactlyTheCreatorShare(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	_, payer := curationSigner(0x71)
+	_, subscriber := curationSigner(0x72)
+	ensureUsername(t, mk, ctx, payer, "stream-payer")
+	ensureUsername(t, mk, ctx, subscriber, "stream-subscriber")
+
+	const epochSeconds = 300
+	params := mk.GetParams(ctx)
+	params.CreatorEpochSeconds = epochSeconds
+	require.NoError(t, mk.SetParams(ctx, params))
+	require.Equal(t, uint64(43_200), params.SubscriptionPeriod, "30-day subscriptions must survive 5-minute epochs")
+
+	tier := params.GetTierConfig(types.LevelSubscriber)
+	require.NotNil(t, tier)
+	fundAccount(mk, payer, tier.PeriodFee)
+	_, creatorAmt, err := types.SplitCreatorFee(tier.PeriodFee, params.SubscriptionCreatorBps)
+	require.NoError(t, err)
+	require.Positive(t, creatorAmt)
+
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	start := ctx.BlockTime().Unix()
+	epoch, err := types.CreatorEpochFromUnix(start, epochSeconds)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetCreatorClock(ctx, epoch))
+	require.NoError(t, mk.AnchorCreatorStream(ctx, start))
+	require.NoError(t, mk.CreateTranche(
+		ctx,
+		payer,
+		subscriber,
+		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT,
+		1,
+		genTxHash(210),
+	))
+
+	// A 30-day subscription spans 8640 five-minute epochs. Buying it must not
+	// have materialized a record per epoch.
+	require.Equal(t, 0, countPrefix(mk, types.PfxCreatorEpoch), "purchase must not pre-split into epoch records")
+
+	// Run past the end of the subscription so the final breakpoint, and with it
+	// the tranche's rounding leftover, has been applied.
+	trancheEnd := start + int64(params.SubscriptionPeriod)*60
+	advanceCreatorClockTo(t, mk, ctx, trancheEnd+2*epochSeconds)
+
+	paid, err := mk.CreatorStreamPaid(ctx)
+	require.NoError(t, err)
+	require.Equal(t, sdkmath.NewIntFromUint64(creatorAmt).String(), paid.String(),
+		"streamed total must equal the creator share exactly")
+
+	rate, err := mk.CreatorStreamRate(ctx)
+	require.NoError(t, err)
+	require.True(t, rate.IsZero(), "nothing may still be streaming after the tranche ends, got %s", rate)
+	require.Equal(t, 0, countPrefix(mk, types.PfxCreatorStreamEnd), "every breakpoint must have been consumed")
+}
+
+// TestCreatorStreamConservesAcrossStackedRenewal covers the awkward case: a
+// renewal's tranche begins at the previous expiry, so it starts in the future
+// and its rate must switch on at a scheduled instant rather than immediately.
+// Getting that wrong pays the second subscription out over the wrong window
+// while the liability still expects every token.
+func TestCreatorStreamConservesAcrossStackedRenewal(t *testing.T) {
+	mk, ctx, _ := setupModule(t)
+	_, payer := curationSigner(0x81)
+	_, subscriber := curationSigner(0x82)
+	ensureUsername(t, mk, ctx, payer, "renew-payer")
+	ensureUsername(t, mk, ctx, subscriber, "renew-subscriber")
+
+	const epochSeconds = 300
+	params := mk.GetParams(ctx)
+	params.CreatorEpochSeconds = epochSeconds
+	require.NoError(t, mk.SetParams(ctx, params))
+	tier := params.GetTierConfig(types.LevelSubscriber)
+	require.NotNil(t, tier)
+	_, creatorAmt, err := types.SplitCreatorFee(tier.PeriodFee, params.SubscriptionCreatorBps)
+	require.NoError(t, err)
+
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	start := ctx.BlockTime().Unix()
+	epoch, err := types.CreatorEpochFromUnix(start, epochSeconds)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetCreatorClock(ctx, epoch))
+	require.NoError(t, mk.AnchorCreatorStream(ctx, start))
+
+	fundAccount(mk, payer, tier.PeriodFee*2)
+	require.NoError(t, mk.CreateTranche(ctx, payer, subscriber,
+		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT, 1, genTxHash(220)))
+	// Second purchase stacks on top: it starts when the first one expires.
+	require.NoError(t, mk.CreateTranche(ctx, payer, subscriber,
+		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT, 1, genTxHash(221)))
+
+	period := int64(params.SubscriptionPeriod) * 60
+	advanceCreatorClockTo(t, mk, ctx, start+2*period+2*epochSeconds)
+
+	paid, err := mk.CreatorStreamPaid(ctx)
+	require.NoError(t, err)
+	expected := sdkmath.NewIntFromUint64(creatorAmt).MulRaw(2)
+	require.Equal(t, expected.String(), paid.String(),
+		"both subscriptions must stream out in full across a stacked renewal")
+
+	rate, err := mk.CreatorStreamRate(ctx)
+	require.NoError(t, err)
+	require.True(t, rate.IsZero(), "got %s", rate)
 }
 
 func TestFiveMinuteCreatorRewardExcludesContentDeletedInEngagementEpoch(t *testing.T) {

@@ -71,13 +71,24 @@ const (
 	PfxCreatorSurplus       = "creator_activation_surplus"
 	PfxCreatorSchedule      = "creator_schedule"
 	PfxCreatorReset         = "creator_reset"
-	PfxTrancheSeq           = "trancheseq"
-	PfxTranche              = "tranche|"
-	PfxTranchePayer         = "tranchepayer|"
-	PfxTrancheRecipient     = "trancherecipient|"
-	PfxSubscriberQuota      = "sq|"
-	PfxSubRenewalQueue      = "sr|"
-	PfxSubRenewalState      = "sra|"
+	// Creator fee streaming. A tranche no longer pre-splits its creator share
+	// into one record per epoch it spans; it adds a per-second rate and one
+	// end breakpoint, and each epoch draws its pool from the accumulator as it
+	// elapses. Every creator_stream_* singleton is zeroed directly by the
+	// reset, so only the breakpoint index belongs in CreatorResetPrefixes.
+	PfxCreatorStream     = "creator_stream_"
+	PfxCreatorStreamRate = "creator_stream_rate"
+	PfxCreatorStreamAcc  = "creator_stream_acc"
+	PfxCreatorStreamPaid = "creator_stream_paid"
+	PfxCreatorStreamTs   = "creator_stream_ts"
+	PfxCreatorStreamEnd  = "cstrend|"
+	PfxTrancheSeq        = "trancheseq"
+	PfxTranche           = "tranche|"
+	PfxTranchePayer      = "tranchepayer|"
+	PfxTrancheRecipient  = "trancherecipient|"
+	PfxSubscriberQuota   = "sq|"
+	PfxSubRenewalQueue   = "sr|"
+	PfxSubRenewalState   = "sra|"
 )
 
 func lp(b []byte) []byte {
@@ -429,6 +440,13 @@ func KeyTranche(id uint64) []byte {
 	return concat([]byte(PfxTranche), u64(id))
 }
 
+// KeyCreatorStreamEnd orders breakpoints by the instant a tranche stops paying
+// out, so the accumulator can apply them in time order with a prefix scan. The
+// tranche id only disambiguates tranches expiring in the same second.
+func KeyCreatorStreamEnd(endUnix int64, id uint64) []byte {
+	return concat([]byte(PfxCreatorStreamEnd), i64(endUnix), u64(id))
+}
+
 func KeyTranchePayer(addr string, id uint64) []byte {
 	return concat([]byte(PfxTranchePayer), MustAcc(addr), u64(id))
 }
@@ -491,5 +509,6 @@ func CreatorResetPrefixes() []string {
 		PfxTranchePayer,
 		PfxTrancheRecipient,
 		PfxCreatorEpoch,
+		PfxCreatorStreamEnd,
 	}
 }

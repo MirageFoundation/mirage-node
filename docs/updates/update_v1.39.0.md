@@ -30,7 +30,9 @@ Being tagged is not being hidden. A tag only tells your content settings what th
 
 ### A creator pool instead of quests
 
-Half of every new subscription payment is burned. The other half funds a daily pool for authors who received an upvote or a direct reply from a paying subscriber that day. The split is equal among those subscribers, then among the actions they took, so one frantic account cannot vacuum the pool. Authors have thirty days after a day's settlement to claim what they earned. Unused remainder is burned. There is no quest board, no invite bonus, and no referral payout in this version. Campaign `ref=` links still tell you where a visitor came from; they just do not mint tokens.
+Half of every new subscription payment is burned. The other half funds a pool for authors who received an upvote or a direct reply from a paying subscriber during the payout period. The split is equal among those subscribers, then among the actions they took, so one frantic account cannot vacuum the pool. Authors have thirty days after a period settles to claim what they earned. Unused remainder is burned. There is no quest board, no invite bonus, and no referral payout in this version. Campaign `ref=` links still tell you where a visitor came from; they just do not mint tokens.
+
+How often that pool pays out is its own governance setting, and it is genuinely its own setting. It starts at once a day and can be shortened to as little as five minutes without shortening anybody's subscription, because a subscription's creator share is no longer chopped into one entry per payout period when you buy it — it flows into each period as that period actually happens. Paying out more often therefore costs nothing at purchase time. The one honest caveat is that shortening the interval resets creator rewards: the outstanding pool is burned and unclaimed earnings from before the change are lost, so it is a change to make deliberately rather than often.
 
 ### Subscriptions that are simpler to use
 

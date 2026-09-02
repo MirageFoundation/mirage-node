@@ -125,54 +125,12 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if err := k.storeSet(ctx, types.KeyTrancheRecipient(recipient, id), []byte{1}); err != nil {
 		return err
 	}
-	sched, err := k.GetCreatorSchedule(ctx)
-	if err != nil {
+	// The creator share streams into epochs as they elapse rather than being
+	// pre-split into one record per epoch here. That is what decouples
+	// creator_epoch_seconds from subscription_period: this costs two writes
+	// whether the subscription spans one epoch or a hundred thousand.
+	if err := k.ScheduleCreatorStreamTranche(ctx, id, sdkmath.NewIntFromUint64(creatorAmt), start, end); err != nil {
 		return err
-	}
-	first, err := sched.EpochAt(start)
-	if err != nil {
-		return err
-	}
-	last, err := sched.EpochAt(end - 1)
-	if err != nil {
-		return err
-	}
-	remaining := sdkmath.NewIntFromUint64(creatorAmt)
-	dur := sdkmath.NewIntFromUint64(duration)
-	for epoch := first; epoch <= last; epoch++ {
-		epochStart, err := sched.EpochStart(epoch)
-		if err != nil {
-			return err
-		}
-		epochEnd, err := sched.EpochEnd(epoch)
-		if err != nil {
-			return err
-		}
-		lo := start
-		if epochStart > lo {
-			lo = epochStart
-		}
-		hi := end
-		if epochEnd < hi {
-			hi = epochEnd
-		}
-		overlap := hi - lo
-		var amount sdkmath.Int
-		if epoch == last {
-			amount = remaining
-			remaining = sdkmath.ZeroInt()
-		} else {
-			amount = sdkmath.NewIntFromUint64(creatorAmt).Mul(sdkmath.NewInt(overlap)).Quo(dur)
-			remaining = remaining.Sub(amount)
-		}
-		if amount.IsPositive() {
-			if err := k.addEpochPool(ctx, epoch, amount); err != nil {
-				return err
-			}
-		}
-	}
-	if !remaining.IsZero() && last >= first {
-		return fmt.Errorf("tranche schedule leftover %s", remaining.String())
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("subscription_tranche_created",
 		sdk.NewAttribute("payer", payer),

@@ -39,10 +39,9 @@ const (
 	// MaxMintInterval is roughly one year at the documented 3s block time.
 	MaxMintInterval = 10_512_000
 	// MaxSubscriptionPeriodMinutes is one year.
-	MaxSubscriptionPeriodMinutes     = 525_600
-	SecondsPerUTCDay                 = 86_400
-	MinCreatorEpochSeconds           = 300
-	MaxCreatorEpochBucketsPerTranche = 1_024
+	MaxSubscriptionPeriodMinutes = 525_600
+	SecondsPerUTCDay             = 86_400
+	MinCreatorEpochSeconds       = 300
 	// MaxEnvelopeAgeSeconds is one day.
 	MaxEnvelopeAgeSeconds = 86_400
 	// MaxProfileListEntries keeps uint64 governance values representable by
@@ -601,15 +600,6 @@ func (p Params) ValidateV139() error {
 	}
 	if SecondsPerUTCDay%p.CreatorEpochSeconds != 0 {
 		return fmt.Errorf("creator_epoch_seconds must divide %d exactly", SecondsPerUTCDay)
-	}
-	durationSeconds := p.SubscriptionPeriod * 60 * p.MaxSubscriptionPeriodsPerPurchase
-	maxBuckets := (durationSeconds+p.CreatorEpochSeconds-1)/p.CreatorEpochSeconds + 1
-	if maxBuckets > MaxCreatorEpochBucketsPerTranche {
-		return fmt.Errorf(
-			"subscription settings can span %d creator epochs; maximum is %d",
-			maxBuckets,
-			MaxCreatorEpochBucketsPerTranche,
-		)
 	}
 	required := []struct {
 		name string

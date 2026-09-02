@@ -210,6 +210,9 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 	if err := k.SetCreatorClock(ctx, creatorEpoch); err != nil {
 		return err
 	}
+	if err := k.AnchorCreatorStream(ctx, ctx.BlockTime().Unix()); err != nil {
+		return err
+	}
 	if err := k.storeSet(ctx, []byte(types.UpgradeV139CompleteKey), []byte{1}); err != nil {
 		return err
 	}
@@ -552,8 +555,16 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 	return nil
 }
 
+// advanceCreatorClock walks the clock one epoch at a time, bounded per block.
+//
+// It used to jump straight to the epoch implied by block time and close
+// whatever happened to be sitting in the ceopen| index. That worked when every
+// epoch's pool had already been written at purchase time. Now an epoch's pool
+// is drawn from the streaming accumulator as the epoch's end boundary passes,
+// so each boundary has to actually be visited or its money would be integrated
+// over and silently folded into a later epoch.
 func (k Keeper) advanceCreatorClock(ctx sdk.Context, params types.Params) error {
-	epoch, err := k.CreatorEpochAt(ctx, ctx.BlockTime().Unix())
+	target, err := k.CreatorEpochAt(ctx, ctx.BlockTime().Unix())
 	if err != nil {
 		return err
 	}
@@ -561,63 +572,169 @@ func (k Keeper) advanceCreatorClock(ctx sdk.Context, params types.Params) error 
 	if err != nil {
 		return err
 	}
-	if epoch < cur {
-		return fmt.Errorf("CONSENSUS_FATAL:CREATOR_CLOCK_REGRESSION have=%d new=%d", cur, epoch)
+	if target < cur {
+		return fmt.Errorf("CONSENSUS_FATAL:CREATOR_CLOCK_REGRESSION have=%d new=%d", cur, target)
 	}
-	if epoch == cur {
+	if target == cur {
 		return nil
 	}
-	closed := uint64(0)
-	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCreatorEpochOpen), int(params.CreatorEpochClosuresPerBlock)+1, func(key, _ []byte) error {
-		if closed >= params.CreatorEpochClosuresPerBlock {
-			return nil
-		}
-		if len(key) < len(types.PfxCreatorEpochOpen)+8 {
-			return fmt.Errorf("malformed ceopen key")
-		}
-		openEpoch := int64(binary.BigEndian.Uint64(key[len(types.PfxCreatorEpochOpen):]))
-		if openEpoch >= epoch {
-			return nil
-		}
-		if err := k.storeDelete(ctx, key); err != nil {
-			return err
-		}
-		if err := k.storeSet(ctx, types.KeyCreatorEpochSettle(openEpoch), []byte{1}); err != nil {
-			return err
-		}
-		var ce types.CreatorEpoch
-		found, err := k.getProto(ctx, types.KeyCreatorEpoch(openEpoch), &ce)
+	sched, err := k.GetCreatorSchedule(ctx)
+	if err != nil {
+		return err
+	}
+	for advanced := uint64(0); cur < target && advanced < params.CreatorEpochClosuresPerBlock; advanced++ {
+		skipTo, err := k.idleCreatorClockTarget(ctx, sched, cur, target)
 		if err != nil {
 			return err
 		}
-		if !found {
-			return fmt.Errorf("CONSENSUS_FATAL:CREATOR_EPOCH_MISSING epoch=%d", openEpoch)
+		if skipTo > cur {
+			// Nothing is streaming and no epoch in between was ever touched,
+			// so every boundary up to here would draw zero and close nothing.
+			// Visiting them one per block would make an idle chain crawl.
+			// The stream cursor is deliberately left behind: settling it later
+			// integrates a zero rate across the gap and still applies the next
+			// breakpoint in order.
+			cur = skipTo
+			if err := k.SetCreatorClock(ctx, cur); err != nil {
+				return err
+			}
+			continue
 		}
-		ce.Status = types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_COUNTING
-		ce.Phase = types.CreatorSettlementPhase_CREATOR_SETTLEMENT_PHASE_COUNT
-		ce.SettlementCursor = nil
-		ce.PartialActor = ""
-		ce.PartialCount = 0
-		if ce.AllocatedTotal == "" {
-			ce.AllocatedTotal = "0"
-		}
-		if ce.ClaimedTotal == "" {
-			ce.ClaimedTotal = "0"
-		}
-		if err := k.setProto(ctx, types.KeyCreatorEpoch(openEpoch), &ce); err != nil {
+		boundary, err := sched.EpochEnd(cur)
+		if err != nil {
 			return err
 		}
-		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_epoch_closed",
-			sdk.NewAttribute("epoch", fmt.Sprintf("%d", openEpoch)),
-			sdk.NewAttribute("pool", ce.Pool),
-			sdk.NewAttribute("gross_records", fmt.Sprintf("%d", ce.GrossRecords)),
-		))
-		closed++
+		amount, complete, err := k.DrawCreatorStream(ctx, boundary, int(params.CreatorSettlementRecordsPerBlock))
+		if err != nil {
+			return err
+		}
+		if !complete {
+			// Too many tranche boundaries in this window to apply in one
+			// block. Leave the clock where it is and resume next block.
+			return nil
+		}
+		if amount.IsPositive() {
+			if err := k.addEpochPool(ctx, cur, amount); err != nil {
+				return err
+			}
+			ctx.Logger().Debug("creator stream drew epoch pool",
+				"epoch", cur,
+				"boundary", boundary,
+				"amount", amount.String(),
+				"height", ctx.BlockHeight())
+		}
+		if err := k.closeCreatorEpoch(ctx, cur); err != nil {
+			return err
+		}
+		cur++
+		if err := k.SetCreatorClock(ctx, cur); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// idleCreatorClockTarget reports how far the clock may jump from cur without
+// skipping work: no money can accrue before the next stream breakpoint, and no
+// epoch below the returned bound has a record waiting to be closed. It returns
+// cur when the clock must step normally.
+func (k Keeper) idleCreatorClockTarget(ctx sdk.Context, sched types.CreatorSchedule, cur, target int64) (int64, error) {
+	idleUntil, idle, err := k.CreatorStreamIdleUntil(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if !idle {
+		return cur, nil
+	}
+	limit := target
+	if idleUntil > 0 {
+		next, err := sched.EpochAt(idleUntil)
+		if err != nil {
+			return 0, err
+		}
+		if next < limit {
+			limit = next
+		}
+	}
+	open, found, err := k.earliestOpenCreatorEpoch(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if found && open < limit {
+		limit = open
+	}
+	if limit < cur {
+		return cur, nil
+	}
+	return limit, nil
+}
+
+func (k Keeper) earliestOpenCreatorEpoch(ctx sdk.Context) (int64, bool, error) {
+	pfx := []byte(types.PfxCreatorEpochOpen)
+	epoch := int64(0)
+	found := false
+	err := k.iterPrefixKeys(ctx, pfx, 1, func(key, _ []byte) error {
+		if found {
+			return nil
+		}
+		if len(key) < len(pfx)+8 {
+			return fmt.Errorf("malformed ceopen key")
+		}
+		epoch = int64(binary.BigEndian.Uint64(key[len(pfx):]))
+		found = true
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
+		return 0, false, err
+	}
+	return epoch, found, nil
+}
+
+// closeCreatorEpoch moves one elapsed epoch into settlement. An epoch that
+// neither received stream money nor saw engagement has no record at all and is
+// skipped, exactly as before.
+func (k Keeper) closeCreatorEpoch(ctx sdk.Context, epoch int64) error {
+	open, err := k.storeHas(ctx, types.KeyCreatorEpochOpen(epoch))
+	if err != nil {
 		return err
 	}
-	return k.SetCreatorClock(ctx, epoch)
+	if !open {
+		return nil
+	}
+	if err := k.storeDelete(ctx, types.KeyCreatorEpochOpen(epoch)); err != nil {
+		return err
+	}
+	if err := k.storeSet(ctx, types.KeyCreatorEpochSettle(epoch), []byte{1}); err != nil {
+		return err
+	}
+	var ce types.CreatorEpoch
+	found, err := k.getProto(ctx, types.KeyCreatorEpoch(epoch), &ce)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("CONSENSUS_FATAL:CREATOR_EPOCH_MISSING epoch=%d", epoch)
+	}
+	ce.Status = types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_COUNTING
+	ce.Phase = types.CreatorSettlementPhase_CREATOR_SETTLEMENT_PHASE_COUNT
+	ce.SettlementCursor = nil
+	ce.PartialActor = ""
+	ce.PartialCount = 0
+	if ce.AllocatedTotal == "" {
+		ce.AllocatedTotal = "0"
+	}
+	if ce.ClaimedTotal == "" {
+		ce.ClaimedTotal = "0"
+	}
+	if err := k.setProto(ctx, types.KeyCreatorEpoch(epoch), &ce); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("creator_epoch_closed",
+		sdk.NewAttribute("epoch", fmt.Sprintf("%d", epoch)),
+		sdk.NewAttribute("pool", ce.Pool),
+		sdk.NewAttribute("gross_records", fmt.Sprintf("%d", ce.GrossRecords)),
+	))
+	return nil
 }
 
 func (k Keeper) processEarlyRenewals(ctx sdk.Context, params types.Params) error {

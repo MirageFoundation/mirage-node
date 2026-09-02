@@ -30,6 +30,13 @@ func (k Keeper) processCreatorReset(ctx sdk.Context, params types.Params) (bool,
 		if err := k.SetCreatorActivationSurplus(ctx, sdkmath.ZeroInt()); err != nil {
 			return true, err
 		}
+		// The accumulator's rate, cursor and paid total all describe the grid
+		// being torn down. Its breakpoint index is wiped with the other
+		// prefixes below; these singletons are not prefix-scannable state, so
+		// they are dropped here.
+		if err := k.ClearCreatorStream(ctx); err != nil {
+			return true, err
+		}
 		reset.PoolBurned = true
 		if err := k.SetCreatorReset(ctx, reset); err != nil {
 			return true, err

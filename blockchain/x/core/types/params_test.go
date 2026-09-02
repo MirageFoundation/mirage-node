@@ -472,12 +472,24 @@ func TestFiveMinuteCreatorEpochParams(t *testing.T) {
 	p.CreatorEpochSeconds = 301
 	require.ErrorContains(t, p.ValidateV139(), "must divide")
 
+	// Payout cadence is independent of subscription length. A tranche used to
+	// pre-split its creator share into one record per epoch it spanned, so the
+	// shortest epoch and the longest subscription could not coexist and
+	// governance had to shrink subscriptions to shorten payouts. The share now
+	// streams, so the two extremes must validate together.
+	p = DefaultParams()
+	p.CreatorEpochSeconds = MinCreatorEpochSeconds
+	p.SubscriptionPeriod = MaxSubscriptionPeriodMinutes
+	p.MaxSubscriptionPeriodsPerPurchase = 1
+	require.NoError(t, p.ValidateV139())
+
+	// The combination governance actually wanted: 30-day subscriptions paying
+	// out every five minutes.
 	p = DefaultParams()
 	p.CreatorEpochSeconds = 300
-	p.SubscriptionPeriod = MaxSubscriptionPeriodMinutes
-	p.SubscriptionEarlyRenewalDays = 0
-	p.MaxSubscriptionPeriodsPerPurchase = 1
-	require.ErrorContains(t, p.ValidateV139(), "creator epochs")
+	require.NoError(t, p.ValidateV139())
+	require.Equal(t, uint64(43_200), p.SubscriptionPeriod)
+	require.Equal(t, uint64(12), p.MaxSubscriptionPeriodsPerPurchase)
 }
 
 func TestCreatorEpochClockDoesNotChangeDailyRelayEpoch(t *testing.T) {

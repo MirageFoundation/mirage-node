@@ -181,6 +181,12 @@ func (k Keeper) activateCreatorSchedule(ctx sdk.Context, newSeconds uint64, save
 	if err := k.SetCreatorClock(ctx, clock); err != nil {
 		return err
 	}
+	// Anchor the fee stream to the new grid. Nothing is owed across the
+	// boundary: on a reset the outstanding pool was burned, and on first
+	// activation there is no history to integrate.
+	if err := k.AnchorCreatorStream(ctx, now); err != nil {
+		return err
+	}
 	ctx.Logger().Info("creator schedule activated",
 		"origin_epoch", sched.OriginEpoch,
 		"origin_unix", sched.OriginUnix,
