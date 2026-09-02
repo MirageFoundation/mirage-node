@@ -88,6 +88,27 @@ describe('join locks in the lens on screen', () => {
         expect(canon(1, 4)).toBe(`${prefix}65016604`);
         expect(canon(2, 0)).toBe(`${prefix}65026600`);
     });
+
+    // TransactionHandler builds MsgJoinCommunity bytes twice: canonicalJoinCommunity
+    // for the metasig, and an inline branch for the PoW preimage. Adding the lens
+    // fields to only the first one shipped a browser that solved PoW over different
+    // bytes than the chain verifies. No suite caught it — the Python helpers sign
+    // with shared/canon.py, so only a real browser runs the PoW branch — and the
+    // retry loop labels any rejection "PoW stale", so the report was three stale
+    // retries rather than a bad preimage. Assert every builder carries the fields.
+    it('puts the lens fields in every MsgJoinCommunity preimage, metasig and PoW', () => {
+        const src = readFileSync(join(frontendSrc, 'utils/TransactionHandler.js'), 'utf8');
+        const builders = src.split('mirage.core.v1:MsgJoinCommunity\\x00').slice(1);
+        expect(builders).toHaveLength(2);
+        for (const region of builders) {
+            // Anchored at the concat call: the tag consts above it are
+            // themselves `Uint8Array.from([2]);` and would end the slice early.
+            const start = region.indexOf('concat(');
+            const body = region.slice(start, region.indexOf(');', start));
+            expect(body).toMatch(/Uint8Array\.from\(\[101\]\), uvarint64\(/);
+            expect(body).toMatch(/Uint8Array\.from\(\[102\]\), uvarint64\(/);
+        }
+    });
 });
 
 describe('curation lenses', () => {

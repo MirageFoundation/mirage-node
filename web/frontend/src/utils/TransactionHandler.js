@@ -5156,6 +5156,11 @@ class TransactionHandler {
                     tag101, encStr((transaction.user || "").toLowerCase()),
                 );
             } else if (action === 'join_community') {
+                // Fields 101/102 must match canonicalJoinCommunity above and
+                // buildCanonV139 in blockchain/app/ante_pow.go. Omitting them
+                // here solved PoW over different bytes than the chain verifies,
+                // which surfaced as the retry loop's "PoW stale" rather than as
+                // a PoW error, because that label is applied to any rejection.
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgJoinCommunity\x00");
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
@@ -5169,6 +5174,8 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr((transaction.community || "").toLowerCase()),
+                    Uint8Array.from([101]), uvarint64(transaction.mode || 0),
+                    Uint8Array.from([102]), uvarint64(transaction.pinned_team_id || 0),
                 );
             } else if (action === 'leave_community') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgLeaveCommunity\x00");
