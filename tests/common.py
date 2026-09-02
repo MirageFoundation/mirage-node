@@ -262,6 +262,21 @@ def _fresh_nonce() -> int:
     return int(time.time_ns()) ^ random.getrandbits(32)
 
 
+def signed_read_params(wallet: LocalWallet, action: str = "get_posts", address: str | None = None) -> dict:
+    """Query params that prove viewer identity for personalized feed reads."""
+    addr = str(address or wallet.address()).strip().lower()
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    sig = sign_canonical(wallet, f"{action}:{addr}:{ts}:{nonce}".encode("utf-8"))
+    return {
+        "address": addr,
+        "pubkey": _b64(wallet.public_key().public_key_bytes),
+        "signature": _b64(sig),
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+    }
+
+
 def _lb_bytes(lb_hex: str) -> bytes:
     try:
         return bytes.fromhex(lb_hex.strip())

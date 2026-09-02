@@ -808,16 +808,7 @@ def _require_signed_request(data: dict, action: str, expected_address: str):
 
     ok, gerr = _guard_push_request(user_addr, action, timestamp, nonce)
     if not ok:
-        # Preserve the guard's status (400 replay / 503 DB) but surface as auth
-        # failure when the guard returned a 400-class proof problem.
-        body, code = gerr
-        if code == 400:
-            try:
-                payload = body.get_json(silent=True) if hasattr(body, "get_json") else None
-                msg = (payload or {}).get("error") or "invalid signature"
-            except Exception:
-                msg = "invalid signature"
-            return None, _auth_error(msg)
+        # Keep the guard's own status: 400 for replay / stale proof, 503 for DB.
         return None, gerr
 
     return user_addr.lower(), None

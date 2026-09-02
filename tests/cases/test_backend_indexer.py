@@ -1000,6 +1000,14 @@ def test_indexer_hardening(backend: str):
                 }
             ]
 
+        @staticmethod
+        def query_creator_epoch_snapshot(epoch_id):
+            return {
+                "epoch": _CreatorChain.query_creator_epoch(epoch_id),
+                "accruals": _CreatorChain.query_creator_epoch_accruals(epoch_id),
+                "targets": _CreatorChain.query_creator_epoch_targets(epoch_id),
+            }
+
     creator_db = _StubCurationDB()
     creator_proc = MessageProcessor(creator_db, _CreatorChain(), lambda *a, **k: None, lambda t: "")
     creator_proc.process_creator_events(

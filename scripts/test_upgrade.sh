@@ -248,7 +248,8 @@ verify_proto_generation_parity() {
   log "protobuf generation matches committed output"
 }
 
-capture_pre_upgrade_params() {
+capture_chain_params() {
+  local dest="$1"
   ctn_python '
 import json, urllib.request, sys
 from pathlib import Path
@@ -258,14 +259,18 @@ with urllib.request.urlopen(req, timeout=10) as response:
     payload = json.load(response)
 params = payload.get("params")
 if not isinstance(params, dict) or not params:
-    print(f"pre-upgrade params response is invalid: {payload!r}", file=sys.stderr)
+    print(f"params response is invalid: {payload!r}", file=sys.stderr)
     sys.exit(1)
-path = Path("'"${STATUS_CTN}"'/pre_upgrade_params.json")
+path = Path("'"${STATUS_CTN}"'/'"${dest}"'")
 tmp = path.with_suffix(path.suffix + ".tmp")
 tmp.write_text(json.dumps(params, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 tmp.replace(path)
-print(f"captured {len(params)} pre-upgrade params in {path}")
+print(f"captured {len(params)} params in {path}")
 '
+}
+
+capture_pre_upgrade_params() {
+  capture_chain_params pre_upgrade_params.json
 }
 
 capture_pre_upgrade_financial() {
@@ -1002,6 +1007,12 @@ run_pipeline() {
   else
     wait_applied_and_live "$name"
   fi
+
+  # Snapshot after the upgrade (or no-upgrade deploy) and before rehearsal
+  # mutates pow_message_limit / subscriber_daily_relay_limit. verify_upgrade
+  # compares this file to pre_upgrade_params.json so those two proposals
+  # cannot look like a migration rewrite.
+  capture_chain_params post_upgrade_params.json
 
   set_stage pow
   ensure_test_limits

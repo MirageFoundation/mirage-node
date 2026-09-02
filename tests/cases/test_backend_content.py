@@ -50,6 +50,7 @@ from tests.common import (
     get_username_from_address,
     get_address_from_username,
     sign_canonical,
+    signed_read_params,
     compute_pow,
     check_pow_target,
     _difficulty_factor,
@@ -287,7 +288,7 @@ def test_post_lifecycle(backend: str):
             time.sleep(1)
             code, feed_c = _get(
                 f"{backend}/api/get_posts",
-                {"limit": 50, "feed": "home", "by": "newest", "address": addr},
+                {"limit": 50, "feed": "home", "by": "newest", **signed_read_params(wallet)},
             )
             posts_c = (feed_c or {}).get("posts") or []
             p_c = next((p for p in posts_c if str(p.get("post_id", "")).lower() == txh), None)
@@ -347,15 +348,15 @@ def test_post_lifecycle(backend: str):
         time.sleep(1)
         _code_n, feed_n = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "feed": "home", "by": "newest", "address": addr},
+            {"limit": 50, "feed": "home", "by": "newest", **signed_read_params(wallet)},
         )
         _code_tn, feed_tn = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "community": community, "by": "newest", "address": addr},
+            {"limit": 50, "community": community, "by": "newest", **signed_read_params(wallet)},
         )
         _code_tm, feed_tm = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "community": community, "by": "magic", "address": addr},
+            {"limit": 50, "community": community, "by": "magic", **signed_read_params(wallet)},
         )
         in_n = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_n or {}).get("posts") or []))
         in_tn = any(str(p.get("post_id", "")).lower() == txh for p in ((feed_tn or {}).get("posts") or []))
@@ -1017,7 +1018,8 @@ def test_seen_posts(backend: str) -> None:
     found_before = False
     for _ in range(int(INDEX_TIMEOUT_SEC)):
         code, feed = _get(
-            f"{backend}/api/get_posts", {"feed": "home", "by": "newest", "limit": 50, "address": viewer_addr}
+            f"{backend}/api/get_posts",
+            {"feed": "home", "by": "newest", "limit": 50, **signed_read_params(viewer)},
         )
         posts = (feed or {}).get("posts") or []
         if any(str(p.get("post_id", "")).lower() == txh for p in posts):
@@ -1072,7 +1074,7 @@ def test_seen_posts(backend: str) -> None:
             "feed": "home",
             "by": "newest",
             "limit": 50,
-            "address": free_addr,
+            **signed_read_params(free),
         },
     )
     posts_self = (feed_self or {}).get("posts") or []
@@ -1146,7 +1148,7 @@ def test_seen_posts(backend: str) -> None:
             "feed": "home",
             "by": "magic",
             "limit": 50,
-            "address": viewer_addr,
+            **signed_read_params(viewer),
         },
     )
     posts_m = (feed_m or {}).get("posts") or []

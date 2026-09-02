@@ -791,7 +791,7 @@ def test_security(backend: str):
             "address": str(sub_wallet.address()),
         }
         _code, resp = _post(f"{backend}/api/mark_inbox_viewed", payload)
-        _expect_http_error("attack.mark_inbox_viewed_mismatch_rejected", resp, 400, "address does not match pubkey")
+        _expect_http_error("attack.mark_inbox_viewed_mismatch_rejected", resp, 401, "address does not match pubkey")
     except Exception as e:
         _fail("attack.mark_inbox_viewed_mismatch_rejected", str(e))
 

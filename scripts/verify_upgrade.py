@@ -184,11 +184,15 @@ def check_params() -> None:
 
 def check_preserved_params() -> None:
     snapshot_path = STATUS_DIR / "pre_upgrade_params.json"
+    after_path = STATUS_DIR / "post_upgrade_params.json"
     if not snapshot_path.is_file():
         fail(f"pre-upgrade parameter snapshot missing: {snapshot_path}")
         return
+    if not after_path.is_file():
+        fail(f"post-upgrade parameter snapshot missing: {after_path}")
+        return
     before = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    after = http_json(f"{REST}/mirage/core/v1/params")["params"]
+    after = json.loads(after_path.read_text(encoding="utf-8"))
     if not isinstance(before, dict) or not isinstance(after, dict):
         fail("pre/post-upgrade parameter payload is not an object")
         return
@@ -321,6 +325,7 @@ def check_migration_state() -> None:
         "v1.39.0_quota_paid_backfill",
         "v1.39.0_rename_topic_pref_type",
         "v1.39.0_repair_resurrected_posts",
+        "v1.39.0_standing_rebuild",
         "v1.39.0_thread_lock_windows",
         "v1.39.0_was_subscriber_at_creation",
     )
@@ -359,10 +364,17 @@ def check_migration_state() -> None:
         )
     else:
         ok(f"all {len(expected)} v1.39 indexer migrations and checksums are recorded")
-    if meta.get("migration_checksum_repin") == VERSION:
-        ok(f"migration checksum repin marker={VERSION}")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from indexer.migrations import _REPIN_RELEASE
+
+    if meta.get("migration_checksum_repin") == _REPIN_RELEASE:
+        ok(f"migration checksum repin marker={_REPIN_RELEASE}")
     else:
-        fail(f"migration checksum repin marker={meta.get('migration_checksum_repin')!r}")
+        fail(
+            f"migration checksum repin marker={meta.get('migration_checksum_repin')!r} "
+            f"expected={_REPIN_RELEASE!r}"
+        )
     if invalid_profiles:
         fail(f"{invalid_profiles} profile(s) retain invalid Agent/reserve/subscriber state")
     else:
@@ -582,10 +594,32 @@ def check_legacy_history_reachable() -> None:
 
     legacy_feed = http_json(f"{BACKEND}/api/get_posts?scope=legacy&limit=5")
     legacy_served = legacy_feed.get("posts") if isinstance(legacy_feed, dict) else None
-    if legacy_served and all(int(post.get("protocol_version", -1)) == 0 for post in legacy_served):
+    legacy_ids = [
+        str(post.get("post_id") or post.get("txhash") or "").lower()
+        for post in (legacy_served or [])
+        if str(post.get("post_id") or post.get("txhash") or "").strip()
+    ]
+    proto0 = 0
+    if legacy_ids:
+        with psycopg.connect(db_url, connect_timeout=10) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT count(*) FROM posts "
+                    "WHERE LOWER(txhash) = ANY(%s) AND protocol_version = 0 AND NOT deleted",
+                    (legacy_ids,),
+                )
+                proto0 = int(cursor.fetchone()[0])
+        print(
+            f"  DEBUG  scope=legacy served={len(legacy_ids)} protocol0={proto0} "
+            f"ids={[i[:12] for i in legacy_ids]}"
+        )
+    if legacy_ids and proto0 == len(legacy_ids):
         ok("scope=legacy serves historical protocol-0 posts")
     else:
-        fail(f"scope=legacy did not return protocol-0 history: {legacy_served!r}")
+        fail(
+            f"scope=legacy did not return protocol-0 history: "
+            f"served={len(legacy_ids)} protocol0={proto0} posts={legacy_served!r}"
+        )
 
     if legacy_only_sample:
         community, txhash = legacy_only_sample

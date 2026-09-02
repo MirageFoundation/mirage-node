@@ -48,6 +48,7 @@ const ERROR_MAP = {
     node_catching_up: "The node is syncing. Please try again shortly.",
     backend_not_initialized: "The server is starting up. Please try again shortly.",
     indexer_unavailable: "Data service is temporarily unavailable.",
+    backend_unavailable: "The server is temporarily unavailable. Please try again shortly.",
     internal_error: "Something went wrong. Please try again.",
     debug_localhost_only: "Debug endpoints are only available on localhost.",
     upgrade_required: "This app version is out of date. Please refresh or update.",
@@ -60,6 +61,8 @@ const ERROR_MAP = {
     invalid_limit: "That request wasn't valid. Please try again.",
     invalid_offset: "That request wasn't valid. Please try again.",
     invalid_cursor: "That request wasn't valid. Please try again.",
+    invalid_creator_cursor: "That creator earnings page isn't valid.",
+    invalid_creator_limit: "That request wasn't valid. Please try again.",
     missing_author: "An author is required.",
     missing_creator: "A creator is required.",
 

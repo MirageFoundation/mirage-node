@@ -50,6 +50,7 @@ from tests.common import (
     get_username_from_address,
     get_address_from_username,
     sign_canonical,
+    signed_read_params,
     compute_pow,
     check_pow_target,
     _difficulty_factor,
@@ -381,7 +382,7 @@ def test_social_graph(backend: str):
     else:
         code, feed = _get(
             f"{backend}/api/get_posts",
-            {"limit": 50, "by": "newest", "address": addr},
+            {"limit": 50, "by": "newest", **signed_read_params(wallet)},
         )
         if code == 200:
             posts = (feed or {}).get("posts") or []
@@ -440,8 +441,8 @@ def test_social_graph(backend: str):
         # Poll the feed instead of a single-shot read: the unblocked post must
         # appear (tolerating indexer/read-replica lag) while the wildcard-blocked
         # post must stay filtered out.
-        has_unblocked = _feed_has_post(backend, addr, nonmatch_post)
-        blocked_filtered = _feed_missing_post(backend, addr, match_post)
+        has_unblocked = _feed_has_post(backend, wallet, nonmatch_post)
+        blocked_filtered = _feed_missing_post(backend, wallet, match_post)
         if has_unblocked and blocked_filtered:
             _pass("social.block_community wildcard filters get_posts")
         else:
