@@ -89,24 +89,77 @@ describe('join locks in the lens on screen', () => {
         expect(canon(2, 0)).toBe(`${prefix}65026600`);
     });
 
-    // TransactionHandler builds MsgJoinCommunity bytes twice: canonicalJoinCommunity
-    // for the metasig, and an inline branch for the PoW preimage. Adding the lens
-    // fields to only the first one shipped a browser that solved PoW over different
-    // bytes than the chain verifies. No suite caught it — the Python helpers sign
-    // with shared/canon.py, so only a real browser runs the PoW branch — and the
-    // retry loop labels any rejection "PoW stale", so the report was three stale
-    // retries rather than a bad preimage. Assert every builder carries the fields.
-    it('puts the lens fields in every MsgJoinCommunity preimage, metasig and PoW', () => {
+    // Every hand-written message is encoded twice in TransactionHandler: a
+    // canonicalX method for the metasig, and an inline branch for the PoW
+    // preimage. Nothing links the two, so adding a field to one and not the
+    // other ships a browser whose PoW covers different bytes than the chain
+    // verifies — which is how the join lens fields reached the metasig only.
+    // No suite caught it, because the Python helpers sign with shared/canon.py
+    // and only a real browser runs the PoW branch.
+    //
+    // Curation messages are structurally immune: both sides iterate
+    // CURATION_TX_SPECS. These pairs are the ones a human has to keep in step,
+    // so assert it instead of trusting it. Envelope tags legitimately differ —
+    // the metasig covers the proof (field 5) and the PoW preimage cannot — so
+    // this compares message fields, which are tag 100 and up.
+    it('keeps message fields identical between every metasig and PoW preimage', () => {
         const src = readFileSync(join(frontendSrc, 'utils/TransactionHandler.js'), 'utf8');
-        const builders = src.split('mirage.core.v1:MsgJoinCommunity\\x00').slice(1);
-        expect(builders).toHaveLength(2);
-        for (const region of builders) {
-            // Anchored at the concat call: the tag consts above it are
-            // themselves `Uint8Array.from([2]);` and would end the slice early.
-            const start = region.indexOf('concat(');
-            const body = region.slice(start, region.indexOf(');', start));
-            expect(body).toMatch(/Uint8Array\.from\(\[101\]\), uvarint64\(/);
-            expect(body).toMatch(/Uint8Array\.from\(\[102\]\), uvarint64\(/);
+        const byMessage = new Map();
+
+        for (const match of src.matchAll(/mirage\.core\.v1:(Msg\w+)\\x00/g)) {
+            const concatAt = src.indexOf('concat(', match.index);
+            expect(concatAt, `no concat() found for ${match[1]}`).toBeGreaterThan(-1);
+            // Balance parens rather than scanning for ');': the tag consts are
+            // themselves `Uint8Array.from([2]);` and nested calls end in ')'.
+            let depth = 0;
+            let end = concatAt;
+            for (let i = concatAt + 'concat'.length; i < src.length; i++) {
+                if (src[i] === '(') depth++;
+                else if (src[i] === ')') { depth--; if (depth === 0) { end = i; break; } }
+            }
+            const region = src.slice(match.index, end);
+            const declared = new Map();
+            for (const d of region.matchAll(/const\s+(tag\w+)\s*=\s*Uint8Array\.from\(\[(\d+)\]\)/g)) {
+                declared.set(d[1], Number(d[2]));
+            }
+            // Scan the whole builder, not just the concat() arguments: MsgPost
+            // and friends assemble a parts array and push onto it above the
+            // final concat. Drop the tag declarations first, so a const that is
+            // declared but never encoded still reads as a missing field.
+            const body = region.replace(/const\s+tag\w+\s*=\s*Uint8Array\.from\(\[\d+\]\);/g, '');
+            const tags = new Set();
+            for (const t of body.matchAll(/\btag(\w+)\b/g)) {
+                const resolved = declared.has(`tag${t[1]}`) ? declared.get(`tag${t[1]}`) : Number(t[1]);
+                if (Number.isFinite(resolved)) tags.add(resolved);
+            }
+            for (const t of body.matchAll(/Uint8Array\.from\(\[(\d+)\]\)/g)) tags.add(Number(t[1]));
+
+            const fields = [...tags].filter((n) => n >= 100).sort((a, b) => a - b);
+            if (!byMessage.has(match[1])) byMessage.set(match[1], []);
+            byMessage.get(match[1]).push(fields);
+        }
+
+        const paired = [...byMessage.entries()].filter(([, variants]) => variants.length > 1);
+        // Guards the parser itself: a regex that silently matched nothing would
+        // otherwise make this test vacuously pass forever.
+        expect(paired.length).toBeGreaterThanOrEqual(10);
+
+        // Report every drifted message at once. Failing on the first one turns a
+        // sweep into one-at-a-time archaeology.
+        const drifted = paired
+            .filter(([, variants]) => variants.slice(1).some((v) => String(v) !== String(variants[0])))
+            .map(([message, variants]) => `${message}: ${variants.map((v) => `[${v}]`).join(' vs ')}`);
+        expect(drifted, 'metasig and PoW preimages cover different message fields').toEqual([]);
+
+        // subscribe, set_auto_renewal and award are paid with tokens and the
+        // chain rejects any of them carrying PoW, so they must have exactly one
+        // builder. MsgSubscribe used to carry a second, unreachable PoW encoder
+        // that had quietly lost envelope_timestamp, envelope_nonce and
+        // period_count — a drift nobody could hit, sitting one routing change
+        // away from being reachable.
+        for (const message of ['MsgSubscribe', 'MsgSetAutoRenewal', 'MsgAward']) {
+            expect(byMessage.get(message), `${message} is fee-only and must not have a PoW preimage`)
+                .toHaveLength(1);
         }
     });
 });

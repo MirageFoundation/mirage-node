@@ -2631,13 +2631,39 @@ class TransactionHandler {
             // warrant re-fetching params and recomputing PoW, up to 3 times.
             const MAX_POW_RETRIES = 3;
             const POW_RETRY_DELAY_MS = 3000;
+            // One gate for both the throw and the result path, so what we tell the
+            // user cannot drift from what we actually retried on.
+            const POW_RETRYABLE = /insufficient pow|precheck|invalid last_block_hash/i;
             let result;
             let lastError = null;
+            // The rejection that caused the pending retry, reported verbatim.
+            // This used to announce "PoW stale" for every retryable rejection,
+            // but a canonical preimage that disagrees with the chain is refused
+            // by the same precheck as genuinely stale work — so a permanent
+            // encoder bug was described as a freshness problem and hidden behind
+            // three silent retries. Say what the server said.
+            let retryReason = '';
+            const retrySummary = (msg) => {
+                const grpc = String(msg).match(/details\s*=\s*"([^"]+)"/);
+                const text = String((grpc && grpc[1]) || msg).replace(/\s+/g, ' ').trim();
+                return text.length > 120 ? `${text.slice(0, 117)}…` : text;
+            };
+            const noteRetry = (attempt, errMsg) => {
+                retryReason = retrySummary(errMsg);
+                console.debug('[tx] pow-retry', {
+                    nextAttempt: attempt + 1,
+                    of: MAX_POW_RETRIES,
+                    action: final_transaction && final_transaction.action,
+                    reason: retryReason,
+                });
+            };
 
             for (let attempt = 0; attempt <= MAX_POW_RETRIES; attempt++) {
                 if (attempt > 0) {
                     // Re-fetch params and rebuild transaction for retry
-                    updateNotification(`PoW stale — retrying (${attempt}/${MAX_POW_RETRIES})…`);
+                    updateNotification(retryReason
+                        ? `Retrying (${attempt}/${MAX_POW_RETRIES}): ${retryReason}`
+                        : `Retrying (${attempt}/${MAX_POW_RETRIES})…`);
                     await new Promise(r => setTimeout(r, POW_RETRY_DELAY_MS));
 
                     if (userLevelNow === 0) {
@@ -2675,8 +2701,9 @@ class TransactionHandler {
                     lastError = error;
                     const errMsg = String(error && error.message ? error.message : error);
                     // Retry on PoW-related failures (difficulty may have changed)
-                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
-                        if (attempt < MAX_POW_RETRIES) continue;
+                    if (POW_RETRYABLE.test(errMsg) && attempt < MAX_POW_RETRIES) {
+                        noteRetry(attempt, errMsg);
+                        continue;
                     }
                     // Non-retryable throw — handle below
                     break;
@@ -2685,8 +2712,9 @@ class TransactionHandler {
                 if (result && !result.success) {
                     const errMsg = String(result.error || '');
                     // Retry on PoW-related failures
-                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
-                        if (attempt < MAX_POW_RETRIES) continue;
+                    if (POW_RETRYABLE.test(errMsg) && attempt < MAX_POW_RETRIES) {
+                        noteRetry(attempt, errMsg);
+                        continue;
                     }
                 }
 
@@ -5020,6 +5048,13 @@ class TransactionHandler {
             };
             const tag6 = Uint8Array.from([6]);   // envelope_timestamp
 
+            // These are paid with tokens and the chain refuses any of them
+            // carrying PoW, so there is no correct preimage to build here.
+            // Fail loudly instead of solving work the chain will reject.
+            if (NO_POW_ACTIONS.has(action)) {
+                throw new Error(`${action} is paid with tokens and cannot use PoW`);
+            }
+
             if (CURATION_TX_SPECS[action]) {
                 const spec = CURATION_TX_SPECS[action];
                 const parts = [
@@ -5390,30 +5425,6 @@ class TransactionHandler {
                     tag105, encStr(String(transaction.override || "").toLowerCase()),
                     ...mediaParts,
                 );
-            } else if (action === 'subscribe') {
-                // subscribe should NEVER use PoW - it must be paid with tokens
-                // This branch should not be reached, but handle gracefully
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSubscribe\x00");
-                const tag2 = Uint8Array.from([2]);
-                const tag3 = Uint8Array.from([3]);
-                const tag4 = Uint8Array.from([4]);
-                const tag5 = Uint8Array.from([5]);
-                const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
-                const targetStr = (transaction.target || "").trim().toLowerCase();
-                const targetBytes = new TextEncoder().encode(targetStr);
-                const parts = [
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(0), // difficulty always 0
-                    tag5, uvarint(0),
-                    tag100, uvarint(Number(transaction.level) || 0),
-                ];
-                if (targetStr) {
-                    parts.push(tag101, encBytes(targetBytes));
-                }
-                baseBytes = concat(...parts);
             } else {
                 throw new Error(`Unknown transaction action: "${action}"`);
             }
