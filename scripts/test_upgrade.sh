@@ -249,24 +249,23 @@ verify_proto_generation_parity() {
 }
 
 capture_pre_upgrade_params() {
-  python3 - "${STATUS_HOST}/pre_upgrade_params.json" <<'PY'
-import json
-import sys
-import urllib.request
+  ctn_python '
+import json, urllib.request, sys
 from pathlib import Path
-
 url = "http://127.0.0.1:1317/mirage/core/v1/params"
-with urllib.request.urlopen(url, timeout=10) as response:
+req = urllib.request.Request(url, headers={"Accept": "application/json"})
+with urllib.request.urlopen(req, timeout=10) as response:
     payload = json.load(response)
 params = payload.get("params")
-if not isinstance(params, dict):
-    raise SystemExit(f"pre-upgrade params response is invalid: {payload!r}")
-path = Path(sys.argv[1])
+if not isinstance(params, dict) or not params:
+    print(f"pre-upgrade params response is invalid: {payload!r}", file=sys.stderr)
+    sys.exit(1)
+path = Path("'"${STATUS_CTN}"'/pre_upgrade_params.json")
 tmp = path.with_suffix(path.suffix + ".tmp")
 tmp.write_text(json.dumps(params, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 tmp.replace(path)
 print(f"captured {len(params)} pre-upgrade params in {path}")
-PY
+'
 }
 
 rpc_height() {
@@ -435,10 +434,12 @@ rpc_is_up() {
 }
 
 lcd_is_up() {
-  python3 - <<'PY'
+  ctn_python '
 import json, urllib.request, sys
+url = "http://127.0.0.1:1317/mirage/core/v1/params"
+req = urllib.request.Request(url, headers={"Accept": "application/json"})
 try:
-    with urllib.request.urlopen("http://127.0.0.1:1317/mirage/core/v1/params", timeout=5) as resp:
+    with urllib.request.urlopen(req, timeout=5) as resp:
         payload = json.load(resp)
 except Exception as e:
     print(f"lcd not ready: {e}", file=sys.stderr)
@@ -447,7 +448,7 @@ params = payload.get("params")
 if not isinstance(params, dict) or not params:
     print(f"lcd params response is invalid: {payload!r}", file=sys.stderr)
     sys.exit(1)
-PY
+'
 }
 
 backend_is_up() {
