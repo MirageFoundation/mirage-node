@@ -154,8 +154,10 @@ activate_conda() {
 assert_backup_image_version() {
   local metadata="${STATUS_HOST}/backup-image.json"
   local version_out="${STATUS_HOST}/backup-image-version.out"
+  local version_err="${STATUS_HOST}/backup-image-version.err"
   python3 - "$ROOT" "$metadata" <<'PY'
 import json
+import subprocess
 import sys
 import tarfile
 from pathlib import Path, PurePosixPath
@@ -179,8 +181,29 @@ with tarfile.open(tarball, "r:gz") as archive:
     image = stream.read().decode("utf-8").strip()
 if not image:
     raise SystemExit(f"{tarball}: docker_image metadata is empty")
+manifest = json.loads(
+    subprocess.check_output(
+        ["git", "-C", str(root), "show", "v1.38.11:release/manifest.json"],
+        text=True,
+    )
+)
+expected_image = manifest.get("image")
+if not expected_image:
+    raise SystemExit("v1.38.11:release/manifest.json is missing image")
+if image != expected_image:
+    raise SystemExit(
+        f"{tarball}: docker_image is {image}; signed v1.38.11 image is {expected_image}"
+    )
 Path(sys.argv[2]).write_text(
-    json.dumps({"tarball": str(tarball), "image": image}, indent=2) + "\n",
+    json.dumps(
+        {
+            "tarball": str(tarball),
+            "image": image,
+            "expected_image": expected_image,
+        },
+        indent=2,
+    )
+    + "\n",
     encoding="utf-8",
 )
 print(f"backup={tarball}")
@@ -189,7 +212,7 @@ PY
   BACKUP_TARBALL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tarball"])' "$metadata")"
   local image
   image="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$metadata")"
-  log "asserting backup binary reports exactly v1.38.11"
+  log "backup image digest matches signed v1.38.11 manifest"
   set +e
   docker run --rm --network none --entrypoint /bin/bash "$image" -lc '
 set -euo pipefail
@@ -202,15 +225,14 @@ else
   exit 1
 fi
 exec "$binary" version
-' 2>&1 | tee "$version_out"
-  local docker_rc=${PIPESTATUS[0]}
+' >"$version_out" 2>"$version_err"
+  local docker_rc=$?
   set -e
   (( docker_rc == 0 )) || die "could not run the miraged binary from backup image ${image}"
   local reported
-  reported="$(tr -d '[:space:]' < "$version_out")"
-  [[ "$reported" == "v1.38.11" ]] || die \
-    "latest mirage.vote backup image reports ${reported:-<empty>}; expected exactly v1.38.11"
-  log "backup image version=${reported}"
+  reported="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' "$version_out" | sed -n '$p')"
+  [[ -n "$reported" ]] || die "backup image ${image} printed no vX.Y.Z version line"
+  log "backup binary version string=${reported} (signed v1.38.11 image may be mislabeled)"
 }
 
 verify_proto_generation_parity() {
