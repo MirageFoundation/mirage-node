@@ -3609,10 +3609,14 @@ activate_if_halted
             f"test_upgrade.sh missing required postflight gates: {missing_postflight}",
         )
         return
-    if "v1.38.11:release/manifest.json" not in rehearsal or "verify_proto_generation_parity" not in rehearsal:
+    if (
+        "v1.38.11:release/manifest.json" not in rehearsal
+        or "verify_proto_generation_parity" not in rehearsal
+        or "LCD params after reset" not in rehearsal
+    ):
         _fail(
             "install.upgrade.rehearsal_preflight",
-            "test_upgrade.sh must pin the backup image to the signed v1.38.11 digest and check protobuf parity",
+            "test_upgrade.sh must pin the backup image to the signed v1.38.11 digest, check protobuf parity, and wait for LCD after reset",
         )
         return
     reset_src = Path(os.path.join(REPO_ROOT, "scripts", "reset_local_testnet.py")).read_text(encoding="utf-8")

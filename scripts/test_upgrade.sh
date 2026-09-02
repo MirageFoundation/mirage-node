@@ -434,6 +434,22 @@ rpc_is_up() {
   fi
 }
 
+lcd_is_up() {
+  python3 - <<'PY'
+import json, urllib.request, sys
+try:
+    with urllib.request.urlopen("http://127.0.0.1:1317/mirage/core/v1/params", timeout=5) as resp:
+        payload = json.load(resp)
+except Exception as e:
+    print(f"lcd not ready: {e}", file=sys.stderr)
+    sys.exit(1)
+params = payload.get("params")
+if not isinstance(params, dict) or not params:
+    print(f"lcd params response is invalid: {payload!r}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 backend_is_up() {
   python3 - <<'PY'
 import json, urllib.request, sys
@@ -918,6 +934,7 @@ run_pipeline() {
   log "reset local testnet from latest mirage.vote backup"
   python3 "${ROOT}/scripts/reset_local_testnet.py" --file "$BACKUP_TARBALL"
   wait_until "$RPC_BUDGET_SEC" "RPC after reset" rpc_is_up
+  wait_until "$RPC_BUDGET_SEC" "LCD params after reset" lcd_is_up
   capture_pre_upgrade_params
 
   if (( NO_CHAIN_UPGRADE )); then
