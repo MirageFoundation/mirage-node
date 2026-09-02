@@ -238,6 +238,17 @@ describe('curation lenses', () => {
         expect(picker).toMatch(/const readStoredPick = \(slug\) => \(applyOnLoad/);
     });
 
+    it('does not refetch the feed when community detail concretizes effective', () => {
+        const picker = readFileSync(join(frontendSrc, 'themes/default/components/CurationLensPicker.js'), 'utf8');
+        const mainView = readFileSync(join(frontendSrc, 'themes/default/routes/MainView.js'), 'utf8');
+        // Detail-load onChange is header-only (4th arg false). A user pick
+        // still omits that arg so handleLensChange defaults syncFeed to true.
+        expect(picker).toMatch(/onChange\?\.\(lens, rawTeamId \? Number\(rawTeamId\) : null, activeTeam, false\)/);
+        expect(picker).toMatch(/onChange\?\.\(lens, teamId, null\);/);
+        expect(mainView).toMatch(/\(lens, teamId, team, syncFeed = true\)/);
+        expect(mainView).toMatch(/if \(syncFeed\) setFeedLens\(\{ lens, teamId \}\)/);
+    });
+
     it('sends every picked lens per community on an aggregated feed', () => {
         sessionStorage.clear();
         const viewer = 'mirage1viewer';
@@ -387,7 +398,7 @@ describe('v1.39 curation UI contracts', () => {
         expect(pickerSrc).toMatch(/height: var\(--community-header-control-height, 28px\)/);
         expect(pickerSrc).toMatch(/font-size: var\(--community-header-control-font-size, 0\.68rem\)/);
         expect(pickerSrc).toMatch(/role="listbox"/);
-        expect(pickerSrc).toMatch(/onChange\?\.\(lens, rawTeamId \? Number\(rawTeamId\) : null, activeTeam\)/);
+        expect(pickerSrc).toMatch(/onChange\?\.\(lens, rawTeamId \? Number\(rawTeamId\) : null, activeTeam, false\)/);
         expect(pickerSrc).not.toMatch(/styled\.select/);
         expect(pickerSrc).toMatch(/>Uncensored</);
         // LIVE_DEFAULT stays Default — do not present the most-subscribed team as selected.

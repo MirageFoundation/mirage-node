@@ -279,14 +279,21 @@ export default function CurationLensPicker({
     }, [applyOnLoad, authoritativeSelection, community, optimisticSelection, requestedSelection, viewerAddr]);
 
     useEffect(() => {
-        // Community header syncs the feed when stored preference loads.
-        // Post pickers must not: an empty detail looks like Default and
-        // snaps the thread back after the user already picked a team.
+        // Header only. The feed already fetched as `effective` (or mounted
+        // into a tab pick); renaming that cache key to raw/default/team
+        // refetches the same posts. User picks still go through change().
+        // Post pickers must not run this at all: an empty detail looks like
+        // Default and snaps the thread back after the user already picked.
         if (!applyOnLoad) return;
         if (!activated || !detail || detailLoading || teamsLoading) return;
         const [lens, rawTeamId] = selected.split(':');
-        console.debug('[lens] applying feed lens', { community, lens, teamId: rawTeamId || null, curated });
-        onChange?.(lens, rawTeamId ? Number(rawTeamId) : null, activeTeam);
+        console.debug('[lens] applying header after detail', {
+            community,
+            lens,
+            teamId: rawTeamId || null,
+            curated,
+        });
+        onChange?.(lens, rawTeamId ? Number(rawTeamId) : null, activeTeam, false);
     }, [activated, activeTeam, applyOnLoad, community, curated, detail, detailLoading, onChange, selected, teamsLoading]);
 
     const change = (selection) => {

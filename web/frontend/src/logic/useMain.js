@@ -212,9 +212,8 @@ export function useMain({
     const setFeedLens = useCallback((next) => {
         const lens = next.lens;
         const teamId = next.teamId ?? null;
-        // The picker calls this twice per pick (user click + its apply effect).
-        // A fresh object each time re-runs the fetch effect, and that re-run
-        // cancelled the pending request for the lens the user just chose.
+        // Identity check: a fresh object with the same lens re-runs the fetch
+        // effect, which cancelled the in-flight request for that lens.
         setStoredFeedLens((prev) => (
             prev.community === urlCommunity && prev.lens === lens && prev.teamId === teamId
                 ? prev

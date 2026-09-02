@@ -996,12 +996,13 @@ const MainView = ({
         setCommunity,
         routeCommunity
     });
-    const handleLensChange = useCallback((lens, teamId, team) => {
-        setFeedLens({ lens, teamId });
+    const handleLensChange = useCallback((lens, teamId, team, syncFeed = true) => {
+        if (syncFeed) setFeedLens({ lens, teamId });
         setCurationHeader({ community: urlCommunity, team });
         console.debug('[lens] community header updated', {
             community: urlCommunity,
             teamId: team?.team_id || null,
+            syncFeed,
         });
     }, [setFeedLens, urlCommunity]);
     const activeCurationTeam = curationHeader.community === urlCommunity ? curationHeader.team : null;
