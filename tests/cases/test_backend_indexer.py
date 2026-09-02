@@ -1994,6 +1994,28 @@ def _indexer_v139_projection_checks() -> None:
     else:
         _fail("indexer_v139.grpc_snapshots_precede_db_transaction", "block opens DB transaction before snapshots")
 
+    from shared.datatypes import MsgUpdateParams as _MsgUpdateParams
+
+    update_params = _MsgUpdateParams()
+    update_params.authority = "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg"
+    update_payload = update_params.SerializeToString()
+    try:
+        update_deps = MessageProcessor.collect_message_snapshot_dependencies(
+            "/mirage.core.v1.MsgUpdateParams",
+            update_payload,
+        )
+        MessageProcessor(gov_db, None, lambda *a, **k: None, lambda value: str(value)).refresh_message_signer_runtime(
+            "/mirage.core.v1.MsgUpdateParams",
+            update_payload,
+        )
+    except Exception as error:
+        _fail("indexer_v139.gov_update_params_no_envelope", str(error))
+    else:
+        if True in update_deps["creator_schedule"] and not update_deps["runtime_candidates"]:
+            _pass("indexer_v139.gov_update_params_no_envelope")
+        else:
+            _fail("indexer_v139.gov_update_params_no_envelope", f"deps={update_deps}")
+
     probe = ChainClient("http://127.0.0.1:26657")
     probe.begin_block_profile_cache()
     probe.seal_block_snapshots()

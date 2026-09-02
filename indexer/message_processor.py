@@ -577,8 +577,9 @@ class MessageProcessor:
         parsed = proto_cls()
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-        signer = derive_owner_from_msg(msg_dict)
-        if signer:
+        signer = ""
+        if msg_dict.get("envelope_pubkey"):
+            signer = derive_owner_from_msg(msg_dict)
             dependencies["runtime_candidates"].add(signer)
         if type_url == "/mirage.core.v1.MsgSubscribe":
             target = str(msg_dict.get("target", "") or signer or "").strip().lower()
@@ -616,7 +617,10 @@ class MessageProcessor:
             return
         parsed = proto_cls()
         parsed.ParseFromString(value)
-        owner = derive_owner_from_msg(MessageToDict(parsed, preserving_proto_field_name=True))
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        if not msg_dict.get("envelope_pubkey"):
+            return
+        owner = derive_owner_from_msg(msg_dict)
         if not owner:
             return
         with self.db._connect() as conn:
