@@ -5,7 +5,6 @@ Message processing logic for the indexer.
 import json
 import logging
 import re
-import time
 from typing import Optional
 from google.protobuf.json_format import MessageToDict
 from shared.datatypes import (
@@ -2695,11 +2694,11 @@ class MessageProcessor:
                     INSERT INTO creator_epochs(
                         epoch_id, pool, status, phase, gross_records, active_engagers,
                         engager_slice, allocated_total, claimed_total, finalized_epoch,
-                        claim_window_days, claim_deadline_epoch, settlement_cursor,
-                        partial_actor, partial_count, prune_pending, prune_complete,
-                        updated_height
+                        claim_window_days, claim_deadline_unix, start_unix, end_unix,
+                        settlement_cursor, partial_actor, partial_count, prune_pending,
+                        prune_complete, updated_height
                     ) VALUES(
-                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
+                        %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
                     )
                     ON CONFLICT(epoch_id) DO UPDATE SET
                         pool=EXCLUDED.pool,
@@ -2712,7 +2711,9 @@ class MessageProcessor:
                         claimed_total=EXCLUDED.claimed_total,
                         finalized_epoch=EXCLUDED.finalized_epoch,
                         claim_window_days=EXCLUDED.claim_window_days,
-                        claim_deadline_epoch=EXCLUDED.claim_deadline_epoch,
+                        claim_deadline_unix=EXCLUDED.claim_deadline_unix,
+                        start_unix=EXCLUDED.start_unix,
+                        end_unix=EXCLUDED.end_unix,
                         settlement_cursor=EXCLUDED.settlement_cursor,
                         partial_actor=EXCLUDED.partial_actor,
                         partial_count=EXCLUDED.partial_count,
@@ -2732,7 +2733,9 @@ class MessageProcessor:
                         epoch["claimed_total"],
                         epoch["finalized_epoch"],
                         epoch["claim_window_days"],
-                        epoch["claim_deadline_epoch"],
+                        epoch["claim_deadline_unix"],
+                        epoch["start_unix"],
+                        epoch["end_unix"],
                         epoch["settlement_cursor"],
                         epoch["partial_actor"],
                         epoch["partial_count"],
@@ -2746,13 +2749,15 @@ class MessageProcessor:
                     cur.executemany(
                         """
                         INSERT INTO creator_accruals(
-                            creator, epoch_id, earned, claimed, claim_deadline_epoch,
-                            claimed_height, claimed_txhash
-                        ) VALUES(%s,%s,%s,%s,%s,%s,%s)
+                            creator, epoch_id, earned, claimed, claim_deadline_unix,
+                            start_unix, end_unix, claimed_height, claimed_txhash
+                        ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT(creator, epoch_id) DO UPDATE SET
                             earned=EXCLUDED.earned,
                             claimed=EXCLUDED.claimed,
-                            claim_deadline_epoch=EXCLUDED.claim_deadline_epoch,
+                            claim_deadline_unix=EXCLUDED.claim_deadline_unix,
+                            start_unix=EXCLUDED.start_unix,
+                            end_unix=EXCLUDED.end_unix,
                             claimed_height=EXCLUDED.claimed_height,
                             claimed_txhash=EXCLUDED.claimed_txhash
                         """,
@@ -2762,7 +2767,9 @@ class MessageProcessor:
                                 epoch_id,
                                 accrual["earned"],
                                 accrual["claimed"],
-                                epoch["claim_deadline_epoch"],
+                                epoch["claim_deadline_unix"],
+                                epoch["start_unix"],
+                                epoch["end_unix"],
                                 accrual["claimed_height"],
                                 accrual["claimed_txhash"],
                             )
@@ -2787,11 +2794,7 @@ class MessageProcessor:
         """Project terminal creator epoch snapshots emitted during finalization."""
         terminal_events = {"creator_epoch_claimable", "creator_epoch_expired"}
         epochs: set[int] = set()
-        reset_attrs = None
         for event_type, attrs in self.decode_events(events):
-            if event_type == "creator_epoch_reset_completed":
-                reset_attrs = attrs
-                continue
             if event_type not in terminal_events:
                 continue
             raw_epoch = attrs.get("epoch")
@@ -2801,8 +2804,6 @@ class MessageProcessor:
             if epoch < 0:
                 raise RuntimeError(f"{event_type} event has negative epoch {epoch}")
             epochs.add(epoch)
-        if reset_attrs is not None:
-            self._reset_creator_projection(reset_attrs, height)
         for epoch in sorted(epochs):
             self.sync_creator_epoch(epoch, height)
 
@@ -2819,8 +2820,6 @@ class MessageProcessor:
                 "origin_unix": int(attrs["origin_unix"]),
                 "epoch_seconds": int(attrs["epoch_seconds"]),
                 "current_epoch": current_epoch,
-                "pending_epoch_seconds": 0,
-                "reset_in_progress": False,
             }
         else:
             raise RuntimeError("creator schedule query has no chain client or event attributes")
@@ -2831,25 +2830,6 @@ class MessageProcessor:
             schedule["origin_unix"],
             schedule["epoch_seconds"],
             schedule["current_epoch"],
-        )
-
-    def _reset_creator_projection(self, attrs: dict, height: int) -> None:
-        for field in ("origin_epoch", "origin_unix", "epoch_seconds"):
-            if field not in attrs:
-                raise RuntimeError(f"creator_epoch_reset_completed missing {field} at height {height}")
-        with self.db._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM creator_epochs")
-                cur.execute("DELETE FROM creator_accruals")
-                cur.execute("DELETE FROM creator_claims")
-                cur.execute("DELETE FROM creator_target_earnings")
-                cur.execute("DELETE FROM subscription_tranches")
-        self._store_creator_schedule(int(time.time()), attrs)
-        logger.info(
-            "creator projection reset origin_epoch=%s epoch_seconds=%s height=%s",
-            attrs["origin_epoch"],
-            attrs["epoch_seconds"],
-            height,
         )
 
     def _handle_create_community(self, type_url: str, value: bytes, ts: int, height: int):

@@ -12,11 +12,6 @@ import (
 )
 
 func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source types.SubscriptionTrancheSource, periodCount uint32, txhash string) error {
-	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
-		return err
-	} else if resetting {
-		return fmt.Errorf("creator reward reset in progress")
-	}
 	params := k.GetParams(ctx)
 	if periodCount < 1 || uint64(periodCount) > params.MaxSubscriptionPeriodsPerPurchase {
 		return fmt.Errorf("period_count must be in [1,%d]", params.MaxSubscriptionPeriodsPerPurchase)
@@ -218,12 +213,9 @@ func (k Keeper) addEpochPool(ctx sdk.Context, epoch int64, amount sdkmath.Int) e
 		return err
 	}
 	if !found {
-		ce = types.CreatorEpoch{
-			EpochId:        epoch,
-			Pool:           "0",
-			EngagerSlice:   "0",
-			AllocatedTotal: "0",
-			ClaimedTotal:   "0",
+		ce, err = k.newCreatorEpoch(ctx, epoch)
+		if err != nil {
+			return err
 		}
 	}
 	cur, err := k.parseInt(ce.Pool)

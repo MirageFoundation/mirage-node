@@ -964,7 +964,9 @@ def test_indexer_hardening(backend: str):
                 "claimed_total": "0",
                 "finalized_epoch": epoch_id + 1,
                 "claim_window_days": 30,
-                "claim_deadline_epoch": epoch_id + 32,
+                "claim_deadline_unix": 1702678400,
+                "start_unix": 1700000000,
+                "end_unix": 1700086400,
                 "settlement_cursor": None,
                 "partial_actor": None,
                 "partial_count": 0,
@@ -998,12 +1000,17 @@ def test_indexer_hardening(backend: str):
     )
     epoch_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_epochs" in s]
     accrual_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_accruals" in s]
+    # The epoch must carry its own wall-clock window. Epoch ids cannot be
+    # converted to times after governance changes creator_epoch_seconds,
+    # because the grid they were numbered on no longer exists.
     if (
         len(epoch_writes) == 1
         and epoch_writes[0][0] == 20696
+        and epoch_writes[0][11:14] == (1702678400, 1700000000, 1700086400)
         and len(accrual_writes) == 1
         and accrual_writes[0][0][0] == "mirage1creator"
         and accrual_writes[0][0][2] == "1000"
+        and accrual_writes[0][0][4:7] == (1702678400, 1700000000, 1700086400)
     ):
         _pass("indexer_hardening.creator_rewards_projected")
     else:
@@ -1051,6 +1058,12 @@ def test_indexer_hardening(backend: str):
             f"status={code} response={earnings!r}",
         )
 
+    # ── Changing the payout interval must not destroy the projection ─────
+    #
+    # v1.39.0 briefly made a creator_epoch_seconds change destructive: the
+    # chain burned the outstanding pool and the indexer dropped every creator
+    # table to match. Both halves are gone. Nothing may wipe these tables, so
+    # a stray reset event has to be inert rather than catastrophic.
     reset_db = _StubCurationDB()
     MessageProcessor(reset_db, None, lambda *a, **k: None, lambda t: "").process_creator_events(
         [
@@ -1066,29 +1079,13 @@ def test_indexer_hardening(backend: str):
         ],
         5000,
     )
-    deleted = [s for s, _ in reset_db.statements if s.startswith("DELETE FROM")]
-    schedule_writes = [p for s, p in reset_db.statements if s == "set_chain_stat creator_schedule"]
-    if (
-        deleted == [
-            "DELETE FROM creator_epochs",
-            "DELETE FROM creator_accruals",
-            "DELETE FROM creator_claims",
-            "DELETE FROM creator_target_earnings",
-            "DELETE FROM subscription_tranches",
-        ]
-        and len(schedule_writes) == 1
-        and schedule_writes[0][0]["epoch_seconds"] == 300
-        and schedule_writes[0][0]["origin_epoch"] == 19676
-        and schedule_writes[0][0]["origin_unix"] == 1700000000
-        and schedule_writes[0][0]["current_epoch"] == 19676
-        and schedule_writes[0][0]["pending_epoch_seconds"] == 0
-        and schedule_writes[0][0]["reset_in_progress"] is False
-    ):
-        _pass("indexer_hardening.creator_reset_clears_projection")
+    destructive = [s for s, _ in reset_db.statements if s.startswith("DELETE FROM")]
+    if not destructive:
+        _pass("indexer_hardening.creator_projection_is_never_wiped")
     else:
         _fail(
-            "indexer_hardening.creator_reset_clears_projection",
-            f"deleted={deleted} schedule={schedule_writes!r}",
+            "indexer_hardening.creator_projection_is_never_wiped",
+            f"deleted={destructive}",
         )
 
     # ── A curator's empty tag is a decision; only `cleared` removes the row ──

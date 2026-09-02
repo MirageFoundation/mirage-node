@@ -74,13 +74,17 @@ func (s CreatorSchedule) EpochEnd(epoch int64) (int64, error) {
 	return s.EpochStart(epoch + 1)
 }
 
-func CreatorClaimDeadline(currentEpoch int64, claimWindowDays, epochSeconds uint64) (int64, error) {
-	if epochSeconds == 0 || SecondsPerUTCDay%epochSeconds != 0 {
-		return 0, fmt.Errorf("creator epoch seconds must divide %d exactly", SecondsPerUTCDay)
-	}
-	windowEpochs, err := CheckedMulUint64(claimWindowDays, SecondsPerUTCDay/epochSeconds)
+// CreatorClaimDeadline returns the instant a claim window shuts, counted in
+// wall-clock seconds from when the epoch settled. Counting it in epochs instead
+// would tie the window's real length to the current interval, so shortening
+// creator_epoch_seconds would retroactively collapse every outstanding window.
+func CreatorClaimDeadline(settledUnix int64, claimWindowDays uint64) (int64, error) {
+	window, err := CheckedMulUint64(claimWindowDays, SecondsPerUTCDay)
 	if err != nil {
 		return 0, err
 	}
-	return CheckedAddInt64(currentEpoch, int64(windowEpochs)+1)
+	if window > math.MaxInt64 {
+		return 0, fmt.Errorf("creator claim window overflows int64")
+	}
+	return CheckedAddInt64(settledUnix, int64(window))
 }

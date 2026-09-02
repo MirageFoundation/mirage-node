@@ -143,7 +143,7 @@ func settleCreatorReward(t *testing.T, directReply bool, epochSeconds uint64, de
 		target:     target,
 		epoch:      epoch,
 		earned:     earned,
-		deadline:   epochResponse.Epoch.ClaimDeadlineEpoch,
+		deadline:   epochResponse.Epoch.ClaimDeadlineUnix,
 	}
 }
 
@@ -225,9 +225,10 @@ func advanceCreatorClockTo(t *testing.T, mk *mockKeeper, base sdk.Context, at in
 
 func TestCreatorRewardDirectReplyExpiresAfterClaimWindow(t *testing.T) {
 	reward := settleCreatorReward(t, true, 300, false)
-	require.Equal(t, reward.epoch+2+(30*288), reward.deadline)
-	expiryTime, err := types.CreatorEpochStart(reward.deadline, 300)
-	require.NoError(t, err)
+	// The window is thirty wall-clock days from settlement, not a count of
+	// epochs, so it means the same span on any interval.
+	require.Equal(t, reward.ctx.BlockTime().Unix()+30*types.SecondsPerUTCDay, reward.deadline)
+	expiryTime := reward.deadline
 	// The clock walks epoch boundaries rather than jumping, because each
 	// boundary is where a streaming tranche hands its slice to an epoch.
 	// Skipping to the deadline in one block would skip that money, so drive
@@ -314,6 +315,69 @@ func TestCreatorStreamPaysOutExactlyTheCreatorShare(t *testing.T) {
 	require.Equal(t, 0, countPrefix(mk, types.PfxCreatorStreamEnd), "every breakpoint must have been consumed")
 }
 
+// TestCreatorStreamConservesAcrossIntervalChange is what lets the payout
+// interval be governable without burning anything. Re-gridding mid-tranche
+// inserts an extra draw boundary at the switchover instant, so the epoch pools
+// are cut differently, but draws are differences of one monotone accumulator
+// and the tranche's rounding leftover still lands on its end breakpoint. The
+// creator share therefore pays out to the base unit either way.
+func TestCreatorStreamConservesAcrossIntervalChange(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	_, payer := curationSigner(0x91)
+	_, subscriber := curationSigner(0x92)
+	ensureUsername(t, mk, ctx, payer, "regrid-payer")
+	ensureUsername(t, mk, ctx, subscriber, "regrid-subscriber")
+
+	params := mk.GetParams(ctx)
+	require.Equal(t, uint64(types.SecondsPerUTCDay), params.CreatorEpochSeconds)
+	tier := params.GetTierConfig(types.LevelSubscriber)
+	require.NotNil(t, tier)
+	fundAccount(mk, payer, tier.PeriodFee)
+	_, creatorAmt, err := types.SplitCreatorFee(tier.PeriodFee, params.SubscriptionCreatorBps)
+	require.NoError(t, err)
+	require.Positive(t, creatorAmt)
+
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	start := ctx.BlockTime().Unix()
+	epoch, err := types.CreatorEpochFromUnix(start, params.CreatorEpochSeconds)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetCreatorClock(ctx, epoch))
+	require.NoError(t, mk.AnchorCreatorStream(ctx, start))
+	require.NoError(t, mk.CreateTranche(
+		ctx,
+		payer,
+		subscriber,
+		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT,
+		1,
+		genTxHash(220),
+	))
+
+	// Run a few days on daily epochs, then switch to five minutes partway
+	// through the subscription.
+	trancheEnd := start + int64(params.SubscriptionPeriod)*60
+	midway := advanceCreatorClockTo(t, mk, ctx, start+3*types.SecondsPerUTCDay)
+	paidBeforeChange, err := mk.CreatorStreamPaid(midway)
+	require.NoError(t, err)
+	require.True(t, paidBeforeChange.IsPositive(), "the stream must already have paid out")
+
+	submitCreatorEpochProposal(t, am, midway, 300)
+
+	paidAcrossChange, err := mk.CreatorStreamPaid(midway)
+	require.NoError(t, err)
+	require.True(t, paidAcrossChange.GTE(paidBeforeChange), "re-gridding may not un-pay anything")
+
+	after := advanceCreatorClockTo(t, mk, midway, trancheEnd+600)
+	paid, err := mk.CreatorStreamPaid(after)
+	require.NoError(t, err)
+	require.Equal(t, sdkmath.NewIntFromUint64(creatorAmt).String(), paid.String(),
+		"the creator share must be paid out exactly, despite the grid changing mid-tranche")
+
+	rate, err := mk.CreatorStreamRate(after)
+	require.NoError(t, err)
+	require.True(t, rate.IsZero(), "nothing may still be streaming after the tranche ends, got %s", rate)
+	require.Equal(t, 0, countPrefix(mk, types.PfxCreatorStreamEnd), "every breakpoint must have been consumed")
+}
+
 // TestCreatorStreamConservesAcrossStackedRenewal covers the awkward case: a
 // renewal's tranche begins at the previous expiry, so it starts in the future
 // and its rate must switch on at a scheduled instant rather than immediately.
@@ -367,159 +431,85 @@ func TestFiveMinuteCreatorRewardExcludesContentDeletedInEngagementEpoch(t *testi
 	settleCreatorReward(t, false, 300, true)
 }
 
-func submitCreatorEpochProposal(t *testing.T, am AppModule, ctx sdk.Context, epochSeconds, prunePerBlock uint64) {
+func submitCreatorEpochProposal(t *testing.T, am AppModule, ctx sdk.Context, epochSeconds uint64) {
 	t.Helper()
-	updates := types.Params{
-		CreatorEpochSeconds:               epochSeconds,
-		SubscriptionPeriod:                60,
-		SubscriptionEarlyRenewalDays:      0,
-		MaxSubscriptionPeriodsPerPurchase: 1,
-		CreatorPruneKeysPerBlock:          prunePerBlock,
-	}
-	paths := []string{
-		"creator_epoch_seconds",
-		"subscription_period",
-		"subscription_early_renewal_days",
-		"max_subscription_periods_per_purchase",
-	}
-	if prunePerBlock != 0 {
-		paths = append(paths, "creator_prune_keys_per_block")
-	}
 	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
 		Authority:  authtypes.NewModuleAddress(govtypes.ModuleName).String(),
-		Params:     updates,
-		UpdateMask: mask(paths...),
+		Params:     types.Params{CreatorEpochSeconds: epochSeconds},
+		UpdateMask: mask("creator_epoch_seconds"),
 	})
 	require.NoError(t, err)
 }
 
-func drainCreatorReset(t *testing.T, mk *mockKeeper, ctx sdk.Context) sdk.Context {
-	t.Helper()
-	for i := 0; i < 10_000; i++ {
-		ctx = ctx.WithBlockHeight(ctx.BlockHeight() + 1).WithEventManager(sdk.NewEventManager())
-		require.NoError(t, mk.ProcessBeginBlockV139(ctx))
-		inProgress, err := mk.CreatorResetInProgress(ctx)
-		require.NoError(t, err)
-		if !inProgress {
-			return ctx
-		}
-	}
-	t.Fatal("creator reset did not finish within 10000 blocks")
-	return ctx
-}
-
-func TestCreatorEpochResetWipesStateAndKeepsIDsMonotonic(t *testing.T) {
+// TestCreatorEpochIntervalChangeKeepsEarnedRewards pins that re-gridding epochs
+// is not destructive. Changing the interval used to burn the outstanding pool
+// and wipe every engagement, accrual, claim and tranche, because pools were
+// pre-computed per epoch id and a new interval made those ids meaningless.
+// Money is now tracked in wall-clock terms, so a change costs nobody anything.
+func TestCreatorEpochIntervalChangeKeepsEarnedRewards(t *testing.T) {
 	reward := settleCreatorReward(t, false, types.SecondsPerUTCDay, false)
 	savedClock, err := reward.mk.GetCreatorClock(reward.ctx)
 	require.NoError(t, err)
-	liability, err := reward.mk.GetCreatorLiability(reward.ctx)
+	liabilityBefore, err := reward.mk.GetCreatorLiability(reward.ctx)
 	require.NoError(t, err)
-	require.True(t, liability.IsPositive())
-	pool := authtypes.NewModuleAddress(types.CreatorPoolName).String()
-	if reward.mk.bank.balances == nil {
-		reward.mk.bank.balances = map[string]sdkmath.Int{}
-	}
-	reward.mk.bank.balances[pool] = liability
+	require.True(t, liabilityBefore.IsPositive())
+	burnedBefore := reward.mk.bank.sentModuleToModule.AmountOf(types.MintDenom)
 
-	submitCreatorEpochProposal(t, reward.am, reward.ctx, 300, 1)
-	inProgress, err := reward.mk.CreatorResetInProgress(reward.ctx)
-	require.NoError(t, err)
-	require.True(t, inProgress)
-	require.ErrorContains(
-		t,
-		reward.mk.ClaimCreatorRewards(reward.ctx, reward.creator, []int64{reward.epoch}),
-		"creator reward reset in progress",
-	)
-	fundAccount(reward.mk, reward.payer, 1)
-	require.ErrorContains(
-		t,
-		reward.mk.CreateTranche(
-			reward.ctx,
-			reward.payer,
-			reward.subscriber,
-			types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT,
-			1,
-			genTxHash(301),
-		),
-		"creator reward reset in progress",
-	)
-	require.NoError(t, reward.mk.RecordUpvoteEngagement(reward.ctx, reward.subscriber, reward.target, 1))
+	submitCreatorEpochProposal(t, reward.am, reward.ctx, 300)
 
-	first := reward.ctx.WithBlockHeight(reward.ctx.BlockHeight() + 1).WithEventManager(sdk.NewEventManager())
-	require.NoError(t, reward.mk.ProcessBeginBlockV139(first))
-	inProgress, err = reward.mk.CreatorResetInProgress(first)
+	liabilityAfter, err := reward.mk.GetCreatorLiability(reward.ctx)
 	require.NoError(t, err)
-	require.True(t, inProgress, "a 1-key budget must leave the reset unfinished")
+	require.Equal(t, liabilityBefore.String(), liabilityAfter.String(), "liability must not be zeroed")
+	require.Equal(t, burnedBefore, reward.mk.bank.sentModuleToModule.AmountOf(types.MintDenom),
+		"the creator pool must not be burned")
 
-	ctx := drainCreatorReset(t, reward.mk, first)
-	require.Greater(t, ctx.BlockHeight(), first.BlockHeight())
-	hasState, err := reward.mk.HasCreatorRewardState(ctx)
+	epochResponse, err := reward.am.CreatorEpoch(reward.ctx, &types.QueryCreatorEpochRequest{EpochId: reward.epoch})
 	require.NoError(t, err)
-	require.False(t, hasState)
-	liability, err = reward.mk.GetCreatorLiability(ctx)
-	require.NoError(t, err)
-	require.True(t, liability.IsZero())
-	require.True(t, reward.mk.bank.sentModuleToModule.AmountOf(types.MintDenom).IsPositive())
+	require.Equal(t, types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE, epochResponse.Epoch.Status,
+		"a settled epoch must survive the interval change")
+	require.Equal(t, reward.deadline, epochResponse.Epoch.ClaimDeadlineUnix, "the claim window must not move")
 
-	clock, err := reward.mk.GetCreatorClock(ctx)
+	require.NoError(t, reward.mk.ClaimCreatorRewards(reward.ctx, reward.creator, []int64{reward.epoch}))
+	require.Equal(t, reward.earned, reward.mk.bank.sentModuleToAccount.AmountOf(types.MintDenom))
+
+	// Epoch ids never repeat: the new grid opens after the one in flight.
+	clock, err := reward.mk.GetCreatorClock(reward.ctx)
 	require.NoError(t, err)
 	require.Equal(t, savedClock+1, clock)
-	unixRebase, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), 300)
-	require.NoError(t, err)
-	require.NotEqual(t, unixRebase, clock)
-
-	sched, err := reward.am.CreatorSchedule(ctx, &types.QueryCreatorScheduleRequest{})
+	sched, err := reward.am.CreatorSchedule(reward.ctx, &types.QueryCreatorScheduleRequest{})
 	require.NoError(t, err)
 	require.Equal(t, savedClock+1, sched.OriginEpoch)
 	require.Equal(t, uint64(300), sched.EpochSeconds)
-	require.False(t, sched.ResetInProgress)
-
-	_, err = reward.am.CreatorEpoch(ctx, &types.QueryCreatorEpochRequest{EpochId: reward.epoch})
-	require.Error(t, err)
-
-	_, subscriber2 := curationSigner(0x64)
-	ensureUsername(t, reward.mk, ctx, subscriber2, "reward-subscriber-2")
-	tier := reward.mk.GetParams(ctx).GetTierConfig(types.LevelSubscriber)
-	fundAccount(reward.mk, reward.payer, tier.PeriodFee)
-	require.NoError(t, reward.mk.CreateTranche(
-		ctx,
-		reward.payer,
-		subscriber2,
-		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT,
-		1,
-		genTxHash(302),
-	))
-	require.NoError(t, reward.mk.RecordUpvoteEngagement(ctx, subscriber2, reward.target, 1))
-	settlementTime, err := types.CreatorSchedule{
-		OriginEpoch:  sched.OriginEpoch,
-		OriginUnix:   sched.OriginUnix,
-		EpochSeconds: sched.EpochSeconds,
-	}.EpochEnd(clock)
-	require.NoError(t, err)
-	settledCtx := ctx.
-		WithBlockHeight(ctx.BlockHeight() + 1).
-		WithBlockTime(time.Unix(settlementTime+1, 0)).
-		WithEventManager(sdk.NewEventManager())
-	require.NoError(t, reward.mk.ProcessBeginBlockV139(settledCtx))
-	epochResponse, err := reward.am.CreatorEpoch(settledCtx, &types.QueryCreatorEpochRequest{EpochId: clock})
-	require.NoError(t, err)
-	require.Equal(t, types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE, epochResponse.Epoch.Status)
-	require.NoError(t, reward.mk.ClaimCreatorRewards(settledCtx, reward.creator, []int64{clock}))
 }
 
-func TestCreatorEpochResetLengthensIntervalMonotonically(t *testing.T) {
+// TestCreatorClaimWindowSurvivesIntervalShortening covers the specific hazard
+// that made the destructive reset look unavoidable. Deadlines used to be epoch
+// numbers, so going from daily to five-minute epochs turned "thirty days from
+// now" into about two and a half hours and would have silently expired every
+// outstanding claim.
+func TestCreatorClaimWindowSurvivesIntervalShortening(t *testing.T) {
+	reward := settleCreatorReward(t, false, types.SecondsPerUTCDay, false)
+	submitCreatorEpochProposal(t, reward.am, reward.ctx, 300)
+
+	almostExpired := reward.ctx.WithBlockTime(time.Unix(reward.deadline-1, 0))
+	require.NoError(t, reward.mk.ClaimCreatorRewards(almostExpired, reward.creator, []int64{reward.epoch}),
+		"the full wall-clock window must still be open after shortening the interval")
+}
+
+// TestCreatorEpochIntervalLengthensMonotonically keeps ids increasing when the
+// interval grows, where a naive rebase onto unix/seconds would move them
+// backwards and collide with epochs that already settled.
+func TestCreatorEpochIntervalLengthensMonotonically(t *testing.T) {
 	reward := settleCreatorReward(t, false, 300, false)
 	savedClock, err := reward.mk.GetCreatorClock(reward.ctx)
 	require.NoError(t, err)
-	submitCreatorEpochProposal(t, reward.am, reward.ctx, types.SecondsPerUTCDay, 1000)
-	ctx := drainCreatorReset(t, reward.mk, reward.ctx)
-	clock, err := reward.mk.GetCreatorClock(ctx)
+
+	submitCreatorEpochProposal(t, reward.am, reward.ctx, types.SecondsPerUTCDay)
+
+	clock, err := reward.mk.GetCreatorClock(reward.ctx)
 	require.NoError(t, err)
 	require.Equal(t, savedClock+1, clock)
-	unixRebase, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), types.SecondsPerUTCDay)
+	unixRebase, err := types.CreatorEpochFromUnix(reward.ctx.BlockTime().Unix(), types.SecondsPerUTCDay)
 	require.NoError(t, err)
 	require.Greater(t, clock, unixRebase)
-	hasState, err := reward.mk.HasCreatorRewardState(ctx)
-	require.NoError(t, err)
-	require.False(t, hasState)
 }

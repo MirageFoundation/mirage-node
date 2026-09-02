@@ -23,9 +23,6 @@ function validateEarnings(data) {
         if (typeof item.earned !== 'string' || typeof item.claimed !== 'string') {
             throw new Error('Creator earnings amounts must be decimal strings');
         }
-        if (!Number.isSafeInteger(Number(item.claim_deadline_epoch))) {
-            throw new Error('Creator earnings deadline is required');
-        }
         for (const field of ['epoch_start_unix', 'epoch_end_unix', 'claim_deadline_unix']) {
             if (!Number.isSafeInteger(Number(item[field])) || Number(item[field]) <= 0) {
                 throw new Error(`Creator earnings ${field} is required`);

@@ -53,46 +53,12 @@ func (k Keeper) GetCreatorEpochAccrualsPaginated(
 	return accruals, nextKey, nil
 }
 
-func (k Keeper) HasCreatorRewardState(ctx sdk.Context) (bool, error) {
-	liability, err := k.GetCreatorLiability(ctx)
-	if err != nil {
-		return false, err
-	}
-	if !liability.IsZero() {
-		return true, nil
-	}
-	prefixes := types.CreatorResetPrefixes()
-	for _, prefix := range prefixes {
-		found := false
-		if err := k.iterPrefixKeys(ctx, []byte(prefix), 1, func(_, _ []byte) error {
-			found = true
-			return nil
-		}); err != nil {
-			return false, err
-		}
-		if found {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, direction int32) error {
 	if err := k.setVoteDir(ctx, voter, target, direction); err != nil {
 		return err
 	}
 	if direction != 1 {
 		return k.clearOpenUpvote(ctx, voter, target)
-	}
-	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
-		return err
-	} else if resetting {
-		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_engagement_paused",
-			sdk.NewAttribute("kind", "upvote"),
-			sdk.NewAttribute("actor", voter),
-			sdk.NewAttribute("target", target),
-		))
-		return nil
 	}
 	if has, err := k.storeHas(ctx, types.KeyUpvoteReserved(types.MustAcc(voter), mustHash(target))); err != nil {
 		return err
@@ -138,16 +104,6 @@ func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, di
 }
 
 func (k Keeper) RecordDirectReplyEngagement(ctx sdk.Context, commenter, parent, sourceHash string) error {
-	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
-		return err
-	} else if resetting {
-		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_engagement_paused",
-			sdk.NewAttribute("kind", "direct_reply"),
-			sdk.NewAttribute("actor", commenter),
-			sdk.NewAttribute("target", parent),
-		))
-		return nil
-	}
 	parentH := mustHash(parent)
 	key := types.KeyReplyReserved(types.MustAcc(commenter), parentH)
 	if has, err := k.storeHas(ctx, key); err != nil {
@@ -196,6 +152,34 @@ func (k Keeper) RecordDirectReplyEngagement(ctx sdk.Context, commenter, parent, 
 	return nil
 }
 
+// newCreatorEpoch stamps an epoch with the wall-clock window it covers on the
+// grid live right now. Recording it here rather than deriving it later is what
+// lets a settled epoch keep reporting honest times after governance changes
+// creator_epoch_seconds and renumbers the grid underneath it.
+func (k Keeper) newCreatorEpoch(ctx sdk.Context, epoch int64) (types.CreatorEpoch, error) {
+	sched, err := k.GetCreatorSchedule(ctx)
+	if err != nil {
+		return types.CreatorEpoch{}, err
+	}
+	start, err := sched.EpochStart(epoch)
+	if err != nil {
+		return types.CreatorEpoch{}, err
+	}
+	end, err := sched.EpochEnd(epoch)
+	if err != nil {
+		return types.CreatorEpoch{}, err
+	}
+	return types.CreatorEpoch{
+		EpochId:        epoch,
+		Pool:           "0",
+		EngagerSlice:   "0",
+		AllocatedTotal: "0",
+		ClaimedTotal:   "0",
+		StartUnix:      start,
+		EndUnix:        end,
+	}, nil
+}
+
 func (k Keeper) ensureOpenEpoch(ctx sdk.Context, epoch int64) (*types.CreatorEpoch, error) {
 	var ce types.CreatorEpoch
 	found, err := k.getProto(ctx, types.KeyCreatorEpoch(epoch), &ce)
@@ -203,12 +187,9 @@ func (k Keeper) ensureOpenEpoch(ctx sdk.Context, epoch int64) (*types.CreatorEpo
 		return nil, err
 	}
 	if !found {
-		ce = types.CreatorEpoch{
-			EpochId:        epoch,
-			Pool:           "0",
-			EngagerSlice:   "0",
-			AllocatedTotal: "0",
-			ClaimedTotal:   "0",
+		ce, err = k.newCreatorEpoch(ctx, epoch)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if err := k.storeSet(ctx, types.KeyCreatorEpochOpen(epoch), []byte{1}); err != nil {
@@ -271,11 +252,6 @@ func mustHash(h string) []byte {
 }
 
 func (k Keeper) ClaimCreatorRewards(ctx sdk.Context, creator string, epochs []int64) error {
-	if resetting, err := k.CreatorResetInProgress(ctx); err != nil {
-		return err
-	} else if resetting {
-		return fmt.Errorf("creator reward reset in progress")
-	}
 	params := k.GetParams(ctx)
 	if len(epochs) < 1 || uint64(len(epochs)) > params.MaxCreatorClaimEpochs {
 		return fmt.Errorf("epoch count must be in [1,%d]", params.MaxCreatorClaimEpochs)
@@ -285,10 +261,7 @@ func (k Keeper) ClaimCreatorRewards(ctx sdk.Context, creator string, epochs []in
 			return fmt.Errorf("epoch ids must be strictly increasing")
 		}
 	}
-	clock, err := k.GetCreatorClock(ctx)
-	if err != nil {
-		return err
-	}
+	now := ctx.BlockTime().Unix()
 	sum := sdkmath.ZeroInt()
 	type item struct {
 		epoch int64
@@ -312,7 +285,7 @@ func (k Keeper) ClaimCreatorRewards(ctx sdk.Context, creator string, epochs []in
 		if ce.Status != types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE {
 			return fmt.Errorf("epoch %d is not claimable", ep)
 		}
-		if clock >= ce.ClaimDeadlineEpoch {
+		if now >= ce.ClaimDeadlineUnix {
 			return fmt.Errorf("epoch %d claim window closed", ep)
 		}
 		if has, err := k.storeHas(ctx, types.KeyEpochClaim(ep, types.MustAcc(creator))); err != nil {

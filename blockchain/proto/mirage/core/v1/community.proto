@@ -113,7 +113,16 @@ message CreatorEpoch {
   string claimed_total = 9;
   int64 finalized_epoch = 10;
   int64 claim_window_days = 11;
-  int64 claim_deadline_epoch = 12;
+  // Wall-clock instant the claim window shuts, not an epoch number. Epoch
+  // numbering is relative to the live grid, so a governance change to
+  // creator_epoch_seconds would otherwise silently redefine how long every
+  // outstanding claim window lasts.
+  int64 claim_deadline_unix = 12;
+  // Wall-clock bounds of this epoch, recorded when it is created. Epoch ids
+  // cannot be converted to times after a governance interval change, because
+  // the grid they were numbered on is gone; the epoch has to carry its own.
+  int64 start_unix = 18;
+  int64 end_unix = 19;
   bytes settlement_cursor = 13;
   string partial_actor = 14;
   uint64 partial_count = 15;

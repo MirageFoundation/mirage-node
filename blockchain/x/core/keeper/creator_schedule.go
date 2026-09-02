@@ -10,16 +10,6 @@ import (
 )
 
 const creatorScheduleSize = 24
-const CreatorResetHeaderSize = 29
-
-type CreatorReset struct {
-	FromSeconds uint64
-	ToSeconds   uint64
-	SavedClock  int64
-	PrefixIndex uint32
-	PoolBurned  bool
-	Cursor      []byte
-}
 
 func (k Keeper) GetCreatorSchedule(ctx sdk.Context) (types.CreatorSchedule, error) {
 	bz, err := k.storeGet(ctx, []byte(types.PfxCreatorSchedule))
@@ -62,66 +52,23 @@ func (k Keeper) CreatorEpochAt(ctx sdk.Context, unix int64) (int64, error) {
 	return sched.EpochAt(unix)
 }
 
-func (k Keeper) CreatorResetInProgress(ctx sdk.Context) (bool, error) {
-	return k.storeHas(ctx, []byte(types.PfxCreatorReset))
-}
-
-func (k Keeper) GetCreatorReset(ctx sdk.Context) (CreatorReset, bool, error) {
-	bz, err := k.storeGet(ctx, []byte(types.PfxCreatorReset))
-	if err != nil {
-		return CreatorReset{}, false, err
-	}
-	if len(bz) == 0 {
-		return CreatorReset{}, false, nil
-	}
-	if len(bz) < CreatorResetHeaderSize {
-		return CreatorReset{}, false, fmt.Errorf("corrupt creator reset length %d", len(bz))
-	}
-	reset := CreatorReset{
-		FromSeconds: binary.BigEndian.Uint64(bz[0:8]),
-		ToSeconds:   binary.BigEndian.Uint64(bz[8:16]),
-		SavedClock:  int64(binary.BigEndian.Uint64(bz[16:24])),
-		PrefixIndex: binary.BigEndian.Uint32(bz[24:28]),
-		PoolBurned:  bz[28] != 0,
-	}
-	if len(bz) > CreatorResetHeaderSize {
-		reset.Cursor = append([]byte(nil), bz[CreatorResetHeaderSize:]...)
-	}
-	return reset, true, nil
-}
-
-func (k Keeper) SetCreatorReset(ctx sdk.Context, reset CreatorReset) error {
-	bz := make([]byte, CreatorResetHeaderSize+len(reset.Cursor))
-	binary.BigEndian.PutUint64(bz[0:8], reset.FromSeconds)
-	binary.BigEndian.PutUint64(bz[8:16], reset.ToSeconds)
-	binary.BigEndian.PutUint64(bz[16:24], uint64(reset.SavedClock))
-	binary.BigEndian.PutUint32(bz[24:28], reset.PrefixIndex)
-	if reset.PoolBurned {
-		bz[28] = 1
-	}
-	copy(bz[CreatorResetHeaderSize:], reset.Cursor)
-	return k.storeSet(ctx, []byte(types.PfxCreatorReset), bz)
-}
-
-func (k Keeper) ClearCreatorReset(ctx sdk.Context) error {
-	return k.storeDelete(ctx, []byte(types.PfxCreatorReset))
-}
-
+// ApplyCreatorEpochSeconds re-grids creator epochs without destroying anything.
+//
+// This used to burn the outstanding creator pool and wipe every engagement,
+// accrual, claim and tranche, because pools were pre-computed per epoch id and
+// a new interval made those ids meaningless. Nothing is keyed that way any
+// more: the fee accumulator runs on wall-clock time and claim windows close at
+// a wall-clock instant, so both survive the switch untouched.
+//
+// The only care needed is the epoch in flight. It gets whatever the stream owes
+// it up to this instant and is closed on the old grid, then the new grid starts
+// here. Epoch ids stay monotonic across the change so settled epochs, accruals
+// and claims keep working.
 func (k Keeper) ApplyCreatorEpochSeconds(ctx sdk.Context, newSeconds uint64) error {
 	if newSeconds == 0 {
 		return fmt.Errorf("creator_epoch_seconds must be set")
 	}
-	inProgress, err := k.CreatorResetInProgress(ctx)
-	if err != nil {
-		return err
-	}
-	if inProgress {
-		return fmt.Errorf("creator_epoch_seconds cannot change while a reset is in progress")
-	}
-	hasState, err := k.HasCreatorRewardState(ctx)
-	if err != nil {
-		return err
-	}
+	now := ctx.BlockTime().Unix()
 	clock, err := k.GetCreatorClock(ctx)
 	if err != nil {
 		return err
@@ -130,40 +77,51 @@ func (k Keeper) ApplyCreatorEpochSeconds(ctx sdk.Context, newSeconds uint64) err
 	if err != nil {
 		return err
 	}
-	if hasState {
-		ctx.Logger().Info("creator epoch reset scheduled",
-			"from_seconds", current.EpochSeconds,
-			"to_seconds", newSeconds,
-			"saved_clock", clock,
-			"height", ctx.BlockHeight())
-		if err := k.SetCreatorReset(ctx, CreatorReset{
-			FromSeconds: current.EpochSeconds,
-			ToSeconds:   newSeconds,
-			SavedClock:  clock,
-		}); err != nil {
-			return err
-		}
-		ctx.EventManager().EmitEvent(sdk.NewEvent("creator_epoch_reset_scheduled",
-			sdk.NewAttribute("from_seconds", fmt.Sprintf("%d", current.EpochSeconds)),
-			sdk.NewAttribute("to_seconds", fmt.Sprintf("%d", newSeconds)),
-			sdk.NewAttribute("saved_clock", fmt.Sprintf("%d", clock)),
-		))
+	if current.EpochSeconds == newSeconds {
 		return nil
 	}
-	return k.activateCreatorSchedule(ctx, newSeconds, clock, ctx.BlockTime().Unix(), false)
+	if clock > 0 {
+		if err := k.settleCreatorEpochInFlight(ctx, clock, now); err != nil {
+			return err
+		}
+	}
+	ctx.Logger().Info("creator epoch interval changing",
+		"from_seconds", current.EpochSeconds,
+		"to_seconds", newSeconds,
+		"clock", clock,
+		"height", ctx.BlockHeight())
+	return k.activateCreatorSchedule(ctx, newSeconds, clock, now)
 }
 
-func (k Keeper) activateCreatorSchedule(ctx sdk.Context, newSeconds uint64, savedClock, now int64, afterReset bool) error {
+// settleCreatorEpochInFlight pays the partially elapsed epoch what the stream
+// produced during it and closes it on the outgoing grid, so no money is
+// stranded between the two grids.
+func (k Keeper) settleCreatorEpochInFlight(ctx sdk.Context, epoch, now int64) error {
+	params := k.GetParams(ctx)
+	amount, complete, err := k.DrawCreatorStream(ctx, now, int(params.CreatorSettlementRecordsPerBlock))
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return fmt.Errorf("creator stream has too many pending boundaries to change the epoch interval this block")
+	}
+	if amount.IsPositive() {
+		if err := k.addEpochPool(ctx, epoch, amount); err != nil {
+			return err
+		}
+	}
+	return k.closeCreatorEpoch(ctx, epoch)
+}
+
+func (k Keeper) activateCreatorSchedule(ctx sdk.Context, newSeconds uint64, savedClock, now int64) error {
 	sched := types.CreatorSchedule{EpochSeconds: newSeconds}
 	var clock int64
 	if savedClock > 0 {
-		originEpoch := savedClock
-		if afterReset {
-			next, err := types.CheckedAddInt64(savedClock, 1)
-			if err != nil {
-				return err
-			}
-			originEpoch = next
+		// The in-flight epoch was just closed, so the new grid opens at the
+		// next id. Ids therefore never repeat across an interval change.
+		originEpoch, err := types.CheckedAddInt64(savedClock, 1)
+		if err != nil {
+			return err
 		}
 		sched.OriginEpoch = originEpoch
 		sched.OriginUnix = now
@@ -181,18 +139,24 @@ func (k Keeper) activateCreatorSchedule(ctx sdk.Context, newSeconds uint64, save
 	if err := k.SetCreatorClock(ctx, clock); err != nil {
 		return err
 	}
-	// Anchor the fee stream to the new grid. Nothing is owed across the
-	// boundary: on a reset the outstanding pool was burned, and on first
-	// activation there is no history to integrate.
-	if err := k.AnchorCreatorStream(ctx, now); err != nil {
+	// The fee stream runs on wall-clock time, so it carries across a grid
+	// change untouched and must not be re-anchored here: doing so would zero
+	// the rate and the paid total and strand every tranche's remaining money.
+	// Only a stream that has never run needs a starting point.
+	cursor, err := k.CreatorStreamCursor(ctx)
+	if err != nil {
 		return err
+	}
+	if cursor == 0 {
+		if err := k.AnchorCreatorStream(ctx, now); err != nil {
+			return err
+		}
 	}
 	ctx.Logger().Info("creator schedule activated",
 		"origin_epoch", sched.OriginEpoch,
 		"origin_unix", sched.OriginUnix,
 		"epoch_seconds", sched.EpochSeconds,
 		"clock", clock,
-		"after_reset", afterReset,
 		"height", ctx.BlockHeight())
 	ctx.EventManager().EmitEvent(sdk.NewEvent("creator_epoch_schedule_updated",
 		sdk.NewAttribute("origin_epoch", fmt.Sprintf("%d", sched.OriginEpoch)),

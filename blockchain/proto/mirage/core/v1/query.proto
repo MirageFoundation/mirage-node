@@ -310,7 +310,5 @@ message QueryCreatorScheduleResponse {
   int64 origin_unix = 2;
   uint64 epoch_seconds = 3;
   int64 current_epoch = 4;
-  uint64 pending_epoch_seconds = 5;
-  bool reset_in_progress = 6;
 }
 

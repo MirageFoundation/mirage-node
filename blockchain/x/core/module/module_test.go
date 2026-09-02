@@ -299,97 +299,45 @@ func TestUpdateParamsRebasesEmptyCreatorClock(t *testing.T) {
 	require.Equal(t, uint64(300), mk.GetParams(ctx).CreatorEpochSeconds)
 }
 
-func TestUpdateParamsSchedulesCreatorIntervalReset(t *testing.T) {
+// TestUpdateParamsAppliesCreatorIntervalImmediately pins that changing the
+// payout interval is an ordinary parameter change. It used to enqueue a
+// multi-block destructive reset that burned the creator pool, wiped reward
+// state, and locked out any further interval change until it drained.
+func TestUpdateParamsAppliesCreatorIntervalImmediately(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
-	mk.storeService.store[string(types.KeyCreatorEpoch(1))] = []byte{1}
+	settled := string(types.KeyCreatorEpoch(1))
+	mk.storeService.store[settled] = []byte{1}
 	require.NoError(t, mk.SetCreatorClock(ctx, 19675))
-	updates := types.Params{
-		CreatorEpochSeconds:               300,
-		SubscriptionPeriod:                60,
-		SubscriptionEarlyRenewalDays:      0,
-		MaxSubscriptionPeriodsPerPurchase: 1,
+
+	changeInterval := func(seconds uint64) error {
+		_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
+			Authority:  authtypes.NewModuleAddress(govtypes.ModuleName).String(),
+			Params:     types.Params{CreatorEpochSeconds: seconds},
+			UpdateMask: mask("creator_epoch_seconds"),
+		})
+		return err
 	}
 
-	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{
-		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
-		Params:    updates,
-		UpdateMask: mask(
-			"creator_epoch_seconds",
-			"subscription_period",
-			"subscription_early_renewal_days",
-			"max_subscription_periods_per_purchase",
-		),
-	})
-	require.NoError(t, err)
+	require.NoError(t, changeInterval(300))
 	require.Equal(t, uint64(300), mk.GetParams(ctx).CreatorEpochSeconds)
-	inProgress, err := mk.CreatorResetInProgress(ctx)
-	require.NoError(t, err)
-	require.True(t, inProgress)
+	require.Contains(t, mk.storeService.store, settled, "existing reward state must survive")
+
+	// Ids advance past the epoch that was in flight, and the grid is live at once.
 	clock, err := mk.GetCreatorClock(ctx)
 	require.NoError(t, err)
-	require.Equal(t, int64(19675), clock)
-
-	_, err = am.UpdateParams(ctx, &types.MsgUpdateParams{
-		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
-		Params: types.Params{
-			CreatorEpochSeconds:               600,
-			SubscriptionPeriod:                60,
-			SubscriptionEarlyRenewalDays:      0,
-			MaxSubscriptionPeriodsPerPurchase: 1,
-		},
-		UpdateMask: mask(
-			"creator_epoch_seconds",
-			"subscription_period",
-			"subscription_early_renewal_days",
-			"max_subscription_periods_per_purchase",
-		),
-	})
-	require.ErrorContains(t, err, "while a reset is in progress")
-
-	current := mk.GetParams(ctx)
-	_, err = am.UpdateParams(ctx, &types.MsgUpdateParams{
-		Authority: authtypes.NewModuleAddress(govtypes.ModuleName).String(),
-		Params:    types.Params{CreatorClaimWindowDays: current.CreatorClaimWindowDays + 1},
-		UpdateMask: mask("creator_claim_window_days"),
-	})
+	require.Equal(t, int64(19676), clock)
+	sched, err := mk.GetCreatorSchedule(ctx)
 	require.NoError(t, err)
-	require.Equal(t, current.CreatorClaimWindowDays+1, mk.GetParams(ctx).CreatorClaimWindowDays)
-	inProgress, err = mk.CreatorResetInProgress(ctx)
-	require.NoError(t, err)
-	require.True(t, inProgress)
-}
+	require.Equal(t, uint64(300), sched.EpochSeconds)
+	require.Equal(t, int64(19676), sched.OriginEpoch)
 
-func TestCreatorIntervalStateGuardCoversEveryStateClass(t *testing.T) {
-	tests := []struct {
-		name  string
-		key   string
-		value []byte
-	}{
-		{"liability", types.PfxCreatorLiability, []byte("1")},
-	}
-	for _, prefix := range types.CreatorResetPrefixes() {
-		tests = append(tests, struct {
-			name  string
-			key   string
-			value []byte
-		}{prefix, prefix + "present", []byte{1}})
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mk, ctx, _ := setupModule(t)
-			mk.storeService.store[tt.key] = tt.value
-			hasState, err := mk.HasCreatorRewardState(ctx)
-			require.NoError(t, err)
-			require.True(t, hasState)
-		})
-	}
-
-	mk, ctx, _ := setupModule(t)
-	require.NoError(t, mk.SetCreatorClock(ctx, 123))
-	hasState, err := mk.HasCreatorRewardState(ctx)
+	// No lockout: a second change in the same block is just another change.
+	require.NoError(t, changeInterval(600))
+	require.Equal(t, uint64(600), mk.GetParams(ctx).CreatorEpochSeconds)
+	clock, err = mk.GetCreatorClock(ctx)
 	require.NoError(t, err)
-	require.False(t, hasState, "the empty creator clock is the state governance rebases")
+	require.Equal(t, int64(19677), clock)
 }
 
 func TestGetProfilesReturnsCorruptProfileError(t *testing.T) {

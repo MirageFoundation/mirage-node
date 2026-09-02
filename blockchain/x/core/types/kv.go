@@ -70,13 +70,11 @@ const (
 	PfxCreatorLiability     = "creator_liability"
 	PfxCreatorSurplus       = "creator_activation_surplus"
 	PfxCreatorSchedule      = "creator_schedule"
-	PfxCreatorReset         = "creator_reset"
 	// Creator fee streaming. A tranche no longer pre-splits its creator share
-	// into one record per epoch it spans; it adds a per-second rate and one
-	// end breakpoint, and each epoch draws its pool from the accumulator as it
-	// elapses. Every creator_stream_* singleton is zeroed directly by the
-	// reset, so only the breakpoint index belongs in CreatorResetPrefixes.
-	PfxCreatorStream     = "creator_stream_"
+	// into one record per epoch it spans; it adds a per-second rate and two
+	// breakpoints, and each epoch draws its pool from the accumulator as it
+	// elapses. All of it is keyed by wall-clock time, which is what lets the
+	// epoch interval change without disturbing money already paid in.
 	PfxCreatorStreamRate = "creator_stream_rate"
 	PfxCreatorStreamAcc  = "creator_stream_acc"
 	PfxCreatorStreamPaid = "creator_stream_paid"
@@ -484,31 +482,4 @@ func UTCEpoch(unix int64) int64 {
 
 func InvertedSupport(count uint64) uint64 {
 	return ^uint64(0) - count
-}
-
-// CreatorResetPrefixes is the deterministic wipe order for a destructive
-// creator-epoch interval change. Profiles, votes, posts, and active
-// subscription status are not in this list.
-func CreatorResetPrefixes() []string {
-	return []string{
-		PfxCreatorEpochOpen,
-		PfxCreatorEpochSettle,
-		PfxCreatorEpochDeadline,
-		PfxCreatorEpochPrune,
-		PfxEngagement,
-		PfxEngagementCount,
-		PfxEpochTarget,
-		PfxTargetEpoch,
-		PfxTargetTotal,
-		PfxEpochCreatorAccrual,
-		PfxCreatorEpochIdx,
-		PfxEpochClaim,
-		PfxUpvoteReserved,
-		PfxReplyReserved,
-		PfxTranche,
-		PfxTranchePayer,
-		PfxTrancheRecipient,
-		PfxCreatorEpoch,
-		PfxCreatorStreamEnd,
-	}
 }

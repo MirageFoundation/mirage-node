@@ -960,7 +960,9 @@ def _build_pool():
     add_f(creator_epoch, "claimed_total", 9, STRING)
     add_f(creator_epoch, "finalized_epoch", 10, INT64)
     add_f(creator_epoch, "claim_window_days", 11, INT64)
-    add_f(creator_epoch, "claim_deadline_epoch", 12, INT64)
+    add_f(creator_epoch, "claim_deadline_unix", 12, INT64)
+    add_f(creator_epoch, "start_unix", 18, INT64)
+    add_f(creator_epoch, "end_unix", 19, INT64)
     add_f(creator_epoch, "settlement_cursor", 13, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(creator_epoch, "partial_actor", 14, STRING)
     add_f(creator_epoch, "partial_count", 15, UINT64)
@@ -1039,8 +1041,6 @@ def _build_pool():
     add_f(query_schedule_resp, "origin_unix", 2, INT64)
     add_f(query_schedule_resp, "epoch_seconds", 3, UINT64)
     add_f(query_schedule_resp, "current_epoch", 4, INT64)
-    add_f(query_schedule_resp, "pending_epoch_seconds", 5, UINT64)
-    add_f(query_schedule_resp, "reset_in_progress", 6, BOOL)
 
     # QueryProfilesRequest
     msg_profiles_req = file_proto.message_type.add()

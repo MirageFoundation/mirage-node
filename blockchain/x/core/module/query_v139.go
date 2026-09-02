@@ -401,20 +401,10 @@ func (am AppModule) CreatorSchedule(ctx context.Context, req *types.QueryCreator
 	if err != nil {
 		return nil, err
 	}
-	reset, found, err := am.k.GetCreatorReset(sdkCtx)
-	if err != nil {
-		return nil, err
-	}
-	pending := uint64(0)
-	if found {
-		pending = reset.ToSeconds
-	}
 	return &types.QueryCreatorScheduleResponse{
-		OriginEpoch:         sched.OriginEpoch,
-		OriginUnix:          sched.OriginUnix,
-		EpochSeconds:        sched.EpochSeconds,
-		CurrentEpoch:        clock,
-		PendingEpochSeconds: pending,
-		ResetInProgress:     found,
+		OriginEpoch:  sched.OriginEpoch,
+		OriginUnix:   sched.OriginUnix,
+		EpochSeconds: sched.EpochSeconds,
+		CurrentEpoch: clock,
 	}, nil
 }

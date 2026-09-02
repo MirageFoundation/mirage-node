@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify, request
 from error_utils import api_error_code
 from logging_utils import log_event, next_request_id
 from db import connect_db
-from params import expect_params, expect_creator_schedule, creator_epoch_unix
+from params import expect_params, expect_creator_schedule
 from curation import MODE_RAW, get_default_team, resolve_lens
 
 communities_bp = Blueprint("communities", __name__)
@@ -741,7 +741,8 @@ def creator_earnings():
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT epoch_id, earned, claimed, claim_deadline_epoch, claimed_height
+                SELECT epoch_id, earned, claimed, claim_deadline_unix,
+                       start_unix, end_unix, claimed_height
                 FROM creator_accruals WHERE LOWER(creator)=LOWER(%s)
                 ORDER BY epoch_id DESC LIMIT 50
                 """,
@@ -750,16 +751,18 @@ def creator_earnings():
             rows = cur.fetchall() or []
         schedule = expect_creator_schedule()
         creator_epoch_seconds = int(schedule["epoch_seconds"])
+        # Times come from the epoch record, not from the live grid. Governance
+        # can change creator_epoch_seconds, which renumbers epochs from that
+        # point on, so an id settled under an earlier grid cannot be converted.
         items = [
             {
                 "epoch_id": r[0],
                 "earned": str(r[1]),
                 "claimed": str(r[2]),
-                "claim_deadline_epoch": r[3],
-                "epoch_start_unix": creator_epoch_unix(int(r[0]), schedule),
-                "epoch_end_unix": creator_epoch_unix(int(r[0]) + 1, schedule),
-                "claim_deadline_unix": creator_epoch_unix(int(r[3]), schedule),
-                "claimed_height": r[4],
+                "epoch_start_unix": r[4],
+                "epoch_end_unix": r[5],
+                "claim_deadline_unix": r[3],
+                "claimed_height": r[6],
             }
             for r in rows
         ]

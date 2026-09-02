@@ -524,16 +524,6 @@ func (k Keeper) ProcessBeginBlockV139(ctx sdk.Context) error {
 		return err
 	}
 	params := k.GetParams(ctx)
-	resetting, err := k.processCreatorReset(ctx, params)
-	if err != nil {
-		return err
-	}
-	if resetting {
-		if err := k.processSubscriptionExpiries(ctx, params); err != nil {
-			return err
-		}
-		return nil
-	}
 	if err := k.advanceCreatorClock(ctx, params); err != nil {
 		return err
 	}

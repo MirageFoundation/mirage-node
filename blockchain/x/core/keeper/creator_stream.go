@@ -91,9 +91,9 @@ func (k Keeper) setCreatorStreamCursor(ctx sdk.Context, at int64) error {
 	return k.setU64Key(ctx, []byte(types.PfxCreatorStreamTs), uint64(at))
 }
 
-// AnchorCreatorStream starts the accumulator without accruing anything. Used at
-// migration and after a destructive reset, where there is deliberately no
-// history to integrate.
+// AnchorCreatorStream starts the accumulator without accruing anything. Only
+// a stream that has never run may be anchored: it zeroes the rate and the paid
+// total, which on a live stream would strand every tranche's remaining money.
 func (k Keeper) AnchorCreatorStream(ctx sdk.Context, at int64) error {
 	if err := k.setCreatorStreamCursor(ctx, at); err != nil {
 		return err
@@ -105,22 +105,6 @@ func (k Keeper) AnchorCreatorStream(ctx sdk.Context, at int64) error {
 		return err
 	}
 	return k.setCreatorStreamInt(ctx, types.PfxCreatorStreamPaid, sdkmath.ZeroInt())
-}
-
-// ClearCreatorStream drops every stream singleton. The breakpoint index is
-// wiped through CreatorResetPrefixes with the rest of the reward state.
-func (k Keeper) ClearCreatorStream(ctx sdk.Context) error {
-	for _, key := range []string{
-		types.PfxCreatorStreamRate,
-		types.PfxCreatorStreamAcc,
-		types.PfxCreatorStreamPaid,
-		types.PfxCreatorStreamTs,
-	} {
-		if err := k.storeDelete(ctx, []byte(key)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func encodeCreatorStreamBreakpoint(rateDelta, accDelta sdkmath.Int) []byte {

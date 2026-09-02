@@ -370,14 +370,13 @@ func (k Keeper) finishAllocate(ctx sdk.Context, ce *types.CreatorEpoch, allocate
 	ce.FinalizedEpoch = clock
 	ce.ClaimWindowDays = int64(params.CreatorClaimWindowDays)
 	deadline, err := types.CreatorClaimDeadline(
-		clock,
+		ctx.BlockTime().Unix(),
 		params.CreatorClaimWindowDays,
-		params.CreatorEpochSeconds,
 	)
 	if err != nil {
 		return remaining, err
 	}
-	ce.ClaimDeadlineEpoch = deadline
+	ce.ClaimDeadlineUnix = deadline
 	ce.Status = types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE
 	ce.SettlementCursor = nil
 	if err := k.setProto(ctx, types.KeyCreatorEpoch(ce.EpochId), ce); err != nil {
@@ -386,13 +385,13 @@ func (k Keeper) finishAllocate(ctx sdk.Context, ce *types.CreatorEpoch, allocate
 	if err := k.storeDelete(ctx, types.KeyCreatorEpochSettle(ce.EpochId)); err != nil {
 		return remaining, err
 	}
-	if err := k.storeSet(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineEpoch, ce.EpochId), []byte{1}); err != nil {
+	if err := k.storeSet(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineUnix, ce.EpochId), []byte{1}); err != nil {
 		return remaining, err
 	}
 	ctx.EventManager().EmitEvent(sdk.NewEvent("creator_epoch_claimable",
 		sdk.NewAttribute("epoch", fmt.Sprintf("%d", ce.EpochId)),
 		sdk.NewAttribute("allocated_total", allocated.String()),
-		sdk.NewAttribute("claim_deadline_epoch", fmt.Sprintf("%d", ce.ClaimDeadlineEpoch)),
+		sdk.NewAttribute("claim_deadline_unix", fmt.Sprintf("%d", ce.ClaimDeadlineUnix)),
 	))
 	return remaining, nil
 }
@@ -430,10 +429,7 @@ func (k Keeper) expireEpochUnallocated(ctx sdk.Context, ce *types.CreatorEpoch, 
 }
 
 func (k Keeper) processCreatorExpiries(ctx sdk.Context, params types.Params) error {
-	clock, err := k.GetCreatorClock(ctx)
-	if err != nil {
-		return err
-	}
+	now := ctx.BlockTime().Unix()
 	n := uint64(0)
 	var due []int64
 	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCreatorEpochDeadline), int(params.CreatorEpochExpiriesPerBlock)+1, func(key, _ []byte) error {
@@ -445,7 +441,7 @@ func (k Keeper) processCreatorExpiries(ctx sdk.Context, params types.Params) err
 			return fmt.Errorf("malformed cedeadline key")
 		}
 		deadline := int64(binary.BigEndian.Uint64(key[len(pfx) : len(pfx)+8]))
-		if deadline > clock {
+		if deadline > now {
 			return nil
 		}
 		epoch := int64(binary.BigEndian.Uint64(key[len(pfx)+8:]))
@@ -473,7 +469,7 @@ func (k Keeper) expireClaimableEpoch(ctx sdk.Context, epoch int64) error {
 		return fmt.Errorf("CONSENSUS_FATAL:CREATOR_EPOCH_MISSING epoch=%d", epoch)
 	}
 	if ce.Status != types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_CLAIMABLE {
-		return k.storeDelete(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineEpoch, epoch))
+		return k.storeDelete(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineUnix, epoch))
 	}
 	pool, err := k.parseInt(ce.Pool)
 	if err != nil {
@@ -496,7 +492,7 @@ func (k Keeper) expireClaimableEpoch(ctx sdk.Context, epoch int64) error {
 	if err := k.setProto(ctx, types.KeyCreatorEpoch(epoch), &ce); err != nil {
 		return err
 	}
-	if err := k.storeDelete(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineEpoch, epoch)); err != nil {
+	if err := k.storeDelete(ctx, types.KeyCreatorEpochDeadline(ce.ClaimDeadlineUnix, epoch)); err != nil {
 		return err
 	}
 	if err := k.storeSet(ctx, types.KeyCreatorEpochPrune(epoch), []byte{1}); err != nil {

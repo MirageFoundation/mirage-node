@@ -510,7 +510,9 @@ class ChainClient:
             "claimed_total": str(value.claimed_total),
             "finalized_epoch": int(value.finalized_epoch) or None,
             "claim_window_days": int(value.claim_window_days) or None,
-            "claim_deadline_epoch": int(value.claim_deadline_epoch) or None,
+            "claim_deadline_unix": int(value.claim_deadline_unix) or None,
+            "start_unix": int(value.start_unix) or None,
+            "end_unix": int(value.end_unix) or None,
             "settlement_cursor": bytes(value.settlement_cursor) or None,
             "partial_actor": str(value.partial_actor or "") or None,
             "partial_count": int(value.partial_count),
@@ -570,7 +572,7 @@ class ChainClient:
         raise RuntimeError(f"CreatorEpochAccruals exceeded 1001 pages for epoch {epoch}")
 
     def query_creator_schedule(self, timeout: int = GRPC_TIMEOUT) -> dict:
-        """Read the live creator-epoch grid, including a pending destructive reset."""
+        """Read the live creator-epoch grid."""
         from shared.datatypes import QueryCreatorScheduleRequest, QueryCreatorScheduleResponse
 
         with grpc.insecure_channel(self.grpc_target) as channel:
@@ -586,16 +588,11 @@ class ChainClient:
         epoch_seconds = int(resp.epoch_seconds)
         if epoch_seconds < 300 or 86400 % epoch_seconds != 0:
             raise RuntimeError(f"CreatorSchedule returned invalid epoch_seconds={epoch_seconds}")
-        pending = int(resp.pending_epoch_seconds)
-        if pending and (pending < 300 or 86400 % pending != 0):
-            raise RuntimeError(f"CreatorSchedule returned invalid pending_epoch_seconds={pending}")
         return {
             "origin_epoch": int(resp.origin_epoch),
             "origin_unix": int(resp.origin_unix),
             "epoch_seconds": epoch_seconds,
             "current_epoch": int(resp.current_epoch),
-            "pending_epoch_seconds": pending,
-            "reset_in_progress": bool(resp.reset_in_progress),
         }
 
     def query_subscription_runtime(self, address: str, timeout: int = GRPC_TIMEOUT) -> dict:

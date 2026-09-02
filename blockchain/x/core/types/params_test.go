@@ -500,9 +500,13 @@ func TestCreatorEpochClockDoesNotChangeDailyRelayEpoch(t *testing.T) {
 	require.Equal(t, unix/SecondsPerUTCDay, UTCEpoch(unix))
 	require.NotEqual(t, creatorEpoch, UTCEpoch(unix))
 
-	deadline, err := CreatorClaimDeadline(creatorEpoch, 30, 300)
+	// Claim windows are wall-clock, so the same thirty days is the same thirty
+	// days whatever the epoch interval happens to be. Measuring the window in
+	// epochs would make shortening the interval retroactively slam every open
+	// window shut.
+	deadline, err := CreatorClaimDeadline(unix, 30)
 	require.NoError(t, err)
-	require.Equal(t, creatorEpoch+30*288+1, deadline)
+	require.Equal(t, unix+30*SecondsPerUTCDay, deadline)
 }
 
 func TestC1BugCondition(t *testing.T) {
