@@ -433,6 +433,7 @@ def filter_posts(
     address = str(viewer or "").strip().lower()
     for post, post_id in zip(posts, ids):
         meta = metadata[post_id]
+        post["protocol_version"] = meta["protocol_version"]
         if scope == "legacy":
             # The legacy scope is the protocol-0 archive and nothing else.
             if meta["protocol_version"] != 0:

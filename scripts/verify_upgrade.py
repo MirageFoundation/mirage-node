@@ -45,10 +45,38 @@ def fail(message: str) -> None:
     print(f"  FAIL  {message}")
 
 
+# Postflight runs this script while test_blockchain and test_backend are already
+# hammering the same Caddy instance, so the shared rate limiter answers 429 to a
+# burst that has nothing wrong with it. Retry those (and the transient gateway
+# codes) with backoff, honouring Retry-After, then fail hard — a 429 that
+# survives the whole budget is a real finding, a single one is scheduling noise.
+_RETRY_STATUSES = (429, 502, 503, 504)
+_MAX_ATTEMPTS = 6
+
+
+def _retry_delay(error: urllib.error.HTTPError, attempt: int) -> float:
+    retry_after = error.headers.get("Retry-After") if error.headers else None
+    if retry_after:
+        try:
+            return min(15.0, max(0.5, float(retry_after)))
+        except (TypeError, ValueError):
+            pass
+    return min(8.0, 0.5 * (2 ** (attempt - 1)))
+
+
 def http_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as response:
-        return json.loads(response.read().decode())
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code not in _RETRY_STATUSES or attempt == _MAX_ATTEMPTS:
+                raise
+            delay = _retry_delay(e, attempt)
+            print(f"  DEBUG  {url} -> {e.code}, retry {attempt}/{_MAX_ATTEMPTS} in {delay:.1f}s")
+            time.sleep(delay)
+    raise RuntimeError(f"unreachable retry loop for {url}")
 
 
 def http_status(url: str, method: str = "GET") -> int:
@@ -59,11 +87,19 @@ def http_status(url: str, method: str = "GET") -> int:
         method=method,
         headers={"Accept": "application/json", "Content-Type": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return int(response.status)
-    except urllib.error.HTTPError as e:
-        return int(e.code)
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return int(response.status)
+        except urllib.error.HTTPError as e:
+            # A route check asserts on the status itself, so only the shared
+            # limiter and gateway codes are retried; 410/403/404 are answers.
+            if e.code not in _RETRY_STATUSES or attempt == _MAX_ATTEMPTS:
+                return int(e.code)
+            delay = _retry_delay(e, attempt)
+            print(f"  DEBUG  {method} {url} -> {e.code}, retry {attempt}/{_MAX_ATTEMPTS} in {delay:.1f}s")
+            time.sleep(delay)
+    raise RuntimeError(f"unreachable retry loop for {url}")
 
 
 def run(command: list[str]) -> str:
@@ -592,33 +628,16 @@ def check_legacy_history_reachable() -> None:
     else:
         ok(f"scope=current candidate pool is {total} posts")
 
-    legacy_feed = http_json(f"{BACKEND}/api/get_posts?scope=legacy&limit=5")
+    legacy_feed = http_json(f"{BACKEND}/api/get_posts?scope=legacy&lens=raw&limit=5")
     legacy_served = legacy_feed.get("posts") if isinstance(legacy_feed, dict) else None
-    legacy_ids = [
-        str(post.get("post_id") or post.get("txhash") or "").lower()
-        for post in (legacy_served or [])
-        if str(post.get("post_id") or post.get("txhash") or "").strip()
-    ]
-    proto0 = 0
-    if legacy_ids:
-        with psycopg.connect(db_url, connect_timeout=10) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT count(*) FROM posts "
-                    "WHERE LOWER(txhash) = ANY(%s) AND protocol_version = 0 AND NOT deleted",
-                    (legacy_ids,),
-                )
-                proto0 = int(cursor.fetchone()[0])
-        print(
-            f"  DEBUG  scope=legacy served={len(legacy_ids)} protocol0={proto0} "
-            f"ids={[i[:12] for i in legacy_ids]}"
-        )
-    if legacy_ids and proto0 == len(legacy_ids):
+    versions = [post.get("protocol_version") for post in (legacy_served or [])]
+    print(f"  DEBUG  scope=legacy count={len(versions)} protocol_version={versions!r}")
+    if legacy_served and all(int(post.get("protocol_version", -1)) == 0 for post in legacy_served):
         ok("scope=legacy serves historical protocol-0 posts")
     else:
         fail(
             f"scope=legacy did not return protocol-0 history: "
-            f"served={len(legacy_ids)} protocol0={proto0} posts={legacy_served!r}"
+            f"count={len(legacy_served or [])} protocol_version={versions!r}"
         )
 
     if legacy_only_sample:

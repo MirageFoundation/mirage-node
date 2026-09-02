@@ -1012,6 +1012,7 @@ run_pipeline() {
   # mutates pow_message_limit / subscriber_daily_relay_limit. verify_upgrade
   # compares this file to pre_upgrade_params.json so those two proposals
   # cannot look like a migration rewrite.
+  wait_until "$RPC_BUDGET_SEC" "LCD params after deploy" lcd_is_up
   capture_chain_params post_upgrade_params.json
 
   set_stage pow

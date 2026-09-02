@@ -1934,6 +1934,8 @@ class DatabaseManager:
     # Votes cast by OTHER users on a post that was later deleted are deliberately
     # kept: they were earned by participating, and retracting them would let an
     # author strip a voter's standing by deleting their own content.
+    # The first `%s` is a restrict flag: false rebuilds every community, true
+    # limits both INSERTs to the owner/community arrays that follow.
     _VOTE_STATS_FROM_CANONICAL = """
         INSERT INTO user_community_stats (owner, community, vote_count, net_votes, unique_root_posts, post_count)
         SELECT
@@ -1950,9 +1952,15 @@ class DatabaseManager:
             0
         FROM votes v
         JOIN posts p ON LOWER(p.txhash) = LOWER(v.target)
-        WHERE LOWER(v.owner) = ANY(%s)
-          AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
-          AND NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
+        WHERE NOT (COALESCE(p.deleted, FALSE) AND LOWER(v.owner) = LOWER(p.owner))
+          AND COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
+          AND (
+            NOT %s
+            OR (
+              LOWER(v.owner) = ANY(%s)
+              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
+            )
+          )
         GROUP BY 1, 2
     """
 
@@ -1964,9 +1972,15 @@ class DatabaseManager:
             0, 0, 0,
             COUNT(*)::int
         FROM posts p
-        WHERE LOWER(p.owner) = ANY(%s)
-          AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
-          AND COALESCE(p.deleted, FALSE) = FALSE
+        WHERE COALESCE(p.deleted, FALSE) = FALSE
+          AND COALESCE(NULLIF(p.root_community, ''), p.community) <> ''
+          AND (
+            NOT %s
+            OR (
+              LOWER(p.owner) = ANY(%s)
+              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
+            )
+          )
         GROUP BY 1, 2
         ON CONFLICT (owner, community) DO UPDATE SET
             post_count = EXCLUDED.post_count
@@ -1985,8 +1999,14 @@ class DatabaseManager:
             "DELETE FROM user_community_stats WHERE owner = ANY(%s) AND community = ANY(%s)",
             (owners, communities),
         )
-        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (owners, communities))
-        cur.execute(self._POST_STATS_FROM_CANONICAL, (owners, communities))
+        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (True, owners, communities))
+        cur.execute(self._POST_STATS_FROM_CANONICAL, (True, owners, communities))
+
+    def _rebuild_all_community_stats(self, cur) -> None:
+        """Wipe user_community_stats and rebuild every row from votes and posts."""
+        cur.execute("DELETE FROM user_community_stats")
+        cur.execute(self._VOTE_STATS_FROM_CANONICAL, (False, [], []))
+        cur.execute(self._POST_STATS_FROM_CANONICAL, (False, [], []))
 
     def reattribute_community_stats(self, root_post_id: str, old_community: str, new_community: str) -> int:
         """Move a thread's vote/post standing after its root community changed.
