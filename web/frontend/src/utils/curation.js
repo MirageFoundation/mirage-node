@@ -1,4 +1,5 @@
 import Api from './api';
+import { CURATOR_READ_ACTION, signReadParams } from './signPlain';
 
 export const CURATION_MODE = Object.freeze({
     LIVE_DEFAULT: 0,
@@ -23,6 +24,12 @@ If you post anything unrelated to sailboats, you might get banned from our curat
 /** Team-page hidden lists: first page 10, then batches of 50. */
 export const HIDDEN_LIST_INITIAL = 10;
 export const HIDDEN_LIST_MORE = 50;
+
+async function withCuratorRead(viewer, params = {}) {
+    const address = String(viewer || '').trim().toLowerCase();
+    if (!address || address === 'guest') return params;
+    return { ...params, viewer: address, ...await signReadParams(CURATOR_READ_ACTION, address) };
+}
 
 /** Unicode code-point length — matches Go utf8.RuneCountInString. */
 export function runeLength(value) {
@@ -198,7 +205,55 @@ export function lensCacheKey({ viewer, community, scope = 'current', lens = LENS
 // Durability belongs on chain — a member's stored preference, which follows
 // them to every device and wins here as soon as it is set.
 const LENS_PICK_PREFIX = 'lens_pick_';
+export const LENS_PICKS_MAX = 20;
 const lensPickKey = (viewer, community) => `${LENS_PICK_PREFIX}${lensCacheKey({ viewer, community })}`;
+
+function lensPickEntries(viewer) {
+    const mine = String(viewer || 'guest').trim().toLowerCase();
+    const entries = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+        const key = sessionStorage.key(i);
+        if (!key || !key.startsWith(LENS_PICK_PREFIX)) continue;
+        try {
+            const parts = key.slice(LENS_PICK_PREFIX.length).split(':').map(decodeURIComponent);
+            if (parts[0] !== mine) continue;
+            const community = parts[1];
+            const parsed = JSON.parse(sessionStorage.getItem(key));
+            const pick = normalizeLens(parsed?.lens, parsed?.teamId ?? null);
+            const selectedAt = Number(parsed?.selectedAt);
+            entries.push({
+                key,
+                community,
+                pick,
+                selectedAt: Number.isSafeInteger(selectedAt) && selectedAt > 0 ? selectedAt : 0,
+            });
+        } catch (err) {
+            sessionStorage.removeItem(key);
+            console.debug('[lens] removed invalid pick', {
+                key,
+                error: String(err?.message || err),
+            });
+            i -= 1;
+        }
+    }
+    return entries;
+}
+
+function pruneLensPicks(viewer) {
+    const entries = lensPickEntries(viewer).sort((a, b) => (
+        b.selectedAt - a.selectedAt || a.community.localeCompare(b.community)
+    ));
+    const evicted = entries.slice(LENS_PICKS_MAX);
+    for (const entry of evicted) sessionStorage.removeItem(entry.key);
+    if (evicted.length > 0) {
+        console.debug('[lens] evicted stale picks', {
+            viewer: String(viewer || 'guest').slice(0, 12),
+            count: evicted.length,
+            communities: evicted.map((entry) => entry.community),
+        });
+    }
+    return entries.slice(0, LENS_PICKS_MAX);
+}
 
 export function readLensPick({ viewer, community }) {
     try {
@@ -214,7 +269,16 @@ export function readLensPick({ viewer, community }) {
 export function writeLensPick({ viewer, community, lens, teamId = null }) {
     const normalized = normalizeLens(lens, teamId);
     try {
-        sessionStorage.setItem(lensPickKey(viewer, community), JSON.stringify(normalized));
+        const newest = lensPickEntries(viewer).reduce(
+            (max, entry) => Math.max(max, entry.selectedAt),
+            0,
+        );
+        const selectedAt = Math.max(Date.now(), newest + 1);
+        sessionStorage.setItem(
+            lensPickKey(viewer, community),
+            JSON.stringify({ ...normalized, selectedAt }),
+        );
+        pruneLensPicks(viewer);
     } catch (_) { }
 }
 
@@ -226,25 +290,16 @@ export function writeLensPick({ viewer, community, lens, teamId = null }) {
  * community and resolves the rest from the viewer's stored preference.
  */
 export function lensPicksParam({ viewer }) {
-    const mine = String(viewer || 'guest').trim().toLowerCase();
-    const entries = [];
     try {
-        for (let i = 0; i < sessionStorage.length; i += 1) {
-            const key = sessionStorage.key(i);
-            if (!key || !key.startsWith(LENS_PICK_PREFIX)) continue;
-            const parts = key.slice(LENS_PICK_PREFIX.length).split(':').map(decodeURIComponent);
-            if (parts[0] !== mine) continue;
-            const community = parts[1];
-            const pick = readLensPick({ viewer, community });
-            if (!pick) continue;
-            entries.push(pick.lens === LENS.TEAM
+        const entries = pruneLensPicks(viewer).map(({ community, pick }) => (
+            pick.lens === LENS.TEAM
                 ? `${community}:${LENS.TEAM}:${pick.teamId}`
-                : `${community}:${pick.lens}`);
-        }
+                : `${community}:${pick.lens}`
+        ));
+        return entries.sort().join(',');
     } catch (_) {
         return '';
     }
-    return entries.sort().join(',');
 }
 
 export function clearLensPick({ viewer, community }) {
@@ -299,8 +354,10 @@ export async function waitForCurationTeamGone(community, teamId, options = {}) {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-            const params = { include_deleted: false, _cb: Date.now() };
-            if (viewer) params.viewer = String(viewer).trim().toLowerCase();
+            const params = await withCuratorRead(viewer, {
+                include_deleted: false,
+                _cb: Date.now(),
+            });
             const data = await Api.get(
                 `communities/${encodeURIComponent(slug)}/teams`,
                 params,
@@ -347,8 +404,7 @@ export async function waitForCurationTeamProfile(community, teamId, name, descri
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
-            const params = { _cb: Date.now() };
-            if (viewer) params.viewer = String(viewer).trim().toLowerCase();
+            const params = await withCuratorRead(viewer, { _cb: Date.now() });
             const data = await Api.get(
                 `communities/${encodeURIComponent(slug)}/teams/${id}`,
                 params,
@@ -396,9 +452,10 @@ export async function waitForOwnCurationTeam(community, owner, name, options = {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
         try {
+            const params = await withCuratorRead(ownerLower, { _cb: Date.now() });
             const data = await Api.get(
                 `communities/${encodeURIComponent(slug)}/teams`,
-                { viewer: ownerLower, _cb: Date.now() },
+                params,
                 { timeoutMs },
             );
             const items = Array.isArray(data?.items) ? data.items : [];

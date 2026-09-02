@@ -3595,6 +3595,26 @@ activate_if_halted
             "test_upgrade.sh must remove ~/.mirage/upgrade_tests after --wait",
         )
         return
+    required_postflight = (
+        "wait_for_core_jobs",
+        "tests/test_extended.py",
+        "proposal_test_creator_rewards.json",
+        "verify_creator_payout.py",
+        "run_phase creator_payout",
+    )
+    missing_postflight = [token for token in required_postflight if token not in rehearsal]
+    if missing_postflight:
+        _fail(
+            "install.upgrade.rehearsal_postflight",
+            f"test_upgrade.sh missing required postflight gates: {missing_postflight}",
+        )
+        return
+    if 'reported" == "v1.38.11"' not in rehearsal or "verify_proto_generation_parity" not in rehearsal:
+        _fail(
+            "install.upgrade.rehearsal_preflight",
+            "test_upgrade.sh must assert the exact v1.38.11 backup image and protobuf parity",
+        )
+        return
     reset_src = Path(os.path.join(REPO_ROOT, "scripts", "reset_local_testnet.py")).read_text(encoding="utf-8")
     if "def cleanup_mirage_tmp" not in reset_src or "cleanup_mirage_tmp()" not in reset_src:
         _fail(

@@ -26,11 +26,9 @@ import { useReports } from "../../../logic/useReports";
  *  - R1 rows sit on `theme.colors.bg`.
  *  - R2 all colors routed through tokens (voteUpBg / voteDownBg / neutral chips).
  *  - R3 rows divided by `1px solid theme.colors.border`.
- *  - R4 data parity with `themes/bluemoon/routes/ReportsView.js`.
  *  - R7 row title 0.78rem/600, meta 0.62rem/500 subtleText.
  *
- * Shell structure mirrors `InboxView` / `FollowsView` / `BlocksView` /
- * `AgentsView`: `FeedRailRow` + `FeedCol` so the page keeps the standard
+ * Shell structure uses `FeedRailRow` + `FeedCol` so the page keeps the standard
  * responsive width bumps every other list route in the theme uses.
  */
 

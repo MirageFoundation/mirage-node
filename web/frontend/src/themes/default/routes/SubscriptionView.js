@@ -13,29 +13,7 @@ import ConfirmDialog from "../components/ConfirmDialog.js";
 import { useSubscription, TIER_COLORS, getTierName, getTierColor, isAdmin } from "../../../logic/useSubscription";
 import AccountStatusNotices from "../components/AccountStatusNotices";
 
-/**
- * SubscriptionView — `default` Plan 06 sub-plan 05.
- *
- * Section-list rewrite of the /subscription route. Visual only — hook
- * wiring / subscribe / auto-renew handlers unchanged. Follows
- * `docs/guides/web-theme-default/RULES.md`:
- *  - R1: lifted surfaces (ActivePlanCard, TierCard, TierDetailsPanel,
- *    BalanceTile) all sit on `bg` — the main canvas. Only borders
- *    separate them.
- *  - R2: every color routed through a token (TIER_COLORS retained as
- *    shared tier visual language per sub-plan 06.1 / StatsView).
- *    Auto-renewing status uses yellow/amber `inboxHighlightRail` +
- *    `inboxHighlightBg` pair (per the recurring-payment convention).
- *  - R3: dividers use `border` / `borderSubtle`.
- *  - R4: data parity with `themes/bluemoon/routes/SubscriptionView.js`.
- *  - R6: all chevrons/directional icons via `react-icons/hi2`.
- *  - R7: page heading 1.1rem/700, section headers 0.6rem/700
- *    uppercase, CTA pills 0.72rem/600.
- *
- * MIRAGE values are rendered via `formatMirageCompact` everywhere
- * (k / M / B suffixes) to keep the numbers consistent with the rest
- * of the theme.
- */
+/** Subscription management in the default UI. */
 
 /* -------------------------------------------------------------------------- */
 /* Shell                                                                      */
@@ -371,13 +349,8 @@ const ActivePlanDivider = styled.div`
     width: 100%;
 `;
 
-/* Admin variant of ActivePlanCard:
- *  - Left column: tier label + admin name (shrinks to content).
- *  - Vertical 1px divider that hugs the left column's text.
- *  - Right column: Balance + Reserve rows, right-aligned so label and
- *    value sit next to each other.
- * Stacks vertically (divider flips to a top border) on very narrow
- * viewports so nothing gets squeezed. Sub-plan 06.11.C. */
+/* Admin variant of ActivePlanCard with the tier and wallet balance split
+ * across two columns. */
 const AdminPlanGrid = styled.div`
     display: flex;
     align-items: stretch;
@@ -425,9 +398,7 @@ const AdminPlanRight = styled.div`
     }
 `;
 
-/* Admin Balance / Reserve label — same typography as `AdminBalanceValue`
- * so the row reads as "Balance 123 MIRAGE" in one consistent voice
- * (sub-plan 06.11.C tweak). */
+/* Admin balance label and value share one typographic voice. */
 const AdminBalanceLabel = styled.div`
     color: ${({ theme }) => theme.colors.subtleText};
     font-size: 0.8rem;
@@ -440,10 +411,7 @@ const AdminBalanceLabel = styled.div`
     ${tooltipStyles()}
 `;
 
-/* Admin Balance / Reserve value. Same font scale + weight as the label
- * so number + unit + label all share the same visual rhythm. Number and
- * "MIRAGE" suffix share the main text color so the value reads as one
- * unit. */
+/* Number and unit share the main text color so the value reads as one unit. */
 const AdminBalanceValue = styled.div`
     color: ${({ theme }) => theme.colors.text};
     font-size: 0.8rem;

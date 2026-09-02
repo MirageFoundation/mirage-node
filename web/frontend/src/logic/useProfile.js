@@ -98,7 +98,6 @@ export function useProfile({
     const isPostsTab = activeTab === 'submissions' || activeTab === 'comments';
     const [profileUsername, setProfileUsername] = useState(() => isOwnProfile ? username || '' : '');
     const [balance, setBalance] = useState(null);
-    const [reserveFunds, setReserveFunds] = useState(null);
     const [profileRegisteredAt, setProfileRegisteredAt] = useState(null);
     const [userLevel, setUserLevel] = useState(0);
     const [subscriptionExpiry, setSubscriptionExpiry] = useState(0);
@@ -279,7 +278,7 @@ export function useProfile({
     }, [isOwnProfile, username, profileAddress]);
 
     // Fetch user status whenever the profile address changes. The header /
-    // aside card (username, balance, reserve, joined, tier, biography) are
+    // aside card (username, balance, joined, tier, biography) are
     // visible on every tab, so the fetch must not be gated on `activeTab`.
     // Previously this was scoped to the Profile tab only, which meant
     // landing on the page with `?tab=comments|submissions|algo` (e.g. after
@@ -318,14 +317,6 @@ export function useProfile({
                 } else {
                     setBalance(null);
                 }
-                if (typeof data.reserve_funds !== 'undefined') {
-                    const rf = Number(data.reserve_funds);
-                    if (Number.isFinite(rf)) {
-                        setReserveFunds(rf);
-                    }
-                } else {
-                    setReserveFunds(null);
-                }
                 if (typeof data.profile_registered_at !== 'undefined' && data.profile_registered_at !== null) {
                     const ts = Number(data.profile_registered_at);
                     setProfileRegisteredAt(Number.isFinite(ts) ? ts : null);
@@ -345,7 +336,6 @@ export function useProfile({
             } catch (_) {
                 if (!cancelled) {
                     setBalance(null);
-                    setReserveFunds(null);
                     setProfileRegisteredAt(null);
                 }
             }
@@ -702,7 +692,6 @@ export function useProfile({
     };
     const usernameDisplay = profileUsername || (isOwnProfile ? username : '') || '(loading…)';
     const balanceDisplay = profileAddress ? balance === null ? '(loading…)' : `${formatMirage(balance)} MIRAGE` : '(address required)';
-    const reserveDisplay = profileAddress ? reserveFunds === null ? '(loading…)' : `${formatMirage(reserveFunds)} MIRAGE` : '(address required)';
     const registeredDisplay = formatRegistrationDate(profileRegisteredAt);
     const canEditProfile = isOwnProfile && Boolean(address);
     const donatePending = isSendPending(profileAddress);
@@ -850,22 +839,19 @@ export function useProfile({
         };
     }, []);
 
-    const { subFeeLabel, agentFeeLabel, subFeeUmirage, agentFeeUmirage } = useMemo(() => {
+    const { subFeeLabel, subFeeUmirage } = useMemo(() => {
         void chainConfigTick;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
             const tiers = cfg?.subscription_tiers || cfg?.tiers || [];
             const sf = Number(tiers?.[1]?.period_fee || 0);
-            const af = Number(tiers?.[2]?.period_fee || 0);
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
-                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
                 subFeeUmirage: sf > 0 ? sf : null,
-                agentFeeUmirage: af > 0 ? af : null,
             };
         } catch (_) { }
-        return { subFeeLabel: null, agentFeeLabel: null, subFeeUmirage: null, agentFeeUmirage: null };
+        return { subFeeLabel: null, subFeeUmirage: null };
     }, [chainConfigTick]);
 
     const handleGiftSub = () => {
@@ -1046,10 +1032,8 @@ export function useProfile({
         handleRecentPostClick,
         usernameDisplay,
         balance,
-        reserveFunds,
         profileRegisteredAt,
         balanceDisplay,
-        reserveDisplay,
         registeredDisplay,
         canEditProfile,
         donatePending,
@@ -1067,9 +1051,7 @@ export function useProfile({
         subFeePending,
         subFeeStatus,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
         handleGiftSub,
         confirmGiftSubAction,
         cancelGiftSub

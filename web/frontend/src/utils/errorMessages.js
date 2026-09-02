@@ -230,8 +230,6 @@ const ERROR_MAP = {
     stats_event_disabled: "Stats events are disabled on this node.",
     invalid_user_level: "Invalid user level.",
 
-    // Quests
-
     // Chain rejects
     transaction_rejected: "Transaction rejected.",
     out_of_gas: "Transaction ran out of gas.",

@@ -50,7 +50,6 @@ export default function usePostGifts({ post, updatePost } = {}) {
     const postId = post?.post_id || null;
     const targetUserId = post?.user_id || null;
     const targetUsername = typeof post?.username === 'string' ? post.username.trim() : '';
-    const authorLevel = Number(post?.author_level) || 0;
 
     // ─── Gift Mirage state ───
     const [confirmDonate, setConfirmDonate] = useState(null);
@@ -105,17 +104,14 @@ export default function usePostGifts({ post, updatePost } = {}) {
         return cfg?.award_configs || [];
     }, [configUpdateTrigger]);
 
-    const { subFeeLabel, agentFeeLabel, subFeeUmirage, agentFeeUmirage } = useMemo(() => {
+    const { subFeeLabel, subFeeUmirage } = useMemo(() => {
         void configUpdateTrigger;
         const cfg = readChainConfig();
         const tiers = cfg?.subscription_tiers || cfg?.tiers || [];
         const sf = Number(tiers?.[1]?.period_fee || 0);
-        const af = Number(tiers?.[2]?.period_fee || 0);
         return {
             subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
-            agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
             subFeeUmirage: sf > 0 ? sf : null,
-            agentFeeUmirage: af > 0 ? af : null,
         };
     }, [configUpdateTrigger]);
 
@@ -247,7 +243,7 @@ export default function usePostGifts({ post, updatePost } = {}) {
                 );
             }
         })();
-    }, [targetUserId, postId, targetUsername, authorLevel]);
+    }, [targetUserId, postId, targetUsername]);
 
     // ─── Confirm/Cancel actions ──────────────────────────────────────────
     const cancelDonate = useCallback(() => setConfirmDonate(null), []);
@@ -421,8 +417,6 @@ export default function usePostGifts({ post, updatePost } = {}) {
         AWARD_TYPES,
         getAwardCost,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
     };
 }

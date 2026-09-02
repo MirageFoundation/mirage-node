@@ -16,8 +16,8 @@ import CreatorClaimCelebration from './CreatorClaimCelebration';
  * at the top of the home and following feeds and disappears once there is
  * nothing left to claim.
  *
- * Geometry is the retired quest reward card's: header (icon tile, title,
- * right-aligned amount pill) over a body of reward rows and a full-width CTA.
+ * The card uses a header (icon tile, title, right-aligned amount pill) over
+ * a body of reward rows and a full-width CTA.
  * The rows list the posts the money came from, so the number in the header is
  * accounted for rather than asserted. Colors go through tokens rather than the
  * raw hex that card inlined (RULES.md R213).
@@ -297,19 +297,18 @@ export default function CreatorEarningsBanner() {
     const earnings = useCreatorEarnings(address);
     const [claiming, setClaiming] = useState(false);
     const [claimed, setClaimed] = useState(null);
-    // The chain needs a few seconds to report the claim, and until it does the
-    // rewards still read as claimable. Drop them here so the card does not
-    // invite a second click on money that is already on its way.
     const [submittedEpochs, setSubmittedEpochs] = useState([]);
 
-    // A claim carries at most 30 epochs, so when more are outstanding take the
-    // ones closest to expiring; the rest stay on the card for the next claim.
     const batch = useMemo(() => {
+        if (!earnings.maxClaimEpochs) return [];
         return earnings.claimable
             .filter((item) => !submittedEpochs.includes(Number(item.epoch_id)))
-            .sort((a, b) => Number(a.claim_deadline_unix) - Number(b.claim_deadline_unix))
-            .slice(0, 30);
-    }, [earnings.claimable, submittedEpochs]);
+            .sort((a, b) => (
+                Number(a.claim_deadline_unix) - Number(b.claim_deadline_unix)
+                || Number(a.epoch_id) - Number(b.epoch_id)
+            ))
+            .slice(0, earnings.maxClaimEpochs);
+    }, [earnings.claimable, earnings.maxClaimEpochs, submittedEpochs]);
     const posts = useMemo(() => mergePosts(batch), [batch]);
 
     // A confirmed claim empties `claimable`, so the celebration has to be able

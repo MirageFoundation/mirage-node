@@ -153,6 +153,77 @@ def attr_text(raw) -> str:
     return str(raw)
 
 
+def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    for index in range(offset, min(len(data), offset + 10)):
+        byte = data[index]
+        value |= (byte & 0x7F) << shift
+        if byte < 0x80:
+            return value, index + 1
+        shift += 7
+    raise RuntimeError("malformed protobuf varint in governance message")
+
+
+def _protobuf_scalar_fields(data: bytes) -> dict[int, list[object]]:
+    """Decode only scalar wire values needed to route governance projections."""
+    fields: dict[int, list[object]] = {}
+    offset = 0
+    while offset < len(data):
+        key, offset = _read_varint(data, offset)
+        field_number = key >> 3
+        wire_type = key & 7
+        if field_number <= 0:
+            raise RuntimeError("governance message contains protobuf field zero")
+        if wire_type == 0:
+            value, offset = _read_varint(data, offset)
+        elif wire_type == 1:
+            if offset + 8 > len(data):
+                raise RuntimeError("truncated fixed64 governance field")
+            value = data[offset : offset + 8]
+            offset += 8
+        elif wire_type == 2:
+            size, offset = _read_varint(data, offset)
+            if size > len(data) - offset:
+                raise RuntimeError("truncated length-delimited governance field")
+            value = data[offset : offset + size]
+            offset += size
+        elif wire_type == 5:
+            if offset + 4 > len(data):
+                raise RuntimeError("truncated fixed32 governance field")
+            value = data[offset : offset + 4]
+            offset += 4
+        else:
+            raise RuntimeError(f"unsupported protobuf wire type {wire_type} in governance message")
+        fields.setdefault(field_number, []).append(value)
+    return fields
+
+
+def _protobuf_text(fields: dict[int, list[object]], field_number: int) -> str:
+    values = fields.get(field_number) or []
+    if not values or not isinstance(values[-1], bytes):
+        return ""
+    try:
+        return values[-1].decode("utf-8").strip().lower()
+    except UnicodeDecodeError as e:
+        raise RuntimeError(f"governance field {field_number} is not UTF-8") from e
+
+
+def _protobuf_repeated_varints(fields: dict[int, list[object]], field_number: int) -> list[int]:
+    out: list[int] = []
+    for value in fields.get(field_number) or []:
+        if isinstance(value, int):
+            out.append(value)
+            continue
+        if not isinstance(value, bytes):
+            raise RuntimeError(f"governance field {field_number} has unsupported encoding")
+        offset = 0
+        while offset < len(value):
+            item, offset = _read_varint(value, offset)
+            out.append(item)
+    return out
+
+
 TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgPost": MsgPost,
     "/mirage.core.v1.MsgEdit": MsgEdit,
@@ -408,6 +479,123 @@ class MessageProcessor:
                 height,
                 tx_hash,
             )
+
+    def process_governance_message(
+        self,
+        type_url: str,
+        value: bytes,
+        tx_hash: str,
+        ts: int,
+        height: int,
+    ) -> None:
+        """Project active MsgGov state using committed payload plus final events."""
+        event_projected = {
+            "/mirage.core.v1.MsgGovCreateCurationTeam",
+            "/mirage.core.v1.MsgGovSetCurationTeamOwner",
+            "/mirage.core.v1.MsgGovSetCuratorMembership",
+            "/mirage.core.v1.MsgGovSetCommunityPreference",
+            "/mirage.core.v1.MsgGovSetCuratorInvitation",
+        }
+        if type_url in event_projected:
+            logger.debug(
+                "[governance] %s deferred to committed curation events height=%s tx=%s",
+                type_url.rsplit(".", 1)[-1],
+                height,
+                tx_hash,
+            )
+            return
+
+        fields = _protobuf_scalar_fields(value)
+        if type_url == "/mirage.core.v1.MsgGovSetCommunityBlock":
+            owner = _protobuf_text(fields, 2)
+            community = _protobuf_text(fields, 3)
+            blocked_values = _protobuf_repeated_varints(fields, 4)
+            if not owner or not community or len(blocked_values) > 1:
+                raise RuntimeError("MsgGovSetCommunityBlock has malformed owner/community/blocked fields")
+            blocked = bool(blocked_values[-1]) if blocked_values else False
+            if blocked:
+                self.db.block_community(owner, community, blocked_at=int(ts))
+            else:
+                self.db.unblock_community(owner, community)
+            logger.info(
+                "[governance] community block projected owner=%s community=%s blocked=%s height=%s",
+                owner,
+                community,
+                blocked,
+                height,
+            )
+            return
+
+        if type_url == "/mirage.core.v1.MsgGovSetSubscriptionState":
+            owner = _protobuf_text(fields, 2)
+            if not owner:
+                raise RuntimeError("MsgGovSetSubscriptionState is missing user")
+            self._refresh_subscription_projection(owner, ts)
+            logger.info("[governance] subscription state reconciled owner=%s height=%s", owner, height)
+            return
+
+        if type_url == "/mirage.core.v1.MsgGovClaimCreatorRewards":
+            creator = _protobuf_text(fields, 2)
+            epochs = _protobuf_repeated_varints(fields, 3)
+            if not creator or not epochs:
+                raise RuntimeError("MsgGovClaimCreatorRewards is missing creator/epoch_ids")
+            for epoch_id in epochs:
+                self.sync_creator_epoch(epoch_id, height)
+            logger.info(
+                "[governance] creator claim reconciled creator=%s epochs=%s height=%s",
+                creator,
+                epochs,
+                height,
+            )
+            return
+
+        raise RuntimeError(f"unsupported active governance message {type_url}")
+
+    @staticmethod
+    def collect_message_snapshot_dependencies(type_url: str, value: bytes) -> dict[str, set]:
+        """Identify subscription and creator state needed before DB locks are held."""
+        dependencies = {
+            "runtime_candidates": set(),
+            "subscription_profiles": set(),
+            "creator_epochs": set(),
+            "creator_schedule": set(),
+        }
+        if type_url.startswith("/mirage.core.v1.MsgGov"):
+            fields = _protobuf_scalar_fields(value)
+            if type_url == "/mirage.core.v1.MsgGovSetSubscriptionState":
+                owner = _protobuf_text(fields, 2)
+                if owner:
+                    dependencies["subscription_profiles"].add(owner)
+                    dependencies["runtime_candidates"].add(owner)
+            elif type_url == "/mirage.core.v1.MsgGovClaimCreatorRewards":
+                dependencies["creator_epochs"].update(_protobuf_repeated_varints(fields, 3))
+            return dependencies
+
+        proto_cls = TYPE_URL_TO_PROTO.get(type_url)
+        if proto_cls is None:
+            return dependencies
+        parsed = proto_cls()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        signer = derive_owner_from_msg(msg_dict)
+        if signer:
+            dependencies["runtime_candidates"].add(signer)
+        if type_url == "/mirage.core.v1.MsgSubscribe":
+            target = str(msg_dict.get("target", "") or signer or "").strip().lower()
+            if target:
+                dependencies["subscription_profiles"].add(target)
+                dependencies["runtime_candidates"].add(target)
+        elif type_url == "/mirage.core.v1.MsgSetLevel":
+            target = str(msg_dict.get("target", "")).strip().lower()
+            if target:
+                dependencies["runtime_candidates"].add(target)
+        elif type_url == "/mirage.core.v1.MsgSetAutoRenewal" and signer:
+            dependencies["subscription_profiles"].add(signer)
+        elif type_url == "/mirage.core.v1.MsgClaimCreatorRewards":
+            dependencies["creator_epochs"].update(int(value) for value in msg_dict.get("epoch_ids") or [])
+        elif type_url == "/mirage.core.v1.MsgUpdateParams":
+            dependencies["creator_schedule"].add(True)
+        return dependencies
 
     def refresh_message_signer_runtime(self, type_url: str, value: bytes) -> None:
         """Refresh quota state after a successful user message may consume it.
@@ -1122,6 +1310,7 @@ class MessageProcessor:
         if len(existing) <= 4:
             raise RuntimeError(f"Rejected edit {tx_hash}: stored post row missing paid flag")
         paid_flag = bool(existing[4])
+        protocol_version = self.db.get_post_protocol_version(override)
         logger.info("MsgEdit upsert: override=%s new_community=%s new_title=%s", override, new_community, new_title)
         self.db.upsert_post(
             override,
@@ -1138,6 +1327,7 @@ class MessageProcessor:
             root_post_id=root_post_id,
             edited_at=int(ts),
             media=media,
+            protocol_version=protocol_version,
         )
 
         # Recompute community safety stats when root posts change
@@ -2669,9 +2859,12 @@ class MessageProcessor:
             )
 
     def sync_creator_epoch(self, epoch_id: int, height: int) -> None:
-        epoch = self.chain.query_creator_epoch(epoch_id)
-        if epoch is None:
-            raise RuntimeError(f"creator epoch {epoch_id} disappeared at height {height}")
+        self.sync_creator_epoch_snapshot(self.chain.query_creator_epoch_snapshot(epoch_id), height)
+
+    def sync_creator_epoch_snapshot(self, snapshot: dict, height: int) -> None:
+        """Write a complete prefetched creator epoch snapshot."""
+        epoch = snapshot["epoch"]
+        epoch_id = int(epoch["epoch_id"])
         missing_amounts = [
             field
             for field in ("pool", "engager_slice", "allocated_total", "claimed_total")
@@ -2681,7 +2874,7 @@ class MessageProcessor:
             raise RuntimeError(
                 f"creator epoch {epoch_id} omitted required amount fields: {', '.join(missing_amounts)}"
             )
-        accruals = self.chain.query_creator_epoch_accruals(epoch_id)
+        accruals = snapshot["accruals"]
         for accrual in accruals:
             if accrual["epoch_id"] != epoch_id:
                 raise RuntimeError(
@@ -2689,7 +2882,7 @@ class MessageProcessor:
                 )
         # The accrual is a per-creator total; the target rows say which post each
         # part of it came from, which is what the earnings UI shows.
-        targets = self.chain.query_creator_epoch_targets(epoch_id)
+        targets = snapshot["targets"]
         for target in targets:
             if target["epoch_id"] != epoch_id:
                 raise RuntimeError(
@@ -2847,6 +3040,26 @@ class MessageProcessor:
             epochs.add(epoch)
         for epoch in sorted(epochs):
             self.sync_creator_epoch(epoch, height)
+
+    def process_subscription_tranche_events(self, events: list, height: int) -> None:
+        """Project tranche snapshots prefetched for recipients touched by this block."""
+        recipients: set[str] = set()
+        for event_type, attrs in self.decode_events(events):
+            if event_type != "subscription_tranche_created":
+                continue
+            recipient = str(attrs.get("recipient", "")).strip().lower()
+            if not recipient:
+                raise RuntimeError(f"subscription_tranche_created event missing recipient at height {height}")
+            recipients.add(recipient)
+        for recipient in sorted(recipients):
+            tranches = self.chain.query_subscription_tranches(recipient)
+            self.db.upsert_subscription_tranches(tranches)
+            logger.info(
+                "[subscription] tranche projection recipient=%s records=%d height=%s",
+                recipient,
+                len(tranches),
+                height,
+            )
 
     def _store_creator_schedule(self, ts: int, attrs: dict | None = None) -> None:
         if self.chain is not None:

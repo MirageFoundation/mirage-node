@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Slow / fill-heavy checks that do not belong in the rehearsal suites.
+Slow / fill-heavy checks run as the release rehearsal's required postflight.
 
 Cap fills, indexer projection, and governance mask round-trips spend minutes
-of chain time. Rehearsal runs tests/test_backend.py and tests/test_blockchain.py
-only. Run this suite when you want the full picture.
+of chain time. The rehearsal waits for tests/test_backend.py and
+tests/test_blockchain.py to pass before starting this suite, so its governance
+and whole-index state changes cannot race either core job.
 
 Run:
     docker exec mirage bash -lc 'cd /opt/mirage && set -a; for f in \

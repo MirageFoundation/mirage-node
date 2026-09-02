@@ -16,6 +16,14 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if periodCount < 1 || uint64(periodCount) > params.MaxSubscriptionPeriodsPerPurchase {
 		return fmt.Errorf("period_count must be in [1,%d]", params.MaxSubscriptionPeriodsPerPurchase)
 	}
+	id, _, err := k.getU64Key(ctx, []byte(types.PfxTrancheSeq))
+	if err != nil {
+		return err
+	}
+	id, err = types.CheckedAddUint64(id, 1)
+	if err != nil {
+		return fmt.Errorf("subscription tranche sequence: %w", err)
+	}
 	rec, found, err := k.loadProfile(ctx, recipient)
 	if err != nil {
 		return err
@@ -63,7 +71,6 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 			return err
 		}
 	}
-	wasPaid := rec.EffectivePaid
 	if rec.SubscriptionExpiry > 0 {
 		if err := k.RemoveSubscription(ctx, recipient, rec.SubscriptionExpiry); err != nil {
 			return err
@@ -76,10 +83,8 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if err := k.saveProfile(ctx, rec); err != nil {
 		return err
 	}
-	if !wasPaid {
-		if err := k.TransitionPaidState(ctx, recipient, true); err != nil {
-			return err
-		}
+	if err := k.TransitionPaidState(ctx, recipient, true); err != nil {
+		return err
 	}
 	if err := k.SetSubscription(ctx, recipient, types.LevelSubscriber, end); err != nil {
 		return err
@@ -87,11 +92,6 @@ func (k Keeper) CreateTranche(ctx sdk.Context, payer, recipient string, source t
 	if err := k.ReplaceSubscriptionRenewalSchedule(ctx, recipient); err != nil {
 		return err
 	}
-	id, _, err := k.getU64Key(ctx, []byte(types.PfxTrancheSeq))
-	if err != nil {
-		return err
-	}
-	id++
 	if err := k.setU64Key(ctx, []byte(types.PfxTrancheSeq), id); err != nil {
 		return err
 	}

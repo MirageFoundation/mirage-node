@@ -17,11 +17,6 @@ from indexer.migrations import run_db_migration
 
 MIGRATION_KEY = "v1.39.0_legacy_post_community"
 
-# A deep legacy chain has comments nested well past the display cap, but each
-# pass only fixes rows whose parent is already resolved, so depth costs passes.
-# The loop stops as soon as a pass changes nothing; this is the safety stop.
-MAX_PASSES = 12
-
 
 def run(db, chain, logger):
     def _migrate(cur):
@@ -45,30 +40,87 @@ def run(db, chain, logger):
         )
         from_root = cur.rowcount
 
-        from_parent = 0
-        for _ in range(MAX_PASSES):
-            cur.execute(
-                """
-                UPDATE posts c
-                SET community = p.community
-                FROM posts p
-                WHERE LOWER(p.txhash) = LOWER(c.target)
-                  AND (c.community IS NULL OR c.community = '')
-                  AND c.target IS NOT NULL AND c.target <> ''
-                  AND p.community IS NOT NULL AND p.community <> ''
-                """
+        cur.execute(
+            """
+            WITH RECURSIVE resolved(txhash, root_txhash, community, path) AS (
+                SELECT
+                    LOWER(txhash),
+                    LOWER(txhash),
+                    LOWER(COALESCE(NULLIF(root_community, ''), NULLIF(community, ''))),
+                    ARRAY[LOWER(txhash)]
+                FROM posts
+                WHERE COALESCE(target, '') = ''
+                  AND COALESCE(NULLIF(root_community, ''), NULLIF(community, '')) IS NOT NULL
+                UNION ALL
+                SELECT
+                    LOWER(child.txhash),
+                    parent.root_txhash,
+                    parent.community,
+                    parent.path || LOWER(child.txhash)
+                FROM resolved parent
+                JOIN posts child ON LOWER(child.target) = parent.txhash
+                WHERE NOT LOWER(child.txhash) = ANY(parent.path)
             )
-            if not cur.rowcount:
-                break
-            from_parent += cur.rowcount
+            UPDATE posts child
+            SET community = COALESCE(NULLIF(child.community, ''), resolved.community),
+                root_community = resolved.community,
+                root_post_id = COALESCE(child.root_post_id, resolved.root_txhash)
+            FROM resolved
+            WHERE LOWER(child.txhash) = resolved.txhash
+              AND child.target IS NOT NULL
+              AND child.target <> ''
+              AND (
+                child.community IS NULL
+                OR child.community = ''
+                OR child.root_community IS NULL
+                OR child.root_community = ''
+                OR child.root_post_id IS NULL
+                OR child.root_post_id = ''
+              )
+            """
+        )
+        from_parent = cur.rowcount
 
         cur.execute(
             "SELECT count(*) FROM posts WHERE (community IS NULL OR community = '') "
             "AND target IS NOT NULL AND target <> ''"
         )
         remaining = int(cur.fetchone()[0])
+        cur.execute(
+            """
+            WITH RECURSIVE ancestry(start_hash, current_hash, path, resolved) AS (
+                SELECT
+                    LOWER(txhash),
+                    LOWER(target),
+                    ARRAY[LOWER(txhash)],
+                    FALSE
+                FROM posts
+                WHERE (community IS NULL OR community = '')
+                  AND target IS NOT NULL
+                  AND target <> ''
+                UNION ALL
+                SELECT
+                    ancestry.start_hash,
+                    LOWER(parent.target),
+                    ancestry.path || LOWER(parent.txhash),
+                    COALESCE(NULLIF(parent.community, ''), NULLIF(parent.root_community, '')) IS NOT NULL
+                FROM ancestry
+                JOIN posts parent ON LOWER(parent.txhash) = ancestry.current_hash
+                WHERE NOT ancestry.resolved
+                  AND NOT LOWER(parent.txhash) = ANY(ancestry.path)
+            )
+            SELECT COUNT(DISTINCT start_hash)
+            FROM ancestry
+            WHERE resolved
+            """
+        )
+        still_resolvable = int(cur.fetchone()[0])
+        if still_resolvable:
+            raise RuntimeError(
+                f"legacy comment migration left {still_resolvable} comments with resolvable ancestors"
+            )
         logger.info(
-            "[community] legacy comment community backfill: %d from root, %d from parent, %d unresolved (of %d)",
+            "[community] legacy comment community backfill: %d from root, %d recursively, %d true orphans (of %d)",
             from_root,
             from_parent,
             remaining,

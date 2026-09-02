@@ -135,17 +135,16 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/communities": PUBLIC,
     "/api/communities/<slug>": PUBLIC,
     "/api/communities/<slug>/teams": PUBLIC,
-    # Team rosters and pending curator invitations are chain state: anyone can
-    # read the same rows off a public node with Query/CurationTeamMembers and
-    # Query/PendingCuratorInvitations, so gating the convenience route is theater.
+    # Team profiles and rosters are public chain state.
     "/api/communities/<slug>/teams/<int:team_id>": PUBLIC,
-    "/api/communities/<slug>/teams/<int:team_id>/invitations": PUBLIC,
-    "/api/communities/<slug>/teams/<int:team_id>/moderation": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/invitations": SIGNED_READ,
+    "/api/communities/<slug>/teams/<int:team_id>/moderation": SIGNED_READ,
     # Same rows as CurationTeamMembers, keyed by curator instead of by team.
     "/api/curators/<address>/communities": PUBLIC,
-    "/api/communities/<slug>/teams/<int:team_id>/hidden-users": PUBLIC,
-    "/api/communities/<slug>/teams/<int:team_id>/hidden-posts": PUBLIC,
+    "/api/communities/<slug>/teams/<int:team_id>/hidden-users": SIGNED_READ,
+    "/api/communities/<slug>/teams/<int:team_id>/hidden-posts": SIGNED_READ,
     "/api/creator/earnings": PUBLIC,
+    "/api/creator/earnings/<int:epoch_id>/targets": PUBLIC,
     "/api/core/post": ENVELOPE,
     "/api/core/report": ENVELOPE,
     "/api/core/send_tokens": ENVELOPE,

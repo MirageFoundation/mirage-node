@@ -40,13 +40,8 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  *    first manifest", no env-var override, no A/B flag, no user-id-based
  *    gating. If you think you need to change this, talk to nik first.
  *
- *    History: the default was `bluemoon` until 2026-04-25. Per nik's call,
- *    `default` is now the single shipped theme experience for every user,
- *    and `normalizeThemeId` below force-overrides any persisted selection
- *    (see point 4). The other theme manifests (`bluemoon`, `onyx`,
- *    `oldreddit`) are kept in the registry only so that legacy `theme_id`
- *    values don't blow up `getThemeFamily` calls during migration; they are
- *    intentionally NOT reachable as a runtime visual.
+ *    `default` is the single shipped theme experience for every user, and
+ *    `normalizeThemeId` below overrides any persisted legacy selection.
  *
  * 2. If `default` is not registered in `THEME_MANIFESTS`, THIS MODULE MUST
  *    THROW at import time. Do NOT fall back to another theme. Do NOT default
@@ -60,14 +55,7 @@ export const REQUIRED_THEME_COMPONENT_KEYS = Object.freeze([
  *    one silent fallback here cascades into every surface.
  *
  * 4. `normalizeThemeId` ALWAYS returns `DEFAULT_THEME_ID` regardless of the
- *    persisted value. This deliberately overrides any user-selected theme
- *    that was saved in localStorage before this rule landed. The settings
- *    UI's theme dropdown is now visual-only: any change there is mapped
- *    back to `default` on the next normalization pass and the storage
- *    value is rewritten by the App / bootstrap rewrite logic.
- *
- * If you are adding a new theme, add it to `themes/manifests.js` and leave
- * THIS line alone. The default does not change when new themes ship.
+ *    persisted value. App bootstrap rewrites old values in storage.
  * ============================================================================
  */
 if (!THEMES.default) {
@@ -82,9 +70,7 @@ export const DEFAULT_THEME_ID = 'default';
  * @returns {string}
  */
 export function normalizeThemeId(_id) {
-    // Other families are unregistered. Any persisted theme_id is rewritten
-    // to default so a leftover `onyx` / `bluemoon` / `oldreddit` value
-    // cannot reach getThemeFamily and blow up first paint.
+    // Persisted legacy ids are rewritten before they can reach first paint.
     return DEFAULT_THEME_ID;
 }
 

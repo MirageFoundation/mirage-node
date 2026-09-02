@@ -141,6 +141,9 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
             )}
             {earnings.items.map((item) => {
                 const claimable = earnings.claimable.some((entry) => Number(entry.epoch_id) === Number(item.epoch_id));
+                const selected = earnings.selected.includes(Number(item.epoch_id));
+                const selectionAtCap = earnings.maxClaimEpochs != null
+                    && earnings.selected.length >= earnings.maxClaimEpochs;
                 const remaining = BigInt(item.earned) - BigInt(item.claimed);
                 const claimed = item.claimed_height != null || remaining <= 0n;
                 const expired = Math.floor(Date.now() / 1000) >= Number(item.claim_deadline_unix);
@@ -151,8 +154,8 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
                 return <Row key={item.epoch_id} $canClaim={canClaim}>
                     {canClaim && <input
                         type="checkbox"
-                        checked={earnings.selected.includes(Number(item.epoch_id))}
-                        disabled={!claimable || earnings.pending}
+                        checked={selected}
+                        disabled={!claimable || earnings.pending || (!selected && selectionAtCap)}
                         onChange={() => earnings.toggleEpoch(item.epoch_id)}
                     />}
                     <Epoch>

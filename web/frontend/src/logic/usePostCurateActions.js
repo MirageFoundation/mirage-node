@@ -18,6 +18,7 @@ import { useViewerCuratorMembership } from './useViewerCuratorMembership';
 import { TAG_OPTIONS } from './useCreatePost';
 import { viewingTeamId as viewingTeamIdOf } from '../utils/curation';
 import { setOptimisticCurationVisibility } from '../utils/curationVisibility';
+import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
 
 // Distinct from the '' tag: '' is the curator saying "untagged", this is the
 // curator having no opinion so the community tag and author tag apply again.
@@ -85,16 +86,18 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
             teamId,
             postId: postId.slice(0, 12),
         });
-        Api.get(
-            `communities/${encodeURIComponent(community)}/teams/${teamId}/moderation`,
-            {
-                viewer,
-                post_id: postId,
-                author,
-                root: rootHash,
-                _cb: Date.now(),
-            },
-        )
+        signReadParams(CURATOR_READ_ACTION, viewer)
+            .then((proof) => Api.get(
+                `communities/${encodeURIComponent(community)}/teams/${teamId}/moderation`,
+                {
+                    viewer,
+                    post_id: postId,
+                    author,
+                    root: rootHash,
+                    _cb: Date.now(),
+                    ...proof,
+                },
+            ))
             .then((data) => {
                 if (cancelled) return;
                 if (typeof data?.post_hidden !== 'boolean'

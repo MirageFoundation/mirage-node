@@ -6,6 +6,56 @@ MIGRATION_KEY = "v1.39.0_curator_defined_communities"
 
 
 def run(db, chain, logger):
+    chain_teams = chain.list_all_curation_teams(include_deleted=True)
+    members_by_team = {
+        (team["community"], team["team_id"]): chain.query_curation_team_members(
+            team["community"], team["team_id"]
+        )
+        for team in chain_teams
+    }
+
+    with db._connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_name='posts'
+                  AND column_name IN ('was_subscriber_at_creation', 'author_was_paid_at_creation')
+                """
+            )
+            creation_flag_columns = {str(row[0]) for row in cur.fetchall()}
+            if "was_subscriber_at_creation" in creation_flag_columns:
+                creation_flag_column = "was_subscriber_at_creation"
+            elif "author_was_paid_at_creation" in creation_flag_columns:
+                creation_flag_column = "author_was_paid_at_creation"
+            else:
+                raise RuntimeError("posts is missing the subscriber-at-creation column")
+            cur.execute(
+                f"""
+                SELECT txhash
+                FROM posts
+                WHERE protocol_version=1
+                  AND (
+                    root_txhash IS NULL
+                    OR post_sequence IS NULL
+                    OR created_height IS NULL
+                    OR created_epoch IS NULL
+                    OR {creation_flag_column} IS NULL
+                  )
+                ORDER BY created_at, txhash
+                """
+            )
+            missing = [str(row[0]).lower() for row in cur.fetchall()]
+
+    post_metadata = {txhash: chain.query_post_metadata(txhash) for txhash in missing}
+    logger.info(
+        "[community] prefetched migration snapshots teams=%d members=%d posts=%d",
+        len(chain_teams),
+        sum(len(members) for members in members_by_team.values()),
+        len(post_metadata),
+    )
+
     def _migrate(cur):
         cur.execute(
             """
@@ -64,7 +114,6 @@ def run(db, chain, logger):
             """
         )
 
-        chain_teams = chain.list_all_curation_teams(include_deleted=True)
         chain_team_keys = {(team["community"], team["team_id"]) for team in chain_teams}
         for team in chain_teams:
             cur.execute(
@@ -98,7 +147,7 @@ def run(db, chain, logger):
                     team["deleted_height"],
                 ),
             )
-            members = chain.query_curation_team_members(team["community"], team["team_id"])
+            members = members_by_team[(team["community"], team["team_id"])]
             cur.execute(
                 "DELETE FROM curation_team_curators WHERE community=%s AND team_id=%s",
                 (team["community"], team["team_id"]),
@@ -130,83 +179,10 @@ def run(db, chain, logger):
                 f"chain_only={sorted(chain_team_keys - db_team_keys)}"
             )
 
-        # Paid/relay quota projection lives in v1_39_0_quota_paid_backfill.
-        # This migration used to SELECT effective_paid=TRUE here, but that
-        # column is still the DEFAULT FALSE from v1_39_0_communities at this
-        # point in startup (KV sync runs only after all migrations), so the
-        # loop always projected 0 paid profiles on real upgrades. Keep the
-        # counter for the completion log/return string.
-        paid_owners: list[str] = []
-
-        cur.execute(
-            """
-            WITH expected AS (
-                SELECT
-                    t.community,
-                    t.team_id,
-                    COUNT(pr.owner)::NUMERIC(20,0) AS subscriber_count
-                FROM curation_teams t
-                LEFT JOIN community_curation_preferences p
-                  ON p.community=t.community
-                 AND p.mode=1
-                 AND p.pinned_team_id=t.team_id
-                LEFT JOIN profiles pr
-                  ON LOWER(pr.owner)=LOWER(p.owner)
-                 AND (pr.effective_paid=TRUE OR pr.level >= 100)
-                WHERE t.deleted_height IS NULL
-                GROUP BY t.community, t.team_id
-            )
-            UPDATE curation_teams t
-            SET subscriber_count=e.subscriber_count
-            FROM expected e
-            WHERE t.community=e.community AND t.team_id=e.team_id
-            """
-        )
-        cur.execute(
-            """
-            UPDATE curation_teams
-            SET subscriber_count=0
-            WHERE deleted_height IS NOT NULL AND subscriber_count<>0
-            """
-        )
-        cur.execute(
-            """
-            SELECT community, team_id, subscriber_count
-            FROM curation_teams
-            ORDER BY community, team_id
-            """
-        )
-        for community, team_id, subscriber_count in cur.fetchall():
-            chain_team = chain.query_curation_team(community, int(team_id))
-            chain_count = int(chain_team["subscriber_count"])
-            if chain_count != int(subscriber_count):
-                raise RuntimeError(
-                    "curation subscriber count mismatch "
-                    f"{community}/{team_id}: indexer={subscriber_count} chain={chain_count}"
-                )
-
-        # Column is still author_was_paid_at_creation here; the rename
-        # migration (v1_39_0_was_subscriber_at_creation) runs after this file.
-        cur.execute(
-            """
-            SELECT txhash
-            FROM posts
-            WHERE protocol_version=1
-              AND (
-                root_txhash IS NULL
-                OR post_sequence IS NULL
-                OR created_height IS NULL
-                OR created_epoch IS NULL
-                OR author_was_paid_at_creation IS NULL
-              )
-            ORDER BY created_at, txhash
-            """
-        )
-        missing = [str(row[0]).lower() for row in cur.fetchall()]
         for txhash in missing:
-            metadata = chain.query_post_metadata(txhash)
+            metadata = post_metadata[txhash]
             cur.execute(
-                """
+                f"""
                 UPDATE posts
                 SET community=%s,
                     root_community=%s,
@@ -215,7 +191,7 @@ def run(db, chain, logger):
                     post_sequence=%s,
                     created_height=%s,
                     created_epoch=%s,
-                    author_was_paid_at_creation=%s,
+                    {creation_flag_column}=%s,
                     deleted_height=NULLIF(%s,0),
                     deleted_epoch=NULLIF(%s,0)
                 WHERE LOWER(txhash)=%s AND protocol_version=1
@@ -247,15 +223,13 @@ def run(db, chain, logger):
             """
         )
         logger.info(
-            "[community] v1.39 cleanup projected %d teams, %d paid profiles, and backfilled %d protocol-1 posts",
+            "[community] v1.39 cleanup projected %d teams and backfilled %d protocol-1 posts",
             len(chain_teams),
-            len(paid_owners),
             len(missing),
         )
         return (
             "curator-defined communities cleanup applied; "
-            f"teams={len(chain_teams)} paid_profiles={len(paid_owners)} "
-            f"post_metadata_backfilled={len(missing)}"
+            f"teams={len(chain_teams)} post_metadata_backfilled={len(missing)}"
         )
 
     return run_db_migration(db, MIGRATION_KEY, _migrate, logger)

@@ -6,6 +6,13 @@ import {
     requireCommunitySlug,
     requireTeamId,
 } from '../utils/curation';
+import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
+
+async function curatorParams(viewer, params = {}) {
+    const address = String(viewer || '').trim().toLowerCase();
+    if (!address || address === 'guest') return params;
+    return { ...params, viewer: address, ...await signReadParams(CURATOR_READ_ACTION, address) };
+}
 
 function validateTeam(team) {
     if (!team || typeof team !== 'object') throw new Error('Invalid curator team response');
@@ -38,8 +45,10 @@ export function useCurationTeams(community, { includeDeleted = false, viewer = '
             setError('');
         }
         try {
-            const params = { include_deleted: includeDeleted, _cb: Date.now() };
-            if (viewer) params.viewer = String(viewer).toLowerCase();
+            const params = await curatorParams(viewer, {
+                include_deleted: includeDeleted,
+                _cb: Date.now(),
+            });
             const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, params);
             if (!data || !Array.isArray(data.items)) throw new Error('Invalid curator teams response');
             const next = data.items.map(validateTeam);
@@ -103,11 +112,16 @@ export function useCurationTeam(community, teamId, viewer = '') {
         setLoading(true);
         setError('');
         try {
-            const params = viewer ? { viewer: String(viewer).toLowerCase() } : undefined;
             const [data, invitationData] = await Promise.all([
-                Api.get(`communities/${encodeURIComponent(slug)}/teams/${id}`, params),
                 viewer
-                    ? Api.get(`communities/${encodeURIComponent(slug)}/teams/${id}/invitations`, params)
+                    ? curatorParams(viewer).then((params) => (
+                        Api.get(`communities/${encodeURIComponent(slug)}/teams/${id}`, params)
+                    ))
+                    : Api.get(`communities/${encodeURIComponent(slug)}/teams/${id}`),
+                viewer
+                    ? curatorParams(viewer).then((params) => (
+                        Api.get(`communities/${encodeURIComponent(slug)}/teams/${id}/invitations`, params)
+                    ))
                     : Promise.resolve({ items: [] }),
             ]);
             const next = validateTeam(data);
@@ -186,12 +200,11 @@ function useHiddenCurationPage(kind, community, teamId, { viewer = '', enabled =
         try {
             const data = await Api.get(
                 `communities/${encodeURIComponent(slug)}/teams/${id}/${pathSuffix}`,
-                {
-                    viewer: viewerAddr,
+                await curatorParams(viewerAddr, {
                     offset,
                     limit,
                     _cb: Date.now(),
-                },
+                }),
             );
             if (!data || !Array.isArray(data.items) || typeof data.has_more !== 'boolean') {
                 throw new Error(`Invalid ${pathSuffix} response`);

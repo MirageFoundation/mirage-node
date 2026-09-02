@@ -32,7 +32,7 @@ function useDebugStateOverride() {
  * BlocksView — `default` Plan 06 sub-plan 03.
  *
  * Rules applied: R1 rows sit on `bg`; R2 all tokens; R3 rows divided by
- * `1px solid theme.colors.border`; R4 data parity with bluemoon; R7 row
+ * `1px solid theme.colors.border`; R7 row
  * title 0.78rem/600, meta 0.62rem/500.
  *
  * Action: `Unblock` via the danger variant of `Button` per sub-plan 06.3.

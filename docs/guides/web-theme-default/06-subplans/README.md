@@ -4,6 +4,11 @@ Plan 06 is too broad to ship in one PR. This folder splits it into focused one-P
 
 **Parent plan:** [`../06-remaining-routes-and-polish.md`](../06-remaining-routes-and-polish.md)
 
+> Historical note: these completed plans mention the former `oldreddit`,
+> `bluemoon`, and `onyx` families that were present while the work was designed.
+> Those paths no longer exist. For current changes, use shared logic, route
+> facades, and `themes/default/` as required by [`../RULES.md`](../RULES.md).
+
 ---
 
 ## Order & status
@@ -37,9 +42,9 @@ Each sub-plan is one PR. Recommended order is **2 → 1 → 3 → 4 → 5 → 7 
 
 - Live inside the Plan 02 desktop shell (TopBar + Sidebar + content column).
 - Reuse theme-local primitives: `Button`, `MarkdownEditor`, `MarkdownRenderer`, panel containers, `AuthPageShell` where relevant — **after sub-plan 2** these must be the restyled default versions.
-- Never import from `themes/oldreddit/*` or `themes/bluemoon/*` inside `default`.
+- Never import from removed theme families inside `default`.
 - **Visual only** — do not modify data hooks or seed-vault/unlock behavior.
-- **Data parity:** every field bluemoon shows must also appear in default (R4).
+- **Data parity:** preserve every field and behavior exposed by shared web contracts (R4).
 - **Visuals:** align spacing, typography, and tokens with `mirage-mobile-app` (R4).
 - Dark + light modes must both be verified.
 - Each PR must pass:

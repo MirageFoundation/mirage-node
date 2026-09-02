@@ -245,31 +245,29 @@ The **feed divider** (the 1px line between rows in the post feed / inbox / lists
 
 **Every UI change to `default` must be preceded by reading both of these references**:
 
-1. **Web (data + structure):** the matching view in `web/frontend/src/themes/bluemoon/`
-   - Example: changing `InboxView.js` → read `themes/bluemoon/routes/InboxView.js` first.
-   - Use bluemoon as the **canonical source for data shape, hook wiring, and feature coverage**. Every piece of data bluemoon shows must be shown in default too.
+1. **Web (data + structure):** the matching hook under `web/frontend/src/logic/`, its route facade under `src/views/`, and the current `themes/default/` implementation.
+   - Example: changing `InboxView.js` → read `logic/useInbox.js`, `views/InboxView.js`, and `themes/default/routes/InboxView.js`.
+   - Shared logic and API contracts are the canonical source for data shape, hook wiring, and feature coverage.
 2. **Mobile (visual / interaction language):** the matching screen in `mirage-mobile-app/src/pages/` (or `app/(tabs)/`).
    - Example: Inbox → `src/pages/inbox-screen.tsx`.
    - Use mobile as the **canonical source for visuals**: spacing, typography, tokens, row layout, icons, empty state tone, interaction feel.
 
 ### The hybrid rule
 
-When mobile visuals and bluemoon data coverage conflict:
+When mobile visuals and web data coverage conflict:
 
-- **Data / features / hook wiring** → follow **bluemoon**. Do not drop any feature that bluemoon shows.
+- **Data / features / hook wiring** → follow shared **logic, views, and API contracts**. Do not drop existing behavior.
 - **Look, feel, spacing, typography, tokens, icons** → follow **mobile**.
 - **Desktop layout structure** → Plan 02 shell (TopBar + Sidebar + content column).
 
 ### Process (do this every sub-plan)
 
-1. Read the bluemoon version of the route.
+1. Read the route's shared logic, facade, and current default implementation.
 2. Read the mobile version of the screen.
-3. List the data fields bluemoon displays → these must all appear in default.
+3. List the data fields and behaviors the current web contract exposes.
 4. Port visuals from mobile (spacing, tokens, row layout, icons, typography).
 5. Wrap the result in the Plan 02 desktop shell.
 6. Verify the build passes.
-
-> If bluemoon doesn't have an equivalent (new surface), fall back to the oldreddit theme for structure, then apply mobile visuals.
 
 ---
 
@@ -283,11 +281,11 @@ Before opening a PR for any default change, confirm:
 - [ ] All inputs follow R5 focus style (`borderStrong` hover + focus, no blue ring).
 - [ ] All chevrons use `HiChevronDown` per R6 — no unicode, no inline polyline.
 - [ ] Typography follows R7 — inputs at `0.75rem/500`, page heading at `1.1rem/700`, no `>1.1rem` body text, no `font-weight: 800`.
-- [ ] I read the bluemoon version of this view before changing it (R4).
+- [ ] I read the matching shared logic, view facade, and default implementation (R4).
 - [ ] I read the mobile version of this screen before changing it (R4).
-- [ ] All bluemoon data fields are present in default.
+- [ ] All existing web data and behavior remain present in default.
 - [ ] Mobile visual tone (spacing, typography, icons) applied.
-- [ ] No `themes/oldreddit/*` or `themes/bluemoon/*` imports inside `themes/default/*`.
+- [ ] No imports reference removed theme families.
 - [ ] Dark + light modes both verified manually in the browser.
 - [ ] `CI=true npm run build` passes cleanly in `web/frontend`.
 

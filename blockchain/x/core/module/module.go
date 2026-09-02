@@ -455,7 +455,12 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 			}
 		}
 		for _, t := range ip.BlockedCommunities {
-			if err := am.k.AddBlockedCommunity(sdkCtx, owner, t, 0); err != nil {
+			params := am.k.GetParams(sdkCtx)
+			tier := params.GetTierConfig(int(ip.Core.Level))
+			if tier == nil {
+				panic(fmt.Errorf("InitGenesis: tier missing for %s", owner))
+			}
+			if err := am.k.AddBlockedCommunity(sdkCtx, owner, t, uint32(tier.MaxBlockedCommunities)); err != nil {
 				panic(fmt.Errorf("InitGenesis: AddBlockedCommunity for %s failed: %w", owner, err))
 			}
 		}
@@ -2760,21 +2765,27 @@ func (am AppModule) SetLevel(ctx context.Context, req *types.MsgSetLevel) (*type
 		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
 	}
 
-	// Validate level is a known tier
 	newLevel := req.GetLevel()
-	if types.LevelToTierIndex(int(newLevel)) < 0 {
-		return nil, fmt.Errorf("invalid level %d: must be 0, 1, 10, or >= 100", newLevel)
+	if newLevel != types.LevelFree && newLevel < types.LevelAdminMin {
+		return nil, fmt.Errorf("invalid level %d: must be 0 or >= 100", newLevel)
 	}
 
-	core.Level = newLevel
+	beforeCanCurate := types.CanCurate(core)
+	if newLevel == types.LevelFree && core.EffectivePaid {
+		core.Level = types.LevelSubscriber
+	} else {
+		core.Level = newLevel
+	}
 
-	// Save profile core
 	bz, err = json.Marshal(core)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal profile: %w", err)
 	}
 	if err := am.k.SetProfileCore(sdkCtx, target, bz); err != nil {
 		return nil, fmt.Errorf("failed to save profile: %w", err)
+	}
+	if err := am.k.TransitionCurationEligibility(sdkCtx, target, beforeCanCurate, types.CanCurate(core)); err != nil {
+		return nil, fmt.Errorf("failed to transition curation eligibility: %w", err)
 	}
 
 	sdkCtx.Logger().Info("SetLevel",

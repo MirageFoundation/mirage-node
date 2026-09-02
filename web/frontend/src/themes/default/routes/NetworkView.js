@@ -17,7 +17,6 @@ import { useNetwork, CHART, fmtMirage } from "../../../logic/useNetwork";
  *    (uppercase, subtleText) separate groups, like `SettingsView`.
  *  - R2: every color routed through a token (no raw hex / rgba).
  *  - R3: divider under page header uses `border`.
- *  - R4: data parity with `themes/bluemoon/routes/NetworkView.js`.
  *  - R7: page heading 1.1rem/700 (matches `SettingsView`), section
  *    header 0.6rem/700 uppercase, field label 0.72rem/500 text, field
  *    value 0.72rem/500 cardBodyText (matches `ProfileView`).

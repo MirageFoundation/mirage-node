@@ -9,7 +9,7 @@ import { dicebearAvatarUrl } from '../../../utils/avatar';
  *
  * Why one component:
  *   - Before this, every surface (TopBar, ProfileView, FollowsView,
- *     BlocksView, AgentsView, SearchResultsView,
+ *     BlocksView, SearchResultsView,
  *     SearchDropdown, comment rows in ViewPostView) declared its own
  *     `styled.img` for the dicebear chip. The bg, padding, and image
  *     framing drifted from surface to surface.

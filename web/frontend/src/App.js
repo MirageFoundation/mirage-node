@@ -19,6 +19,11 @@ import CommunityLeaveConfirmation from './components/CommunityLeaveConfirmation'
 import { installCrossTabSessionWatcher, onSessionReset, resetClientSession } from './utils/sessionLifecycle';
 import { updateNotification } from './utils/notifications';
 import { withReturnTo } from './utils/returnTo';
+import {
+    FEED_READ_ACTION,
+    THREAD_READ_ACTION,
+    signReadParams,
+} from './utils/signPlain';
 
 
 // Lazy import wrapper that handles chunk load failures after deployments.
@@ -502,7 +507,7 @@ class App extends Component {
 
         // Single combined bootstrap fetch: replaces the cold-load fan-out of
         // get_node_config + get_chain_config + get_user_status + get_user_followed +
-        // get_user_blocked + /rewards/summary + the initial
+        // get_user_blocked + the initial
         // screen payload (feed/thread/inbox). Per-section nulls fall through
         // to the existing per-endpoint fetches; chain_config falls back to
         // _bootstrapChainConfig when missing from the response.
@@ -611,9 +616,8 @@ class App extends Component {
 
     _bootstrapNodeConfig(attempt = 0) {
         // Mirrors `_bootstrapChainConfig`: retry get_node_config on transient
-        // failures so home cards (invite codes banner, quest hero), the profile
-        // menu's Referrals item, and CreateAccountView don't render in their
-        // "missing" state until the user manually refreshes.
+        // failures so configuration-backed screens do not stay in their
+        // loading state until a manual refresh.
         const delays = [0, 1000, 3000, 7000];
         if (attempt >= delays.length) {
             // Out of retries — wake up listeners (e.g. CreateAccountView) so
@@ -675,9 +679,8 @@ class App extends Component {
         // Combined first-paint fetch via /api/bootstrap. Distributes results into
         // the existing caches so consumer hooks see the data on their first effect.
         // For logged-out users only node_config/chain_config (+ optional view) come
-        // back; user_* sections are null. On failure, the per-endpoint hooks
-        // (useMain blocked-communities fetcher, useQuests fetchAll, etc.) keep their
-        // existing fetch logic and pick up the slack.
+        // back; user_* sections are null. On failure, per-endpoint hooks keep
+        // their existing fetch logic and pick up the slack.
         const delays = [0, 1000, 3000, 7000];
         if (attempt >= delays.length) {
             // Out of retries: recover nodeConfig via the dedicated endpoint when
@@ -725,7 +728,20 @@ class App extends Component {
 
             console.debug('[App] bootstrap.fetch attempt', attempt + 1, 'logged_in:', !!pk, 'view:', view || null, 'path:', bootstrapPath);
             const requestPk = pk || '';
-            const request = Api.get('bootstrap', Object.keys(params).length ? params : undefined)
+            let readAction = null;
+            if (pk && view && (view.startsWith('feed:') || view.startsWith('community:'))) {
+                readAction = FEED_READ_ACTION;
+            } else if (pk && view && view.startsWith('thread:')) {
+                readAction = THREAD_READ_ACTION;
+            }
+            const signedParams = readAction
+                ? signReadParams(readAction, pk).then((proof) => ({ ...params, ...proof }))
+                : Promise.resolve(params);
+            const request = signedParams
+                .then((requestParams) => Api.get(
+                    'bootstrap',
+                    Object.keys(requestParams).length ? requestParams : undefined,
+                ))
                 .then((resp) => {
                     if (!resp || typeof resp !== 'object') {
                         this._bootstrapApp(attempt + 1);
@@ -806,9 +822,6 @@ class App extends Component {
                         }
                         if (resp.user_blocked) {
                             try { Storage.save('bootstrap_user_blocked', { data: resp.user_blocked, at: stashAt, pk }); } catch (_) { }
-                        }
-                        if (resp.rewards_summary) {
-                            try { Storage.save('bootstrap_rewards_summary', { data: resp.rewards_summary, at: stashAt, pk }); } catch (_) { }
                         }
                     }
 
@@ -897,7 +910,6 @@ class App extends Component {
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
         Storage.remove('bootstrap_user_blocked');
-        Storage.remove('bootstrap_rewards_summary');
         Storage.remove('bootstrap_view');
 
         // Fetch latest status on login via bootstrap (includes chain_config +

@@ -257,6 +257,9 @@ func (k Keeper) JoinCommunity(ctx sdk.Context, owner, slug string, cap uint32) e
 	} else if found {
 		return nil
 	}
+	if cap == 0 {
+		return fmt.Errorf("joined communities cap is zero")
+	}
 	cnt, err := k.CountJoinedCommunities(ctx, owner)
 	if err != nil {
 		return err

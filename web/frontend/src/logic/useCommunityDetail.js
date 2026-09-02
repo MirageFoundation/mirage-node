@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Api from '../utils/api';
 import { requireCommunitySlug } from '../utils/curation';
+import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
 
 function validateDetail(data, slug) {
     if (!data || typeof data !== 'object' || data.community !== slug) {
@@ -33,7 +34,10 @@ export function useCommunityDetail(community, viewer = '', enabled = true) {
             setError('');
         }
         try {
-            const params = viewer ? { viewer: String(viewer).toLowerCase() } : undefined;
+            const viewerAddress = String(viewer || '').toLowerCase();
+            const params = viewerAddress
+                ? { viewer: viewerAddress, ...await signReadParams(CURATOR_READ_ACTION, viewerAddress) }
+                : undefined;
             const data = validateDetail(await Api.get(`communities/${encodeURIComponent(slug)}`, params), slug);
             if (seq !== requestSeq.current) {
                 console.debug('[community] detail stale response dropped', {

@@ -4,7 +4,12 @@ import { HiChevronDown } from "react-icons/hi2";
 import Storage from '../../../utils/Storage';
 import { getAllowedTags } from '../../../utils/ContentTags';
 import Api from '../../../utils/api';
-import { communityLabel, stripCommunityPrefix } from '../../../utils/community';
+import {
+    communityLabel,
+    isValidCommunitySlug,
+    sanitizeCommunitySlug,
+    stripCommunityPrefix,
+} from '../../../utils/community';
 
 const Container = styled.div`
     position: relative;
@@ -265,6 +270,12 @@ const EmptyState = styled.div`
     font-size: 0.7rem;
 `;
 
+const ValidationError = styled.div`
+    padding: 0.35rem 0.85rem 0.1rem;
+    color: ${({ theme }) => theme.colors.voteDown};
+    font-size: 0.62rem;
+`;
+
 const CACHE_TTL_MS = 60 * 1000; // short-term cache for communities
 
 const FLAG_LABELS = {
@@ -287,6 +298,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
     const [isSearching, setIsSearching] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
     const [isLoading, setIsLoading] = useState(false);
+    const [validationError, setValidationError] = useState('');
 
     const containerRef = useRef(null);
     const searchInputRef = useRef(null);
@@ -336,18 +348,10 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
         }
     }, [applyCommunities]);
 
-    const sanitize = useCallback((val) => {
-        try {
-            const s = String(val || '')
-                .toLowerCase()
-                .replace(/[^a-z0-9-]/g, '')
-                .replace(/--+/g, '-')
-                .replace(/^-+|-+$/g, '');
-            return s.slice(0, effectiveMaxLength);
-        } catch (_) {
-            return '';
-        }
-    }, [effectiveMaxLength]);
+    const sanitize = useCallback(
+        (val) => sanitizeCommunitySlug(val, effectiveMaxLength),
+        [effectiveMaxLength],
+    );
 
     const viewerAddress = Storage.load('publicKey', '') || '';
 
@@ -508,8 +512,11 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
     const filteredAllCommunities = filteredAll.map(t => t.community || t);
 
     // Check if search term is a valid new community (not existing, meets length requirements)
-    const isNewCommunity = sanitizedSearch.length >= effectiveMinLength &&
-        sanitizedSearch.length <= effectiveMaxLength &&
+    const isNewCommunity = isValidCommunitySlug(
+        sanitizedSearch,
+        effectiveMinLength,
+        effectiveMaxLength,
+    ) &&
         !allCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
         !followedCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
         !filteredAllCommunities.map(t => String(t || '').toLowerCase()).includes(sanitizedSearch);
@@ -573,6 +580,12 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
 
     const handleSelect = (community, focusNext = false, isNew = false) => {
         const sanitized = sanitize(community);
+        if (!isValidCommunitySlug(sanitized, effectiveMinLength, effectiveMaxLength)) {
+            setValidationError(
+                `Use ${effectiveMinLength}–${effectiveMaxLength} lowercase letters, numbers, or single internal hyphens`,
+            );
+            return;
+        }
         if (isNew) console.debug('[CommunitySelector] selected new slug', { slug: sanitized });
         onChange({
             target: { value: sanitized },
@@ -581,6 +594,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
         setIsOpen(false);
         setSearchValue('');
         setHighlightedIndex(-1);
+        setValidationError('');
         if (focusNext) focusNextInput();
     };
 
@@ -628,6 +642,10 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
                 handleSelect(pick.community, true, pick.type === 'new');
             } else if (sanitizedSearch) {
                 handleSelect(sanitizedSearch, true, isNewCommunity);
+            } else {
+                setValidationError(
+                    `Use ${effectiveMinLength}–${effectiveMaxLength} lowercase letters, numbers, or single internal hyphens`,
+                );
             }
         }
     };
@@ -686,6 +704,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
                         onChange={(e) => {
                             setSearchValue(e.target.value);
                             setHighlightedIndex(-1);
+                            setValidationError('');
                         }}
                         onKeyDown={handleKeyDown}
                         autoComplete="off"
@@ -696,6 +715,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
                         aria-haspopup="listbox"
                         aria-expanded={true}
                     />
+                    {validationError && <ValidationError role="alert">{validationError}</ValidationError>}
                     <Dropdown>
                         <ResultsContainer ref={dropdownRef}>
                             {isLoading ? (

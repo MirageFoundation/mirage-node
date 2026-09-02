@@ -20,19 +20,7 @@ import { useInbox, formatAwardLabel } from "../../../logic/useInbox";
 import InlineMedia from "../components/InlineMedia";
 import { isLikelyImageUrl, isLikelyVideoUrl } from "../../../utils/media";
 
-/**
- * InboxView — `default` Plan 05 sub-plan 01.
- *
- * Follows `docs/guides/web-theme-default/RULES.md`:
- *  - R1 rows sit directly on `theme.colors.bg`; unread rows get a
- *    primary-blue tint via `inboxReplyUnreadBg`.
- *  - R2 every color routed through a token (no raw hex/rgb).
- *  - R3 rows are full-bleed divided by `1px solid theme.colors.border`
- *    — the same divider used by the feed.
- *  - R4 data parity with `themes/bluemoon/routes/InboxView.js`; visual
- *    parity with `mirage-mobile-app/src/components/molecules/inbox-item.tsx`
- *    (no avatar, action icon on the left, time-ago on the right).
- */
+/** Inbox activity in the default UI. */
 
 /**
  * `InboxWrap` caps the inbox at the card-view feed width (820px) by
@@ -658,7 +646,7 @@ export default function InboxView({ state }) {
 
                     const Icon = getActionIcon(reply.type);
 
-                    // Build the action label + inline parent preview (bluemoon parity).
+                    // Build the action label and inline parent preview.
                     let actionLabel;
                     if (isAward) {
                         actionLabel = ` gave you a “${awardLabel}” award for your ${awardTarget}`;

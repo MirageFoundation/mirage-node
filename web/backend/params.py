@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any
 import psycopg
 
 from db import connect_db
+from error_utils import IndexerUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ _REQUIRED_INT_PARAMS = [
     "max_subscription_periods_per_purchase",
     "subscription_early_renewal_days",
     "creator_epoch_seconds",
+    "max_creator_claim_epochs",
 ]
 
 _REQUIRED_FLOAT_PARAMS = [
@@ -175,26 +177,15 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
 
 
 def expect_params() -> Dict[str, Any]:
-    """Get cached params, re-reading them once the cache is older than the TTL.
-
-    A refresh that fails keeps serving the values already loaded rather than
-    failing the request. That is not a fallback masking a bug: the previous
-    behaviour was to serve this same set forever, so a transient indexer blip
-    leaves the backend no worse off than it was, while a 503 on every relay route
-    would be a new and much larger failure. The attempt is logged either way.
-    """
-    global _PARAMS_LOADED_AT
+    """Get cached params, failing the request if a required refresh fails."""
     if _PARAMS_CACHE is None:
-        raise RuntimeError("params cache uninitialized - indexer not available?")
+        raise IndexerUnavailable("params cache is uninitialized")
     if time.monotonic() - _PARAMS_LOADED_AT >= PARAMS_REFRESH_SECONDS:
         try:
-            # One attempt, no retry sleep: this runs on the request path.
             load_params(force=True, max_retries=1)
         except Exception as e:  # noqa: BLE001
-            # Back off for a full interval. Without this a broken indexer would be
-            # re-queried by every request instead of once per TTL.
-            _PARAMS_LOADED_AT = time.monotonic()
-            log.warning(f"Chain param refresh failed, serving cached values: {e}")
+            log.error("required chain param refresh failed: %s", e)
+            raise IndexerUnavailable("required chain param refresh failed") from e
     return _PARAMS_CACHE
 
 
@@ -227,4 +218,3 @@ def expect_creator_schedule() -> Dict[str, Any]:
 
 
 __all__ = ["load_params", "expect_params", "expect_creator_schedule"]
-

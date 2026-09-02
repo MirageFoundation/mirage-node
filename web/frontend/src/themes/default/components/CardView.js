@@ -55,7 +55,7 @@ import { formatTimeStamp } from "../../../logic/useViewPost";
  * Three popovers live on a card:
  *   1. Follow popover — Follow community / Follow user
  *   2. Block popover  — Block user / Block post / Block community / Report post
- *   3. More popover   — full set of actions mirroring bluemoon
+ *   3. More popover   — full set of post actions
  *
  * All popovers reuse the same visual style and behavior as the feed header
  * dropdowns in `ListFeedView.js`.
@@ -169,8 +169,7 @@ const FeedReasonWrapper = styled.span`
 `;
 
 /* Portal-rendered feed debug tooltip that breaks down the ranking
- * formula for the post (S / V / U / P / A / R / N …). Mirrors the
- * bluemoon implementation but themed for default. */
+ * formula for the post (S / V / U / P / A / R / N …). */
 const FeedDebugTooltip = styled.div`
     position: fixed;
     z-index: 10000;
@@ -513,7 +512,7 @@ const MenuItemBtn = styled.button`
     }
 `;
 
-// ─── Icons (ported from bluemoon for visual parity) ────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────
 
 const CommentIcon = (p) => (
     <svg viewBox="0 0 24 24" aria-hidden="true" width="18" height="18" {...p}>
@@ -540,7 +539,7 @@ const EllipsisIcon = (p) => (
  * label). The old bottom toast was removed to match the profile-card
  * share pattern. */
 
-/* Feed-bucket → inline label map, mirroring bluemoon/CardView. */
+/* Feed-bucket → inline label map. */
 const FEED_BUCKET_LABELS = {
     following: 'following',
     similar: 'similar',
@@ -795,12 +794,8 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
     }, [navigate, linkTarget, community]);
 
     /**
-     * Share handler ported from bluemoon: on mobile devices attempt the
-     * native Web Share API (including image blob if the thumbnail is
-     * shareable); on desktop fall back to copying the link to the
-     * clipboard and flashing the inline `ShareSuccessMessage` toast for
-     * 3 seconds. Keeps props compatible with bluemoon's UX so both themes
-     * behave identically.
+     * On mobile, use the native Web Share API and include the thumbnail when
+     * possible. On desktop, copy the post link and show inline confirmation.
      */
     const handleShare = useCallback(async (e) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
@@ -1455,7 +1450,6 @@ function CardView({ state, post, updatePost, showContent = false, showPostLens =
             <GiftSubscriptionDialog
                 open={!!confirmGiftSub}
                 recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : `@${authorDisplay}`}
-                level={confirmGiftSub?.level}
                 feeLabel={subFeeLabel}
                 feeUmirage={subFeeUmirage}
                 loading={!!confirmGiftSub?.loading}

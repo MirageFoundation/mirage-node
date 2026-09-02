@@ -932,12 +932,19 @@ func (k Keeper) AddBlockedCommunity(ctx sdk.Context, owner, pattern string, maxC
 	} else if has {
 		return nil
 	}
+	if maxCap == 0 {
+		return fmt.Errorf("blocked community cap is zero")
+	}
 	next, _, err := k.getU64Key(ctx, types.KeyBlockCommunityNext(owner))
 	if err != nil {
 		return err
 	}
 	seq := next
-	if err := k.setU64Key(ctx, types.KeyBlockCommunityNext(owner), next+1); err != nil {
+	next, err = types.CheckedAddUint64(next, 1)
+	if err != nil {
+		return fmt.Errorf("blocked community sequence: %w", err)
+	}
+	if err := k.setU64Key(ctx, types.KeyBlockCommunityNext(owner), next); err != nil {
 		return err
 	}
 	if err := k.storeSet(ctx, types.KeyBlockCommunity(owner, seq, pattern), []byte{1}); err != nil {

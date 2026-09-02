@@ -173,7 +173,7 @@ func TestUnblockCommunityRemovesEntry(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	for _, slug := range []string{"alpha", "beta", "gamma"} {
-		require.NoError(t, mk.AddBlockedCommunity(ctx, owner, slug, 0))
+		require.NoError(t, mk.AddBlockedCommunity(ctx, owner, slug, 3))
 	}
 
 	_, err := am.UnblockCommunity(ctx, &types.MsgUnblockCommunity{

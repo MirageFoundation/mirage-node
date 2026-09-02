@@ -14,6 +14,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -26,6 +28,7 @@ UPGRADE_NAME = "v1.39.0"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 BACKEND = "http://127.0.0.1:80"
+STATUS_DIR = Path("/root/.mirage/upgrade_tests")
 passed = 0
 failed = 0
 
@@ -48,8 +51,14 @@ def http_json(url: str) -> dict:
         return json.loads(response.read().decode())
 
 
-def http_status(url: str) -> int:
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+def http_status(url: str, method: str = "GET") -> int:
+    body = b"{}" if method == "POST" else None
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method=method,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
             return int(response.status)
@@ -173,6 +182,66 @@ def check_params() -> None:
         fail(f"creator_epoch_seconds={params.get('creator_epoch_seconds')!r}")
 
 
+def check_preserved_params() -> None:
+    snapshot_path = STATUS_DIR / "pre_upgrade_params.json"
+    if not snapshot_path.is_file():
+        fail(f"pre-upgrade parameter snapshot missing: {snapshot_path}")
+        return
+    before = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    after = http_json(f"{REST}/mirage/core/v1/params")["params"]
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        fail("pre/post-upgrade parameter payload is not an object")
+        return
+
+    preserved = (
+        "min_difficulty",
+        "pow_message_window",
+        "pow_message_limit",
+        "pow_calm_period_definition",
+        "pow_calm_sequence_threshold",
+        "mint_interval",
+        "mint_quantity",
+        "block_hash_window",
+        "pow_difficulty_allowance",
+        "max_username_size",
+        "min_username_size",
+        "mint_dynamic_credit_cap",
+        "mint_dynamic_split",
+        "subscription_period",
+        "relay_min_gas_price",
+        "relay_max_gas_fee",
+        "max_envelope_age",
+        "pow_difficulty_step",
+        "award_configs",
+        "mint_floor_split",
+    )
+    aliases = {
+        "max_community_size": ("max_community_size", "max_topic_size"),
+        "min_community_size": ("min_community_size", "min_topic_size"),
+    }
+    mismatches = []
+    for key in preserved:
+        if key not in before or key not in after:
+            mismatches.append(f"{key}: missing before={key in before} after={key in after}")
+        elif before[key] != after[key]:
+            mismatches.append(f"{key}: before={before[key]!r} after={after[key]!r}")
+    for after_key, before_keys in aliases.items():
+        before_key = next((key for key in before_keys if key in before), None)
+        if before_key is None or after_key not in after:
+            mismatches.append(
+                f"{after_key}: missing before aliases={before_keys!r} after={after_key in after}"
+            )
+        elif before[before_key] != after[after_key]:
+            mismatches.append(
+                f"{after_key}: before {before_key}={before[before_key]!r} "
+                f"after={after[after_key]!r}"
+            )
+    if mismatches:
+        fail("governed v1.38 params changed during migration: " + "; ".join(mismatches))
+    else:
+        ok(f"all {len(preserved) + len(aliases)} retained governed params survived migration")
+
+
 def check_params_reach_backend() -> None:
     db_url = os.environ.get("INDEXER_DB_URL", "").strip()
     if not db_url:
@@ -201,24 +270,161 @@ def check_params_reach_backend() -> None:
 
 
 def check_gone_routes() -> None:
-    for path in (
-        "/api/get_topics",
-        "/api/core/follow_topic",
-        "/api/core/unfollow_topic",
-        "/api/core/block_topic",
-        "/api/core/unblock_topic",
-        "/api/core/enable_agent",
-        "/api/core/disable_agent",
-        "/api/core/set_agents",
-        "/api/core/create_community",
-        "/api/core/set_community_metadata",
-        "/api/core/transfer_community",
-    ):
-        status = http_status(f"{BACKEND}{path}")
+    routes = (
+        ("GET", "/api/get_topics"),
+        ("GET", "/api/search_topics"),
+        ("GET", "/api/get_agents"),
+        ("POST", "/api/core/follow_topic"),
+        ("POST", "/api/core/unfollow_topic"),
+        ("POST", "/api/core/block_topic"),
+        ("POST", "/api/core/unblock_topic"),
+        ("POST", "/api/core/enable_agent"),
+        ("POST", "/api/core/disable_agent"),
+        ("POST", "/api/core/set_agents"),
+        ("POST", "/api/core/annotate"),
+        ("POST", "/api/core/create_community"),
+        ("POST", "/api/core/set_community_metadata"),
+        ("POST", "/api/core/transfer_community"),
+        ("GET", "/api/get_quests"),
+        ("GET", "/api/quests/daily"),
+        ("GET", "/api/achievements"),
+        ("GET", "/api/invite"),
+        ("GET", "/api/get_invite_codes"),
+        ("POST", "/api/validate_invite_code"),
+        ("GET", "/api/referrals/summary"),
+        ("GET", "/api/get_referral"),
+        ("POST", "/api/rewards/claim"),
+        ("POST", "/api/admin/rewards/payout"),
+    )
+    for method, path in routes:
+        status = http_status(f"{BACKEND}{path}", method)
         if status == 410:
-            ok(f"{path} -> 410")
+            ok(f"{method} {path} -> 410")
         else:
-            fail(f"{path} status={status}, expected 410")
+            fail(f"{method} {path} status={status}, expected 410")
+
+
+def check_migration_state() -> None:
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
+    if not db_url:
+        fail("INDEXER_DB_URL missing from deployed environment")
+        return
+    import psycopg
+
+    expected = (
+        "v1.39.0_communities",
+        "v1.39.0_curator_defined_communities",
+        "v1.39.0_curator_tags",
+        "v1.39.0_legacy_post_community",
+        "v1.39.0_legacy_vote_standing",
+        "v1.39.0_quota_admins",
+        "v1.39.0_quota_paid_backfill",
+        "v1.39.0_rename_topic_pref_type",
+        "v1.39.0_repair_resurrected_posts",
+        "v1.39.0_thread_lock_windows",
+        "v1.39.0_was_subscriber_at_creation",
+    )
+    marker_keys = [f"migration_{key}" for key in expected]
+    checksum_keys = [f"migration_{key}_checksum" for key in expected]
+    with psycopg.connect(db_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT key, value FROM meta WHERE key = ANY(%s)",
+                (marker_keys + checksum_keys + ["migration_checksum_repin"],),
+            )
+            meta = {str(key): value for key, value in cursor.fetchall()}
+            cursor.execute(
+                "SELECT count(*) FROM profiles "
+                "WHERE level = 10 OR reserve_funds <> 0 "
+                "OR (level = 1 AND effective_paid = FALSE) "
+                "OR (level = 0 AND effective_paid = TRUE)"
+            )
+            invalid_profiles = int(cursor.fetchone()[0])
+            cursor.execute("SELECT count(*) FROM preferences WHERE pref_type = 'topic'")
+            stale_preferences = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' "
+                "AND tablename = ANY(%s)",
+                (["topic_preferences", "topic_content_stats", "user_topic_stats"],),
+            )
+            stale_tables = sorted(str(row[0]) for row in cursor.fetchall())
+
+    missing_markers = [key for key in marker_keys if not meta.get(key)]
+    missing_checksums = [key for key in checksum_keys if not meta.get(key)]
+    if missing_markers or missing_checksums:
+        fail(
+            f"v1.39 migration metadata incomplete: markers={missing_markers} "
+            f"checksums={missing_checksums}"
+        )
+    else:
+        ok(f"all {len(expected)} v1.39 indexer migrations and checksums are recorded")
+    if meta.get("migration_checksum_repin") == VERSION:
+        ok(f"migration checksum repin marker={VERSION}")
+    else:
+        fail(f"migration checksum repin marker={meta.get('migration_checksum_repin')!r}")
+    if invalid_profiles:
+        fail(f"{invalid_profiles} profile(s) retain invalid Agent/reserve/subscriber state")
+    else:
+        ok("profiles contain no Agent, relay reserve, or inconsistent subscriber state")
+    if stale_preferences or stale_tables:
+        fail(
+            f"legacy topic storage remains: pref_type rows={stale_preferences} "
+            f"tables={stale_tables}"
+        )
+    else:
+        ok("topic preferences and renamed topic tables were fully retired")
+
+
+def check_retired_financial_state() -> None:
+    db_url = os.environ.get("BACKEND_DB_URL", "").strip()
+    if not db_url:
+        fail("BACKEND_DB_URL missing from deployed environment")
+        return
+    import psycopg
+
+    required_tables = (
+        "pending_rewards",
+        "reward_payouts",
+        "referral_pending_rewards",
+        "referral_user_accruals",
+    )
+    with psycopg.connect(db_url, connect_timeout=10) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' AND tablename = ANY(%s)",
+                (list(required_tables),),
+            )
+            present = {str(row[0]) for row in cursor.fetchall()}
+            missing = sorted(set(required_tables) - present)
+            if missing:
+                fail(f"retired financial evidence tables were dropped: {missing}")
+                return
+            cursor.execute("SELECT count(*) FROM pending_rewards WHERE claimed_at IS NULL")
+            pending_rewards = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM reward_payouts WHERE status IN ('reserved', 'broadcast')"
+            )
+            open_payouts = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM referral_pending_rewards "
+                "WHERE COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
+                "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')"
+            )
+            pending_referrals = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT count(*) FROM referral_user_accruals WHERE COALESCE(pending, 0) > 0"
+            )
+            pending_accruals = int(cursor.fetchone()[0])
+    if pending_rewards or open_payouts or pending_referrals or pending_accruals:
+        fail(
+            "unresolved v1.38 financial obligations remain: "
+            f"pending_rewards={pending_rewards} open_payouts={open_payouts} "
+            f"pending_referrals={pending_referrals} pending_accruals={pending_accruals}"
+        )
+    else:
+        ok("retired reward evidence is preserved with no unresolved obligations")
 
 
 def check_open_community_contract() -> None:
@@ -351,6 +557,19 @@ def check_legacy_history_reachable() -> None:
                 "AND target IS NOT NULL AND target <> '' AND (community IS NULL OR community = '')"
             )
             orphan_comments = int(cursor.fetchone()[0])
+            cursor.execute(
+                "SELECT LOWER(community), LOWER(txhash) "
+                "FROM posts p "
+                "WHERE protocol_version = 0 AND NOT deleted "
+                "AND COALESCE(target, '') = '' AND COALESCE(community, '') <> '' "
+                "AND NOT EXISTS ("
+                "  SELECT 1 FROM posts newer "
+                "  WHERE LOWER(newer.community) = LOWER(p.community) "
+                "  AND newer.protocol_version <> 0 AND NOT newer.deleted"
+                ") "
+                "ORDER BY created_at DESC LIMIT 1"
+            )
+            legacy_only_sample = cursor.fetchone()
 
     if not legacy_rows:
         ok("no legacy posts on this chain")
@@ -371,6 +590,36 @@ def check_legacy_history_reachable() -> None:
         fail(f"scope=current reports no eligible posts (total={total!r})")
     else:
         ok(f"scope=current candidate pool is {total} posts")
+
+    legacy_feed = http_json(f"{BACKEND}/api/get_posts?scope=legacy&limit=5")
+    legacy_served = legacy_feed.get("posts") if isinstance(legacy_feed, dict) else None
+    if legacy_served and all(int(post.get("protocol_version", -1)) == 0 for post in legacy_served):
+        ok("scope=legacy serves historical protocol-0 posts")
+    else:
+        fail(f"scope=legacy did not return protocol-0 history: {legacy_served!r}")
+
+    if legacy_only_sample:
+        community, txhash = legacy_only_sample
+        query = urllib.parse.urlencode(
+            {
+                "scope": "current",
+                "lens": "raw",
+                "community": community,
+                "by": "newest",
+                "limit": 100,
+            }
+        )
+        community_feed = http_json(f"{BACKEND}/api/get_posts?{query}")
+        current_ids = {
+            str(post.get("post_id") or post.get("txhash") or "").lower()
+            for post in (community_feed.get("posts") or [])
+        }
+        if txhash in current_ids:
+            ok(f"scope=current includes protocol-0 history for [{community}]")
+        else:
+            fail(f"scope=current hid protocol-0 post {txhash} in [{community}]")
+    else:
+        ok("no legacy-only community available for unified current-scope probe")
 
     # The backfill is what puts legacy comments back into community feeds.
     if orphan_comments > legacy_rows // 100:
@@ -422,8 +671,11 @@ def main() -> int:
         check_versions,
         check_upgrade_applied,
         check_params,
+        check_preserved_params,
         check_params_reach_backend,
         check_gone_routes,
+        check_migration_state,
+        check_retired_financial_state,
         check_open_community_contract,
         check_curation_tag_schema,
         check_deleted_posts_stay_deleted,

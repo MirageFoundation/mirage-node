@@ -16,6 +16,7 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 	if !found {
 		return fmt.Errorf("profile missing for paid-state transition: %s", owner)
 	}
+	beforeCanCurate := types.CanCurate(core)
 	if activate {
 		if core.EffectivePaid {
 			return nil
@@ -30,21 +31,8 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		if err := k.saveProfile(ctx, core); err != nil {
 			return err
 		}
-		slugs, err := k.ListJoinedCommunities(ctx, owner)
-		if err != nil {
+		if err := k.TransitionCurationEligibility(ctx, owner, beforeCanCurate, types.CanCurate(core)); err != nil {
 			return err
-		}
-		for _, slug := range slugs {
-			pref, ok, err := k.GetPreference(ctx, owner, slug)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("CONSENSUS_FATAL:JOIN_PREF_MISSING owner=%s community=%s", owner, slug)
-			}
-			if err := k.addSubscriberContribution(ctx, slug, pref); err != nil {
-				return err
-			}
 		}
 		ctx.EventManager().EmitEvent(sdk.NewEvent("subscription_effective_state_changed",
 			sdk.NewAttribute("address", owner),
@@ -53,13 +41,32 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		))
 		return nil
 	}
-	if !core.EffectivePaid {
-		core.SubscriptionExpiry = 0
-		core.AutoRenew = false
-		if err := k.saveProfile(ctx, core); err != nil {
-			return err
-		}
-		return k.ReplaceSubscriptionRenewalSchedule(ctx, owner)
+	core.EffectivePaid = false
+	if core.Level == types.LevelSubscriber {
+		core.Level = types.LevelFree
+	}
+	core.SubscriptionExpiry = 0
+	core.AutoRenew = false
+	if err := k.saveProfile(ctx, core); err != nil {
+		return err
+	}
+	if err := k.TransitionCurationEligibility(ctx, owner, beforeCanCurate, types.CanCurate(core)); err != nil {
+		return err
+	}
+	if err := k.ReplaceSubscriptionRenewalSchedule(ctx, owner); err != nil {
+		return err
+	}
+	ctx.EventManager().EmitEvent(sdk.NewEvent("subscription_effective_state_changed",
+		sdk.NewAttribute("address", owner),
+		sdk.NewAttribute("effective_paid", "false"),
+		sdk.NewAttribute("expiry", "0"),
+	))
+	return nil
+}
+
+func (k Keeper) TransitionCurationEligibility(ctx sdk.Context, owner string, beforeCanCurate, afterCanCurate bool) error {
+	if beforeCanCurate == afterCanCurate {
+		return nil
 	}
 	slugs, err := k.ListJoinedCommunities(ctx, owner)
 	if err != nil {
@@ -73,9 +80,16 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		if !ok {
 			return fmt.Errorf("CONSENSUS_FATAL:JOIN_PREF_MISSING owner=%s community=%s", owner, slug)
 		}
-		if err := k.removeSubscriberContribution(ctx, slug, pref); err != nil {
+		if afterCanCurate {
+			if err := k.addSubscriberContribution(ctx, slug, pref); err != nil {
+				return err
+			}
+		} else if err := k.removeSubscriberContribution(ctx, slug, pref); err != nil {
 			return err
 		}
+	}
+	if afterCanCurate {
+		return nil
 	}
 	if err := k.ClearPendingInvitationsForTarget(ctx, owner); err != nil {
 		return err
@@ -95,8 +109,14 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 		}
 		pfx := types.KeyCurationTeamUserPrefix(owner)
 		rest := key[len(pfx):]
+		if len(rest) < 2 {
+			return fmt.Errorf("malformed curation membership key")
+		}
 		n := int(rest[0])<<8 | int(rest[1])
-		slug := string(rest[2 : 2+n])
+		if len(rest) != 2+n {
+			return fmt.Errorf("malformed curation membership key")
+		}
+		slug := string(rest[2:])
 		memberships = append(memberships, struct {
 			slug   string
 			teamID uint64
@@ -110,23 +130,6 @@ func (k Keeper) TransitionPaidState(ctx sdk.Context, owner string, activate bool
 			return err
 		}
 	}
-	core.EffectivePaid = false
-	if core.Level == types.LevelSubscriber {
-		core.Level = types.LevelFree
-	}
-	core.SubscriptionExpiry = 0
-	core.AutoRenew = false
-	if err := k.saveProfile(ctx, core); err != nil {
-		return err
-	}
-	if err := k.ReplaceSubscriptionRenewalSchedule(ctx, owner); err != nil {
-		return err
-	}
-	ctx.EventManager().EmitEvent(sdk.NewEvent("subscription_effective_state_changed",
-		sdk.NewAttribute("address", owner),
-		sdk.NewAttribute("effective_paid", "false"),
-		sdk.NewAttribute("expiry", "0"),
-	))
 	return nil
 }
 

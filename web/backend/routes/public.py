@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import psycopg
 from db import connect_backend_db, connect_db
 
 logger = logging.getLogger(__name__)
@@ -31,13 +32,12 @@ from typing import Any, Dict, List, Optional
 import requests
 from flask import Blueprint, jsonify, request, has_request_context
 
-from error_utils import safe_error, api_error_code, api_error
+from error_utils import BackendUnavailable, safe_error, api_error_code, api_error
 from fleet_url import post_json as fleet_post_json, validate_fleet_endpoint
 from logging_utils import log_event, next_request_id
 from node import require_runtime, derive_address_from_pubkey as _derive_address_from_pubkey
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards, community_matches_pattern
-from user_last_seen import update_user_last_seen
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
 from curation import (
     filter_posts as _filter_posts_for_lens,
@@ -312,14 +312,32 @@ def _db_get_profile_scalars(addr: str) -> dict | None:
 
 
 public_bp = Blueprint("public", __name__)
+FEED_READ_ACTION = "get_posts"
+THREAD_READ_ACTION = "get_comments"
 
 
-def derive_address_from_pubkey(pub_dec: bytes) -> str:
-    addr = _derive_address_from_pubkey(pub_dec)
-    if addr:
-        source = request.path if has_request_context() else ""
-        update_user_last_seen(addr, source=source)
-    return addr
+def _signed_content_viewer(claimed_address: str, action: str = FEED_READ_ACTION):
+    proof_fields = ("pubkey", "signature", "timestamp", "envelope_nonce")
+    if not any(request.args.get(field) not in (None, "") for field in proof_fields):
+        return "", None
+    from routes.core import _require_signed_read
+
+    return _require_signed_read(request.args.to_dict(flat=True), action, claimed_address)
+
+
+def _required_seen_map(owner: str, *, route: str, rid: str) -> dict[str, int]:
+    try:
+        return get_seen_map(owner)
+    except Exception as exc:
+        log_event(
+            rid,
+            "backend_db.required_failed",
+            route=route,
+            database_owner="backend",
+            operation="seen_state_read",
+            error=str(exc),
+        )
+        raise BackendUnavailable("seen-state read failed") from exc
 
 
 def _is_new_user(profile_created_at: int) -> bool:
@@ -893,9 +911,16 @@ def _get_new_inbox_count(cur, address: str) -> int:
 
         last_seen = fetch_inbox_last_viewed_at(viewer)
         count, last_seen = compute_unread_count(cur, viewer, last_seen)
-    except Exception:
-        count = 0
-        last_seen = 0
+    except Exception as exc:
+        log_event(
+            next_request_id(),
+            "database.required_failed",
+            route=request.path if has_request_context() else "",
+            database_owner="backend",
+            operation="inbox_seen_state",
+            error=str(exc),
+        )
+        raise BackendUnavailable("inbox seen-state read failed") from exc
 
     # Evict expired entries if cache is too large
     if len(_inbox_cache) >= _INBOX_CACHE_MAX:
@@ -932,6 +957,16 @@ def get_blocked_users():
         conn.close()
         return jsonify({"blocked_users": blocked_users})
     except Exception as e:
+        if isinstance(e, psycopg.Error):
+            log_event(
+                next_request_id(),
+                "database.required_failed",
+                route="get_blocked_users",
+                database_owner="indexer",
+                operation="blocked_users_read",
+                error=str(e),
+            )
+            return api_error_code("indexer_unavailable", 503)
         return safe_error(e)
 
 
@@ -947,8 +982,7 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         "following_count": 0,
         "follower_count": 0,
     }
-    try:
-        conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
+    with connect_db(timeout=5.0, busy_timeout_ms=10000) as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
@@ -986,15 +1020,12 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
             (addr_lower,),
         )
         lists["follower_count"] = int(cur.fetchone()[0] or 0)
-        conn.close()
-        logger.debug(
-            "get_profile.follow_counts addr=%s following=%s followers=%s",
-            addr_lower[:12],
-            lists["following_count"],
-            lists["follower_count"],
-        )
-    except Exception as e:
-        logger.warning("Failed to load profile lists from indexer for %s: %s", addr, e)
+    logger.debug(
+        "get_profile.follow_counts addr=%s following=%s followers=%s",
+        addr_lower[:12],
+        lists["following_count"],
+        lists["follower_count"],
+    )
     return lists
 
 
@@ -1027,6 +1058,16 @@ def get_profile():
         }
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
+        if isinstance(e, psycopg.Error):
+            log_event(
+                next_request_id(),
+                "database.required_failed",
+                route="get_profile",
+                database_owner="indexer",
+                operation="profile_read",
+                error=str(e),
+            )
+            return api_error_code("indexer_unavailable", 503)
         return safe_error(e)
 
 
@@ -1257,9 +1298,20 @@ def _load_vote_totals_cached(
     if backend_cur is not None:
         _read_and_fill_cache(backend_cur)
     else:
-        with connect_backend_db() as bconn:
-            with bconn.cursor() as bcur:
-                _read_and_fill_cache(bcur)
+        try:
+            with connect_backend_db() as bconn:
+                with bconn.cursor() as bcur:
+                    _read_and_fill_cache(bcur)
+        except Exception as exc:
+            log_event(
+                next_request_id(),
+                "database.required_failed",
+                route=request.path if has_request_context() else "",
+                database_owner="backend",
+                operation="vote_totals_cache",
+                error=str(exc),
+            )
+            raise BackendUnavailable("vote totals cache failed") from exc
 
     return result
 
@@ -3277,21 +3329,31 @@ def _build_user_status(addr: str) -> dict:
                 user_level = 1
 
     addr_lower = addr.lower()
-    with connect_backend_db() as conn_ib:
-        cur_ib = conn_ib.cursor()
-        cur_ib.execute(
-            "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
-            (addr_lower,),
+    try:
+        with connect_backend_db() as conn_ib:
+            cur_ib = conn_ib.cursor()
+            cur_ib.execute(
+                "SELECT inbox_last_viewed_at FROM user_inbox_state WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                (addr_lower,),
+            )
+            row_ib = cur_ib.fetchone()
+            if row_ib and row_ib[0] is not None:
+                inbox_last_viewed_at = int(row_ib[0])
+    except Exception as exc:
+        log_event(
+            next_request_id(),
+            "database.required_failed",
+            route=request.path if has_request_context() else "",
+            database_owner="backend",
+            operation="inbox_state_read",
+            error=str(exc),
         )
-        row_ib = cur_ib.fetchone()
-        if row_ib and row_ib[0] is not None:
-            inbox_last_viewed_at = int(row_ib[0])
+        raise BackendUnavailable("inbox state read failed") from exc
 
     balance = int(_get_balance(addr))
 
     recent_votes: list = []
-    try:
-        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
         cur = conn.cursor()
         cur.execute(
             """
@@ -3312,9 +3374,6 @@ def _build_user_status(addr: str) -> dict:
                         "timestamp": int(ts or 0),
                     }
                 )
-        conn.close()
-    except Exception:
-        pass
 
     return {
         "username": username,
@@ -3353,6 +3412,18 @@ def get_user_status():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_user_status.err", error=str(e))
+        if isinstance(e, BackendUnavailable):
+            return safe_error(e, context="get_user_status")
+        if isinstance(e, psycopg.Error):
+            log_event(
+                rid,
+                "database.required_failed",
+                route="get_user_status",
+                database_owner="indexer",
+                operation="user_status",
+                error=str(e),
+            )
+            return api_error_code("indexer_unavailable", 503)
         return safe_error(e)
 
 
@@ -4156,6 +4227,12 @@ def _build_bootstrap_view(
     limit = min(max(1, int(limit or 15)), 100)
     community_hint = view[len("community:") :].strip() if view.startswith("community:") else None
     lens, team_id, scope = _lens_request_args(community_hint, allow_team_without_community=view.startswith("thread:"))
+    lens_picks = _lens_picks_arg()
+    signed_fields = {
+        field: request.args.get(field)
+        for field in ("pubkey", "signature", "timestamp", "envelope_nonce")
+        if request.args.get(field) not in (None, "")
+    }
 
     # ── thread:<post_id> ──────────────────────────────────────────────
     if view.startswith("thread:"):
@@ -4212,8 +4289,10 @@ def _build_bootstrap_view(
                 "allowed_tags": ",".join(sorted(allowed_tags)),
                 "lens": lens,
                 "scope": scope,
+                **signed_fields,
                 **({"team_id": str(team_id)} if team_id is not None else {}),
                 **({"address": addr} if addr else {}),
+                **({"lens_picks": request.args.get("lens_picks")} if request.args.get("lens_picks") else {}),
             },
         ):
             posts_resp = get_posts()
@@ -4275,6 +4354,7 @@ def _build_bootstrap_view(
             scope=scope,
             lens=lens,
             team_id=team_id,
+            lens_picks=lens_picks,
         )
         if _is_guest(addr) and (scope == "legacy" or lens == "raw")
         else None
@@ -4291,22 +4371,20 @@ def _build_bootstrap_view(
     conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
     try:
         cur = conn.cursor()
+        source_limit = MAX_CANDIDATE_POOL
         blocked_posts = _get_blocked_posts(cur, addr)
         blocked_users = _get_blocked_users(cur, addr)
         blocked_communities = _get_blocked_communities(cur, addr)
         blocked_communities_exact, blocked_community_prefixes = _split_blocked_communities(blocked_communities)
         persisted_seen: dict[str, int] = {}
         if addr and addr.lower() != "guest":
-            try:
-                persisted_seen = get_seen_map(addr)
-            except Exception:
-                logger.debug("bootstrap.view.seen_load.err addr=%s", addr[:12])
+            persisted_seen = _required_seen_map(addr, route="bootstrap", rid=rid)
 
         if feed_name == "home":
             resp = _get_home_feed(
                 cur,
                 viewer=addr,
-                limit=limit,
+                limit=source_limit,
                 page=1,
                 blocked_posts=blocked_posts,
                 blocked_users=blocked_users,
@@ -4320,7 +4398,7 @@ def _build_bootstrap_view(
             resp = _get_following_feed(
                 cur,
                 viewer=addr,
-                limit=limit,
+                limit=source_limit,
                 page=1,
                 blocked_posts=blocked_posts,
                 blocked_users=blocked_users,
@@ -4339,6 +4417,7 @@ def _build_bootstrap_view(
                 requested_lens=lens,
                 requested_team_id=team_id,
                 scope=scope,
+                community_lenses=lens_picks,
             )
             _resolve_effective_tags(cur, resp["posts"])
             resp["posts"] = _filter_posts_by_allowed_tags(
@@ -4348,7 +4427,14 @@ def _build_bootstrap_view(
                 context=f"bootstrap.view.feed.{feed_name}",
                 viewer=addr,
             )
+            visible_posts = resp["posts"]
+            resp["posts"] = visible_posts[:limit]
+            resp["has_more"] = len(visible_posts) > limit
             _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
+        else:
+            resp["has_more"] = False
+        resp["page"] = 1
+        resp["limit"] = limit
         resp.pop("_timings", None)
         if guest_key is not None:
             _guest_feed_cache_put(guest_key, resp)
@@ -4481,6 +4567,10 @@ def bootstrap():
     rid = next_request_id()
     address = (request.args.get("address") or "").strip() or None
     view_raw = request.args.get("view", default=None, type=str)
+    read_action = THREAD_READ_ACTION if str(view_raw or "").startswith("thread:") else FEED_READ_ACTION
+    content_viewer, auth_err = _signed_content_viewer(address or "", read_action)
+    if auth_err is not None:
+        return auth_err
     by_raw = (request.args.get("by", default="", type=str) or "").strip().lower()
     limit = request.args.get("limit", 15, type=int)
     log_event(rid, "bootstrap.begin", address=address, view=view_raw)
@@ -4494,7 +4584,7 @@ def bootstrap():
     # when node_config is present; a missing relay-quota projection used to 503
     # the whole payload and leave the SPA on an endless skeleton + crash.
     try:
-        allowed_tags = _viewer_allowed_tags(address)
+        allowed_tags = _viewer_allowed_tags(content_viewer)
         resp: Dict[str, Any] = {
             "node_config": _build_node_config(),
             "chain_config": _build_chain_config(),
@@ -4512,7 +4602,7 @@ def bootstrap():
         return api_error_code("indexer_unavailable", 503)
 
     try:
-        resp["view"] = _build_bootstrap_view(view_raw, address, by_raw, allowed_tags, limit, rid)
+        resp["view"] = _build_bootstrap_view(view_raw, content_viewer, by_raw, allowed_tags, limit, rid)
         if address:
             resp["user_status"] = _build_user_status(address)
             resp["user_followed"] = _build_user_followed(address)
@@ -4520,17 +4610,20 @@ def bootstrap():
             community_bootstrap = _build_community_bootstrap(address)
             resp.update(community_bootstrap)
     except Exception as e:
-        # Keep node_config/chain_config. Wipe any partial user fields so the
-        # client never caches user_status without daily_quota/renewal_warning.
         log_event(rid, "bootstrap.user.err", error=str(e), address=address)
-        resp["user_status"] = None
-        resp["user_followed"] = None
-        resp["user_blocked"] = None
-        resp["rewards_summary"] = None
-        resp["community_preferences"] = {}
-        resp["daily_quota"] = None
-        resp["renewal_warning"] = None
-        resp["view"] = None
+        if isinstance(e, BackendUnavailable):
+            return safe_error(e, context="bootstrap")
+        if isinstance(e, psycopg.Error):
+            log_event(
+                rid,
+                "database.required_failed",
+                route="bootstrap",
+                database_owner="indexer",
+                operation="user_bootstrap",
+                error=str(e),
+            )
+            return api_error_code("indexer_unavailable", 503)
+        return safe_error(e, context="bootstrap")
 
     log_event(
         rid,
@@ -4932,7 +5025,10 @@ def search():
     limit = min(max(1, limit), 50)
     offset = request.args.get("offset", 0, type=int)
     offset = max(0, offset)
-    viewer = request.args.get("address", default="", type=str).strip()
+    claimed_viewer = request.args.get("address", default="", type=str).strip()
+    viewer, auth_err = _signed_content_viewer(claimed_viewer)
+    if auth_err is not None:
+        return auth_err
     try:
         lens, team_id, scope = _lens_request_args()
     except ValueError as e:
@@ -5521,7 +5617,10 @@ def get_posts():
     if request.args.get("topic") is not None:
         log_event(rid, "get_posts.topic_retired", topic=request.args.get("topic"), page=page)
         return api_error_code("topic_retired")
-    address = request.args.get("address", default="", type=str)
+    claimed_address = request.args.get("address", default="", type=str)
+    address, auth_err = _signed_content_viewer(claimed_address)
+    if auth_err is not None:
+        return auth_err
     try:
         lens, team_id, scope = _lens_request_args(community)
         lens_picks = _lens_picks_arg()
@@ -5585,10 +5684,7 @@ def get_posts():
         persisted_seen: dict[str, int] = {}
         _t_seen = time.monotonic()
         if address and address.lower() != "guest":
-            try:
-                persisted_seen = get_seen_map(address)
-            except Exception:
-                logger.debug("get_posts.seen_load.err addr=%s", address[:12])
+            persisted_seen = _required_seen_map(address, route="get_posts", rid=rid)
         seen_ms = round((time.monotonic() - _t_seen) * 1000, 2)
 
         if feed in ("home", "following"):
@@ -5606,13 +5702,14 @@ def get_posts():
                 pass
 
             _t_feed = time.monotonic()
+            source_limit = MAX_CANDIDATE_POOL
             # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
                     cur,
                     viewer=address,
-                    limit=limit,
-                    page=page,
+                    limit=source_limit,
+                    page=1,
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
@@ -5625,8 +5722,8 @@ def get_posts():
                 resp = _get_following_feed(
                     cur,
                     viewer=address,
-                    limit=limit,
-                    page=page,
+                    limit=source_limit,
+                    page=1,
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
@@ -5662,8 +5759,17 @@ def get_posts():
                     context=f"get_posts.feed.{feed or 'unknown'}",
                     viewer=address,
                 )
+                visible_posts = resp["posts"]
+                resp["posts"] = visible_posts[offset : offset + limit]
+                resp["has_more"] = len(visible_posts) > offset + limit
+                resp["page"] = page
+                resp["limit"] = limit
                 filter_ms = round((time.monotonic() - _t) * 1000, 2)
                 _track_image_impressions(resp["posts"], rid, context=f"get_posts.feed.{feed or 'unknown'}")
+            else:
+                resp["has_more"] = False
+                resp["page"] = page
+                resp["limit"] = limit
 
             # Emit one structured line for slow feed requests so we can see
             # which step of the home-feed pipeline is dominating latency.
@@ -5956,9 +6062,7 @@ def get_posts():
                 scored.append(post)
 
             scored.sort(key=lambda p: -float(p.get("_score", 0.0)))
-            start = (page - 1) * limit
-            end = start + limit
-            result = scored[start:end] if start < len(scored) else []
+            result = scored
             for p in result:
                 p.pop("_score", None)
         else:
@@ -5970,9 +6074,7 @@ def get_posts():
                 c["_N"] = 1.0
                 c["_seen_count"] = 0
 
-            start = (page - 1) * limit
-            end = start + limit
-            page_posts = candidates[start:end] if start < len(candidates) else []
+            page_posts = candidates
             page_pids = [p["post_id"] for p in page_posts]
             _, award_details = _load_award_aggregates(cur, page_pids, blocked_users)
             result = []
@@ -6018,9 +6120,10 @@ def get_posts():
                 context=f"get_posts.community.{community or 'all'}",
                 viewer=address,
             )
+        has_more = len(result) > offset + limit
+        result = result[offset : offset + limit]
+        if result:
             _track_image_impressions(result, rid, context=f"get_posts.community.{community or 'all'}")
-
-        has_more = len(result) >= limit and (page * limit) < total
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
         total_ms = (time.monotonic() - t_start) * 1000
         if max(total_ms, count_ms, select_ms) > 2000:
@@ -6041,6 +6144,18 @@ def get_posts():
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "get_posts.err", error=str(e))
+        if isinstance(e, BackendUnavailable):
+            return safe_error(e, context="get_posts")
+        if isinstance(e, psycopg.Error):
+            log_event(
+                rid,
+                "database.required_failed",
+                route="get_posts",
+                database_owner="indexer",
+                operation="feed_read",
+                error=str(e),
+            )
+            return api_error_code("indexer_unavailable", 503)
         return safe_error(e)
 
 
@@ -6048,7 +6163,10 @@ def get_posts():
 def get_user_posts():
     rid = next_request_id()
     owner = request.args.get("owner", type=str)
-    viewer = request.args.get("address", default="", type=str)
+    claimed_viewer = request.args.get("address", default="", type=str)
+    viewer, auth_err = _signed_content_viewer(claimed_viewer)
+    if auth_err is not None:
+        return auth_err
     try:
         lens, team_id, scope = _lens_request_args()
     except ValueError as e:
@@ -7416,7 +7534,10 @@ def get_comments():
     t_start = time.time()
 
     post_id = request.args.get("post_id", type=str)
-    address = request.args.get("address", default="", type=str)
+    claimed_address = request.args.get("address", default="", type=str)
+    address, auth_err = _signed_content_viewer(claimed_address, THREAD_READ_ACTION)
+    if auth_err is not None:
+        return auth_err
     try:
         lens, team_id, scope = _lens_request_args(allow_team_without_community=True)
     except ValueError as e:
@@ -8058,46 +8179,18 @@ def _verify_seen_signature(
     timestamp_raw: str | int | None,
     nonce_raw: str | int | None,
 ):
-    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
+    from routes.core import _require_signed_request
 
-    if not (pub_b64 and sig_b64):
-        return None, "missing required fields"
-    try:
-        timestamp = int(timestamp_raw)
-    except (TypeError, ValueError):
-        return None, "invalid timestamp"
-    nonce, err = _parse_envelope_nonce({"envelope_nonce": nonce_raw})
-    if err is not None:
-        return None, "invalid envelope_nonce"
-
-    try:
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-    except Exception:
-        return None, "invalid relay fields"
-    if len(sig_dec) == 65:
-        sig_dec = sig_dec[:64]
-    if len(pub_dec) != 33 or len(sig_dec) != 64:
-        return None, "invalid relay fields"
-
-    user_addr = _derive_address_from_pubkey(pub_dec)
-    if not user_addr:
-        return None, "invalid pubkey"
-    if address and address.lower() != user_addr.lower():
-        return None, "address does not match pubkey"
-
-    signed_payload = f"seen_posts:{user_addr.lower()}:{timestamp}:{nonce}"
-    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
-        return None, "invalid signature"
-
-    ok, guard_err = _guard_push_request(user_addr, "seen_posts", timestamp, nonce)
-    if not ok:
-        # _guard_push_request hands back a (response, status) pair, but this
-        # function's contract is a message string — returning the pair made the
-        # caller jsonify a Response object and 500.
-        body, _code = guard_err
-        return None, (body.get_json(silent=True) or {}).get("error") or "invalid signature"
-    return user_addr.lower(), None
+    return _require_signed_request(
+        {
+            "pubkey": pub_b64,
+            "signature": sig_b64,
+            "timestamp": timestamp_raw,
+            "envelope_nonce": nonce_raw,
+        },
+        "seen_posts",
+        address,
+    )
 
 
 @public_bp.route("/api/seen_posts", methods=["POST"])
@@ -8115,7 +8208,7 @@ def seen_posts_beacon():
         return jsonify({"ok": True, "ingested": 0})
     user_addr, err = _verify_seen_signature(address, pub_b64, sig_b64, timestamp_raw, nonce_raw)
     if not user_addr:
-        return jsonify({"error": err or "invalid signature"}), 400
+        return err
 
     posts_raw = data.get("posts") or []
     if not isinstance(posts_raw, list):
@@ -8136,9 +8229,16 @@ def seen_posts_beacon():
 
     try:
         count = ingest_seen_batch(user_addr, entries, fallback_reason)
-    except Exception:
-        logger.debug("seen_posts_beacon.err addr=%s", address[:12])
-        count = 0
+    except Exception as exc:
+        log_event(
+            next_request_id(),
+            "backend_db.required_failed",
+            route="seen_posts",
+            database_owner="backend",
+            operation="seen_beacon_ingest",
+            error=str(exc),
+        )
+        return api_error_code("backend_unavailable", 503)
     return jsonify({"ok": True, "ingested": count})
 
 
@@ -8147,47 +8247,12 @@ def mark_inbox_viewed():
     """Set the user's inbox_last_viewed_at to now, clearing their unread count."""
     rid = next_request_id()
     data = request.get_json(silent=True) or {}
-    pub_b64 = str(data.get("pubkey", "")).strip()
-    sig_b64 = str(data.get("signature", "")).strip()
     address = (data.get("address") or "").strip()
-    if "timestamp" not in data:
-        return jsonify({"error": "timestamp required"}), 400
-    try:
-        timestamp = int(data.get("timestamp"))
-    except (TypeError, ValueError):
-        return jsonify({"error": "invalid timestamp"}), 400
-    from routes.core import _parse_envelope_nonce, _verify_signature, _guard_push_request
+    from routes.core import _require_signed_request
 
-    nonce, err = _parse_envelope_nonce(data)
-    if err is not None:
-        return err[0], err[1]
-
-    if not (pub_b64 and sig_b64):
-        return jsonify({"error": "missing required fields"}), 400
-
-    try:
-        pub_dec = base64.b64decode(pub_b64)
-        sig_dec = base64.b64decode(sig_b64)
-    except Exception:
-        return jsonify({"error": "invalid relay fields"}), 400
-    if len(sig_dec) == 65:
-        sig_dec = sig_dec[:64]
-    if len(pub_dec) != 33 or len(sig_dec) != 64:
-        return jsonify({"error": "invalid relay fields"}), 400
-
-    user_addr = derive_address_from_pubkey(pub_dec)
-    if not user_addr:
-        return jsonify({"error": "invalid pubkey"}), 400
-
-    if address and address.lower() != user_addr.lower():
-        return jsonify({"error": "address does not match pubkey"}), 400
-
-    signed_payload = f"mark_inbox_viewed:{user_addr.lower()}:{timestamp}:{nonce}"
-    if not _verify_signature(pub_dec, sig_dec, signed_payload.encode("utf-8")):
-        return jsonify({"error": "invalid signature"}), 400
-    ok, err = _guard_push_request(user_addr, "mark_inbox_viewed", timestamp, nonce)
-    if not ok:
-        return err[0], err[1]
+    user_addr, auth_err = _require_signed_request(data, "mark_inbox_viewed", address)
+    if auth_err is not None:
+        return auth_err
 
     addr_lower = user_addr.lower()
     now_ts = int(time.time())
@@ -8217,7 +8282,15 @@ def mark_inbox_viewed():
         return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
     except Exception as e:
         log_event(rid, "mark_inbox_viewed.err", error=str(e))
-        return safe_error(e)
+        log_event(
+            rid,
+            "database.required_failed",
+            route="mark_inbox_viewed",
+            database_owner="backend",
+            operation="inbox_state_write",
+            error=str(e),
+        )
+        return api_error_code("backend_unavailable", 503)
 
 
 # ── Admin stats (signed, admin-only, fleet-aggregated) ───────────────────────

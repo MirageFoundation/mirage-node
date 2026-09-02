@@ -483,10 +483,8 @@ const AsideCard = styled.div`
     flex-direction: column;
 `;
 
-/** Top header banner — uses the app's main Mirage gradient (`gradientStart`
- *  → `gradientEnd`, the indigo→purple ramp shared with quests / new-posts /
- *  feed-type). Same in both light and dark modes so the banner reads as the
- *  brand surface on either canvas. */
+/** Top header banner — uses the app's main Mirage gradient in both light and
+ *  dark modes so the banner reads as the brand surface on either canvas. */
 const Banner = styled.div`
     position: relative;
     height: 96px;
@@ -2409,7 +2407,6 @@ function ProfileViewAuthenticated({
             recipientLabel={profileUsername
                 ? `@${profileUsername}`
                 : (profileAddress ? `@${String(profileAddress).slice(0, 10)}…` : '@this user')}
-            level={confirmGiftSub?.level}
             feeLabel={subFeeLabel}
             feeUmirage={subFeeUmirage}
             loading={!!confirmGiftSub?.loading}

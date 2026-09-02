@@ -924,7 +924,6 @@ def _wait_tx_status(
         time.sleep(0.5)
     return None
 
-
 def _wait_tx_status_failure(
     backend: str,
     tx_hash: str,

@@ -10,8 +10,12 @@ from tests.common import (
     _debug,
     _fail,
     _get,
+    _b64,
+    _fresh_nonce,
+    _now_ms,
     _pass,
     _rand_str,
+    sign_canonical,
 )
 from tests.backend_helpers import (
     _do_accept_curator_invite,
@@ -56,6 +60,23 @@ def _feed_ids(feed: dict | None) -> set[str]:
             if value:
                 ids.add(value)
     return ids
+
+
+def _signed_curator_params(wallet) -> dict:
+    address = str(wallet.address()).lower()
+    timestamp = _now_ms()
+    nonce = _fresh_nonce()
+    signature = sign_canonical(
+        wallet,
+        f"curator_read:{address}:{timestamp}:{nonce}".encode("utf-8"),
+    )
+    return {
+        "viewer": address,
+        "pubkey": _b64(wallet.public_key().public_key_bytes),
+        "signature": _b64(signature),
+        "timestamp": timestamp,
+        "envelope_nonce": nonce,
+    }
 
 
 def _community_feed(
@@ -259,13 +280,13 @@ def test_curation_backend(backend: str) -> None:
 
     hidden_list_url = f"{backend}/api/communities/{slug}/teams/{team_id}/hidden-users"
     code, missing = _get(hidden_list_url)
-    if code == 400 and isinstance(missing, dict) and missing.get("error_code") == "missing_viewer":
-        _pass("curation.backend_hidden_users_requires_viewer")
+    if code == 401:
+        _pass("curation.backend_hidden_users_requires_signature")
     else:
-        _fail("curation.backend_hidden_users_requires_viewer", f"code={code} body={missing}")
+        _fail("curation.backend_hidden_users_requires_signature", f"code={code} body={missing}")
 
     free_addr = str(free.address()).lower()
-    code, forbidden = _get(hidden_list_url, {"viewer": free_addr})
+    code, forbidden = _get(hidden_list_url, _signed_curator_params(free))
     if code == 403 and isinstance(forbidden, dict) and forbidden.get("error_code") == "forbidden":
         _pass("curation.backend_hidden_users_curator_only")
     else:
@@ -362,7 +383,9 @@ def test_curation_backend(backend: str) -> None:
     last_list_body: dict | None = None
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     while time.perf_counter() < deadline:
-        last_list_code, last_list_body = _get(hidden_list_url, {"viewer": sub_addr, "limit": 10, "offset": 0})
+        signed = _signed_curator_params(sub)
+        signed.update({"limit": 10, "offset": 0})
+        last_list_code, last_list_body = _get(hidden_list_url, signed)
         addresses = {str(item.get("address") or "").lower() for item in ((last_list_body or {}).get("items") or [])}
         listed = (
             last_list_code == 200
@@ -387,7 +410,9 @@ def test_curation_backend(backend: str) -> None:
     last_posts_body: dict | None = None
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     while time.perf_counter() < deadline:
-        last_posts_code, last_posts_body = _get(hidden_posts_url, {"viewer": sub_addr, "limit": 10, "offset": 0})
+        signed = _signed_curator_params(sub)
+        signed.update({"limit": 10, "offset": 0})
+        last_posts_code, last_posts_body = _get(hidden_posts_url, signed)
         post_ids = {str(item.get("post_id") or "").lower() for item in ((last_posts_body or {}).get("items") or [])}
         posts_listed = last_posts_code == 200 and post_tx in post_ids
         if posts_listed:
@@ -401,7 +426,9 @@ def test_curation_backend(backend: str) -> None:
             f"code={last_posts_code} body={last_posts_body}",
         )
 
-    code, bad_limit = _get(hidden_posts_url, {"viewer": sub_addr, "limit": 51})
+    signed = _signed_curator_params(sub)
+    signed["limit"] = 51
+    code, bad_limit = _get(hidden_posts_url, signed)
     if code == 400 and isinstance(bad_limit, dict) and bad_limit.get("error_code") == "invalid_limit":
         _pass("curation.backend_hidden_posts_limit_cap")
     else:
@@ -479,10 +506,12 @@ def _expect_rejected(name: str, backend: str, resp: dict) -> bool:
     return False
 
 
-def _moderation(backend: str, slug: str, team_id: int, viewer: str, post_id: str, author: str) -> tuple[int, dict]:
+def _moderation(backend: str, slug: str, team_id: int, wallet, post_id: str, author: str) -> tuple[int, dict]:
+    params = _signed_curator_params(wallet)
+    params.update({"post_id": post_id, "author": author, "root": post_id})
     return _get(
         f"{backend}/api/communities/{slug}/teams/{team_id}/moderation",
-        {"viewer": viewer, "post_id": post_id, "author": author, "root": post_id},
+        params,
     )
 
 
@@ -490,7 +519,7 @@ def _wait_moderation(
     backend: str,
     slug: str,
     team_id: int,
-    viewer: str,
+    wallet,
     post_id: str,
     author: str,
     field: str,
@@ -499,7 +528,7 @@ def _wait_moderation(
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     last: dict | None = None
     while time.perf_counter() < deadline:
-        code, last = _moderation(backend, slug, team_id, viewer, post_id, author)
+        code, last = _moderation(backend, slug, team_id, wallet, post_id, author)
         if code == 200 and isinstance(last, dict) and last.get(field) == expected:
             return True, last
         time.sleep(0.5)
@@ -531,10 +560,10 @@ def test_curation_team_lifecycle(backend: str) -> None:
 
     invitations_url = f"{backend}/api/communities/{slug}/teams/{team_id}/invitations"
     code, missing = _get(invitations_url)
-    if code == 400 and isinstance(missing, dict) and missing.get("error_code") == "missing_viewer":
-        _pass("curation_team.invitations_requires_viewer")
+    if code == 401:
+        _pass("curation_team.invitations_requires_signature")
     else:
-        _fail("curation_team.invitations_requires_viewer", f"code={code} body={missing}")
+        _fail("curation_team.invitations_requires_signature", f"code={code} body={missing}")
 
     invite = _do_invite_curator(backend, owner_wallet, slug, team_id, curator_addr, skip_pow=True)
     if not _expect_accepted("curation_team.invite", backend, invite):
@@ -544,7 +573,7 @@ def test_curation_team_lifecycle(backend: str) -> None:
     last_inv: dict | None = None
     deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
     while time.perf_counter() < deadline:
-        code, last_inv = _get(invitations_url, {"viewer": owner_addr})
+        code, last_inv = _get(invitations_url, _signed_curator_params(owner_wallet))
         invitees = {str(item.get("invitee") or "").lower() for item in ((last_inv or {}).get("items") or [])}
         if code == 200 and curator_addr in invitees:
             invited = True
@@ -688,15 +717,17 @@ def test_curation_team_lifecycle(backend: str) -> None:
         return
     _pass("curation_team.seed_post")
 
-    code, forbidden = _moderation(backend, slug, team_id, str(WALLETS["free"].address()).lower(), post_tx, author_addr)
+    code, forbidden = _moderation(backend, slug, team_id, WALLETS["free"], post_tx, author_addr)
     if code == 403 and isinstance(forbidden, dict) and forbidden.get("error_code") == "forbidden":
         _pass("curation_team.moderation_curator_only")
     else:
         _fail("curation_team.moderation_curator_only", f"code={code} body={forbidden}")
 
+    no_post_params = _signed_curator_params(curator_wallet)
+    no_post_params["author"] = author_addr
     code, no_post = _get(
         f"{backend}/api/communities/{slug}/teams/{team_id}/moderation",
-        {"viewer": curator_addr, "author": author_addr},
+        no_post_params,
     )
     if code == 400 and isinstance(no_post, dict) and no_post.get("error_code") == "missing_post_id":
         _pass("curation_team.moderation_requires_post_id")
@@ -708,7 +739,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_hidden(backend, curator_wallet, slug, team_id, post_tx, hidden=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_hidden", True)
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "post_hidden", True
+    )
     if ok:
         _pass("curation_team.moderation_reports_post_hidden")
     else:
@@ -734,7 +767,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_thread_locked(backend, curator_wallet, slug, team_id, post_tx, locked=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "thread_locked", True)
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "thread_locked", True
+    )
     if ok:
         _pass("curation_team.moderation_reports_thread_locked")
     else:
@@ -745,7 +780,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_thread_locked(backend, curator_wallet, slug, team_id, post_tx, locked=False, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "thread_locked", False)
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "thread_locked", False
+    )
     if ok:
         _pass("curation_team.moderation_reports_thread_unlocked")
     else:
@@ -756,7 +793,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, tag="gore", skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", "gore")
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "post_tag", "gore"
+    )
     if ok:
         _pass("curation_team.moderation_reports_post_tag")
     else:
@@ -770,7 +809,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, tag="", skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", "")
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "post_tag", ""
+    )
     if ok:
         _pass("curation_team.moderation_reports_empty_post_tag")
     else:
@@ -781,7 +822,9 @@ def test_curation_team_lifecycle(backend: str) -> None:
         backend,
         _do_set_curation_post_tag(backend, curator_wallet, slug, team_id, post_tx, clear=True, skip_pow=True),
     )
-    ok, body = _wait_moderation(backend, slug, team_id, curator_addr, post_tx, author_addr, "post_tag", None)
+    ok, body = _wait_moderation(
+        backend, slug, team_id, curator_wallet, post_tx, author_addr, "post_tag", None
+    )
     if ok:
         _pass("curation_team.moderation_reports_cleared_post_tag")
     else:
@@ -867,12 +910,28 @@ def _thread_ids(
     backend: str,
     root: str,
     *,
-    address: str,
+    wallet,
     lens: str,
     team_id: int | None = None,
 ) -> tuple[int, set[str], dict]:
     """Return the post ids the thread tree serves for one lens."""
-    params = {"post_id": root, "address": address, "lens": lens, "scope": "current"}
+    address = str(wallet.address()).lower()
+    timestamp = _now_ms()
+    nonce = _fresh_nonce()
+    signature = sign_canonical(
+        wallet,
+        f"get_comments:{address}:{timestamp}:{nonce}".encode("utf-8"),
+    )
+    params = {
+        "post_id": root,
+        "address": address,
+        "lens": lens,
+        "scope": "current",
+        "pubkey": _b64(wallet.public_key().public_key_bytes),
+        "signature": _b64(signature),
+        "timestamp": timestamp,
+        "envelope_nonce": nonce,
+    }
     if team_id is not None:
         params["team_id"] = str(team_id)
     code, body = _get(f"{backend}/api/get_comments", params)
@@ -894,7 +953,7 @@ def _wait_thread_ids(
     backend: str,
     root: str,
     *,
-    address: str,
+    wallet,
     lens: str,
     team_id: int | None,
     expect_present: set[str],
@@ -905,7 +964,7 @@ def _wait_thread_ids(
     ids: set[str] = set()
     body: dict = {}
     while time.perf_counter() < deadline:
-        code, ids, body = _thread_ids(backend, root, address=address, lens=lens, team_id=team_id)
+        code, ids, body = _thread_ids(backend, root, wallet=wallet, lens=lens, team_id=team_id)
         if code == 200 and expect_present <= ids and not (expect_absent & ids):
             return True, ids, body
         time.sleep(0.5)
@@ -984,7 +1043,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, body = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="team",
         team_id=team_id,
         expect_present={open_reply},
@@ -1001,7 +1060,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, body = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="default",
         team_id=None,
         expect_present={open_reply},
@@ -1022,7 +1081,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, _ = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="team",
         team_id=team_id,
         expect_present={open_reply},
@@ -1045,7 +1104,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, body = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="team",
         team_id=team_id,
         expect_present={open_reply, reopened_reply},
@@ -1073,7 +1132,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, _ = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="team",
         team_id=team_id,
         expect_present={open_reply, reopened_reply},
@@ -1089,7 +1148,7 @@ def test_curation_thread_lock_windows(backend: str) -> None:
     ok, ids, body = _wait_thread_ids(
         backend,
         root,
-        address=owner_addr,
+        wallet=owner_wallet,
         lens="raw",
         team_id=None,
         expect_present={open_reply, locked_reply, reopened_reply, second_locked_reply},

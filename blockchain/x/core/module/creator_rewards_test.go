@@ -444,6 +444,94 @@ func TestFiveMinuteCreatorRewardExcludesContentDeletedInEngagementEpoch(t *testi
 	settleCreatorReward(t, false, 300, true)
 }
 
+func TestCreatorSettlementUsesImmutableCountSnapshot(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	_, payer := curationSigner(0xa1)
+	_, voter := curationSigner(0xa2)
+	_, firstCreator := curationSigner(0xa3)
+	_, secondCreator := curationSigner(0xa4)
+	for addr, username := range map[string]string{
+		payer: "snapshot-payer", voter: "snapshot-voter",
+		firstCreator: "snapshot-first", secondCreator: "snapshot-second",
+	} {
+		ensureUsername(t, mk, ctx, addr, username)
+	}
+	params := mk.GetParams(ctx)
+	params.CreatorEpochSeconds = 300
+	params.CreatorSettlementRecordsPerBlock = 2
+	require.NoError(t, mk.SetParams(ctx, params))
+	tier := params.GetTierConfig(types.LevelSubscriber)
+	require.NotNil(t, tier)
+	fundAccount(mk, payer, tier.PeriodFee)
+	epoch, err := types.CreatorEpochFromUnix(ctx.BlockTime().Unix(), params.CreatorEpochSeconds)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetCreatorClock(ctx, epoch))
+	require.NoError(t, mk.CreateTranche(ctx, payer, voter,
+		types.SubscriptionTrancheSource_SUBSCRIPTION_TRANCHE_SOURCE_GIFT, 1, genTxHash(930)))
+
+	firstTarget := genTxHash(931)
+	secondTarget := genTxHash(932)
+	require.NoError(t, mk.SetPostMetadata(ctx, firstTarget, &types.PostMetadata{Author: firstCreator}))
+	require.NoError(t, mk.SetPostMetadata(ctx, secondTarget, &types.PostMetadata{Author: secondCreator}))
+	require.NoError(t, mk.RecordUpvoteEngagement(ctx, voter, firstTarget, 1))
+	require.NoError(t, mk.RecordUpvoteEngagement(ctx, voter, secondTarget, 1))
+	firstTargetBytes, err := types.HashBytes(firstTarget)
+	require.NoError(t, err)
+	secondTargetBytes, err := types.HashBytes(secondTarget)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetRawKVPair(ctx,
+		types.KeyVoteDir(types.MustAcc(voter), secondTargetBytes),
+		u64Test(uint64(uint32(0xffffffff)))))
+
+	mk.storeService.store[types.UpgradeV139CompleteKey] = []byte{1}
+	epochEnd, err := types.CreatorEpochEnd(epoch, params.CreatorEpochSeconds)
+	require.NoError(t, err)
+	countCtx := ctx.WithBlockHeight(ctx.BlockHeight() + 1).
+		WithBlockTime(time.Unix(epochEnd+1, 0)).
+		WithEventManager(sdk.NewEventManager())
+	require.NoError(t, mk.ProcessBeginBlockV139(countCtx))
+	counted, err := am.CreatorEpoch(countCtx, &types.QueryCreatorEpochRequest{EpochId: epoch})
+	require.NoError(t, err)
+	require.Equal(t, types.CreatorEpochStatus_CREATOR_EPOCH_STATUS_ALLOCATING, counted.Epoch.Status)
+
+	require.NoError(t, mk.SetRawKVPair(countCtx,
+		types.KeyVoteDir(types.MustAcc(voter), firstTargetBytes),
+		u64Test(uint64(uint32(0xffffffff)))))
+	require.NoError(t, mk.SetRawKVPair(countCtx,
+		types.KeyVoteDir(types.MustAcc(voter), secondTargetBytes),
+		u64Test(1)))
+	allocateCtx := countCtx.WithBlockHeight(countCtx.BlockHeight() + 1).WithEventManager(sdk.NewEventManager())
+	require.NoError(t, mk.ProcessBeginBlockV139(allocateCtx))
+
+	first, err := am.TargetEarnings(allocateCtx, &types.QueryTargetEarningsRequest{Target: firstTarget})
+	require.NoError(t, err)
+	require.Len(t, first.Earnings, 1)
+	require.Equal(t, counted.Epoch.Pool, first.Earnings[0].Amount)
+	second, err := am.TargetEarnings(allocateCtx, &types.QueryTargetEarningsRequest{Target: secondTarget})
+	require.NoError(t, err)
+	require.Empty(t, second.Earnings)
+	accruals, err := am.CreatorAccruals(allocateCtx, &types.QueryCreatorAccrualsRequest{Creator: firstCreator})
+	require.NoError(t, err)
+	require.Len(t, accruals.Accruals, 1)
+	require.Equal(t, counted.Epoch.Pool, accruals.Accruals[0].Amount)
+}
+
+func TestCreatorSettlementValiditySurvivesGenesisRoundTrip(t *testing.T) {
+	source, ctx, sourceModule := setupModule(t)
+	actor := types.MustAcc(genAddr(125))
+	target, err := types.HashBytes(genTxHash(940))
+	require.NoError(t, err)
+	key := types.KeyEngagementValid(77, actor, types.EngagementKindUpvote, target)
+	require.NoError(t, source.SetRawKVPair(ctx, key, []byte{1}))
+	exported := sourceModule.ExportGenesis(ctx, source.CDC())
+
+	dest, destCtx, destModule := setupModule(t)
+	destModule.InitGenesis(destCtx, dest.CDC(), exported)
+	value, err := dest.GetRaw(destCtx, key)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value)
+}
+
 func submitCreatorEpochProposal(t *testing.T, am AppModule, ctx sdk.Context, epochSeconds uint64) {
 	t.Helper()
 	_, err := am.UpdateParams(ctx, &types.MsgUpdateParams{

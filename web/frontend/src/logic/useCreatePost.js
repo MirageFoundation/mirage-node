@@ -8,6 +8,8 @@ import { formatError } from "../utils/errorMessages";
 import { requireAccount } from "../utils/openBrowsing";
 import { getVideoThumbnailUrl, isLikelyImageUrl, isLikelyVideoUrl } from "../utils/media";
 import { updateNotification } from "../utils/notifications";
+import { isValidCommunitySlug, sanitizeCommunitySlug } from "../utils/community";
+import { signReadParams, THREAD_READ_ACTION } from "../utils/signPlain";
 export const TAG_OPTIONS = [{
     value: '',
     label: 'No tag (safe)'
@@ -45,7 +47,7 @@ export function useCreatePost({
             const referrer = document.referrer || '';
             const match = referrer.match(/\/c\/([^/?]+)/);
             if (match && match[1] && match[1] !== 'all') {
-                return match[1];
+                return decodeURIComponent(match[1]);
             }
         } catch (_) { }
         return null;
@@ -54,19 +56,19 @@ export function useCreatePost({
         try {
             const st = locationState && locationState.fromCommunity;
             if (st && st !== 'all') {
-                return String(st).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                return sanitizeCommunitySlug(st);
             }
         } catch (_) { }
         try {
             const params = new URLSearchParams(locationSearch || '');
             const qp = params.get('community');
             if (qp && qp !== 'all') {
-                return String(qp).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                return sanitizeCommunitySlug(qp);
             }
         } catch (_) { }
         const ref = getCurrentCommunity();
         if (ref && ref !== 'all') {
-            return String(ref).replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            return sanitizeCommunitySlug(ref);
         }
         return '';
     }, [locationState, locationSearch]);
@@ -83,11 +85,7 @@ export function useCreatePost({
     const [submitStatus, setSubmitStatus] = useState('idle'); // idle, solving, submitting, verifying
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [editorUpload, setEditorUpload] = useState(null);
-    /* `globalDragging` powers the page-wide drop overlay in the onyx,
-     * bluemoon, and oldreddit themes. The default theme deliberately
-     * doesn't read it — it ships with a single inline drop panel as
-     * the only drop target — but we keep the state here so the shared
-     * hook stays drop-in compatible across all themes. */
+    /* The composer keeps this shared drag state for its page-wide drop overlay. */
     const [globalDragging, setGlobalDragging] = useState(false);
     const [attachedMedia, setAttachedMedia] = useState([]); // [{type: 'image'|'video', url: string}]
     const MAX_MEDIA = 10;
@@ -113,11 +111,13 @@ export function useCreatePost({
         const load = async () => {
             try {
                 const viewerAddress = Storage.load('publicKey', '');
+                const proof = await signReadParams(THREAD_READ_ACTION, viewerAddress);
                 const data = await Api.get('get_comments', {
                     post_id: overrideId,
                     address: viewerAddress,
                     lens: 'effective',
                     scope: 'current',
+                    ...proof,
                 });
                 if (data && data.root) {
                     setCommunityValue(data.root.community || '');
@@ -368,10 +368,7 @@ export function useCreatePost({
     }, [isSubmitting, isUploading, attachedMedia.length, editorUpload, MAX_MEDIA]);
 
     const handleCommunityChange = e => {
-        let formattedValue = e.target.value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        if (formattedValue.length > limits.maxCommunity) {
-            formattedValue = formattedValue.slice(0, limits.maxCommunity);
-        }
+        const formattedValue = sanitizeCommunitySlug(e.target.value, limits.maxCommunity);
         const prevCommunity = communityValue;
 
         // Ignore empty or identical values to avoid clearing when reopening selector
@@ -480,7 +477,7 @@ export function useCreatePost({
     const handleSubmit = async (event, opts = {}) => {
         event.preventDefault();
         setSubmitError('');
-        const community = communityValue;
+        const community = String(communityValue || '').trim().toLowerCase();
         const title = String(titleValue).trim();
         let content = String(opts.content != null ? opts.content : contentValue).trim();
         const tag = tagEnabled ? String(tagValue || '').trim().toLowerCase() : '';
@@ -516,6 +513,10 @@ export function useCreatePost({
         }
         if (community.length > limits.maxCommunity) {
             setSubmitError(`Community name too long (max ${limits.maxCommunity} characters)`);
+            return;
+        }
+        if (!isValidCommunitySlug(community, limits.minCommunity, limits.maxCommunity)) {
+            setSubmitError('Community slugs may contain lowercase letters, numbers, and single internal hyphens');
             return;
         }
         if (content.length > limits.maxContent) {
@@ -660,11 +661,13 @@ export function useCreatePost({
                                 return;
                             }
                             const viewerAddress = Storage.load('publicKey', '');
+                            const proof = await signReadParams(THREAD_READ_ACTION, viewerAddress);
                             const data = await Api.get('get_comments', {
                                 post_id: txHash,
                                 address: viewerAddress,
                                 lens: 'effective',
                                 scope: 'current',
+                                ...proof,
                             });
                             if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                 Storage.removeOptimisticPost(txHash);

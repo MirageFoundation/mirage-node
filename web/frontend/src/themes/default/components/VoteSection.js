@@ -198,8 +198,7 @@ const CollapseToggle = styled.span`
 
 // ─── Icons ─────────────────────────────────────────────────────────────────
 
-// Triangle icons ported from bluemoon/VoteSection so both themes share the
-// same up/down glyph language.
+// Triangle icons keep the same shape across voting surfaces.
 const UpIcon = (props) => (
     <svg viewBox="0 0 16 16" width="1em" height="1em" aria-hidden="true" focusable="false" {...props}>
         <path d="M8 3l5 8H3l5-8z" fill="currentColor" />
@@ -232,10 +231,10 @@ function DefaultVoteSection({ state, post, updatePost, showToggle = true, inline
     const onClick = (dir) => (e) => {
         // Fire the vote synchronously first so the network request is not
         // blocked behind a React state flush (this is what made default
-        // feel ~1s slower than bluemoon).
+        // feel about one second slower).
         handleVote(post, dir);
         // Drop focus so the hover/focus tint clears immediately, matching
-        // bluemoon's _voteClick behavior.
+        // the shared optimistic-vote behavior.
         if (e && e.currentTarget) e.currentTarget.blur();
         // Schedule the bounce after the click work is dispatched.
         if (bounceTimerRef.current) clearTimeout(bounceTimerRef.current);

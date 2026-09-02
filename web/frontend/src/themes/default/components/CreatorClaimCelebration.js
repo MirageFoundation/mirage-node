@@ -8,10 +8,8 @@ import { requireThemeColor } from '../../../utils/themeColor';
  *
  * Claiming is a chain transaction, so the only feedback the user got was the
  * generic "Transaction submitted" toast that every action produces. The money
- * arrived and nothing on screen said so. This is the retired quest reward
- * card's celebration overlay (confetti, bobbing emoji, eyebrow / title /
- * subtitle stack, one reward row, full-width dismiss), restored for the claim
- * it now confirms.
+ * arrived and nothing on screen said so. This overlay provides a clear
+ * confirmation and reward summary.
  *
  * It is only rendered after the claim is projected on chain, so the amount it
  * shows is the confirmed one, never an optimistic guess.

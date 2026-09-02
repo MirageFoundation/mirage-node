@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
     LENS,
+    LENS_PICKS_MAX,
     MAX_CURATION_TEAM_DESCRIPTION_LENGTH,
     MAX_CURATION_TEAM_NAME_LENGTH,
     clearLensPick,
@@ -28,10 +29,27 @@ import {
 } from '../../src/utils/curation.js';
 import {
     currentCreatorEpoch,
+    fetchCreatorEarningsPages,
     isCreatorEarningClaimable,
+    nextClaimSelection,
     normalizeClaimEpochs,
+    requireCreatorClaimCheckTx,
+    waitForCreatorClaim,
 } from '../../src/logic/useCreatorEarnings.js';
 import { formatCreatorRewardTime } from '../../src/themes/default/components/CreatorEarningsPanel.js';
+import {
+    communityFromPathname,
+    createPostPathForContext,
+} from '../../src/themes/default/components/MobileBottomNav.js';
+import {
+    isValidCommunitySlug,
+    sanitizeCommunitySlug,
+} from '../../src/utils/community.js';
+import {
+    CURATOR_READ_ACTION,
+    FEED_READ_ACTION,
+    signedReadPayload,
+} from '../../src/utils/signPlain.js';
 import Api from '../../src/utils/api.js';
 import {
     registerCommunityLeaveConfirmationHandler,
@@ -42,6 +60,16 @@ import {
     setOptimisticCurationVisibility,
 } from '../../src/utils/curationVisibility.js';
 import { TransactionHandler } from '../../src/utils/TransactionHandler.js';
+
+vi.mock('../../src/utils/signPlain.js', async (importOriginal) => ({
+    ...await importOriginal(),
+    signReadParams: vi.fn().mockResolvedValue({
+        pubkey: 'proof-pubkey',
+        signature: 'proof-signature',
+        envelope_nonce: 1,
+        timestamp: 1,
+    }),
+}));
 
 const here = dirname(fileURLToPath(import.meta.url));
 const frontendSrc = join(here, '../../src');
@@ -262,6 +290,27 @@ describe('curation lenses', () => {
 
         clearLensPick({ viewer, community: 'news' });
         expect(lensPicksParam({ viewer })).toBe('tech:raw');
+    });
+
+    it('retains only the 20 most recent lens picks deterministically', () => {
+        sessionStorage.clear();
+        const viewer = 'mirage1viewer';
+        for (let index = 0; index < 25; index += 1) {
+            writeLensPick({ viewer, community: `community-${index}`, lens: LENS.RAW });
+        }
+        const picks = lensPicksParam({ viewer }).split(',');
+        expect(LENS_PICKS_MAX).toBe(20);
+        expect(picks).toHaveLength(20);
+        for (let index = 0; index < 5; index += 1) {
+            expect(readLensPick({ viewer, community: `community-${index}` })).toBeNull();
+        }
+        for (let index = 5; index < 25; index += 1) {
+            expect(readLensPick({ viewer, community: `community-${index}` })).toEqual({
+                lens: LENS.RAW,
+                teamId: null,
+            });
+        }
+        expect(picks).toEqual([...picks].sort());
     });
 
     it('keys the aggregated feed and its cold-start stash on the picks it sent', () => {
@@ -1149,15 +1198,51 @@ describe('waitForOwnCurationTeam', () => {
     });
 });
 
+describe('community composer context', () => {
+    it('preserves canonical internal hyphens', () => {
+        expect(sanitizeCommunitySlug(' Foo-Bar ')).toBe('foo-bar');
+        expect(isValidCommunitySlug('foo-bar', 2, 50)).toBe(true);
+        expect(isValidCommunitySlug('foo--bar', 2, 50)).toBe(false);
+    });
+
+    it('carries a /c/ slug into the mobile create link', () => {
+        const community = communityFromPathname('/c/foo-bar');
+        expect(community).toBe('foo-bar');
+        expect(createPostPathForContext(true, community)).toBe('/create_post?community=foo-bar');
+        expect(createPostPathForContext(false, community)).toBe('/create_post');
+    });
+});
+
+describe('signed authenticated reads', () => {
+    it('uses stable feed and curator payload actions', () => {
+        expect(signedReadPayload(FEED_READ_ACTION, 'MIRAGE1VIEWER', 123, 7))
+            .toBe('get_posts:mirage1viewer:123:7');
+        expect(signedReadPayload(CURATOR_READ_ACTION, 'mirage1viewer', 456, 8))
+            .toBe('curator_read:mirage1viewer:456:8');
+    });
+});
+
 describe('creator reward claims', () => {
     it('deduplicates and sorts epoch IDs', () => {
-        expect(normalizeClaimEpochs([9, 3, 9, 5])).toEqual([3, 5, 9]);
+        expect(normalizeClaimEpochs([9, 3, 9, 5], 10)).toEqual([3, 5, 9]);
     });
 
     it('rejects empty and oversized batches', () => {
-        expect(() => normalizeClaimEpochs([])).toThrow('at least one');
-        expect(() => normalizeClaimEpochs(Array.from({ length: 31 }, (_, index) => index + 1)))
-            .toThrow('at most 30');
+        expect(() => normalizeClaimEpochs([], 4)).toThrow('at least one');
+        expect(() => normalizeClaimEpochs([1, 2, 3], 2)).toThrow('at most 2');
+    });
+
+    it('does not throw when selecting beyond a lowered governance cap', () => {
+        expect(nextClaimSelection([1, 2], 3, 2)).toEqual({ selected: [1, 2], atCap: true });
+        expect(nextClaimSelection([1, 2], 2, 2)).toEqual({ selected: [1], atCap: false });
+    });
+
+    it('surfaces CheckTx failure before settlement polling', () => {
+        expect(() => requireCreatorClaimCheckTx({
+            success: false,
+            error_code: 'transaction_rejected',
+            error_details: { message: 'invalid claim' },
+        })).toThrow();
     });
 
     it('uses the configured creator reward interval', () => {
@@ -1183,5 +1268,146 @@ describe('creator reward claims', () => {
         const unix = Date.UTC(2026, 7, 27, 12, 5, 0) / 1000;
         expect(formatCreatorRewardTime(unix, 300)).toMatch(/12:05.*UTC/);
         expect(formatCreatorRewardTime(unix, 86400)).not.toMatch(/12:05/);
+    });
+
+    it('pages through claimable earnings oldest-deadline-first', async () => {
+        const base = {
+            creator_epoch_seconds: 21600,
+            origin_epoch: 10,
+            origin_unix: 100,
+            max_creator_claim_epochs: 3,
+        };
+        const row = (epoch) => ({
+            epoch_id: epoch,
+            earned: '100',
+            claimed: '0',
+            epoch_start_unix: epoch * 100,
+            epoch_end_unix: epoch * 100 + 50,
+            claim_deadline_unix: epoch * 100 + 500,
+            claimed_height: null,
+            posts: [],
+        });
+        const get = vi.spyOn(Api, 'get')
+            .mockResolvedValueOnce({ ...base, items: [row(1)], has_more: true, next_cursor: 'next' })
+            .mockResolvedValueOnce({ ...base, items: [row(2)], has_more: false, next_cursor: null });
+
+        const result = await fetchCreatorEarningsPages('mirage1creator', { claimableOnly: true });
+
+        expect(result.items.map((item) => item.epoch_id)).toEqual([1, 2]);
+        expect(get.mock.calls[0][1]).toMatchObject({
+            claimable_only: true,
+            sort: 'claim_deadline_asc',
+        });
+        expect(get.mock.calls[1][1].cursor).toBe('next');
+        get.mockRestore();
+    });
+
+    it('waits for DeliverTx and indexed claimed_height', async () => {
+        const pollTxStatus = vi.fn().mockResolvedValue({ success: true, indexed: false });
+        const fetchEarnings = vi.fn()
+            .mockResolvedValueOnce({ items: [{ epoch_id: 4, claimed_height: null }] })
+            .mockResolvedValueOnce({ items: [{ epoch_id: 4, claimed_height: 99 }] });
+        const sleep = vi.fn().mockResolvedValue(undefined);
+
+        await expect(waitForCreatorClaim({
+            epochIds: [4],
+            txHash: 'abc',
+            creator: 'mirage1creator',
+            pollTxStatus,
+            fetchEarnings,
+            sleep,
+        })).resolves.toEqual([{ epoch_id: 4, claimed_height: 99 }]);
+        expect(pollTxStatus).toHaveBeenCalledWith('abc', expect.objectContaining({ requireIndexed: false }));
+        expect(fetchEarnings).toHaveBeenCalledTimes(2);
+    });
+
+    it('surfaces DeliverTx rejection before claiming financial success', async () => {
+        const fetchEarnings = vi.fn();
+        await expect(waitForCreatorClaim({
+            epochIds: [4],
+            txHash: 'abc',
+            creator: 'mirage1creator',
+            pollTxStatus: vi.fn().mockResolvedValue({
+                success: false,
+                error_details: { message: 'claim window closed' },
+            }),
+            fetchEarnings,
+        })).rejects.toThrow('claim window closed');
+        expect(fetchEarnings).not.toHaveBeenCalled();
+    });
+
+    it('surfaces indexer query failure so the claim can be retried', async () => {
+        await expect(waitForCreatorClaim({
+            epochIds: [4],
+            txHash: 'abc',
+            creator: 'mirage1creator',
+            pollTxStatus: vi.fn().mockResolvedValue({ success: true }),
+            fetchEarnings: vi.fn().mockRejectedValue(new Error('indexer unavailable')),
+        })).rejects.toThrow('indexer unavailable');
+    });
+
+    it('times out when claimed_height is not indexed', async () => {
+        let time = 0;
+        await expect(waitForCreatorClaim({
+            epochIds: [4],
+            txHash: 'abc',
+            creator: 'mirage1creator',
+            pollTxStatus: vi.fn().mockResolvedValue({ success: true }),
+            fetchEarnings: vi.fn().mockResolvedValue({
+                items: [{ epoch_id: 4, claimed_height: null }],
+            }),
+            now: () => time,
+            sleep: async (ms) => { time += ms; },
+            settleTimeoutMs: 2,
+            settleIntervalMs: 1,
+        })).rejects.toThrow('indexing timed out');
+    });
+
+    it('allows a successful retry after a projection failure', async () => {
+        const options = {
+            epochIds: [4],
+            txHash: 'abc',
+            creator: 'mirage1creator',
+            pollTxStatus: vi.fn().mockResolvedValue({ success: true }),
+        };
+        await expect(waitForCreatorClaim({
+            ...options,
+            fetchEarnings: vi.fn().mockRejectedValue(new Error('temporary indexer failure')),
+        })).rejects.toThrow('temporary indexer failure');
+        await expect(waitForCreatorClaim({
+            ...options,
+            fetchEarnings: vi.fn().mockResolvedValue({
+                items: [{ epoch_id: 4, claimed_height: 101 }],
+            }),
+        })).resolves.toEqual([{ epoch_id: 4, claimed_height: 101 }]);
+    });
+});
+
+describe('retired runtime source guards', () => {
+    it('keeps compatibility code while removing live retired-feature branches', () => {
+        const handler = readFileSync(join(frontendSrc, 'utils/TransactionHandler.js'), 'utf8');
+        const app = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
+        const index = readFileSync(join(frontendSrc, 'index.js'), 'utf8');
+        const profile = readFileSync(join(frontendSrc, 'logic/useProfile.js'), 'utf8');
+        const subscription = readFileSync(join(frontendSrc, 'logic/useSubscription.js'), 'utf8');
+        const postGifts = readFileSync(join(frontendSrc, 'logic/usePostGifts.js'), 'utf8');
+        const viewPost = readFileSync(join(frontendSrc, 'logic/useViewPost.js'), 'utf8');
+        const main = readFileSync(join(frontendSrc, 'logic/useMain.js'), 'utf8');
+        const themesReadme = readFileSync(join(frontendSrc, 'themes/README.md'), 'utf8');
+
+        expect(handler).not.toContain('questActionCompleted');
+        expect(handler).not.toMatch(/targetLevel\s*===\s*10/);
+        expect(app).not.toContain('bootstrap_rewards_summary');
+        expect(profile).not.toMatch(/reserveFunds|reserveDisplay|agentFee/);
+        expect(subscription).not.toMatch(/reserveFunds|setReserveFunds/);
+        expect(postGifts).not.toMatch(/agentFee/);
+        expect(viewPost).not.toMatch(/agentFee/);
+        expect(themesReadme).not.toMatch(/bluemoon|oldreddit|onyx/i);
+
+        expect(index).toContain('Storage.migrateRenamedKeys()');
+        expect(handler).toContain('(protocol_version == null ? 1 : protocol_version)');
+        expect(viewPost).toContain("target.startsWith('/t/') || target === '/topics' || target === '/agents'");
+        expect(main).toMatch(/signReadParams\(FEED_READ_ACTION, viewerAddress\)/);
+        expect(app).toMatch(/signReadParams\(readAction, pk\)/);
     });
 });

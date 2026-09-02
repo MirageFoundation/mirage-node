@@ -4,6 +4,18 @@ import { derivePrivateKeyFromSeed } from './CryptoUtils.js';
 import { generateEnvelopeNonce } from './canonicalEncoding';
 import { ensureCosmCrypto } from './cosmCrypto';
 
+export const FEED_READ_ACTION = 'get_posts';
+export const THREAD_READ_ACTION = 'get_comments';
+export const CURATOR_READ_ACTION = 'curator_read';
+
+export function signedReadPayload(action, address, timestamp, nonce) {
+    const verb = String(action || '').trim();
+    const owner = String(address || '').trim().toLowerCase();
+    if (!verb) throw new Error('signed read action is required');
+    if (!owner) throw new Error('signed read address is required');
+    return `${verb}:${owner}:${timestamp}:${nonce}`;
+}
+
 /**
  * Sign a plain UTF-8 payload string with the user's key.
  * Returns { pubkey, signature, envelope_nonce, timestamp } (all base64/number)
@@ -33,4 +45,10 @@ export async function signPlainPayload(payloadFn) {
     const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
 
     return { pubkey: pubB64, signature: sigB64, envelope_nonce: nonce, timestamp };
+}
+
+export async function signReadParams(action, address) {
+    return signPlainPayload(
+        (timestamp, nonce) => signedReadPayload(action, address, timestamp, nonce),
+    );
 }

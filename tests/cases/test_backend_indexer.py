@@ -1840,7 +1840,204 @@ def test_indexer_hardening(backend: str):
         _pass("indexer_hardening.obsolete_surface_removed")
 
     _indexer_hardening_2026_08_14_checks()
+    _indexer_v139_projection_checks()
     _indexer_hardening_db_checks(backend)
+
+
+def _indexer_v139_projection_checks() -> None:
+    """Static and stub regressions for v1.39 indexer recovery/projection."""
+    import inspect
+
+    from indexer import main as indexer_main
+    from indexer.chain_client import (
+        ChainClient,
+        INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS,
+    )
+    from indexer.database import DatabaseManager
+    from indexer.message_processor import MessageProcessor
+    from indexer.migrations import (
+        _REPINNED_MIGRATION_KEYS,
+        _REPIN_RELEASE,
+    )
+    from indexer.migrations import v1_39_0_communities as communities_migration
+    from indexer.migrations import v1_39_0_curator_defined_communities as curation_migration
+    from indexer.migrations import v1_39_0_legacy_post_community as legacy_comment_migration
+    from indexer.migrations import v1_39_0_rename_topic_pref_type as preference_migration
+
+    preference_source = inspect.getsource(preference_migration.run)
+    preference_requirements = (
+        "ON CONFLICT(owner, pref_type, target) DO UPDATE",
+        "EXCLUDED.updated_at > preferences.updated_at",
+        "DELETE FROM preferences WHERE pref_type = 'topic'",
+        "DROP TABLE IF EXISTS topic_preferences",
+    )
+    missing = [value for value in preference_requirements if value not in preference_source]
+    if missing:
+        _fail("indexer_v139.preference_collision_merge", f"missing source contracts: {missing}")
+    else:
+        _pass("indexer_v139.preference_collision_merge")
+
+    curation_source = inspect.getsource(curation_migration.run)
+    callback_source = curation_source.split("def _migrate(cur):", 1)[1]
+    curation_problems = []
+    if "chain." in callback_source:
+        curation_problems.append("migration callback performs chain RPC")
+    if "subscriber_count=EXCLUDED.subscriber_count" not in callback_source:
+        curation_problems.append("authoritative team count is not upserted")
+    if "WITH expected AS" in callback_source:
+        curation_problems.append("count is recomputed from pre-sync profiles")
+    if curation_problems:
+        _fail("indexer_v139.curation_rpc_before_ddl", "; ".join(curation_problems))
+    else:
+        _pass("indexer_v139.curation_rpc_before_ddl")
+
+    database_source = inspect.getsource(DatabaseManager)
+    joined_source = inspect.getsource(DatabaseManager.set_joined_communities)
+    if (
+        "NOT (LOWER(community) = ANY(%s))" in joined_source
+        and "ON CONFLICT(owner, community) DO NOTHING" in joined_source
+        and "mode=EXCLUDED.mode" not in joined_source
+    ):
+        _pass("indexer_v139.join_sync_preserves_modes")
+    else:
+        _fail("indexer_v139.join_sync_preserves_modes", "membership sync still replaces pinned/raw preferences")
+
+    processor_source = inspect.getsource(MessageProcessor._handle_edit)
+    reattribute_source = inspect.getsource(DatabaseManager.reattribute_community_stats)
+    if (
+        "get_post_protocol_version" in processor_source
+        and "protocol_version=protocol_version" in processor_source
+        and "SET community = %s, root_community = %s" in reattribute_source
+    ):
+        _pass("indexer_v139.edit_integrity")
+    else:
+        _fail("indexer_v139.edit_integrity", "edit loses protocol or descendant community attribution")
+
+    legacy_source = inspect.getsource(legacy_comment_migration.run)
+    if "WITH RECURSIVE resolved" in legacy_source and "MAX_PASSES" not in legacy_source and "still_resolvable" in legacy_source:
+        _pass("indexer_v139.deep_comment_propagation")
+    else:
+        _fail("indexer_v139.deep_comment_propagation", "legacy propagation remains depth-limited")
+
+    schema_source = inspect.getsource(communities_migration.run)
+    retired_history = [
+        table
+        for table in ("community_founder_history", "curation_team_history", "curation_action_history")
+        if f"CREATE TABLE IF NOT EXISTS {table}" in schema_source
+    ]
+    if retired_history:
+        _fail("indexer_v139.no_dead_curation_history", f"still creates {retired_history}")
+    else:
+        _pass("indexer_v139.no_dead_curation_history")
+
+    expected_gov = {
+        "/mirage.core.v1.MsgGovCreateCurationTeam",
+        "/mirage.core.v1.MsgGovSetCurationTeamOwner",
+        "/mirage.core.v1.MsgGovSetCuratorMembership",
+        "/mirage.core.v1.MsgGovSetCommunityPreference",
+        "/mirage.core.v1.MsgGovSetCommunityBlock",
+        "/mirage.core.v1.MsgGovSetCuratorInvitation",
+        "/mirage.core.v1.MsgGovSetSubscriptionState",
+        "/mirage.core.v1.MsgGovClaimCreatorRewards",
+    }
+    if INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS == expected_gov:
+        _pass("indexer_v139.all_governance_paths_registered", count=8)
+    else:
+        _fail(
+            "indexer_v139.all_governance_paths_registered",
+            f"got={sorted(INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS)}",
+        )
+
+    class _GovDb:
+        def __init__(self):
+            self.calls = []
+
+        def block_community(self, owner, community, blocked_at=0):
+            self.calls.append(("block", owner, community, blocked_at))
+
+        def unblock_community(self, owner, community):
+            self.calls.append(("unblock", owner, community))
+
+    def _varint(value):
+        out = bytearray()
+        while value >= 0x80:
+            out.append((value & 0x7F) | 0x80)
+            value >>= 7
+        out.append(value)
+        return bytes(out)
+
+    def _text_field(number, value):
+        raw = value.encode()
+        return _varint(number << 3 | 2) + _varint(len(raw)) + raw
+
+    gov_db = _GovDb()
+    gov_processor = MessageProcessor(gov_db, None, lambda *a, **k: None, lambda value: str(value))
+    payload = _text_field(2, "mirage1owner") + _text_field(3, "news") + _varint(4 << 3) + b"\x01"
+    gov_processor.process_governance_message(
+        "/mirage.core.v1.MsgGovSetCommunityBlock",
+        payload,
+        "proposal-1",
+        123,
+        456,
+    )
+    if gov_db.calls == [("block", "mirage1owner", "news", 123)]:
+        _pass("indexer_v139.governance_block_projects")
+    else:
+        _fail("indexer_v139.governance_block_projects", f"calls={gov_db.calls}")
+
+    block_source = inspect.getsource(indexer_main.Indexer._process_block)
+    if (
+        block_source.index("_prefetch_block_snapshots") < block_source.index("with self.db.transaction")
+        and "seal_block_snapshots" in block_source
+    ):
+        _pass("indexer_v139.grpc_snapshots_precede_db_transaction")
+    else:
+        _fail("indexer_v139.grpc_snapshots_precede_db_transaction", "block opens DB transaction before snapshots")
+
+    probe = ChainClient("http://127.0.0.1:26657")
+    probe.begin_block_profile_cache()
+    probe.seal_block_snapshots()
+    try:
+        probe.query_subscription_runtime("mirage1missing")
+        _fail("indexer_v139.sealed_runtime_cache", "cache miss attempted RPC")
+    except RuntimeError as e:
+        if "not prefetched" in str(e):
+            _pass("indexer_v139.sealed_runtime_cache")
+        else:
+            _fail("indexer_v139.sealed_runtime_cache", str(e))
+    finally:
+        probe.end_block_profile_cache()
+
+    backfill_source = inspect.getsource(indexer_main.Indexer._backfill_creator_rewards)
+    if (
+        "query_terminal_creator_epochs" in backfill_source
+        and "query_creator_schedule" not in backfill_source
+        and "creator_projection_initialized" not in backfill_source
+    ):
+        _pass("indexer_v139.creator_recovery_crosses_schedules")
+    else:
+        _fail("indexer_v139.creator_recovery_crosses_schedules", "recovery still derives current schedule range")
+
+    if "INSERT INTO subscription_tranches" in database_source and "process_subscription_tranche_events" in inspect.getsource(
+        MessageProcessor
+    ):
+        _pass("indexer_v139.subscription_tranches_projected")
+    else:
+        _fail("indexer_v139.subscription_tranches_projected", "tranche event projection is incomplete")
+
+    required_repins = {
+        "v1.39.0_communities",
+        "v1.39.0_curator_defined_communities",
+        "v1.39.0_legacy_post_community",
+        "v1.39.0_rename_topic_pref_type",
+    }
+    if required_repins <= set(_REPINNED_MIGRATION_KEYS) and _REPIN_RELEASE != "v1.39.0":
+        _pass("indexer_v139.migration_checksums_repinned")
+    else:
+        _fail(
+            "indexer_v139.migration_checksums_repinned",
+            f"release={_REPIN_RELEASE} missing={sorted(required_repins - set(_REPINNED_MIGRATION_KEYS))}",
+        )
 
 
 def _indexer_hardening_2026_08_14_checks() -> None:

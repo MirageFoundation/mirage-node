@@ -40,7 +40,7 @@ from indexer.database import (
     META_LAST_HEIGHT,
 )
 from indexer.address_utils import module_address
-from indexer.chain_client import ChainClient
+from indexer.chain_client import ChainClient, INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS
 from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO, attr_text
 from indexer.migrations import run_migrations
 from indexer import redgifs, rumble
@@ -69,6 +69,7 @@ TYPE_URL_UPDATE_PARAMS = "/mirage.core.v1.MsgUpdateParams"
 
 MINT_DENOM = "umirage"
 CREATOR_EPOCH_TERMINAL_STATUSES = frozenset({3, 4})
+PROFILE_PREFERENCE_SYNC_DEADLINE = 120.0
 
 # Cosmos staking BondStatus for a validator in the active set.
 BOND_STATUS_BONDED = 3
@@ -375,6 +376,107 @@ class Indexer:
             raise RuntimeError(f"Chain params refresh returned empty data at height {height}")
         return snapshot, reason
 
+    def _prefetch_governance_messages(self, result_obj: dict, height: int) -> dict[int, list[dict]]:
+        events = result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or []
+        proposal_ids = self.processor.extract_passed_proposals(events)
+        snapshots: dict[int, list[dict]] = {}
+        for proposal_id in proposal_ids:
+            try:
+                snapshots[proposal_id] = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
+            except RuntimeError as grpc_err:
+                if "no trackable messages" not in str(grpc_err).lower():
+                    raise
+                snapshots[proposal_id] = []
+                logger.warning(
+                    "Proposal %s carries no indexer-tracked messages; nothing to project (height=%s)",
+                    proposal_id,
+                    height,
+                )
+        return snapshots
+
+    def _prefetch_block_snapshots(
+        self,
+        txs: list,
+        txs_results: list,
+        result_obj: dict,
+        governance_messages: dict[int, list[dict]],
+    ) -> None:
+        runtime_candidates: set[str] = set()
+        subscription_profiles: set[str] = set()
+        creator_epochs: set[int] = set()
+        creator_schedule_needed = False
+
+        def collect(type_url: str, value: bytes) -> None:
+            nonlocal creator_schedule_needed
+            dependencies = self.processor.collect_message_snapshot_dependencies(type_url, value)
+            runtime_candidates.update(dependencies["runtime_candidates"])
+            subscription_profiles.update(dependencies["subscription_profiles"])
+            creator_epochs.update(int(epoch) for epoch in dependencies["creator_epochs"])
+            creator_schedule_needed = creator_schedule_needed or bool(dependencies["creator_schedule"])
+
+        for tx_b64, tx_result in zip(txs, txs_results):
+            if int(tx_result.get("code", 0) or 0) != 0:
+                continue
+            try:
+                raw = TxRaw()
+                body = TxBody()
+                raw.ParseFromString(base64.b64decode(tx_b64))
+                body.ParseFromString(raw.body_bytes)
+            except (DecodeError, UnicodeDecodeError):
+                continue
+            for any_msg in body.messages:
+                if any_msg.type_url.startswith("/mirage.core.v1."):
+                    collect(any_msg.type_url, any_msg.value)
+
+        for messages in governance_messages.values():
+            for entry in messages:
+                collect(str(entry["type_url"]), base64.b64decode(entry["value"]))
+
+        tranche_recipients: set[str] = set()
+        for event_type, attrs in self.processor.decode_events(self._all_block_events(result_obj)):
+            if event_type in (
+                "subscription_expired",
+                "subscription_renewed",
+                "subscription_renewal_warning",
+                "subscription_effective_state_changed",
+            ):
+                address = str(attrs.get("address", "")).strip().lower()
+                if not address:
+                    raise RuntimeError(f"{event_type} event is missing address")
+                subscription_profiles.add(address)
+                runtime_candidates.add(address)
+            elif event_type in ("creator_epoch_claimable", "creator_epoch_expired"):
+                raw_epoch = attrs.get("epoch")
+                if raw_epoch is None:
+                    raise RuntimeError(f"{event_type} event is missing epoch")
+                creator_epochs.add(int(raw_epoch))
+            elif event_type == "subscription_tranche_created":
+                recipient = str(attrs.get("recipient", "")).strip().lower()
+                if not recipient:
+                    raise RuntimeError("subscription_tranche_created event is missing recipient")
+                tranche_recipients.add(recipient)
+
+        runtime_owners = self.db.filter_subscription_runtime_owners(runtime_candidates) | subscription_profiles
+        for owner in sorted(subscription_profiles):
+            self.chain.query_profile_full(owner)
+        for owner in sorted(runtime_owners):
+            self.chain.query_subscription_runtime(owner)
+        for epoch_id in sorted(creator_epochs):
+            self.chain.query_creator_epoch_snapshot(epoch_id)
+        if creator_schedule_needed:
+            self.chain.query_creator_schedule()
+        for recipient in sorted(tranche_recipients):
+            self.chain.query_subscription_tranches(recipient)
+        logger.debug(
+            "block snapshots prefetched profiles=%d runtimes=%d creator_epochs=%d "
+            "creator_schedule=%s tranche_recipients=%d",
+            len(subscription_profiles),
+            len(runtime_owners),
+            len(creator_epochs),
+            creator_schedule_needed,
+            len(tranche_recipients),
+        )
+
     def _process_block(self, height: int):
         """Project one block into PostgreSQL atomically, then advance the checkpoint."""
         blk = self.chain.get_block(height)
@@ -418,6 +520,9 @@ class Indexer:
 
         self.chain.begin_block_profile_cache()
         try:
+            governance_messages = self._prefetch_governance_messages(result_obj, height)
+            self._prefetch_block_snapshots(txs, txs_results, result_obj, governance_messages)
+            self.chain.seal_block_snapshots()
             with self.db.transaction(label="block", height=height):
                 for idx, tx_b64 in enumerate(txs):
                     try:
@@ -425,8 +530,9 @@ class Indexer:
                     except Exception as tx_err:
                         raise RuntimeError(f"Error processing tx {idx} at height {height}: {tx_err}") from tx_err
 
-                self._process_governance_events(result_obj, ts, height)
+                self._process_governance_events(result_obj, ts, height, governance_messages)
                 self._process_subscription_events(result_obj, ts, height)
+                self.processor.process_subscription_tranche_events(self._all_block_events(result_obj), height)
                 self.processor.process_curation_events(
                     result_obj.get("end_block_events") or result_obj.get("finalize_block_events") or [],
                     height,
@@ -626,7 +732,13 @@ class Indexer:
                 )
                 self.processor.update_profile_subscription(address, level, new_expiry, ts)
 
-    def _process_governance_events(self, result_obj: dict, ts: int, height: int):
+    def _process_governance_events(
+        self,
+        result_obj: dict,
+        ts: int,
+        height: int,
+        governance_messages: dict[int, list[dict]],
+    ):
         """Apply the messages of every proposal that passed in this block.
 
         Fails closed: an unresolvable passed proposal rolls the block back rather
@@ -645,17 +757,9 @@ class Indexer:
 
         params_updated = False
         for proposal_id in passed_ids:
-            try:
-                messages = self.chain.fetch_proposal_messages(proposal_id, TYPE_URL_TO_PROTO)
-            except RuntimeError as grpc_err:
-                if "no trackable messages" in str(grpc_err).lower():
-                    logger.warning(
-                        "Proposal %s carries no indexer-tracked messages; nothing to project (height=%s)",
-                        proposal_id,
-                        height,
-                    )
-                    continue
-                raise
+            if proposal_id not in governance_messages:
+                raise RuntimeError(f"proposal {proposal_id} was not prefetched before the block transaction")
+            messages = governance_messages[proposal_id]
 
             for entry in messages:
                 type_url = entry.get("type_url")
@@ -663,14 +767,23 @@ class Indexer:
                 if not type_url or not value_b64:
                     raise RuntimeError(f"Proposal {proposal_id} returned a message without type_url/value")
                 value_bytes = base64.b64decode(value_b64)
-                self.processor.process_core_message(
-                    type_url,
-                    value_bytes,
-                    f"proposal-{proposal_id}",
-                    ts,
-                    height,
-                    events=events,
-                )
+                if type_url in INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS:
+                    self.processor.process_governance_message(
+                        type_url,
+                        value_bytes,
+                        f"proposal-{proposal_id}",
+                        ts,
+                        height,
+                    )
+                else:
+                    self.processor.process_core_message(
+                        type_url,
+                        value_bytes,
+                        f"proposal-{proposal_id}",
+                        ts,
+                        height,
+                        events=events,
+                    )
                 if type_url == TYPE_URL_UPDATE_PARAMS:
                     params_updated = True
 
@@ -1341,7 +1454,7 @@ class Indexer:
             logger.info("Completed %d migrations", migration_count)
 
         self._sync_profiles_from_chain()
-        self._backfill_creator_rewards_once()
+        self._backfill_creator_rewards()
         self._startup_resync()
 
         self.running = True
@@ -1379,33 +1492,28 @@ class Indexer:
         self.db.set_indexer_state("chain_head_height", str(self.chain.get_current_height()), now)
         logger.info("Startup resync complete")
 
-    def _backfill_creator_rewards_once(self) -> None:
-        marker = "creator_projection_initialized_v1_39_0"
-        if self.db.get_indexer_state(marker) == "1":
-            return
+    def _backfill_creator_rewards(self) -> None:
+        """Recover every unexpired terminal epoch, including old schedules."""
         height = self.chain.get_current_height()
-        raw_params = get_raw_params()
-        schedule = self.chain.query_creator_schedule()
-        creator_epoch_seconds = int(schedule["epoch_seconds"])
-        current_epoch = int(schedule["current_epoch"])
-        origin_epoch = int(schedule["origin_epoch"])
-        claim_window_days = int(raw_params["creator_claim_window_days"])
-        claim_window_epochs = claim_window_days * 86400 // creator_epoch_seconds
-        first_epoch = max(origin_epoch, current_epoch - claim_window_epochs - 1)
-        projected = 0
+        cutoff = int(time.time())
+        terminal = self.chain.query_terminal_creator_epochs(cutoff)
+        snapshots = [
+            self.chain.query_creator_epoch_snapshot(int(value["epoch_id"]))
+            for value in terminal
+        ]
         with self.db.transaction(label="creator-backfill", height=height):
-            for epoch_id in range(first_epoch, current_epoch):
-                epoch = self.chain.query_creator_epoch(epoch_id)
-                if epoch is None or epoch["status"] not in CREATOR_EPOCH_TERMINAL_STATUSES:
-                    continue
-                self.processor.sync_creator_epoch(epoch_id, height)
-                projected += 1
-            self.db.set_indexer_state(marker, "1", int(time.time()))
+            for snapshot in snapshots:
+                status = int(snapshot["epoch"]["status"])
+                if status not in CREATOR_EPOCH_TERMINAL_STATUSES:
+                    raise RuntimeError(
+                        f"terminal creator query returned non-terminal epoch "
+                        f"{snapshot['epoch']['epoch_id']} status={status}"
+                    )
+                self.processor.sync_creator_epoch_snapshot(snapshot, height)
         logger.info(
-            "Creator reward backfill complete epochs=%s range=%s..%s height=%s",
-            projected,
-            first_epoch,
-            current_epoch,
+            "Creator reward recovery complete epochs=%s cutoff=%s height=%s",
+            len(snapshots),
+            cutoff,
             height,
         )
 
@@ -1520,11 +1628,28 @@ class Indexer:
         now = int(time.time())
         chain_owners: set[str] = set()
         batch = []
+        preference_snapshots: list[tuple[str, str, dict]] = []
+        preference_deadline = time.monotonic() + PROFILE_PREFERENCE_SYNC_DEADLINE
         for p in profiles:
             owner = str(p.get("owner", "")).strip().lower()
             if not owner:
                 raise RuntimeError("chain returned a profile with an empty owner")
             chain_owners.add(owner)
+            for community_value in p.get("joined_communities") or []:
+                if time.monotonic() >= preference_deadline:
+                    raise RuntimeError(
+                        "community preference sync exceeded "
+                        f"{PROFILE_PREFERENCE_SYNC_DEADLINE:.0f}s after {len(preference_snapshots)} records"
+                    )
+                community = str(community_value).strip().lower()
+                if not community:
+                    raise RuntimeError(f"chain returned an empty joined community for {owner}")
+                preference = self.chain.query_community_preference(owner, community)
+                if not preference.get("joined"):
+                    raise RuntimeError(
+                        f"profile inventory lists {owner}/{community} joined but CommunityPreference does not"
+                    )
+                preference_snapshots.append((owner, community, preference))
             batch.append(
                 (
                     owner,
@@ -1556,6 +1681,15 @@ class Indexer:
                 for target in p.get("blocked_communities") or []:
                     self.db.block_community(owner, str(target), now)
 
+            for owner, community, preference in preference_snapshots:
+                self.db.upsert_community_preference(
+                    owner,
+                    community,
+                    int(preference["mode"]),
+                    preference["pinned_team_id"],
+                    0,
+                )
+
             absent = self._soft_delete_absent_owners(chain_owners, now)
 
         # Migrations that backfill quota run BEFORE this sync, when effective_paid
@@ -1583,8 +1717,10 @@ class Indexer:
 
         t_done = time.time()
         logger.info(
-            "KV Sync: reconciled %d profiles in %.1fs (soft-deleted %d absent, total %.1fs)",
+            "KV Sync: reconciled %d profiles and %d preferences in %.1fs "
+            "(soft-deleted %d absent, total %.1fs)",
             len(batch),
+            len(preference_snapshots),
             t_done - t_fetch,
             absent,
             t_done - t0,

@@ -7,11 +7,11 @@ This folder contains the plan for building a new Mirage web theme named **`defau
 
 The work is split across six per-PR plans so each phase ships independently and stays reviewable.
 
-> **📐 Style rules:** Before touching any UI in `default`, read [`RULES.md`](./RULES.md). It covers background tokens, dark↔light color pairs, divider rules, and the required bluemoon + mobile reference check.
+> **📐 Style rules:** Before touching any UI in `default`, read [`RULES.md`](./RULES.md). It covers background tokens, dark↔light color pairs, divider rules, and the required shared-web + mobile reference check.
 
 ---
 
-## Why a new theme family (not a restyle)
+## Why this was built as a theme family
 
 Mirage web themes are **full UI families**, not skins. They own:
 
@@ -20,7 +20,7 @@ Mirage web themes are **full UI families**, not skins. They own:
 - theme-local components (TopBar, Sidebar, CardView, etc.)
 - tokens (colors, layout, typography)
 
-Because of that, mobile-like colors + Reddit-like layout cannot be achieved with token-only edits. The theme system is already designed for this use case — we just need to add a new entry.
+Because of that, mobile-like colors + Reddit-like layout could not be achieved with token-only edits. `default` was built through the theme system and is now the only retained family; the superseded source families were removed after this work shipped.
 
 Shared behavior (API, tx, crypto, storage, data hooks) stays in `web/frontend/src/logic/` and `web/frontend/src/utils/` and is **not** modified by this theme.
 
@@ -30,7 +30,7 @@ Shared behavior (API, tx, crypto, storage, data hooks) stays in `web/frontend/sr
 
 Whenever desktop structure and mobile visuals conflict:
 
-- **Desktop layout/structure** → take cues from Reddit / the existing `oldreddit` theme
+- **Desktop layout/structure** → follow the shipped default shell and its Reddit-style information hierarchy
 - **Visual tokens + mobile feel** → take cues from `mirage-mobile-app`
 
 ---
@@ -62,15 +62,15 @@ Each plan is designed to be one PR (or a series of one-PR sub-plans). Later plan
 6. [Change Username](./05-subplans/06-change-username.md) — ✅ Done
 7. [Sign Out](./05-subplans/07-sign-out.md) — ✅ Done (closes Plan 05)
 
-**Next focus:** Plan 06 is closed. All sub-plans 06.1 – 06.5, 06.7 – 06.11 ✅ done; 06.6 ⏭️ skipped. Sub-plan [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) (Admin UI pass) landed last — A (`tierAdmin` token), B (profile menu), C (Subscription admin branch), D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity in `CardView`/`PostMenu`), and F (cleanup + grep gates) all green. Optional follow-up: flip `defaultManifest` to index 0 in `THEME_MANIFESTS` to make `default` the registry default.
+**Next focus:** Plan 06 is closed. All sub-plans 06.1 – 06.5, 06.7 – 06.11 ✅ done; 06.6 ⏭️ skipped. Sub-plan [`06-subplans/11-admin-ui.md`](./06-subplans/11-admin-ui.md) (Admin UI pass) landed last — A (`tierAdmin` token), B (profile menu), C (Subscription admin branch), D (post-detail `ConfirmDialog`/`Toast`), E (feed-row admin parity in `CardView`/`PostMenu`), and F (cleanup + grep gates) all green. `default` is now the sole registered theme.
 
 Plan 04 (post detail + profile) was originally deferred; the post-detail slice shipped as sub-plan 05.3, and the profile slice closed via a tokenization-only pass in sub-plan [`06-subplans/01-profile.md`](./06-subplans/01-profile.md) (full header/tabs rewrite dropped by design decision). Plans 02 and 03 stay complete (with the `MobileBottomNav` full restyle still deferred).
 
 ---
 
-### ⚠️ 2026-04-18 audit — pending work that wasn't in the original plan
+### 2026-04-18 historical audit
 
-A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a large number of routes and components are still **byte-identical or near-identical copies of `oldreddit`** (only the `MobileHeader` import + mount was added). They were never restyled with default tokens/typography. The [`06-subplans/`](./06-subplans/README.md) folder captures the full follow-up work. Summary:
+A full diff of `themes/default/**` against the then-present `oldreddit` family revealed that a large number of routes and components were **byte-identical or near-identical copies**. The [`06-subplans/`](./06-subplans/README.md) folder records the follow-up work. The old comparison family has since been removed; the inventory below is retained as design history.
 
 **Routes still rendering in oldreddit style** (need full default restyle):
 
@@ -115,12 +115,8 @@ A full diff of `themes/default/**` vs `themes/oldreddit/**` revealed that a larg
 - `web/frontend/src/views/README.md`
 - `web/frontend/src/components/README.md`
 
-### Structural starting point (desktop layout)
-- `web/frontend/src/themes/oldreddit/`
-
-### Secondary references (modern interactions)
-- `web/frontend/src/themes/onyx/`
-- `web/frontend/src/themes/bluemoon/`
+### Historical web references
+The removed `oldreddit`, `onyx`, and `bluemoon` families informed the original desktop structure and interaction coverage. Their former paths are historical context in the dated sub-plans, not current source references. Use `web/frontend/src/themes/default/`, shared logic, and route facades for current work.
 
 ### Mobile visual reference (`mirage-mobile-app`)
 - `src/config/theme.ts`
@@ -157,5 +153,5 @@ CI=true npm run build
 
 - **CSS-only approach will fail** — treat this as a full theme family.
 - **Cross-theme component imports cause long-term pain** — copy components into `default` and evolve them locally.
-- **Route coverage gaps break navigation** — every theme route key from the registry must be implemented.
+- **Route coverage gaps break navigation** — every registered route key must be implemented.
 - **Mobile/desktop tension** — apply the hybrid rule above whenever there is a conflict.

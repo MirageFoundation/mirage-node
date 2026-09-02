@@ -204,17 +204,14 @@ func (am AppModule) GovSetSubscriptionState(ctx context.Context, req *types.MsgG
 		if err := am.k.SaveProfile(sdkCtx, core); err != nil {
 			return nil, err
 		}
-		if !core.EffectivePaid {
-			if err := am.k.TransitionPaidState(sdkCtx, owner, true); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := am.k.SetSubscription(sdkCtx, owner, int(core.Level), core.SubscriptionExpiry); err != nil {
-				return nil, err
-			}
-			if err := am.k.ReplaceSubscriptionRenewalSchedule(sdkCtx, owner); err != nil {
-				return nil, err
-			}
+		if err := am.k.TransitionPaidState(sdkCtx, owner, true); err != nil {
+			return nil, err
+		}
+		if err := am.k.SetSubscription(sdkCtx, owner, types.LevelSubscriber, core.SubscriptionExpiry); err != nil {
+			return nil, err
+		}
+		if err := am.k.ReplaceSubscriptionRenewalSchedule(sdkCtx, owner); err != nil {
+			return nil, err
 		}
 	} else {
 		if req.GetNominalExpiry() != 0 || req.GetAutoRenew() {

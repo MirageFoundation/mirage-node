@@ -5,12 +5,10 @@ import Storage from './Storage';
  *
  * Background: /api/bootstrap collapses the cold-load fan-out into one
  * request. App.js writes per-section snapshots into localStorage under
- * keys like `bootstrap_user_blocked`, `bootstrap_invite_codes`,
- * `bootstrap_rewards_summary`, and `bootstrap_view` with a
+ * keys like `bootstrap_user_blocked` and `bootstrap_view` with a
  * `{ data, at, pk }` envelope.
  *
- * Consumer hooks (useMain blocked communities / feed, invite codes; useQuests
- * fetchAll; useViewPost; useInbox) read the stash on mount instead of
+ * Consumer hooks (useMain, useViewPost, and useInbox) read the stash on mount instead of
  * firing their own request — but only once, and only within a short TTL
  * after bootstrap. If the stash is missing, expired, or for a different
  * user, the hook falls through to its existing fetch path.

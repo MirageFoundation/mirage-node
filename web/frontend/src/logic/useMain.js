@@ -10,6 +10,7 @@ import { peekBootstrapStashAfterBootstrap, readBootstrapStash, readBootstrapStas
 import { usePendingFollows } from "./useFollowState.js";
 import { onSessionReset } from "../utils/sessionLifecycle";
 import { LENS, lensCacheKey, lensPicksParam, lensQuery, readLensPick } from "../utils/curation";
+import { FEED_READ_ACTION, signReadParams } from "../utils/signPlain";
 
 const APP_BANNER_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -336,7 +337,7 @@ export function useMain({
         }
         return mode;
     });
-    const [oldRedditSort, setOldRedditSort] = useState(() => {
+    const [feedSort, setFeedSort] = useState(() => {
         // Derive from the persisted home_sort_mode so the toggle survives refresh.
         // 'newest' -> 'new', anything else -> 'best'. Without this the effect below
         // resets home_sort_mode back to 'magic' on every mount.
@@ -347,26 +348,26 @@ export function useMain({
             return 'best';
         }
     });
-    const handleOldRedditSortChange = useCallback(mode => {
+    const handleFeedSortChange = useCallback(mode => {
         if (mode !== 'best' && mode !== 'new') return;
-        console.debug('[OldReddit] sort.select', {
+        console.debug('[Feed] sort.select', {
             mode
         });
-        setOldRedditSort(mode);
+        setFeedSort(mode);
     }, []);
     useEffect(() => {
         if (!mapHomeSortMode) return;
-        const mapped = oldRedditSort === 'new' ? 'newest' : 'magic';
+        const mapped = feedSort === 'new' ? 'newest' : 'magic';
         if (homeSortMode !== mapped) {
-            console.debug('[OldReddit] sort.map', {
-                oldRedditSort,
+            console.debug('[Feed] sort.map', {
+                feedSort,
                 homeSortMode,
                 mapped
             });
             setHomeSortMode(mapped);
             Storage.save('home_sort_mode', mapped);
         }
-    }, [mapHomeSortMode, oldRedditSort, homeSortMode]);
+    }, [mapHomeSortMode, feedSort, homeSortMode]);
     const [cardSize, setCardSize] = useState(() => {
         try {
             return Storage.load('card_size', 'compact');
@@ -1001,7 +1002,14 @@ export function useMain({
             page,
             guest: isGuest,
         });
-        Api.get('get_posts', params).then(handleResponse).catch(onError);
+        const signedParams = isGuest
+            ? Promise.resolve(params)
+            : signReadParams(FEED_READ_ACTION, viewerAddress)
+                .then((proof) => ({ ...params, ...proof }));
+        signedParams
+            .then((requestParams) => Api.get('get_posts', requestParams))
+            .then(handleResponse)
+            .catch(onError);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [state.community, state.lastFetched, setCommunity, setPosts, currentPage, joinedCommunitiesSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts, openBrowsingEnabled, feedLens, feedCacheCommunity, feedLensPicks]);
 
@@ -1711,8 +1719,8 @@ export function useMain({
         hasMorePosts,
         homeSortMode,
         setHomeSortMode,
-        oldRedditSort,
-        handleOldRedditSortChange,
+        feedSort,
+        handleFeedSortChange,
         cardSize,
         handleCardSizeChange,
         hideDownvotedPosts,

@@ -199,8 +199,15 @@ def _test_effective_tag_precedence() -> None:
         sys.path.insert(0, str(backend_dir))
     from curation import resolve_effective_tags
 
-    def effective(default_tag, overrides, author_tag, post_id="a" * 64):
-        posts = [{"post_id": post_id, "community": "test", "tag": author_tag, "lens": {"effective_team_id": 7}}]
+    def effective(default_tag, overrides, author_tag, post_id="a" * 64, team_id=7):
+        posts = [
+            {
+                "post_id": post_id,
+                "community": "test",
+                "tag": author_tag,
+                "lens": {"effective_team_id": team_id},
+            }
+        ]
         resolve_effective_tags(_TagCursor(default_tag, overrides), posts)
         return posts[0]["tag"]
 
@@ -223,6 +230,20 @@ def _test_effective_tag_precedence() -> None:
         _fail("backend_hardening.effective_tag_precedence", f"mismatches: {bad}")
     else:
         _pass("backend_hardening.effective_tag_precedence", cases=len(cases))
+
+    raw_cases = [
+        ("gore", {post: "death"}, "adult", "gore"),
+        ("", {post: "death"}, "adult", "adult"),
+    ]
+    raw_bad = [
+        (default_tag, overrides, author_tag, expected, effective(default_tag, overrides, author_tag, team_id=None))
+        for default_tag, overrides, author_tag, expected in raw_cases
+        if effective(default_tag, overrides, author_tag, team_id=None) != expected
+    ]
+    if raw_bad:
+        _fail("backend_hardening.raw_tag_precedence", f"mismatches: {raw_bad}")
+    else:
+        _pass("backend_hardening.raw_tag_precedence", cases=len(raw_cases))
 
 
 def _test_visible_comment_recount() -> None:
@@ -442,6 +463,137 @@ def _test_legacy_posts_reach_current_scope() -> None:
         _pass("backend_hardening.legacy_posts_visible")
 
 
+def _test_v139_backend_contracts() -> None:
+    repo = Path(__file__).resolve().parents[2]
+    backend = repo / "web" / "backend"
+    public = (backend / "routes" / "public.py").read_text(encoding="utf-8")
+    communities = (backend / "routes" / "communities.py").read_text(encoding="utf-8")
+    core = (backend / "routes" / "core.py").read_text(encoding="utf-8")
+    db = (backend / "db.py").read_text(encoding="utf-8")
+    params = (backend / "params.py").read_text(encoding="utf-8")
+    problems = []
+
+    if "FEED_READ_ACTION = \"get_posts\"" not in public or "_signed_content_viewer(claimed_address" not in public:
+        problems.append("feed identity is not bound to one signed-read action")
+    if public.index("_require_signed_request(data, \"mark_inbox_viewed\"") > public.index(
+        "INSERT INTO user_inbox_state"
+    ):
+        problems.append("mark_inbox_viewed writes before signature verification")
+    if public.count("source_limit = MAX_CANDIDATE_POOL") < 2:
+        problems.append("feed filtering has no bounded overfetch")
+    if public.index('resp["posts"] = _filter_posts_by_allowed_tags(') > public.index(
+        'visible_posts = resp["posts"]'
+    ):
+        problems.append("feed page is sliced before effective tag filtering")
+    if '"pending_rewards",' in db[db.index("for gone in (") :]:
+        problems.append("pending_rewards is still dropped")
+    if '"reward_payouts",' in db[db.index("for gone in (") :]:
+        problems.append("reward_payouts is still dropped")
+    for needle in (
+        "unresolved legacy reward obligations remain",
+        "status IN ('reserved', 'broadcast')",
+        "claimed_at IS NULL",
+    ):
+        if needle not in db:
+            problems.append(f"legacy obligation guard missing {needle!r}")
+    for needle in (
+        '"max_creator_claim_epochs"',
+        "claim_deadline_unix ASC, epoch_id ASC",
+        "posts_next_cursor",
+        "/api/creator/earnings/<int:epoch_id>/targets",
+    ):
+        if needle not in params + communities:
+            problems.append(f"creator pagination contract missing {needle!r}")
+    if 'int(expect_params()["max_creator_claim_epochs"])' not in core or "len(epoch_ids) > 30" in core:
+        problems.append("creator claim validation still uses a static cap")
+    guard_source = core[core.index("def _guard_push_request") : core.index("def _validate_envelope_timestamp")]
+    if 'api_error_code("backend_unavailable", 503)' not in guard_source or "indexer DB unavailable" in guard_source:
+        problems.append("push nonce failures are labeled as the wrong database")
+    if "serving cached values" in params or "raise IndexerUnavailable" not in params:
+        problems.append("required chain params still fall back during an indexer outage")
+    if problems:
+        _fail("backend_hardening.v139_backend_contracts", "; ".join(problems))
+    else:
+        _pass("backend_hardening.v139_backend_contracts")
+
+
+class _CreatorCursor:
+    def __init__(self):
+        self.sql = ""
+        self.params = ()
+
+    def execute(self, sql, params=()):
+        self.sql = " ".join(str(sql).split())
+        self.params = tuple(params)
+
+    def fetchall(self):
+        if "FROM creator_accruals" in self.sql:
+            return [
+                (4, 100, 0, 1000, 800, 900, None),
+                (7, 200, 0, 1100, 900, 1000, None),
+            ]
+        if "FROM creator_target_earnings" in self.sql:
+            return [("a" * 64, 100, 2, 1, "title", "body", "test", None, False)]
+        raise AssertionError(self.sql)
+
+
+class _CreatorConnection:
+    def __init__(self):
+        self.cursor_value = _CreatorCursor()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def cursor(self):
+        return self.cursor_value
+
+
+def _test_creator_earnings_endpoint() -> None:
+    from flask import Flask
+
+    backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    import routes.communities as communities
+
+    original_connect = communities.connect_db
+    original_schedule = communities.expect_creator_schedule
+    original_params = communities.expect_params
+    communities.connect_db = lambda: _CreatorConnection()
+    communities.expect_creator_schedule = lambda: {
+        "epoch_seconds": 300,
+        "origin_epoch": 1,
+        "origin_unix": 100,
+    }
+    communities.expect_params = lambda: {"max_creator_claim_epochs": 7}
+    app = Flask("creator-earnings-test")
+    try:
+        with app.test_request_context(
+            "/api/creator/earnings?creator=mirage1creator&claimable_only=true&limit=1"
+        ):
+            response = communities.creator_earnings()
+            body = response.get_json()
+    finally:
+        communities.connect_db = original_connect
+        communities.expect_creator_schedule = original_schedule
+        communities.expect_params = original_params
+    ok = (
+        body["has_more"] is True
+        and body["next_cursor"] == "1000:4"
+        and body["max_creator_claim_epochs"] == 7
+        and [item["epoch_id"] for item in body["items"]] == [4]
+        and body["items"][0]["posts"][0]["txhash"] == "a" * 64
+        and body["items"][0]["posts_has_more"] is False
+    )
+    if ok:
+        _pass("backend_hardening.creator_earnings_cursor")
+    else:
+        _fail("backend_hardening.creator_earnings_cursor", repr(body))
+
+
 def test_backend_hardening(backend: str):
     _debug(f"backend_hardening: begin backend={backend}")
 
@@ -451,6 +603,8 @@ def test_backend_hardening(backend: str):
     _test_visible_comment_recount()
     _test_thread_lock_is_read_only()
     _test_legacy_posts_reach_current_scope()
+    _test_v139_backend_contracts()
+    _test_creator_earnings_endpoint()
 
     if not _check_local_docker():
         _fail("backend_hardening.container_probes", "local docker required")
@@ -645,6 +799,64 @@ def test_backend_hardening(backend: str):
         "    core.flush_user_last_seen(200)\n"
         "    after_ok = len(calls)\n"
         "print('OK' if after_error == 0 and after_ok == 1 else ('BAD', after_error, after_ok))\n",
+    )
+    _probe(
+        "backend_hardening.unsigned_feed_address_is_guest",
+        "from flask import Flask\n"
+        "import routes.public as pub\n"
+        "app = Flask('probe')\n"
+        "with app.test_request_context('/api/get_posts?address=mirage1spoof&allowed_tags=adult'):\n"
+        "    viewer, err = pub._signed_content_viewer('mirage1spoof')\n"
+        "    tags = pub._viewer_allowed_tags(viewer)\n"
+        "print('OK' if viewer == '' and err is None and tags == set() else ('BAD', viewer, err, tags))\n",
+    )
+    _probe(
+        "backend_hardening.entitlement_db_failure_is_503_class",
+        "from flask import Flask\n"
+        "import routes.core as core\n"
+        "from error_utils import IndexerUnavailable\n"
+        "app = Flask('probe')\n"
+        "core.connect_db = lambda *a, **k: (_ for _ in ()).throw(RuntimeError('db down'))\n"
+        "with app.test_request_context('/api/core/post'):\n"
+        "    try:\n"
+        "        core._profile_paid_and_level('mirage1x')\n"
+        "        ok = False\n"
+        "    except IndexerUnavailable:\n"
+        "        ok = True\n"
+        "print('OK' if ok else 'BAD')\n",
+    )
+    _probe(
+        "backend_hardening.invalid_inbox_signature_has_no_activity",
+        "from flask import Flask\n"
+        "import routes.public as pub\n"
+        "calls = []\n"
+        "pub.connect_backend_db = lambda: calls.append('db')\n"
+        "app = Flask('probe')\n"
+        "app.register_blueprint(pub.public_bp)\n"
+        "client = app.test_client()\n"
+        "r = client.post('/api/mark_inbox_viewed', json={'address':'mirage1x','pubkey':'bad','signature':'bad','timestamp':1,'envelope_nonce':1})\n"
+        "print('OK' if r.status_code == 401 and calls == [] else ('BAD', r.status_code, calls))\n",
+    )
+    _probe(
+        "backend_hardening.creator_paging_contract",
+        "from flask import Flask\n"
+        "import routes.communities as c\n"
+        "app = Flask('probe')\n"
+        "with app.test_request_context('/api/creator/earnings?claimable_only=true&limit=17&cursor=1000:9'):\n"
+        "    value, err = c._parse_creator_paging()\n"
+        "ok = err is None and value == (17, True, 'claim_deadline_asc', (1000, 9))\n"
+        "print('OK' if ok else ('BAD', value, err))\n",
+    )
+    _probe(
+        "backend_hardening.dynamic_creator_claim_cap_required",
+        "import params\n"
+        "required = 'max_creator_claim_epochs' in params._REQUIRED_INT_PARAMS\n"
+        "try:\n"
+        "    params._build_cache_from_params({'tiers': [], 'award_configs': []})\n"
+        "    failed = False\n"
+        "except RuntimeError as e:\n"
+        "    failed = 'missing required chain param' in str(e)\n"
+        "print('OK' if required and failed else ('BAD', required, failed))\n",
     )
 
     # ── L-2: LIKE metacharacters are escaped, backslash included ─────────

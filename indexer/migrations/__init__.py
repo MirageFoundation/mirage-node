@@ -189,7 +189,7 @@ def _meta_set(db: "DatabaseManager", key: str, value: str) -> None:
 # user_topic_stats -> user_community_stats. Schema init creates the new names, so
 # every earlier migration touching those tables had to move with them or a fresh
 # database would fail on an old migration.
-_REPIN_RELEASE = "v1.39.0"
+_REPIN_RELEASE = "v1.39.0-indexer-blockers"
 _REPINNED_MIGRATION_KEYS = (
     "v1.16.0_agent_edits",
     "v1.22.4_rename_porn_to_adult",
@@ -197,7 +197,10 @@ _REPINNED_MIGRATION_KEYS = (
     "v1.34.0_repair_topic_attribution",
     "v1.36.0_repair_deleted_post_standing",
     "v1.39.0_communities",
+    "v1.39.0_curator_defined_communities",
+    "v1.39.0_legacy_post_community",
     "v1.39.0_legacy_vote_standing",
+    "v1.39.0_rename_topic_pref_type",
     "v1.39.0_repair_resurrected_posts",
 )
 _REPIN_MARKER_KEY = "migration_checksum_repin"

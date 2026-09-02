@@ -161,37 +161,6 @@ def run(db, chain, logger):
 
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS community_founder_history (
-                community TEXT NOT NULL,
-                sequence NUMERIC(20,0) NOT NULL,
-                height BIGINT NOT NULL,
-                tx_hash TEXT,
-                old_founder TEXT,
-                new_founder TEXT,
-                authority TEXT,
-                PRIMARY KEY (community, sequence)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS curation_team_history (
-                community TEXT NOT NULL,
-                team_id NUMERIC(20,0) NOT NULL,
-                sequence NUMERIC(20,0) NOT NULL,
-                height BIGINT NOT NULL,
-                tx_hash TEXT,
-                event_type TEXT,
-                actor TEXT,
-                target TEXT,
-                accepted_order NUMERIC(20,0),
-                authority TEXT,
-                PRIMARY KEY (community, team_id, sequence)
-            )
-            """
-        )
-        cur.execute(
-            """
             CREATE TABLE IF NOT EXISTS curation_hidden_posts (
                 community TEXT NOT NULL,
                 team_id NUMERIC(20,0) NOT NULL,
@@ -227,23 +196,6 @@ def run(db, chain, logger):
             )
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS curation_action_history (
-                height BIGINT NOT NULL,
-                event_index INTEGER NOT NULL,
-                tx_hash TEXT,
-                community TEXT,
-                team_id NUMERIC(20,0),
-                actor TEXT,
-                action TEXT,
-                target TEXT,
-                active BOOLEAN,
-                PRIMARY KEY (height, event_index)
-            )
-            """
-        )
-
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS creator_epochs (

@@ -143,6 +143,7 @@ proto-deps:
 proto-gen:
 	@echo "Generating protobuf files..."
 	@ignite generate proto-go --yes
+	@go tool github.com/bufbuild/buf/cmd/buf generate --template proto/buf.gen.gogo.yaml
 
 .PHONY: proto-gen
 

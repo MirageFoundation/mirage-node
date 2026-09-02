@@ -597,7 +597,6 @@ export function MoreMenuChip({
             <GiftSubscriptionDialog
                 open={!!confirmGiftSub}
                 recipientLabel={confirmGiftSub?.username ? `@${confirmGiftSub.username}` : authorLabelShort}
-                level={confirmGiftSub?.level}
                 feeLabel={subFeeLabel}
                 feeUmirage={subFeeUmirage}
                 loading={!!confirmGiftSub?.loading}

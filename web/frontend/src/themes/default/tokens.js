@@ -1,7 +1,6 @@
 /**
  * Colors ported from `mirage-mobile-app/src/config/theme.ts`.
- * Mobile palette translated into the same key set the existing oldreddit
- * theme uses, so cloned components keep working without prop drift.
+ * Mobile palette translated into the shared web token contract.
  */
 const defaultDarkColors = {
     // Base surfaces
@@ -91,8 +90,7 @@ const defaultDarkColors = {
     warningHoverBg: 'rgba(245, 158, 11, 0.15)',
     warningText: '#f59e0b',
 
-    // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
-    // Used for primary CTAs and accent borders.
+    // Main Mirage gradient for primary CTAs and accent borders.
     gradientStart: '#667eea',
     gradientEnd: '#764ba2',
     gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -256,7 +254,7 @@ const defaultLightColors = {
     warningHoverBg: 'rgba(245, 158, 11, 0.15)',
     warningText: '#f59e0b',
 
-    // Main Mirage app gradient (ported from mirage-mobile-app quests/new-posts/feed-type)
+    // Main Mirage gradient.
     gradientStart: '#667eea',
     gradientEnd: '#764ba2',
     gradient: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -510,7 +508,7 @@ function buildLayout(colors) {
         tabSizeTablet: '0.6rem',
 
         // default is a mobile-app-inspired theme — pills + rounded panels are on-brand,
-        // so we opt out of the oldreddit-era `border-radius: 0 !important` reset in Style.js.
+        // so we opt out of the global square-corner reset in Style.js.
         flatMode: false,
         maxVideoWidth: 600,
         inboxFullWidth: true,

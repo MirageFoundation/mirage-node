@@ -55,6 +55,7 @@ const (
 	PfxReplyReserved        = "rr|"
 	PfxEngagement           = "ev|"
 	PfxEngagementCount      = "evc|"
+	PfxEngagementValid      = "evvalid|"
 	PfxCreatorEpoch         = "ce|"
 	PfxCreatorEpochOpen     = "ceopen|"
 	PfxCreatorEpochSettle   = "cesettle|"
@@ -380,6 +381,14 @@ func KeyEngagementEpochPrefix(epoch int64) []byte {
 
 func KeyEngagementCount(epoch int64, actor []byte) []byte {
 	return concat([]byte(PfxEngagementCount), i64(epoch), actor)
+}
+
+func KeyEngagementValid(epoch int64, actor []byte, kind byte, target []byte) []byte {
+	return concat([]byte(PfxEngagementValid), i64(epoch), actor, []byte{kind}, target)
+}
+
+func KeyEngagementValidEpochPrefix(epoch int64) []byte {
+	return concat([]byte(PfxEngagementValid), i64(epoch))
 }
 
 func KeyCreatorEpoch(epoch int64) []byte {

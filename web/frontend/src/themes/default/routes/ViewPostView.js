@@ -35,6 +35,7 @@ import ContentTagBadge, { ThreadLockMark } from "../components/ContentTagBadge";
 import { BlockChip } from "../components/PostMenu";
 import { PostLensPicker } from "../components/CurationLensPicker";
 import CommunityMembershipButton from "../components/CommunityMembershipButton";
+import { signReadParams, THREAD_READ_ACTION } from "../../../utils/signPlain";
 import {
     HiNoSymbol,
     HiOutlineLink,
@@ -1091,7 +1092,7 @@ const StyledContentArea = styled.div`
      * is still capped via InlineMedia's internal max (600px height for
      * root posts, 225px for comments). When the user drags the image
      * wider, InlineMedia sets maxWidth: 'none' inline, allowing the
-     * image to grow up to the viewport width — matching bluemoon. */
+     * image to grow up to the viewport width. */
     img, video {
         max-height: 600px;
     }
@@ -1119,7 +1120,7 @@ const MainContentWrapper = styled.div`
     min-height: 120vh;
     /* Allow drag-resized images to visually escape the 820px FeedCol
      * on desktop and extend toward the viewport edge (matching the
-     * bluemoon theme's behaviour). The image itself is capped at
+     * focused-thread behaviour). The image itself is capped at
      * window.innerWidth - 16 by InlineMedia so it never triggers a
      * page-level horizontal scrollbar. */
     overflow-x: visible;
@@ -1142,7 +1143,7 @@ const MainContentWrapper = styled.div`
  *
  * Also overrides the nested `MarkdownEditor` shared component so the
  * textarea + toolbar read against the default theme instead of the
- * bluemoon-era `panelAlt` card look. The overrides are scoped to this
+ * former `panelAlt` card look. The overrides are scoped to this
  * wrapper via descendant selectors so `MarkdownEditor` stays untouched
  * for any other route that uses it (CreatePost, edit flows, etc.).
  */
@@ -1935,11 +1936,13 @@ function ViewPostView({
             await new Promise(r => setTimeout(r, delays[i]));
             if (unblockAbortRef.current) return;
             try {
+                const proof = await signReadParams(THREAD_READ_ACTION, viewerAddress);
                 const data = await Api.get('get_comments', {
                     post_id: blockedPostIdLower,
                     address: viewerAddress,
                     lens: 'effective',
                     scope: 'current',
+                    ...proof,
                 });
                 if (
                     data && data.root && data.root.post_id
@@ -2418,7 +2421,7 @@ function ViewPostView({
                             </MenuItem>}
                             {viewerAddress !== 'guest' && <MenuItem disabled={isSubscribePending(post.user_id)} onClick={() => {
                                 setOpenMenuId(null);
-                                handleGiftSubscription(post.user_id, post.post_id, post.author_level);
+                                handleGiftSubscription(post.user_id, post.post_id);
                             }}>
                                 <HiOutlineGift />
                                 <span>{formatSubscribeStatus(post.user_id) || giftSubscriptionLabel}</span>
@@ -3500,7 +3503,6 @@ function ViewPostView({
                     <GiftSubscriptionDialog
                         open={!!confirmGiftSub}
                         recipientLabel={giftSubLabel}
-                        level={confirmGiftSub?.level}
                         feeLabel={giftSubFeeLabel}
                         feeUmirage={giftSubFeeUmirage}
                         loading={!!confirmGiftSub?.loading}

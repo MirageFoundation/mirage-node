@@ -103,7 +103,6 @@ export function useSubscription({
     const [subscriptionExpiry, setSubscriptionExpiry] = useState(0);
     const [autoRenew, setAutoRenew] = useState(false);
     const [balance, setBalance] = useState(0);
-    const [reserveFunds, setReserveFunds] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isUpgrading, setIsUpgrading] = useState(false);
     const [error, setError] = useState('');
@@ -190,9 +189,6 @@ export function useSubscription({
                 const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
                 if (typeof balanceVal !== 'undefined') {
                     setBalance(Number(balanceVal) || 0);
-                }
-                if (typeof data.reserve_funds !== 'undefined') {
-                    setReserveFunds(Number(data.reserve_funds) || 0);
                 }
             } catch (err) {
                 if (!cancelled) {
@@ -352,9 +348,6 @@ export function useSubscription({
                 }
                 if ((typeof expectedAutoRenew === 'undefined' && typeof fetchedAuto !== 'undefined') || fetchedAuto === expectedAutoRenew) {
                     setAutoRenew(Boolean(fetchedAuto));
-                }
-                if (data?.reserve_funds !== undefined) {
-                    setReserveFunds(Number(data.reserve_funds) || 0);
                 }
                 const matchesAuto = typeof expectedAutoRenew === 'undefined' || Boolean(data?.auto_renew) === Boolean(expectedAutoRenew);
                 const matchesLevel = typeof expectedLevel === 'undefined' || Number(data?.user_level ?? 0) === Number(expectedLevel);
@@ -576,7 +569,6 @@ export function useSubscription({
         subscriptionExpiry,
         autoRenew,
         balance,
-        reserveFunds,
         isLoading,
         isUpgrading,
         error,

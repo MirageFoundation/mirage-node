@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Api from '../utils/api';
 import Storage from '../utils/Storage';
 import { requireCommunitySlug } from '../utils/curation';
+import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
 
 /** community → { teamId, teamName } | null */
 const membershipCache = new Map();
@@ -52,7 +53,10 @@ export async function fetchViewerCuratorMembership(community, viewer, { fresh = 
     if (inflight.has(key)) return inflight.get(key);
 
     const pending = (async () => {
-        const params = fresh ? { viewer: owner, _cb: Date.now() } : { viewer: owner };
+        const proof = await signReadParams(CURATOR_READ_ACTION, owner);
+        const params = fresh
+            ? { viewer: owner, _cb: Date.now(), ...proof }
+            : { viewer: owner, ...proof };
         const data = await Api.get(`communities/${encodeURIComponent(slug)}/teams`, params);
         if (!data || !Array.isArray(data.items)) {
             throw new Error('Invalid curator teams response');
@@ -132,9 +136,10 @@ export function useViewerCuratorCommunities() {
         }
         setLoading(true);
         try {
+            const proof = await signReadParams(CURATOR_READ_ACTION, viewer);
             const data = await Api.get(
                 `curators/${encodeURIComponent(viewer)}/communities`,
-                { _cb: Date.now() },
+                { viewer, _cb: Date.now(), ...proof },
             );
             if (!data || !Array.isArray(data.communities)) {
                 throw new Error('Invalid curator communities response');

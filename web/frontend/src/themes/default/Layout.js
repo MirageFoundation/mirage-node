@@ -1,9 +1,7 @@
 import styled from "styled-components";
 
-/** Horizontal padding of `OldRedditShell` `Container` / top bar — list feeds negate this for full-bleed row borders; inner content uses the same inset to stay aligned with the logo. */
-export const OLDREDDIT_SHELL_INSET_X = '0.75rem';
-
-/** Classic theme only — styled layout primitives; not shared with other themes. */
+/** Horizontal shell padding shared by list feeds and inner content. */
+export const SHELL_INSET_X = '0.75rem';
 
 /**
  * RESPONSIVE BREAKPOINTS
@@ -114,16 +112,6 @@ export const CappedPageColumn = styled.div`
     margin-left: 0;
     margin-right: auto;
     box-sizing: border-box;
-`;
-
-/** Cancels `OldRedditShell` `Container` horizontal padding so tabbed panels and list shells match `ListFeedView` full-bleed width (borders, search strip rules). */
-export const OldRedditContentBleed = styled.div`
-    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
-    max-width: none;
-    box-sizing: border-box;
-    min-width: 0;
 `;
 
 export const ModernPostFeed = styled.div`
@@ -370,42 +358,5 @@ export const ClickableTab = styled.button`
 
     @media (max-width: 1000px) {
         padding: ${({ theme }) => theme.layout.clickableTabPaddingTablet};
-    }
-`;
-
-export const OldRedditTabsStrip = styled.div`
-    background: ${({ theme }) => theme.colors.panel};
-    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-    margin-top: ${({ theme }) => theme.layout.tabbedMarginTop};
-`;
-
-export const OldRedditTabsRow = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.4rem ${OLDREDDIT_SHELL_INSET_X};
-    width: 100%;
-    max-width: 1200px;
-    margin-left: 0;
-    margin-right: auto;
-    box-sizing: border-box;
-`;
-
-export const OldRedditTab = styled(ClickableTab)`
-    text-decoration: none;
-    background: transparent;
-    border: none;
-    color: ${({ $active, theme }) => ($active ? theme.colors.text : theme.colors.subtleText)};
-    font-weight: ${({ $active }) => ($active ? 700 : 600)};
-    padding: 0.25rem 0.55rem 0.1rem;
-
-    &:first-child {
-        padding-left: 2px;
-    }
-
-    &:hover:not([disabled]) {
-        background: transparent;
-        color: ${({ theme }) => theme.colors.text};
     }
 `;

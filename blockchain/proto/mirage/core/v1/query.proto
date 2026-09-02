@@ -87,6 +87,9 @@ service Query {
   rpc CreatorSchedule(QueryCreatorScheduleRequest) returns (QueryCreatorScheduleResponse) {
     option (google.api.http).get = "/mirage/core/v1/creator/schedule";
   }
+  rpc TerminalCreatorEpochs(QueryTerminalCreatorEpochsRequest) returns (QueryTerminalCreatorEpochsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/terminal_epochs";
+  }
 }
 
 // QueryParamsRequest is request type for the Query/Params RPC method.
@@ -327,3 +330,11 @@ message QueryCreatorScheduleResponse {
   int64 current_epoch = 4;
 }
 
+message QueryTerminalCreatorEpochsRequest {
+  int64 cutoff_deadline_unix = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryTerminalCreatorEpochsResponse {
+  repeated CreatorEpoch epochs = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}

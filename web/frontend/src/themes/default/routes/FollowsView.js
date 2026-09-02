@@ -27,17 +27,7 @@ function useDebugStateOverride() {
     return params.get("_state") || null;
 }
 
-/**
- * FollowsView — `default` Plan 06 sub-plan 03.
- *
- * Follows `docs/guides/web-theme-default/RULES.md`:
- *  - R1 rows sit on `theme.colors.bg`.
- *  - R2 every color routed through a token.
- *  - R3 rows are full-bleed divided by `1px solid theme.colors.border`.
- *  - R4 data parity with `themes/bluemoon/routes/FollowsView.js`; visual
- *    language matches the inbox row density from sub-plan 05.1.
- *  - R7 row title 0.78rem/600, meta 0.62rem/500 subtleText.
- */
+/** Followed communities and users in the default UI. */
 
 const FollowsWrap = styled.div`
     width: 100%;

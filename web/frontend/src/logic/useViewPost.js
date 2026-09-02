@@ -21,12 +21,19 @@ import { formatMirageCompact } from "../utils/formatters";
 import { peekBootstrapStashAfterBootstrap, readBootstrapStash } from "../utils/bootstrapStash";
 import { communityLabel } from "../utils/community";
 import { LENS, lensQuery, joinPreferenceForLens } from "../utils/curation";
-import { signPlainPayload } from "../utils/signPlain";
+import { signReadParams, THREAD_READ_ACTION } from "../utils/signPlain";
 export const pickCard = requireThemeColor;
 
 function commentsLensParams(lens, teamId) {
     if (lens === LENS.TEAM) return lensQuery(lens, teamId);
     return lensQuery(lens || LENS.EFFECTIVE, null);
+}
+
+async function getComments(params, viewer) {
+    const address = String(viewer || '').trim().toLowerCase();
+    if (!address || address === 'guest') return Api.get('get_comments', params);
+    const proof = await signReadParams(THREAD_READ_ACTION, address);
+    return Api.get('get_comments', { ...params, ...proof });
 }
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
@@ -1045,7 +1052,7 @@ export function useViewPost({
         } catch (_) { }
         setDonateAmount("10000"); // Reset to default
     };
-    const handleGiftSubscription = (userAddress, postId, authorLevel) => {
+    const handleGiftSubscription = (userAddress, postId) => {
         if (!userAddress) return;
         if (isSubscribePending(userAddress)) return;
         if (!viewerAddress || viewerAddress === 'guest') {
@@ -1264,9 +1271,7 @@ export function useViewPost({
     const giftSubscriptionLabel = 'Gift Subscription';
     const {
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage
     } = useMemo(() => {
         void configUpdateTrigger;
         try {
@@ -1274,19 +1279,14 @@ export function useViewPost({
             const cfg = raw ? JSON.parse(raw) : null;
             const tiers = cfg?.tiers || [];
             const sf = Number(tiers[1]?.period_fee || 0);
-            const af = Number(tiers[2]?.period_fee || 0);
             return {
                 subFeeLabel: sf > 0 ? formatMirageCompact(sf) + ' MIRAGE' : null,
-                agentFeeLabel: af > 0 ? formatMirageCompact(af) + ' MIRAGE' : null,
-                subFeeUmirage: sf > 0 ? sf : null,
-                agentFeeUmirage: af > 0 ? af : null
+                subFeeUmirage: sf > 0 ? sf : null
             };
         } catch (_) { }
         return {
             subFeeLabel: null,
-            agentFeeLabel: null,
-            subFeeUmirage: null,
-            agentFeeUmirage: null
+            subFeeUmirage: null
         };
     }, [configUpdateTrigger]);
     const getAwardCost = name => {
@@ -2000,11 +2000,11 @@ export function useViewPost({
                         try {
                             const result = await tx.pollTxStatus(txHash);
                             if (result && result.success && result.indexed) {
-                                const data = await Api.get('get_comments', {
+                                const data = await getComments({
                                     post_id: postId,
                                     address: viewerAddress,
                                     ...commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId),
-                                });
+                                }, viewerAddress);
                                 if (data && data.root && Array.isArray(data.ancestors) && ('ancestors_omitted' in data)) {
                                     try { Api.invalidate('get_comments'); } catch (_) { }
                                     setRoot(data.root);
@@ -2274,11 +2274,11 @@ export function useViewPost({
             try { Storage.remove('bootstrap_view'); } catch (_) { }
             const lensParams = commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId);
             console.debug('[ViewPostView] get_comments', { postId: post_id, ...lensParams });
-            Api.get('get_comments', {
+            getComments({
                 post_id,
                 address: viewerAddress,
                 ...lensParams,
-            }).then(data => {
+            }, viewerAddress).then(data => {
                 applyCommentsData(data);
             }).catch(error => {
                 if (cancelled || commentsRequestRef.current !== requestId) return;
@@ -2385,11 +2385,11 @@ export function useViewPost({
                         if (cancelled) return;
                     }
                     try {
-                        const data = await Api.get('get_comments', {
+                        const data = await getComments({
                             post_id: normalizedPostId,
                             address: viewerAddress,
                             ...commentsLensParams(threadLensRef.current.lens, threadLensRef.current.teamId),
-                        });
+                        }, viewerAddress);
                         if (data && data.root && data.root.post_id) {
                             applyIndexedPost(
                                 data.root,
@@ -2791,9 +2791,7 @@ export function useViewPost({
         AWARD_TYPES,
         giftSubscriptionLabel,
         subFeeLabel,
-        agentFeeLabel,
         subFeeUmirage,
-        agentFeeUmirage,
         getAwardCost,
         handleGiveAward,
         confirmAwardAction,

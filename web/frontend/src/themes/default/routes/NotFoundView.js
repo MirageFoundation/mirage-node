@@ -10,20 +10,7 @@ import {
 } from "../Layout";
 import { useNotFound } from "../../../logic/useNotFound";
 
-/**
- * NotFoundView — `default` Plan 06 sub-plan 07.
- *
- * Rules (`docs/guides/web-theme-default/RULES.md`):
- *  - R1 centered panel sits on `theme.colors.bg` — no full-column fill.
- *  - R2 every color routed through a token; no raw shadows.
- *  - R3 no dividers — 404 is a single centered block.
- *  - R4 data parity with `themes/bluemoon/routes/NotFoundView.js` (code,
- *    title, path, back/home actions). Visual tone follows mobile app's
- *    empty-state pattern (icon circle + title + subtle message + CTA).
- *  - R7 big "404" is the hero 2rem/700 (hero surface exception); title
- *    1.1rem/700 page heading; message 0.75rem/500 subtle; path 0.62rem/500
- *    monospace subtle.
- */
+/** Missing-route screen in the default UI. */
 
 const NotFoundWrap = styled.div`
     width: 100%;

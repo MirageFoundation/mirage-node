@@ -28,11 +28,9 @@ func (am AppModule) CurationTeam(ctx context.Context, req *types.QueryCurationTe
 func (am AppModule) CurationTeams(ctx context.Context, req *types.QueryCurationTeamsRequest) (*types.QueryCurationTeamsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	slug := strings.TrimSpace(req.GetCommunity())
-	var key []byte
-	var limit uint64
-	if req.GetPagination() != nil {
-		key = req.GetPagination().GetKey()
-		limit = req.GetPagination().GetLimit()
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 	out, nextKey, err := am.k.GetCurationTeamsPaginated(sdkCtx, types.KeyCurationTeamPrefix(slug), key, limit, req.GetIncludeDeleted())
 	if err != nil {
@@ -43,11 +41,9 @@ func (am AppModule) CurationTeams(ctx context.Context, req *types.QueryCurationT
 
 func (am AppModule) AllCurationTeams(ctx context.Context, req *types.QueryAllCurationTeamsRequest) (*types.QueryAllCurationTeamsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	var key []byte
-	var limit uint64
-	if req.GetPagination() != nil {
-		key = req.GetPagination().GetKey()
-		limit = req.GetPagination().GetLimit()
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 	out, nextKey, err := am.k.GetCurationTeamsPaginated(sdkCtx, []byte(types.PfxCurationTeam), key, limit, req.GetIncludeDeleted())
 	if err != nil {
@@ -63,13 +59,27 @@ func teamPageResponse(nextKey []byte) *query.PageResponse {
 	return &query.PageResponse{NextKey: nextKey}
 }
 
+func v139Page(page *query.PageRequest) ([]byte, uint64, error) {
+	if page == nil {
+		return nil, 0, nil
+	}
+	if page.GetOffset() != 0 {
+		return nil, 0, status.Error(codes.InvalidArgument, "pagination offset is not supported; use pagination.key")
+	}
+	if page.GetReverse() {
+		return nil, 0, status.Error(codes.InvalidArgument, "reverse pagination is not supported")
+	}
+	if page.GetCountTotal() {
+		return nil, 0, status.Error(codes.InvalidArgument, "count_total pagination is not supported")
+	}
+	return page.GetKey(), page.GetLimit(), nil
+}
+
 func (am AppModule) CurationTeamMembers(ctx context.Context, req *types.QueryCurationTeamMembersRequest) (*types.QueryCurationTeamMembersResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	var key []byte
-	var limit uint64
-	if req.GetPagination() != nil {
-		key = req.GetPagination().GetKey()
-		limit = req.GetPagination().GetLimit()
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 	out, nextKey, err := am.k.GetCurationTeamMembersPaginated(
 		sdkCtx,
@@ -89,28 +99,15 @@ func (am AppModule) PendingCuratorInvitations(ctx context.Context, req *types.Qu
 	if _, err := types.CanonicalAccBytes(owner); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	var out []*types.PendingCuratorInvitation
-	err := am.k.IterPrefix(sdkCtx, types.KeyCurationInviteRevPrefix(owner), 100, func(key, _ []byte) error {
-		slug, teamID, err := parseInviteRevKey(owner, key)
-		if err != nil {
-			return err
-		}
-		inviterBz, err := am.k.GetRaw(sdkCtx, types.KeyCurationInvite(slug, teamID, owner))
-		if err != nil {
-			return err
-		}
-		out = append(out, &types.PendingCuratorInvitation{
-			Community: slug,
-			TeamId:    teamID,
-			Invitee:   owner,
-			Inviter:   string(inviterBz),
-		})
-		return nil
-	})
+	key, limit, err := v139Page(req.GetPagination())
 	if err != nil {
 		return nil, err
 	}
-	return &types.QueryPendingCuratorInvitationsResponse{Invitations: out}, nil
+	out, nextKey, err := am.k.GetPendingCuratorInvitationsPaginated(sdkCtx, owner, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryPendingCuratorInvitationsResponse{Invitations: out, Pagination: teamPageResponse(nextKey)}, nil
 }
 
 func (am AppModule) CurationMemberships(ctx context.Context, req *types.QueryCurationMembershipsRequest) (*types.QueryCurationMembershipsResponse, error) {
@@ -119,26 +116,15 @@ func (am AppModule) CurationMemberships(ctx context.Context, req *types.QueryCur
 	if _, err := types.CanonicalAccBytes(owner); err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	var out []*types.CurationMembership
-	err := am.k.IterPrefix(sdkCtx, types.KeyCurationTeamUserPrefix(owner), 100, func(key, value []byte) error {
-		pfx := types.KeyCurationTeamUserPrefix(owner)
-		slug, _, err := parseLp(key[len(pfx):])
-		if err != nil {
-			return err
-		}
-		if len(value) != 8 {
-			return fmtError("malformed ctu value")
-		}
-		out = append(out, &types.CurationMembership{
-			Community: slug,
-			TeamId:    binary.BigEndian.Uint64(value),
-		})
-		return nil
-	})
+	key, limit, err := v139Page(req.GetPagination())
 	if err != nil {
 		return nil, err
 	}
-	return &types.QueryCurationMembershipsResponse{Memberships: out}, nil
+	out, nextKey, err := am.k.GetCurationMembershipsPaginated(sdkCtx, owner, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryCurationMembershipsResponse{Memberships: out, Pagination: teamPageResponse(nextKey)}, nil
 }
 
 func (am AppModule) CommunityPreference(ctx context.Context, req *types.QueryCommunityPreferenceRequest) (*types.QueryCommunityPreferenceResponse, error) {
@@ -189,25 +175,19 @@ func (am AppModule) CreatorEpoch(ctx context.Context, req *types.QueryCreatorEpo
 func (am AppModule) CreatorAccruals(ctx context.Context, req *types.QueryCreatorAccrualsRequest) (*types.QueryCreatorAccrualsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	creator := strings.TrimSpace(req.GetCreator())
-	var out []*types.CreatorAccrual
-	err := am.k.IterPrefix(sdkCtx, types.KeyCreatorEpochIdxPrefix(types.MustAcc(creator)), 100, func(key, _ []byte) error {
-		pfx := types.KeyCreatorEpochIdxPrefix(types.MustAcc(creator))
-		if len(key) < len(pfx)+8 {
-			return fmtError("malformed eca idx")
-		}
-		epoch := int64(binary.BigEndian.Uint64(key[len(pfx):]))
-		var acc types.CreatorAccrual
-		found, err := am.k.GetProto(sdkCtx, types.KeyEpochCreatorAccrual(epoch, types.MustAcc(creator)), &acc)
-		if err != nil || !found {
-			return err
-		}
-		out = append(out, &acc)
-		return nil
-	})
+	creatorBytes, err := types.CanonicalAccBytes(creator)
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	key, limit, err := v139Page(req.GetPagination())
 	if err != nil {
 		return nil, err
 	}
-	return &types.QueryCreatorAccrualsResponse{Accruals: out}, nil
+	out, nextKey, err := am.k.GetCreatorAccrualsPaginated(sdkCtx, creatorBytes, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryCreatorAccrualsResponse{Accruals: out, Pagination: teamPageResponse(nextKey)}, nil
 }
 
 func (am AppModule) CreatorEpochAccruals(
@@ -215,11 +195,9 @@ func (am AppModule) CreatorEpochAccruals(
 	req *types.QueryCreatorEpochAccrualsRequest,
 ) (*types.QueryCreatorEpochAccrualsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	var key []byte
-	var limit uint64
-	if req.GetPagination() != nil {
-		key = req.GetPagination().GetKey()
-		limit = req.GetPagination().GetLimit()
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 	out, nextKey, err := am.k.GetCreatorEpochAccrualsPaginated(sdkCtx, req.GetEpochId(), key, limit)
 	if err != nil {
@@ -233,11 +211,9 @@ func (am AppModule) CreatorEpochTargets(
 	req *types.QueryCreatorEpochTargetsRequest,
 ) (*types.QueryCreatorEpochTargetsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	var key []byte
-	var limit uint64
-	if req.GetPagination() != nil {
-		key = req.GetPagination().GetKey()
-		limit = req.GetPagination().GetLimit()
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
 	}
 	out, nextKey, err := am.k.GetCreatorEpochTargetsPaginated(sdkCtx, req.GetEpochId(), key, limit)
 	if err != nil {
@@ -250,50 +226,34 @@ func (am AppModule) TargetEarnings(ctx context.Context, req *types.QueryTargetEa
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	h, err := types.HashBytes(strings.ToLower(strings.TrimSpace(req.GetTarget())))
 	if err != nil {
-		return nil, err
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	var out []*types.TargetEarning
-	err = am.k.IterPrefix(sdkCtx, concatQuery([]byte(types.PfxTargetEpoch), h), 100, func(key, _ []byte) error {
-		if len(key) < len(types.PfxTargetEpoch)+32+8 {
-			return fmtError("malformed ectarget key")
-		}
-		epoch := int64(binary.BigEndian.Uint64(key[len(key)-8:]))
-		var te types.TargetEarning
-		found, err := am.k.GetProto(sdkCtx, types.KeyEpochTarget(epoch, h), &te)
-		if err != nil || !found {
-			return err
-		}
-		out = append(out, &te)
-		return nil
-	})
+	key, limit, err := v139Page(req.GetPagination())
 	if err != nil {
 		return nil, err
 	}
-	return &types.QueryTargetEarningsResponse{Earnings: out}, nil
+	out, nextKey, err := am.k.GetTargetEarningsPaginated(sdkCtx, h, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryTargetEarningsResponse{Earnings: out, Pagination: teamPageResponse(nextKey)}, nil
 }
 
 func (am AppModule) SubscriptionTranches(ctx context.Context, req *types.QuerySubscriptionTranchesRequest) (*types.QuerySubscriptionTranchesResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	addr := strings.TrimSpace(req.GetAddress())
-	var out []*types.SubscriptionTranche
-	err := am.k.IterPrefix(sdkCtx, types.KeyTrancheRecipientPrefix(addr), 100, func(key, _ []byte) error {
-		pfx := types.KeyTrancheRecipientPrefix(addr)
-		if len(key) < len(pfx)+8 {
-			return fmtError("malformed tranche recipient idx")
-		}
-		id := binary.BigEndian.Uint64(key[len(pfx):])
-		var t types.SubscriptionTranche
-		found, err := am.k.GetProto(sdkCtx, types.KeyTranche(id), &t)
-		if err != nil || !found {
-			return err
-		}
-		out = append(out, &t)
-		return nil
-	})
+	if _, err := types.CanonicalAccBytes(addr); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	key, limit, err := v139Page(req.GetPagination())
 	if err != nil {
 		return nil, err
 	}
-	return &types.QuerySubscriptionTranchesResponse{Tranches: out}, nil
+	out, nextKey, err := am.k.GetSubscriptionTranchesPaginated(sdkCtx, addr, key, limit)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QuerySubscriptionTranchesResponse{Tranches: out, Pagination: teamPageResponse(nextKey)}, nil
 }
 
 func parseInviteRevKey(owner string, key []byte) (string, uint64, error) {
@@ -341,15 +301,19 @@ func fmtError(msg string) error {
 
 func (am AppModule) SubscriptionRenewal(ctx context.Context, req *types.QuerySubscriptionRenewalRequest) (*types.QuerySubscriptionRenewalResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	addr := strings.TrimSpace(req.GetAddress())
+	if _, err := types.CanonicalAccBytes(addr); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	var st types.SubscriptionRenewalState
-	found, err := am.k.GetProto(sdkCtx, types.KeySubRenewalState(strings.TrimSpace(req.GetAddress())), &st)
+	found, err := am.k.GetProto(sdkCtx, types.KeySubRenewalState(addr), &st)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
 		return &types.QuerySubscriptionRenewalResponse{}, nil
 	}
-	cnt, _, err := am.k.GetU32(sdkCtx, types.KeyCurationTeamUserCount(strings.TrimSpace(req.GetAddress())))
+	cnt, _, err := am.k.GetU32(sdkCtx, types.KeyCurationTeamUserCount(addr))
 	if err != nil {
 		return nil, err
 	}
@@ -360,6 +324,9 @@ func (am AppModule) SubscriberQuota(ctx context.Context, req *types.QuerySubscri
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 	addr := strings.TrimSpace(req.GetAddress())
+	if _, err := types.CanonicalAccBytes(addr); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	core, found, err := am.k.LoadProfile(sdkCtx, addr)
 	if err != nil {
 		return nil, err
@@ -424,5 +391,31 @@ func (am AppModule) CreatorSchedule(ctx context.Context, req *types.QueryCreator
 		OriginUnix:   sched.OriginUnix,
 		EpochSeconds: sched.EpochSeconds,
 		CurrentEpoch: clock,
+	}, nil
+}
+
+func (am AppModule) TerminalCreatorEpochs(
+	ctx context.Context,
+	req *types.QueryTerminalCreatorEpochsRequest,
+) (*types.QueryTerminalCreatorEpochsResponse, error) {
+	if req.GetCutoffDeadlineUnix() < 0 {
+		return nil, status.Error(codes.InvalidArgument, "cutoff_deadline_unix must be non-negative")
+	}
+	key, limit, err := v139Page(req.GetPagination())
+	if err != nil {
+		return nil, err
+	}
+	epochs, nextKey, err := am.k.GetTerminalCreatorEpochsPaginated(
+		sdk.UnwrapSDKContext(ctx),
+		req.GetCutoffDeadlineUnix(),
+		key,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &types.QueryTerminalCreatorEpochsResponse{
+		Epochs:     epochs,
+		Pagination: teamPageResponse(nextKey),
 	}, nil
 }

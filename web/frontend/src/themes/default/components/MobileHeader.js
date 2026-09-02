@@ -7,7 +7,7 @@ import Storage from '../../../utils/Storage';
  * Mobile-only header for the default theme.
  *
  * Rendered by each theme route inside its main container (existing pattern
- * inherited from `oldreddit`). Hidden above 600px via CSS so desktop users
+ * used by the web shell). Hidden above 600px via CSS so desktop users
  * see only the `TopBar` from the shell.
  *
  * Inspired by `mirage-mobile-app/src/components/molecules/feed-header.tsx`:

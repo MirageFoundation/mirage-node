@@ -75,7 +75,6 @@ const LOCAL_ERROR_CODE_BY_MESSAGE = {
     "Recipient must be a mirage1 address": "recipient_must_be_mirage1",
     "Minimum amount is 0.001 MIRAGE": "amount_too_small",
     "Missing target or award type": "award_missing_target_or_type",
-    "Invalid level (must be 1 or 10)": "invalid_level",
     "amount must be positive": "amount_must_be_positive",
     "missing recovery phrase": "missing_recovery_phrase",
     "invalid signer address": "invalid_signer_address",
@@ -529,10 +528,8 @@ class TransactionHandler {
         if (!cfg || typeof cfg !== 'object') throw new Error('chainConfig unavailable');
         const tiers = cfg.subscription_tiers || cfg.tiers;
         if (!Array.isArray(tiers)) throw new Error('subscription tiers unavailable');
-        const targetLevel = Number(level);
-        const tierIdx = targetLevel === 1 ? 1 : targetLevel === 10 ? 2 : -1;
-        if (tierIdx < 0 || tierIdx >= tiers.length) throw new Error('Invalid level');
-        const fee = Math.trunc(Number(tiers[tierIdx]?.period_fee || 0));
+        if (Number(level) !== 1 || tiers.length <= 1) throw new Error('Invalid level');
+        const fee = Math.trunc(Number(tiers[1]?.period_fee || 0));
         if (fee <= 0) throw new Error('subscription fee unavailable');
         return fee;
     }
@@ -1252,7 +1249,7 @@ class TransactionHandler {
     async claimCreatorRewards(epochIds) {
         try {
             const ids = [...new Set((epochIds || []).map(Number))].sort((a, b) => a - b);
-            if (!ids.length || ids.length > 30 || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+            if (!ids.length || ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
                 throw new Error('invalid epoch ids');
             }
             const owner = String(Storage.load('publicKey', '') || '').toLowerCase();
@@ -1801,7 +1798,7 @@ class TransactionHandler {
 
     /**
      * Subscribe (or gift a subscription) to a tier level.
-     * @param {number} level - Target paid subscription level (1=Subscriber, 10=Agent)
+     * @param {number} level - Target paid subscription level (Subscriber=1)
      * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier
      * @param {string} [target] - Optional target address to gift the subscription to
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
@@ -2235,7 +2232,6 @@ class TransactionHandler {
         this.totalPowSeconds = 0;
 
         let hadFailure = false;
-        let hadQuestAction = false; // Track if any quest-relevant actions were processed
         while (this.transactions.length > 0) {
             const queuedPeek = this.transactions[0];
             if (!queuedPeek) break;
@@ -2265,11 +2261,6 @@ class TransactionHandler {
             const giftTarget = String(transaction.target || '').trim();
             const _isGiftSubscribe = transaction.action === 'subscribe' && giftTarget !== ''; // eslint-disable-line no-unused-vars
             this.processedTransactions += 1;
-            // Track quest-relevant actions
-            if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
-                hadQuestAction = true;
-            }
-
             const failAndDrain = (failResult) => {
                 this._releaseEntryReservation(queued);
                 if (_resolve) _resolve(failResult);
@@ -2772,10 +2763,6 @@ class TransactionHandler {
                 } else {
                     updateNotification(`Transaction submitted (took ${totalElapsed.toFixed(1)}s)`);
                 }
-            }
-            // Dispatch event for quest-relevant actions so quest progress can refresh
-            if (hadQuestAction) {
-                window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { batch: true } }));
             }
         } else {
             // Replace the pinned "Processing tx N/M" toast so it doesn't sit
@@ -4894,12 +4881,6 @@ class TransactionHandler {
                     this._startVoteDetailsPoll(txHash, target);
                 }
 
-                // Dispatch event for quest-relevant actions so quest progress can refresh
-                const action = transaction?.action;
-                if (action === 'create_vote' || action === 'create_post' || action === 'create_comment') {
-                    console.log('[TransactionHandler] Dispatching questActionCompleted for action:', action);
-                    window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { action, txHash } }));
-                }
             }
             resolve({ success: success, tx_hash: txHash, result: out, error: out?.error, error_code: out?.error_code });
             return;

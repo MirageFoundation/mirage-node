@@ -123,7 +123,7 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 			}
 		} else {
 			p.core.EffectivePaid = false
-			if p.core.Level == types.LevelAgent {
+			if p.core.Level == types.LevelAgent || p.core.Level == types.LevelSubscriber {
 				p.core.Level = types.LevelFree
 			}
 		}
@@ -159,27 +159,31 @@ func (k Keeper) MigrateV139(ctx sdk.Context) error {
 		return err
 	}
 
-	params := types.DefaultParams()
 	stored := k.GetParams(ctx)
-	params.MintInterval = stored.MintInterval
-	params.MintQuantity = stored.MintQuantity
-	params.MintDynamicCreditCap = stored.MintDynamicCreditCap
-	params.MintFloorSplit = stored.MintFloorSplit
-	params.MintDynamicSplit = stored.MintDynamicSplit
-	params.MinDifficulty = stored.MinDifficulty
-	params.PowDifficultyStep = stored.PowDifficultyStep
-	params.PowMessageWindow = stored.PowMessageWindow
-	params.PowMessageLimit = stored.PowMessageLimit
-	params.PowCalmPeriodDefinition = stored.PowCalmPeriodDefinition
-	params.PowCalmSequenceThreshold = stored.PowCalmSequenceThreshold
-	params.BlockHashWindow = stored.BlockHashWindow
-	params.PowDifficultyAllowance = stored.PowDifficultyAllowance
-	params.MinUsernameSize = stored.MinUsernameSize
-	params.MaxUsernameSize = stored.MaxUsernameSize
-	params.SubscriptionPeriod = stored.SubscriptionPeriod
-	if params.SubscriptionPeriod == 0 {
-		params.SubscriptionPeriod = 43200
-	}
+	defaults := types.DefaultParams()
+	params := stored
+	params.Tiers = defaults.Tiers
+	params.SubscriptionReserveBps = 0
+	params.SubscriptionCreatorBps = defaults.SubscriptionCreatorBps
+	params.MaxCuratorsPerTeam = defaults.MaxCuratorsPerTeam
+	params.MaxPendingCuratorInvitesPerTeam = defaults.MaxPendingCuratorInvitesPerTeam
+	params.MaxPendingCuratorInvitesPerUser = defaults.MaxPendingCuratorInvitesPerUser
+	params.MaxCurationTeamNameLength = defaults.MaxCurationTeamNameLength
+	params.MaxCurationTeamDescriptionLength = defaults.MaxCurationTeamDescriptionLength
+	params.SubscriptionTransitionsPerBlock = defaults.SubscriptionTransitionsPerBlock
+	params.CurationPruneKeysPerBlock = defaults.CurationPruneKeysPerBlock
+	params.CreatorEpochClosuresPerBlock = defaults.CreatorEpochClosuresPerBlock
+	params.CreatorSettlementRecordsPerBlock = defaults.CreatorSettlementRecordsPerBlock
+	params.CreatorPruneKeysPerBlock = defaults.CreatorPruneKeysPerBlock
+	params.CreatorClaimWindowDays = defaults.CreatorClaimWindowDays
+	params.MaxCreatorClaimEpochs = defaults.MaxCreatorClaimEpochs
+	params.MaxCreatorEngagementsPerEpoch = defaults.MaxCreatorEngagementsPerEpoch
+	params.CreatorEpochExpiriesPerBlock = defaults.CreatorEpochExpiriesPerBlock
+	params.SubscriptionEarlyRenewalDays = defaults.SubscriptionEarlyRenewalDays
+	params.SubscriptionRenewalAttemptsPerBlock = defaults.SubscriptionRenewalAttemptsPerBlock
+	params.SubscriberDailyRelayLimit = defaults.SubscriberDailyRelayLimit
+	params.MaxSubscriptionPeriodsPerPurchase = defaults.MaxSubscriptionPeriodsPerPurchase
+	params.CreatorEpochSeconds = defaults.CreatorEpochSeconds
 	if err := params.ValidateV139(); err != nil {
 		return fmt.Errorf("v1.39.0: params: %w", err)
 	}
@@ -326,7 +330,11 @@ func (k Keeper) migrateBlockedTopics(ctx sdk.Context) error {
 		if err := k.setU32Key(ctx, types.KeyBlockCommunityCount(owner), n); err != nil {
 			return err
 		}
-		if err := k.setU64Key(ctx, types.KeyBlockCommunityNext(owner), maxSeq[owner]+1); err != nil {
+		next, err := types.CheckedAddUint64(maxSeq[owner], 1)
+		if err != nil {
+			return fmt.Errorf("v1.39.0: blocked-community sequence for %s: %w", owner, err)
+		}
+		if err := k.setU64Key(ctx, types.KeyBlockCommunityNext(owner), next); err != nil {
 			return err
 		}
 	}
@@ -452,6 +460,7 @@ func (k Keeper) EnsureCurationTeamFoundersSubscribed(ctx sdk.Context) error {
 	}
 	params := k.GetParams(ctx)
 	pinned := 0
+	var teams []types.CurationTeam
 	if err := k.iterPrefixKeys(ctx, []byte(types.PfxCurationTeam), 0, func(_, value []byte) error {
 		var team types.CurationTeam
 		if err := k.cdc.Unmarshal(value, &team); err != nil {
@@ -460,6 +469,12 @@ func (k Keeper) EnsureCurationTeamFoundersSubscribed(ctx sdk.Context) error {
 		if team.DeletedHeight != 0 || team.Community == "" || team.TeamId == 0 || team.Owner == "" {
 			return nil
 		}
+		teams = append(teams, team)
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, team := range teams {
 		core, found, err := k.loadProfile(ctx, team.Owner)
 		if err != nil {
 			return err
@@ -487,9 +502,6 @@ func (k Keeper) EnsureCurationTeamFoundersSubscribed(ctx sdk.Context) error {
 			return fmt.Errorf("v1.39.0: pin founder %s to %s/%d: %w", team.Owner, team.Community, team.TeamId, err)
 		}
 		pinned++
-		return nil
-	}); err != nil {
-		return err
 	}
 	if err := k.storeSet(ctx, []byte(types.UpgradeV139FounderSubsKey), []byte{1}); err != nil {
 		return err

@@ -247,15 +247,11 @@ function MobileBottomNav({ state }) {
     const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/blocks']);
 
     const currentCommunity = React.useMemo(() => {
-        try {
-            const m = pathname.match(/^\/t\/([^/]+)/);
-            const t = m && m[1] ? decodeURIComponent(m[1]) : '';
-            return t || '';
-        } catch (_) { return ''; }
+        return communityFromPathname(pathname);
     }, [pathname]);
 
     // Position the nav with JS against the visual viewport so the iOS keyboard
-    // / URL bar don't leave a gap (matches oldreddit/onyx behavior).
+    // or URL bar does not leave a gap.
     useEffect(() => {
         if (!isMobile) return;
         const nav = navRef.current;
@@ -392,9 +388,7 @@ function MobileBottomNav({ state }) {
     // Always route to /create_post so CreatePostView can render the same
     // LoggedOutPromptCard logged-out users see on large screens — avoids
     // dumping them straight onto the signup form.
-    const createLink = hasPublicKey && currentCommunity
-        ? `/create_post?community=${encodeURIComponent(currentCommunity)}`
-        : '/create_post';
+    const createLink = createPostPathForContext(hasPublicKey, currentCommunity);
 
     return ReactDOM.createPortal(
         <>
@@ -508,6 +502,21 @@ function MobileBottomNav({ state }) {
         </>,
         document.body
     );
+}
+
+export function communityFromPathname(pathname) {
+    try {
+        const match = String(pathname || '').match(/^\/c\/([^/]+)/);
+        return match?.[1] ? decodeURIComponent(match[1]) : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+export function createPostPathForContext(hasPublicKey, community) {
+    return hasPublicKey && community
+        ? `/create_post?community=${encodeURIComponent(community)}`
+        : '/create_post';
 }
 
 export default MobileBottomNav;

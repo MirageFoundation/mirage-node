@@ -294,8 +294,16 @@ def _guard_push_request(owner: str, action: str, timestamp_ms: int, nonce: int):
                 if not row:
                     return False, (jsonify({"error": "replayed envelope_nonce"}), 400)
         return True, None
-    except Exception:
-        return False, (jsonify({"error": "indexer DB unavailable"}), 503)
+    except Exception as exc:
+        log_event(
+            next_request_id(),
+            "database.required_failed",
+            route=request.path if has_request_context() else "",
+            database_owner="backend",
+            operation="push_nonce_guard",
+            error=str(exc),
+        )
+        return False, api_error_code("backend_unavailable", 503)
 
 
 def _validate_envelope_timestamp(timestamp_ms: int):
@@ -550,11 +558,19 @@ def _profile_paid_and_level(addr: str) -> tuple[bool, int]:
                 (addr_lc,),
             )
             row = cur.fetchone()
-            if not row:
-                return False, 0
-            return bool(row[0]), int(row[1] or 0)
-    except Exception:
+    except Exception as exc:
+        log_event(
+            next_request_id(),
+            "database.required_failed",
+            route=request.path if has_request_context() else "",
+            database_owner="indexer",
+            operation="profile_entitlement",
+            error=str(exc),
+        )
+        raise IndexerUnavailable("profile entitlement lookup failed") from exc
+    if not row:
         return False, 0
+    return bool(row[0]), int(row[1] or 0)
 
 
 def is_subscriber(addr: str) -> bool:
@@ -809,17 +825,11 @@ def _require_signed_request(data: dict, action: str, expected_address: str):
 
 def get_user_level(addr: str) -> int:
     """Return subscription level for user from indexer DB."""
-    try:
-        a = (addr or "").strip().lower()
-        if not a:
-            return 0
-        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (a,))
-            row = cur.fetchone()
-            return int(row[0]) if row and row[0] is not None else 0
-    except Exception:
+    a = (addr or "").strip().lower()
+    if not a:
         return 0
+    _paid, level = _profile_paid_and_level(a)
+    return level
 
 
 @core_bp.route("/api/core/set_username", methods=["POST"])
@@ -4224,8 +4234,9 @@ def core_claim_creator_rewards():
         if not isinstance(raw_ids, list) or not raw_ids:
             return jsonify({"error": "epoch_ids required"}), 400
         epoch_ids = [int(x) for x in raw_ids]
-        if len(epoch_ids) > 30:
-            return jsonify({"error": "at most 30 epoch_ids"}), 400
+        max_claim_epochs = int(expect_params()["max_creator_claim_epochs"])
+        if len(epoch_ids) > max_claim_epochs:
+            return jsonify({"error": f"at most {max_claim_epochs} epoch_ids"}), 400
         if epoch_ids != sorted(set(epoch_ids)) or epoch_ids != sorted(epoch_ids):
             return jsonify({"error": "epoch_ids must be strictly increasing"}), 400
         prev = 0

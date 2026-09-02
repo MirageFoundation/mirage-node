@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Local release rehearsal: reset from the latest mirage.vote backup, deploy the
-# current tree, confirm the suite PoW/relay limits, then launch test_blockchain / test_backend
-# / verify_upgrade as detached docker exec jobs. When the release registers a
+# current tree, confirm the suite PoW/relay limits, then launch test_blockchain,
+# test_backend, and verify/postflight as detached docker exec jobs. Postflight
+# waits for both suites, then runs extended coverage and the creator payout probe.
+# When the release registers a
 # chain upgrade handler it also passes the software-upgrade proposal and waits
 # for the halt and the plan to apply.
 #
@@ -24,6 +26,7 @@
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.state      running|passed|failed
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.exit       set when done
 #   ~/.mirage/upgrade_tests/{blockchain,backend,verify}.out        full captured output
+#   ~/.mirage/upgrade_tests/postflight.*.state                     postflight phase results
 #   ~/.mirage/upgrade_tests/all.json                               written when all three finish
 #
 # Usage:
@@ -39,8 +42,10 @@ STATUS_CTN="/root/.mirage/upgrade_tests"
 PROPOSAL_UPGRADE="${ROOT}/scripts/proposals/proposal_upgrade.json"
 PROPOSAL_POW="${ROOT}/scripts/proposals/proposal_set_pow_message_limit_9999999.json"
 PROPOSAL_RELAY_LIMIT="${ROOT}/scripts/proposals/proposal_set_subscriber_daily_relay_limit_10000.json"
+PROPOSAL_CREATOR_TEST="${ROOT}/scripts/proposals/proposal_test_creator_rewards.json"
 UPGRADES_GO="${ROOT}/blockchain/app/upgrades.go"
 JOBS=(blockchain backend verify)
+BACKUP_TARBALL=""
 
 # Set from --no-chain-upgrade; cross-checked against upgrades.go before use.
 NO_CHAIN_UPGRADE=0
@@ -51,6 +56,8 @@ RPC_BUDGET_SEC="${RPC_BUDGET_SEC:-240}"
 APPLIED_BUDGET_SEC="${APPLIED_BUDGET_SEC:-180}"
 POW_BUDGET_SEC="${POW_BUDGET_SEC:-90}"
 WAIT_BUDGET_SEC="${WAIT_BUDGET_SEC:-14400}"
+CORE_JOBS_BUDGET_SEC="${CORE_JOBS_BUDGET_SEC:-14400}"
+CREATOR_PARAM_BUDGET_SEC="${CREATOR_PARAM_BUDGET_SEC:-180}"
 
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
 die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
@@ -58,8 +65,10 @@ die() { printf '[%s] ERROR: %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; exit 1; }
 usage() {
   cat <<'EOF'
 Local release rehearsal: reset from the latest mirage.vote backup, deploy the
-current tree, confirm the suite PoW/relay limits, then launch test_blockchain / test_backend /
-verify_upgrade as detached docker exec jobs. A release that registers a chain
+current tree, confirm the suite PoW/relay limits, then launch test_blockchain,
+test_backend, and verify/postflight as detached docker exec jobs. Postflight
+runs extended coverage and the creator payout probe only after both suites pass.
+A release that registers a chain
 upgrade handler additionally passes the software-upgrade proposal and waits for
 the halt and the plan to apply.
 
@@ -140,6 +149,102 @@ activate_conda() {
   fi
   eval "$(conda shell.bash hook)"
   conda activate mirage-node
+}
+
+assert_backup_image_version() {
+  local metadata="${STATUS_HOST}/backup-image.json"
+  local version_out="${STATUS_HOST}/backup-image-version.out"
+  python3 - "$ROOT" "$metadata" <<'PY'
+import json
+import sys
+import tarfile
+from pathlib import Path, PurePosixPath
+
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root / "scripts"))
+import backup_restore
+
+tarball = backup_restore.find_latest_backup("mirage.vote").resolve()
+with tarfile.open(tarball, "r:gz") as archive:
+    members = [
+        member
+        for member in archive.getmembers()
+        if member.isfile() and PurePosixPath(member.name).parts[-2:] == (".mirage", "docker_image")
+    ]
+    if len(members) != 1:
+        raise SystemExit(f"{tarball}: expected exactly one .mirage/docker_image, found {len(members)}")
+    stream = archive.extractfile(members[0])
+    if stream is None:
+        raise SystemExit(f"{tarball}: cannot read {members[0].name}")
+    image = stream.read().decode("utf-8").strip()
+if not image:
+    raise SystemExit(f"{tarball}: docker_image metadata is empty")
+Path(sys.argv[2]).write_text(
+    json.dumps({"tarball": str(tarball), "image": image}, indent=2) + "\n",
+    encoding="utf-8",
+)
+print(f"backup={tarball}")
+print(f"image={image}")
+PY
+  BACKUP_TARBALL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tarball"])' "$metadata")"
+  local image
+  image="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$metadata")"
+  log "asserting backup binary reports exactly v1.38.11"
+  set +e
+  docker run --rm --network none --entrypoint /bin/bash "$image" -lc '
+set -euo pipefail
+if [[ -x /opt/mirage/blockchain/miraged ]]; then
+  binary=/opt/mirage/blockchain/miraged
+elif [[ -x /opt/mirage/blockchain/bin/miraged ]]; then
+  binary=/opt/mirage/blockchain/bin/miraged
+else
+  echo "ERROR: miraged binary not found in backup image" >&2
+  exit 1
+fi
+exec "$binary" version
+' 2>&1 | tee "$version_out"
+  local docker_rc=${PIPESTATUS[0]}
+  set -e
+  (( docker_rc == 0 )) || die "could not run the miraged binary from backup image ${image}"
+  local reported
+  reported="$(tr -d '[:space:]' < "$version_out")"
+  [[ "$reported" == "v1.38.11" ]] || die \
+    "latest mirage.vote backup image reports ${reported:-<empty>}; expected exactly v1.38.11"
+  log "backup image version=${reported}"
+}
+
+verify_proto_generation_parity() {
+  local before after
+  before="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
+  log "regenerating protobuf output and checking committed parity"
+  make -C "${ROOT}/blockchain" proto-gen
+  after="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)"
+  if [[ "$after" != "$before" ]]; then
+    git -C "$ROOT" status --short
+    die "protobuf generation changed the working tree; commit regenerated output before rehearsal"
+  fi
+  log "protobuf generation matches committed output"
+}
+
+capture_pre_upgrade_params() {
+  python3 - "${STATUS_HOST}/pre_upgrade_params.json" <<'PY'
+import json
+import sys
+import urllib.request
+from pathlib import Path
+
+url = "http://127.0.0.1:1317/mirage/core/v1/params"
+with urllib.request.urlopen(url, timeout=10) as response:
+    payload = json.load(response)
+params = payload.get("params")
+if not isinstance(params, dict):
+    raise SystemExit(f"pre-upgrade params response is invalid: {payload!r}")
+path = Path(sys.argv[1])
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(params, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+tmp.replace(path)
+print(f"captured {len(params)} pre-upgrade params in {path}")
+PY
 }
 
 rpc_height() {
@@ -395,6 +500,13 @@ for job in jobs:
         item[key] = int(text) if key == "exit" else text
     summary[job] = item
 if all("exit" in summary[job] for job in jobs):
+    phase_prefix = "postflight."
+    summary["postflight"] = {
+        path.name[len(phase_prefix) : -len(".state")]: path.read_text().strip()
+        for path in sorted(status_dir.glob(f"{phase_prefix}*.state"))
+    }
+    stage_path = status_dir / "pipeline.stage"
+    summary["pipeline_stage"] = stage_path.read_text().strip() if stage_path.exists() else "missing"
     tmp = status_dir / "all.json.tmp"
     tmp.write_text(json.dumps(summary, indent=2) + "\n")
     tmp.replace(status_dir / "all.json")
@@ -409,11 +521,127 @@ EOF
   chmod +x "${STATUS_HOST}/run_job.sh"
 }
 
+write_postflight() {
+  cat > "${STATUS_HOST}/postflight.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+DIR="/root/.mirage/upgrade_tests"
+CORE_JOBS_BUDGET_SEC="${CORE_JOBS_BUDGET_SEC:-14400}"
+CREATOR_PARAM_BUDGET_SEC="${CREATOR_PARAM_BUDGET_SEC:-180}"
+CURRENT_PHASE=""
+
+atomic_write() {
+  local path="$1" body="$2"
+  printf '%s\n' "$body" > "${path}.tmp"
+  mv "${path}.tmp" "$path"
+}
+
+set_stage() {
+  atomic_write "${DIR}/pipeline.stage" "$1"
+  printf '[postflight] stage=%s\n' "$1"
+}
+
+phase_state() {
+  atomic_write "${DIR}/postflight.${1}.state" "$2"
+}
+
+on_exit() {
+  local rc=$?
+  if (( rc != 0 )) && [[ -n "$CURRENT_PHASE" ]]; then
+    phase_state "$CURRENT_PHASE" failed
+    set_stage "postflight_failed:${CURRENT_PHASE}"
+  fi
+}
+trap on_exit EXIT
+
+run_phase() {
+  local phase="$1"
+  shift
+  CURRENT_PHASE="$phase"
+  phase_state "$phase" running
+  set_stage "postflight_${phase}"
+  if "$@"; then
+    phase_state "$phase" passed
+    CURRENT_PHASE=""
+    return 0
+  else
+    local rc=$?
+    phase_state "$phase" failed
+    return "$rc"
+  fi
+}
+
+wait_for_core_jobs() {
+  local start=$SECONDS blockchain backend state
+  while (( SECONDS - start < CORE_JOBS_BUDGET_SEC )); do
+    blockchain="$(cat "${DIR}/blockchain.state" 2>/dev/null || printf missing)"
+    backend="$(cat "${DIR}/backend.state" 2>/dev/null || printf missing)"
+    printf '[postflight] core jobs blockchain=%s backend=%s\n' "$blockchain" "$backend"
+    for state in "$blockchain" "$backend"; do
+      case "$state" in
+        passed|running|missing) ;;
+        failed) return 1 ;;
+        *) printf '[postflight] invalid core job state: %s\n' "$state" >&2; return 1 ;;
+      esac
+    done
+    if [[ "$blockchain" == passed && "$backend" == passed ]]; then
+      return 0
+    fi
+    sleep 5
+  done
+  printf '[postflight] timed out after %ss waiting for blockchain and backend\n' \
+    "$CORE_JOBS_BUDGET_SEC" >&2
+  return 1
+}
+
+wait_creator_param() {
+  python3 - "$CREATOR_PARAM_BUDGET_SEC" <<'PY'
+import json
+import sys
+import time
+import urllib.request
+
+budget = int(sys.argv[1])
+deadline = time.monotonic() + budget
+last = None
+while time.monotonic() < deadline:
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:1317/mirage/core/v1/params", timeout=5
+        ) as response:
+            params = json.load(response)["params"]
+        last = int(params["creator_epoch_seconds"])
+        print(f"[postflight] creator_epoch_seconds={last}", flush=True)
+        if last == 300:
+            raise SystemExit(0)
+    except Exception as error:
+        print(f"[postflight] params query not ready: {error}", flush=True)
+    time.sleep(3)
+raise SystemExit(
+    f"timed out after {budget}s waiting for creator_epoch_seconds=300 (last={last!r})"
+)
+PY
+}
+
+run_phase upgrade python3 /opt/mirage/scripts/verify_upgrade.py
+run_phase core_jobs wait_for_core_jobs
+run_phase extended python3 tests/test_extended.py
+run_phase creator_proposal \
+  python3 scripts/submit_proposal.py local \
+  scripts/proposals/proposal_test_creator_rewards.json --no-confirm
+run_phase creator_activation wait_creator_param
+run_phase creator_payout python3 /opt/mirage/scripts/verify_creator_payout.py
+set_stage postflight_complete
+EOF
+  chmod +x "${STATUS_HOST}/postflight.sh"
+}
+
 clear_status() {
   log "clearing ${STATUS_HOST}"
   rm -rf "$STATUS_HOST"
   mkdir -p "$STATUS_HOST"
   write_run_job
+  write_postflight
 }
 
 # Successful jobs need no leftover scratch. Failed runs preserve this directory
@@ -468,7 +696,7 @@ wait_for_jobs() {
       cat "${STATUS_HOST}/all.json"
       echo
       if [[ -f "${STATUS_HOST}/verify.out" ]]; then
-        log "verify_upgrade output:"
+        log "verify/postflight output:"
         cat "${STATUS_HOST}/verify.out"
       fi
       local name rc=0
@@ -614,10 +842,13 @@ launch_jobs() {
   wait_until 60 "supervisord socket" supervisor_ready
   wait_until 90 "backend /api/get_parameters" backend_ready
 
-  log "launching detached docker exec jobs: blockchain, backend, verify"
+  log "launching detached docker exec jobs: blockchain, backend, verify/postflight"
   docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" blockchain python3 tests/test_blockchain.py
   docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" backend python3 tests/test_backend.py
-  docker exec -d "$CONTAINER" bash "${STATUS_CTN}/run_job.sh" verify python3 /opt/mirage/scripts/verify_upgrade.py
+  docker exec -d "$CONTAINER" env \
+    "CORE_JOBS_BUDGET_SEC=${CORE_JOBS_BUDGET_SEC}" \
+    "CREATOR_PARAM_BUDGET_SEC=${CREATOR_PARAM_BUDGET_SEC}" \
+    bash "${STATUS_CTN}/run_job.sh" verify bash "${STATUS_CTN}/postflight.sh"
 }
 
 print_monitor() {
@@ -641,6 +872,8 @@ run_pipeline() {
   [[ -f "$PROPOSAL_UPGRADE" ]] || die "missing ${PROPOSAL_UPGRADE}"
   [[ -f "$PROPOSAL_POW" ]] || die "missing ${PROPOSAL_POW}"
   [[ -f "$PROPOSAL_RELAY_LIMIT" ]] || die "missing ${PROPOSAL_RELAY_LIMIT}"
+  [[ -f "$PROPOSAL_CREATOR_TEST" ]] || die "missing ${PROPOSAL_CREATOR_TEST}"
+  [[ -f "${ROOT}/scripts/verify_creator_payout.py" ]] || die "missing creator payout verifier"
   preflight_clean_tree
   activate_conda
 
@@ -654,11 +887,16 @@ run_pipeline() {
   resolve_upgrade_mode "$name"
 
   clear_status
+  set_stage backup_image
+  assert_backup_image_version
+  set_stage proto_parity
+  verify_proto_generation_parity
   set_stage reset
 
   log "reset local testnet from latest mirage.vote backup"
-  python3 "${ROOT}/scripts/reset_local_testnet.py" --latest
+  python3 "${ROOT}/scripts/reset_local_testnet.py" --file "$BACKUP_TARBALL"
   wait_until "$RPC_BUDGET_SEC" "RPC after reset" rpc_is_up
+  capture_pre_upgrade_params
 
   if (( NO_CHAIN_UPGRADE )); then
     assert_no_pending_plan

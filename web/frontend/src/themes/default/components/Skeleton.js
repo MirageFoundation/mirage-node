@@ -306,7 +306,7 @@ const PageHeaderWrap = styled.div`
 /**
  * Page-header skeleton — a short title line and optional subtitle line
  * that mirrors the real `HeaderRow` / `HeaderSubRow` rhythm used across
- * the `default` route shells (Follows, Reports, Agents, Discover,
+ * the `default` route shells (Follows, Reports, Discover,
  * Search, Stats, Network, Inbox, ViewPost). Title defaults to ~40%
  * width (≈ a one- or two-word heading), subtitle to ~60%.
  */

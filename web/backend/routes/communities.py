@@ -3,6 +3,7 @@ from __future__ import annotations
 """Community, curation, and creator HTTP reads/writes."""
 
 import re
+import time
 
 from flask import Blueprint, jsonify, request
 
@@ -13,6 +14,7 @@ from params import expect_params, expect_creator_schedule
 from curation import MODE_RAW, get_default_team, resolve_lens
 
 communities_bp = Blueprint("communities", __name__)
+CURATOR_READ_ACTION = "curator_read"
 
 
 def _limit() -> int:
@@ -87,6 +89,100 @@ def _viewer_is_team_curator(cur, slug: str, team_id: int, viewer: str) -> bool:
         (slug, team_id, viewer),
     )
     return cur.fetchone() is not None
+
+
+def _require_curator_read(viewer: str):
+    from routes.core import _require_signed_read
+
+    data = request.args.to_dict(flat=True)
+    return _require_signed_read(data, CURATOR_READ_ACTION, viewer)
+
+
+def _parse_creator_paging():
+    try:
+        limit = int(request.args.get("limit", 25))
+    except (TypeError, ValueError):
+        return None, api_error_code("invalid_creator_limit", 400)
+    if limit < 1 or limit > 100:
+        return None, api_error_code("invalid_creator_limit", 400)
+    claimable_raw = (request.args.get("claimable_only") or "false").strip().lower()
+    if claimable_raw not in ("true", "false"):
+        return None, api_error_code("invalid_input", 400)
+    claimable_only = claimable_raw == "true"
+    default_sort = "claim_deadline_asc" if claimable_only else "epoch_desc"
+    sort = (request.args.get("sort") or default_sort).strip().lower()
+    if sort not in ("claim_deadline_asc", "epoch_desc"):
+        return None, api_error_code("invalid_input", 400)
+    if claimable_only and sort != "claim_deadline_asc":
+        return None, api_error_code("invalid_input", 400)
+    if not claimable_only and sort != "epoch_desc":
+        return None, api_error_code("invalid_input", 400)
+    cursor = (request.args.get("cursor") or "").strip().lower()
+    parsed_cursor = None
+    if cursor:
+        try:
+            if sort == "claim_deadline_asc":
+                deadline, epoch_id = cursor.split(":", 1)
+                parsed_cursor = (int(deadline), int(epoch_id))
+            else:
+                parsed_cursor = int(cursor)
+        except (TypeError, ValueError):
+            return None, api_error_code("invalid_creator_cursor", 400)
+        values = parsed_cursor if isinstance(parsed_cursor, tuple) else (parsed_cursor,)
+        if any(value < 0 for value in values):
+            return None, api_error_code("invalid_creator_cursor", 400)
+    return (limit, claimable_only, sort, parsed_cursor), None
+
+
+def _target_page(cur, creator: str, epoch_id: int, limit: int, cursor: str = "") -> tuple[list[dict], str | None, bool]:
+    cursor_amount = None
+    cursor_txhash = ""
+    if cursor:
+        try:
+            amount_raw, cursor_txhash = cursor.split(":", 1)
+            cursor_amount = int(amount_raw)
+        except (TypeError, ValueError):
+            raise ValueError("invalid target cursor")
+        if cursor_amount < 0 or not cursor_txhash:
+            raise ValueError("invalid target cursor")
+    cur.execute(
+        """
+        SELECT t.target_txhash, t.amount, t.upvote_units, t.direct_reply_units,
+               p.title, p.content, p.community, p.target, p.deleted
+        FROM creator_target_earnings t
+        LEFT JOIN posts p ON p.txhash = t.target_txhash
+        WHERE LOWER(t.creator)=LOWER(%s) AND t.epoch_id=%s
+          AND (
+            %s::NUMERIC IS NULL
+            OR t.amount < %s
+            OR (t.amount = %s AND LOWER(t.target_txhash) > %s)
+          )
+        ORDER BY t.amount DESC, LOWER(t.target_txhash) ASC
+        LIMIT %s
+        """,
+        (creator, epoch_id, cursor_amount, cursor_amount, cursor_amount, cursor_txhash, limit + 1),
+    )
+    rows = cur.fetchall() or []
+    has_more = len(rows) > limit
+    items = []
+    for row in rows[:limit]:
+        deleted = bool(row[8])
+        content = (row[5] or "").strip()
+        items.append(
+            {
+                "txhash": row[0],
+                "amount": str(row[1]),
+                "upvote_units": int(row[2]),
+                "direct_reply_units": int(row[3]),
+                "title": None if deleted else (row[4] or None),
+                "excerpt": None if deleted else (content[:120] or None),
+                "community": row[6],
+                "is_comment": row[7] is not None,
+                "deleted": deleted,
+            }
+        )
+    next_cursor = f"{items[-1]['amount']}:{items[-1]['txhash'].lower()}" if has_more and items else None
+    return items, next_cursor, has_more
 
 
 @communities_bp.route("/api/communities")
@@ -445,8 +541,10 @@ def community_team_invitations(slug: str, team_id: int):
     rid = next_request_id()
     slug = (slug or "").strip().lower()
     viewer = (request.args.get("viewer") or "").strip().lower()
-    if not viewer:
-        return api_error_code("missing_viewer", 400)
+    signed_viewer, auth_err = _require_curator_read(viewer)
+    if auth_err is not None:
+        return auth_err
+    viewer = signed_viewer
     try:
         with connect_db() as conn:
             cur = conn.cursor()
@@ -510,8 +608,10 @@ def community_team_moderation(slug: str, team_id: int):
     root = (request.args.get("root") or "").strip().lower()
     if not _valid_slug(slug) or team_id <= 0:
         return api_error_code("community_invalid", 400)
-    if not viewer:
-        return api_error_code("missing_viewer", 400)
+    signed_viewer, auth_err = _require_curator_read(viewer)
+    if auth_err is not None:
+        return auth_err
+    viewer = signed_viewer
     if not post_id:
         return api_error_code("missing_post_id", 400)
     if not author:
@@ -608,8 +708,10 @@ def community_team_hidden_users(slug: str, team_id: int):
     viewer = (request.args.get("viewer") or "").strip().lower()
     if not _valid_slug(slug) or team_id <= 0:
         return api_error_code("community_invalid", 400)
-    if not viewer:
-        return api_error_code("missing_viewer", 400)
+    signed_viewer, auth_err = _require_curator_read(viewer)
+    if auth_err is not None:
+        return auth_err
+    viewer = signed_viewer
     paging, err = _parse_hidden_list_paging()
     if err is not None:
         return err
@@ -673,8 +775,10 @@ def community_team_hidden_posts(slug: str, team_id: int):
     viewer = (request.args.get("viewer") or "").strip().lower()
     if not _valid_slug(slug) or team_id <= 0:
         return api_error_code("community_invalid", 400)
-    if not viewer:
-        return api_error_code("missing_viewer", 400)
+    signed_viewer, auth_err = _require_curator_read(viewer)
+    if auth_err is not None:
+        return auth_err
+    viewer = signed_viewer
     paging, err = _parse_hidden_list_paging()
     if err is not None:
         return err
@@ -736,57 +840,58 @@ def creator_earnings():
     creator = (request.args.get("creator") or "").strip()
     if not creator:
         return api_error_code("missing_creator", 400)
+    paging, paging_err = _parse_creator_paging()
+    if paging_err is not None:
+        return paging_err
+    limit, claimable_only, sort, cursor = paging
     try:
         with connect_db() as conn:
             cur = conn.cursor()
+            conditions = ["LOWER(creator)=LOWER(%s)"]
+            query_params: list = [creator]
+            if claimable_only:
+                conditions.extend(
+                    [
+                        "earned > claimed",
+                        "claimed_height IS NULL",
+                        "claim_deadline_unix IS NOT NULL",
+                        "claim_deadline_unix >= %s",
+                    ]
+                )
+                query_params.append(int(time.time()))
+            if cursor is not None:
+                if sort == "claim_deadline_asc":
+                    conditions.append(
+                        "(claim_deadline_unix > %s OR (claim_deadline_unix = %s AND epoch_id > %s))"
+                    )
+                    query_params.extend((cursor[0], cursor[0], cursor[1]))
+                else:
+                    conditions.append("epoch_id < %s")
+                    query_params.append(cursor)
+            order = (
+                "claim_deadline_unix ASC, epoch_id ASC"
+                if sort == "claim_deadline_asc"
+                else "epoch_id DESC"
+            )
             cur.execute(
-                """
+                f"""
                 SELECT epoch_id, earned, claimed, claim_deadline_unix,
                        start_unix, end_unix, claimed_height
-                FROM creator_accruals WHERE LOWER(creator)=LOWER(%s)
-                ORDER BY epoch_id DESC LIMIT 50
+                FROM creator_accruals
+                WHERE {" AND ".join(conditions)}
+                ORDER BY {order}
+                LIMIT %s
                 """,
-                (creator,),
+                query_params + [limit + 1],
             )
             rows = cur.fetchall() or []
-            # The accrual is one number per epoch. The target rows break it down
-            # by the post that earned it, so a creator can see where the money
-            # came from instead of being handed an unexplained total.
-            epoch_ids = [r[0] for r in rows]
-            target_rows = []
-            if epoch_ids:
-                cur.execute(
-                    """
-                    SELECT t.epoch_id, t.target_txhash, t.amount,
-                           t.upvote_units, t.direct_reply_units,
-                           p.title, p.content, p.community, p.target, p.deleted
-                    FROM creator_target_earnings t
-                    LEFT JOIN posts p ON p.txhash = t.target_txhash
-                    WHERE LOWER(t.creator)=LOWER(%s) AND t.epoch_id = ANY(%s)
-                    ORDER BY t.epoch_id DESC, t.amount DESC
-                    LIMIT 500
-                    """,
-                    (creator, epoch_ids),
-                )
-                target_rows = cur.fetchall() or []
-        by_epoch: dict[int, list] = {}
-        for t in target_rows:
-            deleted = bool(t[9])
-            content = (t[6] or "").strip()
-            by_epoch.setdefault(t[0], []).append(
-                {
-                    "txhash": t[1],
-                    "amount": str(t[2]),
-                    "upvote_units": int(t[3]),
-                    "direct_reply_units": int(t[4]),
-                    "title": None if deleted else (t[5] or None),
-                    "excerpt": None if deleted else (content[:120] or None),
-                    "community": t[7],
-                    "is_comment": t[8] is not None,
-                    "deleted": deleted,
-                }
-            )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            posts_by_epoch = {}
+            for row in rows:
+                posts_by_epoch[row[0]] = _target_page(cur, creator, int(row[0]), 25)
         schedule = expect_creator_schedule()
+        params = expect_params()
         creator_epoch_seconds = int(schedule["epoch_seconds"])
         # Times come from the epoch record, not from the live grid. Governance
         # can change creator_epoch_seconds, which renumbers epochs from that
@@ -800,20 +905,56 @@ def creator_earnings():
                 "epoch_end_unix": r[5],
                 "claim_deadline_unix": r[3],
                 "claimed_height": r[6],
-                "posts": by_epoch.get(r[0], []),
+                "posts": posts_by_epoch[r[0]][0],
+                "posts_next_cursor": posts_by_epoch[r[0]][1],
+                "posts_has_more": posts_by_epoch[r[0]][2],
             }
             for r in rows
         ]
+        next_cursor = None
+        if has_more and items:
+            last = items[-1]
+            next_cursor = (
+                f"{last['claim_deadline_unix']}:{last['epoch_id']}"
+                if sort == "claim_deadline_asc"
+                else str(last["epoch_id"])
+            )
         return jsonify(
             {
                 "items": items,
                 "creator_epoch_seconds": creator_epoch_seconds,
                 "origin_epoch": int(schedule["origin_epoch"]),
                 "origin_unix": int(schedule["origin_unix"]),
-                "next_cursor": None,
-                "has_more": False,
+                "max_creator_claim_epochs": int(params["max_creator_claim_epochs"]),
+                "next_cursor": next_cursor,
+                "has_more": has_more,
             }
         )
     except Exception as e:
         log_event(rid, "creator.earnings.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
+@communities_bp.route("/api/creator/earnings/<int:epoch_id>/targets")
+def creator_earning_targets(epoch_id: int):
+    rid = next_request_id()
+    creator = (request.args.get("creator") or "").strip()
+    if not creator:
+        return api_error_code("missing_creator", 400)
+    try:
+        limit = int(request.args.get("limit", 25))
+    except (TypeError, ValueError):
+        return api_error_code("invalid_creator_limit", 400)
+    if epoch_id < 0 or limit < 1 or limit > 100:
+        return api_error_code("invalid_creator_limit", 400)
+    cursor = (request.args.get("cursor") or "").strip().lower()
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            items, next_cursor, has_more = _target_page(cur, creator, epoch_id, limit, cursor)
+        return jsonify({"items": items, "next_cursor": next_cursor, "has_more": has_more})
+    except ValueError:
+        return api_error_code("invalid_creator_cursor", 400)
+    except Exception as e:
+        log_event(rid, "creator.targets.err", error=str(e), epoch_id=epoch_id)
         return api_error_code("indexer_unavailable", 503)

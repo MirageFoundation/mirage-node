@@ -79,37 +79,43 @@ func (k Keeper) countEpoch(ctx sdk.Context, ce *types.CreatorEpoch, budget int) 
 		start = ce.SettlementCursor
 		exclusive = true
 	}
-	processed := 0
-	exhausted := true
-	if err := k.iterPrefixFrom(ctx, pfx, start, exclusive, budget+1, func(key, value []byte) error {
-		if processed >= budget {
-			exhausted = false
-			return nil
-		}
+	records, err := k.collectPrefixFrom(ctx, pfx, start, exclusive, budget+1)
+	if err != nil {
+		return budget, err
+	}
+	exhausted := len(records) <= budget
+	if !exhausted {
+		records = records[:budget]
+	}
+	for _, record := range records {
+		key, value := record.key, record.value
 		actor, kind, target, err := parseEngagementKey(key)
 		if err != nil {
-			return err
+			return budget, err
 		}
 		actorStr := sdk.AccAddress(actor).String()
 		if ce.PartialActor != "" && ce.PartialActor != actorStr {
 			if err := k.flushCountActor(ctx, ce); err != nil {
-				return err
+				return budget, err
 			}
 		}
 		ce.PartialActor = actorStr
 		valid, err := k.engagementValid(ctx, ce.EpochId, actorStr, kind, target, value)
 		if err != nil {
-			return err
+			return budget, err
 		}
+		validityKey := types.KeyEngagementValid(ce.EpochId, actor, kind, target)
 		if valid {
+			if err := k.storeSet(ctx, validityKey, []byte{1}); err != nil {
+				return budget, err
+			}
 			ce.PartialCount++
+		} else if err := k.storeDelete(ctx, validityKey); err != nil {
+			return budget, err
 		}
 		ce.SettlementCursor = append([]byte(nil), key...)
-		processed++
-		return nil
-	}); err != nil {
-		return budget, err
 	}
+	processed := len(records)
 	if exhausted {
 		if ce.PartialActor != "" {
 			if err := k.flushCountActor(ctx, ce); err != nil {
@@ -200,33 +206,37 @@ func (k Keeper) allocateEpoch(ctx sdk.Context, ce *types.CreatorEpoch, budget in
 	if err != nil {
 		return budget, err
 	}
-	processed := 0
-	exhausted := true
-	if err := k.iterPrefixFrom(ctx, pfx, start, exclusive, budget+1, func(key, value []byte) error {
-		if processed >= budget {
-			exhausted = false
-			return nil
-		}
+	records, err := k.collectPrefixFrom(ctx, pfx, start, exclusive, budget+1)
+	if err != nil {
+		return budget, err
+	}
+	exhausted := len(records) <= budget
+	if !exhausted {
+		records = records[:budget]
+	}
+	for _, record := range records {
+		key := record.key
 		actor, kind, target, err := parseEngagementKey(key)
 		if err != nil {
-			return err
+			return budget, err
 		}
 		actorStr := sdk.AccAddress(actor).String()
-		valid, err := k.engagementValid(ctx, ce.EpochId, actorStr, kind, target, value)
+		valid, err := k.storeHas(ctx, types.KeyEngagementValid(ce.EpochId, actor, kind, target))
 		if err != nil {
-			return err
+			return budget, err
 		}
 		if valid {
 			units, found, err := k.getU64Key(ctx, types.KeyEngagementCount(ce.EpochId, actor))
 			if err != nil {
-				return err
+				return budget, err
 			}
 			if !found || units == 0 {
-				return fmt.Errorf("CONSENSUS_FATAL:CREATOR_EVC_MISSING actor=%s epoch=%d", actorStr, ce.EpochId)
+				return budget, haltFinalizeInvariantError(ctx, "creator_engagement_count_missing",
+					fmt.Errorf("actor=%s epoch=%d", actorStr, ce.EpochId))
 			}
 			perUnit := slice.Quo(sdkmath.NewIntFromUint64(units))
 			if err := k.applyAllocation(ctx, ce, kind, target, perUnit); err != nil {
-				return err
+				return budget, err
 			}
 			if perUnit.IsPositive() {
 				allocated = allocated.Add(perUnit)
@@ -234,11 +244,8 @@ func (k Keeper) allocateEpoch(ctx sdk.Context, ce *types.CreatorEpoch, budget in
 		}
 		ce.SettlementCursor = append([]byte(nil), key...)
 		ce.AllocatedTotal = allocated.String()
-		processed++
-		return nil
-	}); err != nil {
-		return budget, err
 	}
+	processed := len(records)
 	ce.AllocatedTotal = allocated.String()
 	if exhausted {
 		return k.finishAllocate(ctx, ce, allocated, budget-processed)
@@ -534,34 +541,21 @@ func (k Keeper) processCreatorPruning(ctx sdk.Context, params types.Params) erro
 }
 
 func (k Keeper) pruneEpochDetails(ctx sdk.Context, epoch int64, budget int) (int, error) {
-	deleted := 0
-	if err := k.iterPrefixKeys(ctx, types.KeyEngagementEpochPrefix(epoch), budget, func(key, _ []byte) error {
-		if err := k.storeDelete(ctx, key); err != nil {
-			return err
+	prefixes := [][]byte{
+		types.KeyEngagementEpochPrefix(epoch),
+		concatBytes([]byte(types.PfxEngagementCount), i64bytes(epoch)),
+		types.KeyEngagementValidEpochPrefix(epoch),
+	}
+	for _, prefix := range prefixes {
+		var err error
+		budget, err = k.deleteCreatorPrefixBudget(ctx, prefix, budget)
+		if err != nil {
+			return budget, err
 		}
-		deleted++
-		return nil
-	}); err != nil {
-		return budget, err
-	}
-	budget -= deleted
-	if budget <= 0 {
-		return 0, nil
-	}
-	evcPfx := types.KeyEngagementCount(epoch, nil)
-	// KeyEngagementCount with nil actor is "evc|"+epoch; actor is appended after.
-	evcPfx = concatBytes([]byte(types.PfxEngagementCount), i64bytes(epoch))
-	deleted = 0
-	if err := k.iterPrefixKeys(ctx, evcPfx, budget, func(key, _ []byte) error {
-		if err := k.storeDelete(ctx, key); err != nil {
-			return err
+		if budget <= 0 {
+			return 0, nil
 		}
-		deleted++
-		return nil
-	}); err != nil {
-		return budget, err
 	}
-	budget -= deleted
 	if budget > 0 {
 		var ce types.CreatorEpoch
 		found, err := k.getProto(ctx, types.KeyCreatorEpoch(epoch), &ce)
@@ -577,6 +571,20 @@ func (k Keeper) pruneEpochDetails(ctx sdk.Context, epoch int64, budget int) (int
 		if err := k.storeDelete(ctx, types.KeyCreatorEpochPrune(epoch)); err != nil {
 			return budget, err
 		}
+	}
+	return budget, nil
+}
+
+func (k Keeper) deleteCreatorPrefixBudget(ctx sdk.Context, prefix []byte, budget int) (int, error) {
+	records, err := k.collectPrefixFrom(ctx, prefix, prefix, false, budget)
+	if err != nil {
+		return budget, err
+	}
+	for _, record := range records {
+		if err := k.storeDelete(ctx, record.key); err != nil {
+			return budget, err
+		}
+		budget--
 	}
 	return budget, nil
 }
@@ -660,6 +668,23 @@ func parseEngagementKey(key []byte) (actor []byte, kind byte, target []byte, err
 	kind = rest[20]
 	target = rest[21:]
 	return actor, kind, target, nil
+}
+
+type creatorSettlementRecord struct {
+	key   []byte
+	value []byte
+}
+
+func (k Keeper) collectPrefixFrom(ctx sdk.Context, prefix, start []byte, exclusive bool, limit int) ([]creatorSettlementRecord, error) {
+	records := make([]creatorSettlementRecord, 0, limit)
+	err := k.iterPrefixFrom(ctx, prefix, start, exclusive, limit, func(key, value []byte) error {
+		records = append(records, creatorSettlementRecord{
+			key:   append([]byte(nil), key...),
+			value: append([]byte(nil), value...),
+		})
+		return nil
+	})
+	return records, err
 }
 
 func concatBytes(parts ...[]byte) []byte {

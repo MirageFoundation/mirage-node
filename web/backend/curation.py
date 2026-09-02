@@ -333,9 +333,12 @@ def resolve_effective_tags(
             default_teams[community] = get_default_team(cur, community)
         default_team = default_teams[community]
 
-        stamped = (post.get("lens") or {}).get("effective_team_id")
+        stamped_lens = post.get("lens") or {}
+        stamped = stamped_lens.get("effective_team_id")
         if stamped is not None:
-            team_id = int(stamped)
+            lens_team_id = int(stamped)
+        elif stamped_lens:
+            lens_team_id = None
         else:
             if community not in lens_teams:
                 lens_teams[community] = resolve_lens(
@@ -345,22 +348,17 @@ def resolve_effective_tags(
                     requested_lens=requested_lens,
                     requested_team_id=requested_team_id,
                 )["effective_team_id"]
-            team_id = lens_teams[community]
-        # The raw lens has no team of its own, so per-post overrides fall back
-        # to the default team's, which is where the community tag comes from.
-        if team_id is None:
-            if not default_team:
-                continue
-            team_id = default_team["team_id"]
-
-        cur.execute(
-            """
-            SELECT tag FROM curation_post_tags
-            WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
-            """,
-            (community, int(team_id), post_id),
-        )
-        row = cur.fetchone()
+            lens_team_id = lens_teams[community]
+        row = None
+        if lens_team_id is not None:
+            cur.execute(
+                """
+                SELECT tag FROM curation_post_tags
+                WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
+                """,
+                (community, int(lens_team_id), post_id),
+            )
+            row = cur.fetchone()
         community_tag = default_team["tag"] if default_team else ""
         if row is not None:
             effective = str(row[0] or "")
@@ -373,7 +371,7 @@ def resolve_effective_tags(
                 "[tag] override post=%s community=%s team=%s author_tag=%s effective=%s",
                 post_id[:12],
                 community,
-                team_id,
+                lens_team_id,
                 post.get("tag", ""),
                 effective,
             )

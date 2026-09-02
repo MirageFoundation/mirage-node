@@ -17,7 +17,7 @@ import { Link } from "react-router-dom";
 import Storage from "../../../utils/Storage";
 import * as tx from "../../../utils/tx";
 import { isJoinedCommunity, joinCommunity, leaveCommunity, invalidateCache as invalidateCommunitiesCache } from "../../../utils/Subscriptions";
-import { ContentGrid, ModernPostFeed, StyledError, OLDREDDIT_SHELL_INSET_X } from "../Layout";
+import { ContentGrid, ModernPostFeed, StyledError, SHELL_INSET_X } from "../Layout";
 import { useMain } from "../../../logic/useMain";
 import { requireThemeColor } from "../../../utils/themeColor";
 import CurationLensPicker from "../components/CurationLensPicker";
@@ -604,13 +604,13 @@ const MainFeedPanel = styled.div`
  * LoadingCard — flat list row, same surface as ListFeedView (no inset card / no body bg gaps)
  */
 const LoadingCard = styled.div`
-    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-left: calc(-1 * ${SHELL_INSET_X});
+    margin-right: calc(-1 * ${SHELL_INSET_X});
+    width: calc(100% + 2 * ${SHELL_INSET_X});
     max-width: none;
     padding: ${({
     $size
-}) => ($size === 'compact' ? '0.75rem' : '1rem')} ${OLDREDDIT_SHELL_INSET_X};
+}) => ($size === 'compact' ? '0.75rem' : '1rem')} ${SHELL_INSET_X};
     min-height: 5rem;
     background-color: ${({
     theme
@@ -655,9 +655,9 @@ const BlockedCommunityState = styled.div`
      * the empty state reads as part of the feed column, not a separate
      * panel (06.3 polish round 4). */
     background: ${({ theme }) => theme.colors.bg};
-    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-left: calc(-1 * ${SHELL_INSET_X});
+    margin-right: calc(-1 * ${SHELL_INSET_X});
+    width: calc(100% + 2 * ${SHELL_INSET_X});
     box-sizing: border-box;
 `;
 const BlockedCommunityIcon = styled.div`
@@ -870,11 +870,11 @@ const CommunityLensControls = styled.div`
  * EmptyHomeCard — flat full-width strip, aligned with list feed surface
  */
 const EmptyHomeCard = styled.div`
-    margin-left: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    margin-right: calc(-1 * ${OLDREDDIT_SHELL_INSET_X});
-    width: calc(100% + 2 * ${OLDREDDIT_SHELL_INSET_X});
+    margin-left: calc(-1 * ${SHELL_INSET_X});
+    margin-right: calc(-1 * ${SHELL_INSET_X});
+    width: calc(100% + 2 * ${SHELL_INSET_X});
     max-width: none;
-    padding: 1.25rem ${OLDREDDIT_SHELL_INSET_X};
+    padding: 1.25rem ${SHELL_INSET_X};
     background-color: ${({
     theme
 }) => theme.colors.panel};
@@ -957,8 +957,8 @@ const MainView = ({
         hasMorePosts,
         homeSortMode,
         setHomeSortMode,
-        oldRedditSort,
-        handleOldRedditSortChange,
+        feedSort,
+        handleFeedSortChange,
         cardSize,
         handleCardSizeChange,
         hideDownvotedPosts,
@@ -1297,7 +1297,7 @@ const MainView = ({
                                                 viewer={viewerAddress}
                                                 onChange={handleLensChange}
                                             />
-                                            <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                            <FeedSortToggle sortMode={feedSort} onChange={handleFeedSortChange} />
                                             <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
                                         </CommunityLensControls>
                                     </CommunityLensTopRow>
@@ -1317,7 +1317,7 @@ const MainView = ({
                                             {urlCommunity === 'home' ? 'Home' : 'Following'}
                                         </HomeFeedInfoTitle>
                                         <HomeFeedModeInline>
-                                            <FeedSortToggle sortMode={oldRedditSort} onChange={handleOldRedditSortChange} />
+                                            <FeedSortToggle sortMode={feedSort} onChange={handleFeedSortChange} />
                                             <FeedViewToggle viewMode={feedViewMode} onChange={handleFeedViewModeChange} />
                                         </HomeFeedModeInline>
                                     </HomeFeedHeaderRow>
@@ -1478,7 +1478,7 @@ const MainView = ({
                                 // Only the All feed still uses ListFeedView's toolbar title row.
                                 const showFeedToolbar = urlCommunity === 'all';
                                 const feedTitle = urlCommunity === 'all' ? 'All' : null;
-                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={oldRedditSort} onSortChange={handleOldRedditSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavCommunity={urlCommunity} showPostLens={false} />;
+                                return <FeedComponent posts={visiblePosts} state={state} updatePost={updatePost} hidingPostsSet={hidingPostsSet} flashingPostsSet={flashingPostsSet} viewerAddress={viewerAddress} sortMode={feedSort} onSortChange={handleFeedSortChange} showSortTabs={showFeedToolbar} feedTitle={feedTitle} feedNavCommunity={urlCommunity} showPostLens={false} />;
                             })()}
 
                             {canBrowse && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (

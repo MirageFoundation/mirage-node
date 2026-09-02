@@ -1071,6 +1071,123 @@ def _build_pool():
     add_f(query_schedule_resp, "epoch_seconds", 3, UINT64)
     add_f(query_schedule_resp, "current_epoch", 4, INT64)
 
+    query_terminal_epochs_req = file_proto.message_type.add()
+    query_terminal_epochs_req.name = "QueryTerminalCreatorEpochsRequest"
+    add_f(query_terminal_epochs_req, "cutoff_deadline_unix", 1, INT64)
+    add_message_field(
+        query_terminal_epochs_req,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageRequest",
+    )
+    query_terminal_epochs_resp = file_proto.message_type.add()
+    query_terminal_epochs_resp.name = "QueryTerminalCreatorEpochsResponse"
+    add_message_field(
+        query_terminal_epochs_resp,
+        "epochs",
+        1,
+        ".mirage.core.v1.CreatorEpoch",
+        repeated=True,
+    )
+    add_message_field(
+        query_terminal_epochs_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
+    subscription_tranche = file_proto.message_type.add()
+    subscription_tranche.name = "SubscriptionTranche"
+    add_f(subscription_tranche, "id", 1, UINT64)
+    add_f(subscription_tranche, "payer", 2, STRING)
+    add_f(subscription_tranche, "recipient", 3, STRING)
+    add_f(subscription_tranche, "source", 4, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(subscription_tranche, "start_time", 5, INT64)
+    add_f(subscription_tranche, "end_time", 6, INT64)
+    add_f(subscription_tranche, "period_count", 7, UINT32)
+    add_f(subscription_tranche, "total_fee", 8, STRING)
+    add_f(subscription_tranche, "burn_amount", 9, STRING)
+    add_f(subscription_tranche, "creator_amount", 10, STRING)
+    add_f(subscription_tranche, "creator_bps", 11, UINT64)
+    add_f(subscription_tranche, "period", 12, UINT64)
+    add_f(subscription_tranche, "created_height", 13, INT64)
+    add_f(subscription_tranche, "txhash", 14, STRING)
+
+    query_tranches_req = file_proto.message_type.add()
+    query_tranches_req.name = "QuerySubscriptionTranchesRequest"
+    add_f(query_tranches_req, "address", 1, STRING)
+    add_message_field(
+        query_tranches_req,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageRequest",
+    )
+    query_tranches_resp = file_proto.message_type.add()
+    query_tranches_resp.name = "QuerySubscriptionTranchesResponse"
+    add_message_field(
+        query_tranches_resp,
+        "tranches",
+        1,
+        ".mirage.core.v1.SubscriptionTranche",
+        repeated=True,
+    )
+    add_message_field(
+        query_tranches_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
+    query_creator_accruals_req = file_proto.message_type.add()
+    query_creator_accruals_req.name = "QueryCreatorAccrualsRequest"
+    add_f(query_creator_accruals_req, "creator", 1, STRING)
+    add_message_field(
+        query_creator_accruals_req,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageRequest",
+    )
+    query_creator_accruals_resp = file_proto.message_type.add()
+    query_creator_accruals_resp.name = "QueryCreatorAccrualsResponse"
+    add_message_field(
+        query_creator_accruals_resp,
+        "accruals",
+        1,
+        ".mirage.core.v1.CreatorAccrual",
+        repeated=True,
+    )
+    add_message_field(
+        query_creator_accruals_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
+    query_target_earnings_req = file_proto.message_type.add()
+    query_target_earnings_req.name = "QueryTargetEarningsRequest"
+    add_f(query_target_earnings_req, "target", 1, STRING)
+    add_message_field(
+        query_target_earnings_req,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageRequest",
+    )
+    query_target_earnings_resp = file_proto.message_type.add()
+    query_target_earnings_resp.name = "QueryTargetEarningsResponse"
+    add_message_field(
+        query_target_earnings_resp,
+        "earnings",
+        1,
+        ".mirage.core.v1.TargetEarning",
+        repeated=True,
+    )
+    add_message_field(
+        query_target_earnings_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
     # QueryProfilesRequest
     msg_profiles_req = file_proto.message_type.add()
     msg_profiles_req.name = "QueryProfilesRequest"
@@ -1230,3 +1347,12 @@ QuerySubscriberQuotaRequest = _get_message_class("mirage.core.v1.QuerySubscriber
 QuerySubscriberQuotaResponse = _get_message_class("mirage.core.v1.QuerySubscriberQuotaResponse")
 QueryCreatorScheduleRequest = _get_message_class("mirage.core.v1.QueryCreatorScheduleRequest")
 QueryCreatorScheduleResponse = _get_message_class("mirage.core.v1.QueryCreatorScheduleResponse")
+QueryTerminalCreatorEpochsRequest = _get_message_class("mirage.core.v1.QueryTerminalCreatorEpochsRequest")
+QueryTerminalCreatorEpochsResponse = _get_message_class("mirage.core.v1.QueryTerminalCreatorEpochsResponse")
+SubscriptionTranche = _get_message_class("mirage.core.v1.SubscriptionTranche")
+QuerySubscriptionTranchesRequest = _get_message_class("mirage.core.v1.QuerySubscriptionTranchesRequest")
+QuerySubscriptionTranchesResponse = _get_message_class("mirage.core.v1.QuerySubscriptionTranchesResponse")
+QueryCreatorAccrualsRequest = _get_message_class("mirage.core.v1.QueryCreatorAccrualsRequest")
+QueryCreatorAccrualsResponse = _get_message_class("mirage.core.v1.QueryCreatorAccrualsResponse")
+QueryTargetEarningsRequest = _get_message_class("mirage.core.v1.QueryTargetEarningsRequest")
+QueryTargetEarningsResponse = _get_message_class("mirage.core.v1.QueryTargetEarningsResponse")

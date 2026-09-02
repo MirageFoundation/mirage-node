@@ -51,19 +51,7 @@ import {
 } from "../../../utils/Subscriptions";
 import { usePendingFollows } from "../../../logic/useFollowState.js";
 
-/**
- * `/search?q=...` — default full results view.
- *
- * Follows `RULES.md`:
- *  - R1: sits on `theme.colors.bg` via the shared `ContainerBody` wrapper.
- *  - R2: every color routed through tokens.
- *  - R3: only `1px solid theme.colors.border` dividers.
- *  - R4: data parity with `themes/bluemoon/routes/SearchResultsView.js`
- *    (communities, users, posts + load-more per tab), visual tone from
- *    `mirage-mobile-app/src/pages/search-screen.tsx` (plain-text tab row
- *    with active underline + count badge, row-style community/user results,
- *    post results via the theme-local `CardView`).
- */
+/** Full post, community, and user results for `/search?q=...`. */
 
 const TABS = [
     { id: "posts", label: "Posts" },

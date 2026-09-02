@@ -1,34 +1,17 @@
-# `src/views` — theme route facades (not the real pages)
+# `src/views`
 
-## Why this folder exists
+`App.js` lazy-loads `src/views/<Name>.js` through stable paths. Each file is a
+thin facade that resolves the corresponding screen from the default UI
+manifest.
 
-`App.js` lazy-loads **`src/views/<Name>.js`** with stable paths. Each file is a **thin wrapper**: it calls `useThemeRoute('<Name>')` and renders whatever the **active theme** registered on its manifest’s **`routes`** map.
+Real screens live in `src/themes/default/routes/`. Keep layout, copy, and
+styled-components there.
 
-**Real screens** (layout, copy, styled-components) live under **`src/themes/<themeId>/routes/`** — e.g. `themes/bluemoon/routes/MainView.js` vs `themes/oldreddit/routes/MainView.js`.
+Adding a top-level screen requires:
 
-## Mental model
+1. A route component in `src/themes/default/routes/`.
+2. An entry in the default manifest's `routes` map.
+3. A matching facade in this directory.
+4. A route in `App.js`.
 
-```
-App (lazy import)
-    import('./views/MainView')
-         │
-         ▼
-    views/MainView.js                    ← facade (few lines)
-         │
-         ▼
-    useThemeRoute('MainView')
-         │
-         ▼
-    getThemeRoute(themeId, 'MainView')
-         │
-         ▼
-    themes/bluemoon/index.js   →  routes: { MainView: …, … }
-    themes/oldreddit/...     →  routes: { MainView: …, … }
-```
-
-Switching **theme** swaps the resolved page component **without** changing `App`’s import paths.
-
-## Related
-
-- **`src/themes/README.md`** — register themes in **`themes/manifests.js`** only.
-- **`src/components/README.md`** — global **`Toast` / `UnlockPrompt` / `Tooltip`** entrypoints; implementations are still per manifest.
+See `src/themes/README.md` for the complete runtime structure.

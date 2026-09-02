@@ -369,8 +369,14 @@ class DatabaseManager:
                     BEGIN
                         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'topic_preferences') THEN
                             INSERT INTO preferences(owner, pref_type, target, weight, updated_at)
-                            SELECT owner, 'community', topic, weight, updated_at FROM topic_preferences
-                            ON CONFLICT DO NOTHING;
+                            SELECT owner, 'topic', topic, weight, updated_at FROM topic_preferences
+                            ON CONFLICT(owner, pref_type, target) DO UPDATE SET
+                                weight = CASE
+                                    WHEN EXCLUDED.updated_at > preferences.updated_at
+                                    THEN EXCLUDED.weight
+                                    ELSE preferences.weight
+                                END,
+                                updated_at = GREATEST(EXCLUDED.updated_at, preferences.updated_at);
                         END IF;
                         IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'author_preferences') THEN
                             INSERT INTO preferences(owner, pref_type, target, weight, updated_at)
@@ -928,6 +934,16 @@ class DatabaseManager:
                 )
                 return cur.fetchone()
 
+    def get_post_protocol_version(self, txhash: str) -> int:
+        """Return the stored protocol version for an existing post."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT protocol_version FROM posts WHERE LOWER(txhash) = LOWER(%s)", (txhash,))
+                row = cur.fetchone()
+        if row is None:
+            raise RuntimeError(f"post protocol version target is missing: {txhash}")
+        return int(row[0])
+
     def get_root_community_for_post(self, txhash: str):
         """
         Return (root_community, root_post_id) for a given post/comment, or (None, None) if not found.
@@ -1270,6 +1286,24 @@ class DatabaseManager:
                         owner,
                     ),
                 )
+
+    def filter_subscription_runtime_owners(self, addresses: set[str]) -> set[str]:
+        """Return addresses whose indexed tier causes runtime refreshes."""
+        normalized = sorted({str(value).strip().lower() for value in addresses if str(value).strip()})
+        if not normalized:
+            return set()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT LOWER(owner)
+                    FROM profiles
+                    WHERE LOWER(owner) = ANY(%s)
+                      AND (effective_paid = TRUE OR level >= 100)
+                    """,
+                    (normalized,),
+                )
+                return {str(row[0]) for row in cur.fetchall() if row and row[0]}
                 if cur.rowcount != 1:
                     raise RuntimeError(f"subscription runtime profile is missing: {owner}")
 
@@ -1982,8 +2016,8 @@ class DatabaseManager:
                 # The root and every descendant share root_post_id, so the whole
                 # thread follows the root in one statement.
                 cur.execute(
-                    "UPDATE posts SET root_community = %s WHERE LOWER(root_post_id) = %s",
-                    (new_norm, root_norm),
+                    "UPDATE posts SET community = %s, root_community = %s WHERE LOWER(root_post_id) = %s",
+                    (new_norm, new_norm, root_norm),
                 )
                 threads_moved = cur.rowcount
 
@@ -2324,19 +2358,134 @@ class DatabaseManager:
                     )
 
     def set_joined_communities(self, owner: str, communities: list[str]) -> None:
-        """Replace joined-community preferences from the chain's joined-community list."""
+        """Reconcile membership without overwriting stored curation choices."""
+        owner_norm = str(owner or "").strip().lower()
+        normalized = sorted(
+            {
+                str(community or "").strip().lower()
+                for community in communities
+                if str(community or "").strip()
+            }
+        )
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM community_curation_preferences WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                for community in communities:
+                if normalized:
                     cur.execute(
                         """
-                        INSERT INTO community_curation_preferences(owner, community, mode, pinned_team_id, updated_height)
-                        VALUES(%s, %s, 0, NULL, 0)
+                        DELETE FROM community_curation_preferences
+                        WHERE LOWER(owner) = %s
+                          AND NOT (LOWER(community) = ANY(%s))
+                        """,
+                        (owner_norm, normalized),
+                    )
+                    cur.executemany(
+                        """
+                        INSERT INTO community_curation_preferences(
+                            owner, community, mode, pinned_team_id, updated_height
+                        ) VALUES(%s, %s, 0, NULL, 0)
                         ON CONFLICT(owner, community) DO NOTHING
                         """,
-                        (owner, community),
+                        [(owner_norm, community) for community in normalized],
                     )
+                else:
+                    cur.execute(
+                        "DELETE FROM community_curation_preferences WHERE LOWER(owner) = %s",
+                        (owner_norm,),
+                    )
+        logger.debug(
+            "[curation] reconciled joined communities owner=%s authoritative_count=%d",
+            owner_norm,
+            len(normalized),
+        )
+
+    def upsert_community_preference(
+        self,
+        owner: str,
+        community: str,
+        mode: int,
+        pinned_team_id: int | None,
+        updated_height: int,
+    ) -> None:
+        """Store one authoritative chain preference without losing its mode."""
+        mode_value = int(mode)
+        team_value = int(pinned_team_id or 0)
+        if mode_value not in (0, 1, 2) or (mode_value == 1) != (team_value > 0):
+            raise RuntimeError(
+                f"invalid community preference owner={owner} community={community} "
+                f"mode={mode_value} team={team_value}"
+            )
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO community_curation_preferences(
+                        owner, community, mode, pinned_team_id, updated_height
+                    ) VALUES(%s,%s,%s,NULLIF(%s,0),%s)
+                    ON CONFLICT(owner, community) DO UPDATE SET
+                        mode=EXCLUDED.mode,
+                        pinned_team_id=EXCLUDED.pinned_team_id,
+                        updated_height=GREATEST(
+                            community_curation_preferences.updated_height,
+                            EXCLUDED.updated_height
+                        )
+                    """,
+                    (
+                        str(owner).strip().lower(),
+                        str(community).strip().lower(),
+                        mode_value,
+                        team_value,
+                        int(updated_height),
+                    ),
+                )
+
+    def upsert_subscription_tranches(self, tranches: list[dict]) -> None:
+        """Project authoritative tranche records idempotently."""
+        if not tranches:
+            return
+        rows = [
+            (
+                int(value["tranche_id"]),
+                str(value["payer"]).strip().lower(),
+                str(value["recipient"]).strip().lower(),
+                int(value["source"]),
+                int(value["period_count"]),
+                int(value["start_time"]),
+                int(value["end_time"]),
+                str(value["total_fee"]),
+                str(value["burn_amount"]),
+                str(value["creator_amount"]),
+                int(value["creator_bps"]),
+                int(value["created_height"]),
+                value["tx_hash"],
+            )
+            for value in tranches
+        ]
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO subscription_tranches(
+                        tranche_id, payer, recipient, source, period_count,
+                        start_time, end_time, total_fee, burn_amount, creator_amount,
+                        creator_bps, created_height, tx_hash
+                    ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT(tranche_id) DO UPDATE SET
+                        payer=EXCLUDED.payer,
+                        recipient=EXCLUDED.recipient,
+                        source=EXCLUDED.source,
+                        period_count=EXCLUDED.period_count,
+                        start_time=EXCLUDED.start_time,
+                        end_time=EXCLUDED.end_time,
+                        total_fee=EXCLUDED.total_fee,
+                        burn_amount=EXCLUDED.burn_amount,
+                        creator_amount=EXCLUDED.creator_amount,
+                        creator_bps=EXCLUDED.creator_bps,
+                        created_height=EXCLUDED.created_height,
+                        tx_hash=EXCLUDED.tx_hash
+                    """,
+                    rows,
+                )
+        logger.debug("[subscription] upserted authoritative tranches count=%d", len(rows))
 
     def follow_user(self, owner: str, target: str) -> None:
         """Follow a user (add to followed_users with next position, evict oldest beyond cap)."""

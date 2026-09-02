@@ -25,6 +25,10 @@ class IndexerUnavailable(RuntimeError):
     """
 
 
+class BackendUnavailable(RuntimeError):
+    """The backend-owned database could not answer a required query."""
+
+
 # ── Canonical error registry: code → message ─────────────────────────
 # This is the single source of truth. The reverse map is auto-derived below.
 # All messages MUST be lowercase. No duplicates allowed.
@@ -77,9 +81,12 @@ ERRORS = {
     "missing_creator": "creator is required",
     "invalid_offset": "offset must be a non-negative integer",
     "invalid_limit": "limit must be an integer from 1 to 50",
+    "invalid_creator_limit": "limit must be an integer from 1 to 100",
     "invalid_cursor": "cursor must be post_count:community",
+    "invalid_creator_cursor": "invalid creator earnings cursor",
     "internal_error": "internal server error",
     "indexer_unavailable": "indexer DB unavailable",
+    "backend_unavailable": "backend DB unavailable",
     "debug_localhost_only": "debug endpoints only available on localhost",
     # PoW
     "insufficient_pow_precheck": "insufficient pow (precheck)",
@@ -275,5 +282,8 @@ def safe_error(e: Exception, context: str = "") -> tuple:
     if isinstance(e, IndexerUnavailable):
         logger().error(f"{prefix}request_id={request_id} indexer_unavailable: {e}")
         return api_error_code("indexer_unavailable", 503, request_id=request_id)
+    if isinstance(e, BackendUnavailable):
+        logger().error(f"{prefix}request_id={request_id} backend_unavailable: {e}")
+        return api_error_code("backend_unavailable", 503, request_id=request_id)
     logger().error(f"{prefix}request_id={request_id} {type(e).__name__}: {e}\n{traceback.format_exc()}")
     return jsonify({"error": "internal server error", "error_code": "internal_error", "request_id": request_id}), 500

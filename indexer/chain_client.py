@@ -41,6 +41,19 @@ GOVERNANCE_ONLY_TYPE_URLS = frozenset(
     }
 )
 
+INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS = frozenset(
+    {
+        f"{CORE_TYPE_URL_PREFIX}MsgGovCreateCurationTeam",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetCurationTeamOwner",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetCuratorMembership",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetCommunityPreference",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetCommunityBlock",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetCuratorInvitation",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovSetSubscriptionState",
+        f"{CORE_TYPE_URL_PREFIX}MsgGovClaimCreatorRewards",
+    }
+)
+
 # Profile listing pages are far larger than a normal point query, so they get
 # their own (longer) budget instead of the 3s GRPC_TIMEOUT.
 # The chain caps a page at keeper.MaxProfilesQueryLimit (100); asking for more
@@ -63,6 +76,11 @@ class ChainClient:
         self.ws_url = jsonrpc_url.replace("http://", "ws://") + "/websocket"
         self.grpc_target = self._derive_grpc_target(jsonrpc_url)
         self._profile_cache: dict[str, Optional[dict]] | None = None
+        self._subscription_runtime_cache: dict[str, dict] | None = None
+        self._creator_epoch_snapshot_cache: dict[int, dict] | None = None
+        self._subscription_tranche_cache: dict[str, list[dict]] | None = None
+        self._creator_schedule_cache: dict | None = None
+        self._block_snapshots_sealed = False
 
     @staticmethod
     def _derive_grpc_target(jsonrpc_url: str) -> str:
@@ -211,10 +229,24 @@ class ChainClient:
         second call would have given, without the node advancing underneath it.
         """
         self._profile_cache: dict[str, Optional[dict]] | None = {}
+        self._subscription_runtime_cache = {}
+        self._creator_epoch_snapshot_cache = {}
+        self._subscription_tranche_cache = {}
+        self._creator_schedule_cache = {}
+        self._block_snapshots_sealed = False
+
+    def seal_block_snapshots(self) -> None:
+        """Forbid subscription/creator cache misses once the DB transaction opens."""
+        self._block_snapshots_sealed = True
 
     def end_block_profile_cache(self) -> None:
         """Drop the per-block memo so the next block reads fresh chain state."""
         self._profile_cache = None
+        self._subscription_runtime_cache = None
+        self._creator_epoch_snapshot_cache = None
+        self._subscription_tranche_cache = None
+        self._creator_schedule_cache = None
+        self._block_snapshots_sealed = False
 
     def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> Optional[dict]:
         """Query full profile (including per-entry lists) via gRPC.
@@ -625,10 +657,148 @@ class ChainClient:
                     return out
         raise RuntimeError(f"CreatorEpochTargets exceeded 1001 pages for epoch {epoch}")
 
+    def query_creator_epoch_snapshot(self, epoch_id: int) -> dict:
+        """Read the complete creator projection unit outside the DB transaction."""
+        epoch = int(epoch_id)
+        if self._creator_epoch_snapshot_cache is not None and epoch in self._creator_epoch_snapshot_cache:
+            return self._creator_epoch_snapshot_cache[epoch]
+        if self._block_snapshots_sealed:
+            raise RuntimeError(f"creator epoch {epoch} was not prefetched before the block transaction")
+        value = self.query_creator_epoch(epoch)
+        if value is None:
+            raise RuntimeError(f"creator epoch {epoch} disappeared before projection")
+        snapshot = {
+            "epoch": value,
+            "accruals": self.query_creator_epoch_accruals(epoch),
+            "targets": self.query_creator_epoch_targets(epoch),
+        }
+        if self._creator_epoch_snapshot_cache is not None:
+            self._creator_epoch_snapshot_cache[epoch] = snapshot
+        logger.debug(
+            "creator snapshot prefetched epoch=%s accruals=%d targets=%d",
+            epoch,
+            len(snapshot["accruals"]),
+            len(snapshot["targets"]),
+        )
+        return snapshot
+
+    def query_terminal_creator_epochs(self, min_claim_deadline_unix: int) -> list[dict]:
+        """Page every terminal epoch still discoverable by claim deadline."""
+        try:
+            from shared.datatypes import (
+                PageRequest,
+                QueryTerminalCreatorEpochsRequest,
+                QueryTerminalCreatorEpochsResponse,
+            )
+        except ImportError as e:
+            raise RuntimeError(
+                "terminal creator recovery requires QueryTerminalCreatorEpochs Python descriptors"
+            ) from e
+
+        next_key = b""
+        epochs: list[dict] = []
+        seen: set[int] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/TerminalCreatorEpochs",
+                request_serializer=QueryTerminalCreatorEpochsRequest.SerializeToString,
+                response_deserializer=QueryTerminalCreatorEpochsResponse.FromString,
+            )
+            for page in range(1001):
+                req = QueryTerminalCreatorEpochsRequest(
+                    cutoff_deadline_unix=int(min_claim_deadline_unix),
+                    pagination=PageRequest(key=next_key, limit=1000),
+                )
+                try:
+                    resp = method(req, timeout=PROFILES_PAGE_TIMEOUT)
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"TerminalCreatorEpochs gRPC failed on page {page + 1}: {e}") from e
+                for value in resp.epochs:
+                    epoch_id = int(value.epoch_id)
+                    if epoch_id in seen:
+                        raise RuntimeError(f"TerminalCreatorEpochs returned duplicate epoch {epoch_id}")
+                    seen.add(epoch_id)
+                    epochs.append({"epoch_id": epoch_id, "claim_deadline_unix": int(value.claim_deadline_unix)})
+                next_key = bytes(resp.pagination.next_key) if resp.HasField("pagination") else b""
+                if not next_key:
+                    logger.info(
+                        "terminal creator epochs fetched count=%d cutoff=%d",
+                        len(epochs),
+                        int(min_claim_deadline_unix),
+                    )
+                    return epochs
+        raise RuntimeError("TerminalCreatorEpochs exceeded 1001 pages")
+
+    def query_subscription_tranches(self, address: str) -> list[dict]:
+        """Read every tranche for one recipient with bounded pagination."""
+        from shared.datatypes import PageRequest, QuerySubscriptionTranchesRequest, QuerySubscriptionTranchesResponse
+
+        owner = str(address).strip().lower()
+        if not owner:
+            raise RuntimeError("query_subscription_tranches requires address")
+        if self._subscription_tranche_cache is not None and owner in self._subscription_tranche_cache:
+            return self._subscription_tranche_cache[owner]
+        if self._block_snapshots_sealed:
+            raise RuntimeError(f"subscription tranches for {owner} were not prefetched before the block transaction")
+
+        next_key = b""
+        out: list[dict] = []
+        seen: set[int] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/SubscriptionTranches",
+                request_serializer=QuerySubscriptionTranchesRequest.SerializeToString,
+                response_deserializer=QuerySubscriptionTranchesResponse.FromString,
+            )
+            for page in range(1001):
+                req = QuerySubscriptionTranchesRequest(
+                    address=owner,
+                    pagination=PageRequest(key=next_key, limit=1000),
+                )
+                try:
+                    resp = method(req, timeout=PROFILES_PAGE_TIMEOUT)
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"SubscriptionTranches gRPC failed for {owner} page {page + 1}: {e}") from e
+                for value in resp.tranches:
+                    tranche_id = int(value.id)
+                    if tranche_id in seen:
+                        raise RuntimeError(f"SubscriptionTranches returned duplicate tranche {tranche_id}")
+                    seen.add(tranche_id)
+                    out.append(
+                        {
+                            "tranche_id": tranche_id,
+                            "payer": str(value.payer).strip().lower(),
+                            "recipient": str(value.recipient).strip().lower(),
+                            "source": int(value.source),
+                            "period_count": int(value.period_count),
+                            "start_time": int(value.start_time),
+                            "end_time": int(value.end_time),
+                            "total_fee": str(value.total_fee),
+                            "burn_amount": str(value.burn_amount),
+                            "creator_amount": str(value.creator_amount),
+                            "creator_bps": int(value.creator_bps),
+                            "created_height": int(value.created_height),
+                            "tx_hash": str(value.txhash).strip().lower() or None,
+                        }
+                    )
+                next_key = bytes(resp.pagination.next_key) if resp.HasField("pagination") else b""
+                if not next_key:
+                    break
+            else:
+                raise RuntimeError(f"SubscriptionTranches exceeded 1001 pages for {owner}")
+        if self._subscription_tranche_cache is not None:
+            self._subscription_tranche_cache[owner] = out
+        logger.debug("subscription tranches prefetched recipient=%s count=%d", owner, len(out))
+        return out
+
     def query_creator_schedule(self, timeout: int = GRPC_TIMEOUT) -> dict:
         """Read the live creator-epoch grid."""
         from shared.datatypes import QueryCreatorScheduleRequest, QueryCreatorScheduleResponse
 
+        if self._creator_schedule_cache:
+            return self._creator_schedule_cache
+        if self._block_snapshots_sealed:
+            raise RuntimeError("creator schedule was not prefetched before the block transaction")
         with grpc.insecure_channel(self.grpc_target) as channel:
             method = channel.unary_unary(
                 "/mirage.core.v1.Query/CreatorSchedule",
@@ -642,12 +812,15 @@ class ChainClient:
         epoch_seconds = int(resp.epoch_seconds)
         if epoch_seconds < 300 or 86400 % epoch_seconds != 0:
             raise RuntimeError(f"CreatorSchedule returned invalid epoch_seconds={epoch_seconds}")
-        return {
+        result = {
             "origin_epoch": int(resp.origin_epoch),
             "origin_unix": int(resp.origin_unix),
             "epoch_seconds": epoch_seconds,
             "current_epoch": int(resp.current_epoch),
         }
+        if self._creator_schedule_cache is not None:
+            self._creator_schedule_cache = result
+        return result
 
     def query_subscription_runtime(self, address: str, timeout: int = GRPC_TIMEOUT) -> dict:
         """Read quota and renewal-warning state required by bootstrap."""
@@ -661,6 +834,10 @@ class ChainClient:
         owner = str(address).strip().lower()
         if not owner:
             raise RuntimeError("query_subscription_runtime requires address")
+        if self._subscription_runtime_cache is not None and owner in self._subscription_runtime_cache:
+            return self._subscription_runtime_cache[owner]
+        if self._block_snapshots_sealed:
+            raise RuntimeError(f"subscription runtime for {owner} was not prefetched before the block transaction")
         with grpc.insecure_channel(self.grpc_target) as channel:
             quota_method = channel.unary_unary(
                 "/mirage.core.v1.Query/SubscriberQuota",
@@ -712,6 +889,8 @@ class ChainClient:
             result["quota_limit"],
             result["renewal_expiry"],
         )
+        if self._subscription_runtime_cache is not None:
+            self._subscription_runtime_cache[owner] = result
         return result
 
     @staticmethod
@@ -894,6 +1073,7 @@ class ChainClient:
                 if any_msg.type_url.startswith(CORE_TYPE_URL_PREFIX)
                 and any_msg.type_url not in type_url_to_proto
                 and any_msg.type_url not in GOVERNANCE_ONLY_TYPE_URLS
+                and any_msg.type_url not in INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS
             }
         )
         if untracked:
@@ -906,6 +1086,7 @@ class ChainClient:
             }
             for any_msg in anys
             if any_msg.type_url in type_url_to_proto
+            or any_msg.type_url in INDEXER_PROJECTED_GOVERNANCE_TYPE_URLS
         ]
 
     @staticmethod

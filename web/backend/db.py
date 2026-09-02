@@ -653,19 +653,41 @@ def init_backend_schema() -> None:
                 if new_val > 1:
                     logger.info("backend.schema.seq_reset table=%s seq=%s val=%s", table, seq_name, new_val)
 
+            unresolved: Dict[str, int] = {}
+            for table, predicate in (
+                ("pending_rewards", "claimed_at IS NULL"),
+                ("reward_payouts", "status IN ('reserved', 'broadcast')"),
+                (
+                    "referral_pending_rewards",
+                    "COALESCE(total_pending, 0) > 0 AND paid_at IS NULL "
+                    "AND COALESCE(status, 'pending') NOT IN ('denied', 'rejected')",
+                ),
+                ("referral_user_accruals", "COALESCE(pending, 0) > 0"),
+            ):
+                cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+                if cur.fetchone()[0] is None:
+                    continue
+                cur.execute(f"SELECT COUNT(*) FROM {table} WHERE {predicate}")
+                count = int(cur.fetchone()[0] or 0)
+                logger.info("backend.schema.legacy_financial_evidence table=%s unresolved=%d", table, count)
+                if count:
+                    unresolved[table] = count
+            if unresolved:
+                details = ", ".join(f"{table}={count}" for table, count in sorted(unresolved.items()))
+                raise RuntimeError(
+                    "unresolved legacy reward obligations remain; settle them under v1.38 before upgrading: "
+                    + details
+                )
+
             for gone in (
                 "invite_codes",
                 "referral_links",
-                "referral_pending_rewards",
-                "referral_user_accruals",
                 "referral_state",
                 "referral_user_settings",
                 "user_daily_quests",
                 "user_flash_quests",
                 "user_quest_state",
                 "user_achievements",
-                "pending_rewards",
-                "reward_payouts",
                 "user_unlocks",
                 "reward_suspensions",
             ):

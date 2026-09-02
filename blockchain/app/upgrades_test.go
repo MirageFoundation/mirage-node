@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,6 +12,8 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 	"github.com/cosmos/cosmos-sdk/baseapp"
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
 	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 	"github.com/stretchr/testify/require"
@@ -21,6 +24,18 @@ import (
 type MockAppOptions struct{}
 
 func (MockAppOptions) Get(key string) interface{} { return nil }
+
+type upgradeAccountKeeperMock struct {
+	accounts map[string]sdk.AccountI
+}
+
+func (m *upgradeAccountKeeperMock) GetAccount(_ context.Context, addr sdk.AccAddress) sdk.AccountI {
+	return m.accounts[addr.String()]
+}
+
+func (m *upgradeAccountKeeperMock) SetAccount(_ context.Context, account sdk.AccountI) {
+	m.accounts[account.GetAddress().String()] = account
+}
 
 func TestValidateV1340Params(t *testing.T) {
 	require.NoError(t, validateV1340Params(coretypes.DefaultParams()))
@@ -48,6 +63,34 @@ func TestV1110DefaultsDoNotActivateV1380MintSplit(t *testing.T) {
 	current := coretypes.DefaultParams()
 	require.Equal(t, 0.20, current.MintFloorSplit)
 	require.Equal(t, 0.10, current.MintDynamicSplit)
+}
+
+func TestEnsureCreatorModuleAccountConvertsSquattedBaseAccount(t *testing.T) {
+	addr := authtypes.NewModuleAddress(coretypes.CreatorPoolName)
+	base := authtypes.NewBaseAccountWithAddress(addr)
+	require.NoError(t, base.SetAccountNumber(77))
+	require.NoError(t, base.SetSequence(88))
+	accounts := &upgradeAccountKeeperMock{accounts: map[string]sdk.AccountI{addr.String(): base}}
+	balances := map[string]uint64{addr.String(): 12_345}
+
+	require.NoError(t, ensureCreatorModuleAccount(context.Background(), accounts))
+	converted, ok := accounts.GetAccount(context.Background(), addr).(*authtypes.ModuleAccount)
+	require.True(t, ok)
+	require.Equal(t, coretypes.CreatorPoolName, converted.GetName())
+	require.Equal(t, uint64(77), converted.GetAccountNumber())
+	require.Equal(t, uint64(88), converted.GetSequence())
+	require.Equal(t, uint64(12_345), balances[converted.GetAddress().String()])
+	require.NoError(t, ensureCreatorModuleAccount(context.Background(), accounts), "existing module account must be idempotent")
+}
+
+func TestEnsureCreatorModuleAccountCreatesMissingAccount(t *testing.T) {
+	addr := authtypes.NewModuleAddress(coretypes.CreatorPoolName)
+	accounts := &upgradeAccountKeeperMock{accounts: map[string]sdk.AccountI{}}
+	require.Nil(t, accounts.GetAccount(context.Background(), addr))
+	require.NoError(t, ensureCreatorModuleAccount(context.Background(), accounts))
+	created, ok := accounts.GetAccount(context.Background(), addr).(*authtypes.ModuleAccount)
+	require.True(t, ok)
+	require.Equal(t, coretypes.CreatorPoolName, created.GetName())
 }
 
 // TestStoreLoaderWithExistingStore tests that using StoreUpgrades.Added for

@@ -22,24 +22,7 @@ import { formatSubscriberCount } from "../../../utils/curation";
 import ContentTagBadge from "../components/ContentTagBadge";
 import CommunityMembershipButton from "../components/CommunityMembershipButton";
 
-/**
- * DiscoverView — `default` Plan 06 sub-plan 07.
- *
- * Rules (`docs/guides/web-theme-default/RULES.md`):
- *  - R1 search + list sit on `theme.colors.bg`.
- *  - R2 every color routed through a token (community tag badge still uses
- *    `tagColors` from the shared `useDiscover` util which already pairs
- *    bg/border/text — left unchanged per R4 "do not hard-code tag
- *    icon / color").
- *  - R3 no row dividers (matches AgentsView decision).
- *  - R4 data parity with `themes/bluemoon/routes/DiscoverView.js`;
- *    visual language from `mirage-mobile-app/src/pages/communities-list-screen.tsx`
- *    (search pill on top, community rows with `#community`, post/comment meta,
- *    Follow action on the right).
- *  - R5 search input focuses on `borderStrong` with no blue ring.
- *  - R7 page heading 1.1rem/700, section label 0.6rem/700 uppercase,
- *    row title 0.75rem/500, meta 0.62rem/500 subtle.
- */
+/** Community discovery in the default UI. */
 
 const DiscoverWrap = styled.div`
     width: 100%;

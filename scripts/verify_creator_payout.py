@@ -14,6 +14,7 @@ import json
 import socket
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, "/opt/mirage")
@@ -90,6 +91,41 @@ def creator_epoch(epoch: int) -> dict | None:
         return rest(f"/mirage/core/v1/creator/epoch/{epoch}").get("epoch")
     except Exception:
         return None
+
+
+def backend_earnings(creator: str) -> list[dict]:
+    query = urllib.parse.urlencode(
+        {
+            "creator": creator,
+            "limit": 100,
+            "sort": "oldest",
+        }
+    )
+    with urllib.request.urlopen(f"{BACKEND}/api/creator/earnings?{query}", timeout=10) as response:
+        data = json.load(response)
+    items = data.get("items")
+    if not isinstance(items, list):
+        die(f"backend creator earnings returned invalid payload: {data}")
+    return items
+
+
+def wait_backend_claimed(creator: str, epoch: int, timeout: float = 120.0) -> dict:
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            rows = backend_earnings(creator)
+            last = next((row for row in rows if int(row.get("epoch_id", -1)) == epoch), None)
+            if last and int(last.get("claimed_height") or 0) > 0:
+                print(
+                    f"  backend/indexer recorded claimed_height={last['claimed_height']} "
+                    f"claimed={last.get('claimed')}"
+                )
+                return last
+        except Exception as error:
+            last = {"error": repr(error)}
+        time.sleep(2)
+    die(f"backend/indexer did not record claimed_height for epoch {epoch}: last={last!r}")
 
 
 def commit(label: str, resp: dict, from_height: int) -> str:
@@ -286,6 +322,10 @@ def main() -> int:
     print(f"epoch claimed_total now {ce['claimed_total']}")
     if int(ce["claimed_total"]) < earned:
         die("epoch did not record the claim")
+
+    indexed_claim = wait_backend_claimed(author_addr, engaged_epoch)
+    if int(indexed_claim.get("claimed") or 0) < earned:
+        die(f"backend/indexer claimed amount {indexed_claim.get('claimed')!r} is below {earned}")
 
     resp = claim(author, [engaged_epoch])
     if not (resp.get("error") or int(resp.get("code", 0) or 0) != 0):

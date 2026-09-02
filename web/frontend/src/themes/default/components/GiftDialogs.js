@@ -417,7 +417,6 @@ export function GiftMirageDialog({
 export function GiftSubscriptionDialog({
     open,
     recipientLabel,
-    level,
     feeUmirage,
     feeLabel, // optional pre-formatted string (fallback when feeUmirage not available)
     loading,

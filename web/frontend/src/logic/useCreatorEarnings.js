@@ -4,7 +4,10 @@ import * as tx from '../utils/tx';
 import { formatError } from '../utils/errorMessages';
 import { usePendingCuration } from './usePendingCuration';
 
-function validateEarnings(data) {
+const EARNINGS_PAGE_LIMIT = 50;
+const EARNINGS_MAX_PAGES = 200;
+
+export function validateEarnings(data) {
     if (!data || !Array.isArray(data.items)) throw new Error('Invalid creator earnings response');
     const creatorEpochSeconds = Number(data.creator_epoch_seconds);
     if (!Number.isSafeInteger(creatorEpochSeconds) || creatorEpochSeconds < 300) {
@@ -18,6 +21,13 @@ function validateEarnings(data) {
     if (!Number.isSafeInteger(originUnix) || originUnix < 0) {
         throw new Error('Creator schedule origin unix is required');
     }
+    const maxClaimEpochs = Number(data.max_creator_claim_epochs);
+    if (!Number.isSafeInteger(maxClaimEpochs) || maxClaimEpochs <= 0) {
+        throw new Error('Creator claim batch limit is required');
+    }
+    if (typeof data.has_more !== 'boolean') throw new Error('Creator earnings pagination state is required');
+    const nextCursor = data.next_cursor == null ? null : String(data.next_cursor);
+    if (data.has_more && !nextCursor) throw new Error('Creator earnings next cursor is required');
     for (const item of data.items) {
         if (!Number.isSafeInteger(Number(item.epoch_id))) throw new Error('Invalid creator earnings epoch');
         if (typeof item.earned !== 'string' || typeof item.claimed !== 'string') {
@@ -35,19 +45,127 @@ function validateEarnings(data) {
             }
         }
     }
-    return { items: data.items, creatorEpochSeconds, originEpoch, originUnix };
+    return {
+        items: data.items,
+        creatorEpochSeconds,
+        originEpoch,
+        originUnix,
+        maxClaimEpochs,
+        nextCursor,
+        hasMore: data.has_more,
+    };
 }
 
-// The claim rows are re-read until the chain has the claim, but never forever.
 const CLAIM_SETTLE_TIMEOUT_MS = 120000;
 const CLAIM_SETTLE_INTERVAL_MS = 2000;
 
-export function normalizeClaimEpochs(values) {
+export function normalizeClaimEpochs(values, maxClaimEpochs) {
+    const cap = Number(maxClaimEpochs);
+    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Creator claim batch limit is required');
     const ids = [...new Set((values || []).map(Number))].sort((a, b) => a - b);
     if (!ids.length) throw new Error('Select at least one claimable epoch');
-    if (ids.length > 30) throw new Error('You can claim at most 30 epochs at once');
+    if (ids.length > cap) throw new Error(`You can claim at most ${cap} epochs at once`);
     if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid epoch selection');
     return ids;
+}
+
+export function nextClaimSelection(current, epochId, maxClaimEpochs) {
+    const id = Number(epochId);
+    const cap = Number(maxClaimEpochs);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid epoch selection');
+    if (!Number.isSafeInteger(cap) || cap <= 0) throw new Error('Creator claim batch limit is required');
+    const selected = [...new Set((current || []).map(Number))];
+    if (selected.includes(id)) return { selected: selected.filter((value) => value !== id), atCap: false };
+    if (selected.length >= cap) return { selected, atCap: true };
+    return { selected: [...selected, id], atCap: false };
+}
+
+export function requireCreatorClaimCheckTx(result) {
+    if (!result?.success) throw new Error(formatError(result));
+    const txHash = String(result.tx_hash || '').trim().toLowerCase();
+    if (!txHash) throw new Error('Creator claim response did not include a transaction hash');
+    return txHash;
+}
+
+function assertSameEarningsConfig(expected, actual) {
+    for (const key of ['creatorEpochSeconds', 'originEpoch', 'originUnix', 'maxClaimEpochs']) {
+        if (expected[key] !== actual[key]) throw new Error(`Creator earnings ${key} changed during pagination`);
+    }
+}
+
+export async function fetchCreatorEarningsPages(creator, {
+    claimableOnly = false,
+    stopEpochIds = [],
+} = {}) {
+    const address = String(creator || '').trim().toLowerCase();
+    if (!address) throw new Error('Creator address is required');
+    const wanted = new Set((stopEpochIds || []).map(Number));
+    const found = new Set();
+    const seenCursors = new Set();
+    const items = [];
+    let cursor = null;
+    let config = null;
+
+    for (let page = 0; page < EARNINGS_MAX_PAGES; page += 1) {
+        const params = {
+            creator: address,
+            limit: EARNINGS_PAGE_LIMIT,
+            claimable_only: claimableOnly,
+            sort: claimableOnly ? 'claim_deadline_asc' : 'epoch_desc',
+            _cb: Date.now(),
+        };
+        if (cursor) params.cursor = cursor;
+        const next = validateEarnings(await Api.get('creator/earnings', params));
+        if (config) assertSameEarningsConfig(config, next);
+        else config = next;
+        items.push(...next.items);
+        for (const item of next.items) {
+            if (wanted.has(Number(item.epoch_id))) found.add(Number(item.epoch_id));
+        }
+        if (wanted.size > 0 && found.size === wanted.size) break;
+        if (!next.hasMore) break;
+        if (seenCursors.has(next.nextCursor)) throw new Error('Creator earnings cursor repeated');
+        seenCursors.add(next.nextCursor);
+        cursor = next.nextCursor;
+        if (page === EARNINGS_MAX_PAGES - 1) {
+            throw new Error('Creator earnings exceeded the pagination budget');
+        }
+    }
+    return { ...config, items };
+}
+
+export async function waitForCreatorClaim({
+    epochIds,
+    txHash,
+    creator,
+    pollTxStatus = tx.pollTxStatus,
+    fetchEarnings = fetchCreatorEarningsPages,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now = () => Date.now(),
+    settleTimeoutMs = CLAIM_SETTLE_TIMEOUT_MS,
+    settleIntervalMs = CLAIM_SETTLE_INTERVAL_MS,
+}) {
+    const delivered = await pollTxStatus(txHash, {
+        initialDelay: 0,
+        interval: 2000,
+        maxAttempts: 30,
+        requireIndexed: false,
+    });
+    if (!delivered) throw new Error('Timed out waiting for the creator claim transaction');
+    if (!delivered.success) {
+        throw new Error(delivered.error_details?.message || 'Creator claim was rejected by the chain');
+    }
+
+    const deadline = now() + settleTimeoutMs;
+    while (now() < deadline) {
+        const data = await fetchEarnings(creator, { stopEpochIds: epochIds });
+        const rows = data.items.filter((item) => epochIds.includes(Number(item.epoch_id)));
+        if (rows.length === epochIds.length && rows.every((item) => item.claimed_height != null)) {
+            return rows;
+        }
+        await sleep(settleIntervalMs);
+    }
+    throw new Error('The claim was accepted, but earnings indexing timed out. Please try again.');
 }
 
 export function currentCreatorEpoch(epochSeconds, now = Date.now(), originEpoch = 0, originUnix = 0) {
@@ -74,6 +192,8 @@ export function useCreatorEarnings(creator) {
     const [creatorEpochSeconds, setCreatorEpochSeconds] = useState(null);
     const [originEpoch, setOriginEpoch] = useState(null);
     const [originUnix, setOriginUnix] = useState(null);
+    const [maxClaimEpochs, setMaxClaimEpochs] = useState(null);
+    const [claimableItems, setClaimableItems] = useState([]);
     const [selected, setSelected] = useState([]);
     const [loading, setLoading] = useState(Boolean(address));
     const [error, setError] = useState('');
@@ -89,6 +209,8 @@ export function useCreatorEarnings(creator) {
             setCreatorEpochSeconds(null);
             setOriginEpoch(null);
             setOriginUnix(null);
+            setMaxClaimEpochs(null);
+            setClaimableItems([]);
             setLoading(false);
             return [];
         }
@@ -97,20 +219,30 @@ export function useCreatorEarnings(creator) {
             setError('');
         }
         try {
-            const next = validateEarnings(await Api.get('creator/earnings', { creator: address, _cb: Date.now() }));
-            setItems(next.items);
-            setCreatorEpochSeconds(next.creatorEpochSeconds);
-            setOriginEpoch(next.originEpoch);
-            setOriginUnix(next.originUnix);
-            setSelected((current) => current.filter((id) => next.items.some((item) => Number(item.epoch_id) === id)));
+            const [history, claimableData] = await Promise.all([
+                fetchCreatorEarningsPages(address),
+                fetchCreatorEarningsPages(address, { claimableOnly: true }),
+            ]);
+            assertSameEarningsConfig(history, claimableData);
+            setItems(history.items);
+            setClaimableItems(claimableData.items);
+            setCreatorEpochSeconds(history.creatorEpochSeconds);
+            setOriginEpoch(history.originEpoch);
+            setOriginUnix(history.originUnix);
+            setMaxClaimEpochs(history.maxClaimEpochs);
+            setSelected((current) => current.filter(
+                (id) => claimableData.items.some((item) => Number(item.epoch_id) === id),
+            ));
             console.debug('[earnings] loaded', {
                 creator: address,
-                epochs: next.items.length,
-                creatorEpochSeconds: next.creatorEpochSeconds,
-                originEpoch: next.originEpoch,
-                originUnix: next.originUnix,
+                epochs: history.items.length,
+                claimableEpochs: claimableData.items.length,
+                creatorEpochSeconds: history.creatorEpochSeconds,
+                originEpoch: history.originEpoch,
+                originUnix: history.originUnix,
+                maxClaimEpochs: history.maxClaimEpochs,
             });
-            return next.items;
+            return history.items;
         } catch (err) {
             const message = String(err?.message || err);
             setError(message);
@@ -132,74 +264,56 @@ export function useCreatorEarnings(creator) {
         };
     }, [refresh]);
 
-    // Runs detached from the claim, so it must stop on its own: bounded by a
-    // deadline, and abandoned if the component that started it is gone.
-    const settle = useCallback(async (ids) => {
-        const deadline = Date.now() + CLAIM_SETTLE_TIMEOUT_MS;
-        while (Date.now() < deadline) {
-            await new Promise((done) => setTimeout(done, CLAIM_SETTLE_INTERVAL_MS));
-            if (!mounted.current) return;
-            let next;
-            try {
-                next = await refresh(true);
-            } catch (err) {
-                console.error('[earnings] settle refresh failed', String(err?.message || err));
-                continue;
-            }
-            const rows = next.filter((item) => ids.includes(Number(item.epoch_id)));
-            if (rows.length === ids.length && rows.every((item) => item.claimed_height != null)) {
-                console.debug('[earnings] claim settled', { epochIds: ids });
-                await tx.refreshBalance();
-                window.dispatchEvent(new Event('creatorEarningsUpdated'));
-                return;
-            }
-        }
-        console.warn('[earnings] claim did not settle within the budget', { epochIds: ids });
-    }, [refresh]);
-
     const claimable = useMemo(() => {
-        return items.filter((item) => isCreatorEarningClaimable(item));
-    }, [items]);
+        return claimableItems.filter((item) => isCreatorEarningClaimable(item));
+    }, [claimableItems]);
 
     const toggleEpoch = useCallback((epochId) => {
-        const id = Number(epochId);
-        setSelected((current) => (
-            current.includes(id)
-                ? current.filter((value) => value !== id)
-                : normalizeClaimEpochs([...current, id])
-        ));
-    }, []);
+        const next = nextClaimSelection(selected, epochId, maxClaimEpochs);
+        if (next.atCap) {
+            setError(`You can claim at most ${maxClaimEpochs} epochs at once`);
+            return;
+        }
+        setError('');
+        setSelected(next.selected);
+    }, [maxClaimEpochs, selected]);
 
     // `epochIds` lets the feed banner claim everything outstanding in one go,
     // while the profile panel claims whatever the user ticked.
     const claim = useCallback(async (epochIds = null) => {
-        const ids = normalizeClaimEpochs(epochIds || selected);
+        const ids = normalizeClaimEpochs(epochIds || selected, maxClaimEpochs);
         setError('');
         console.debug('[earnings] claiming', { creator: address, epochIds: ids });
-        const result = await tx.claimCreatorRewards(ids);
-        if (!result?.success) {
-            const message = formatError(result);
+        try {
+            const result = await tx.claimCreatorRewards(ids);
+            const txHash = requireCreatorClaimCheckTx(result);
+            Api.invalidate('creator/earnings');
+            await waitForCreatorClaim({
+                epochIds: ids,
+                txHash,
+                creator: address,
+                fetchEarnings: (_ignored, options) => fetchCreatorEarningsPages(address, options),
+            });
+            if (!mounted.current) throw new Error('Creator claim view closed before confirmation');
+            await refresh(true);
+            await tx.refreshBalance();
+            window.dispatchEvent(new Event('creatorEarningsUpdated'));
+            console.debug('[earnings] claim confirmed', { creator: address, epochIds: ids, txHash });
+            return result;
+        } catch (err) {
+            const message = String(err?.message || err);
             setError(message);
+            console.error('[earnings] claim failed', { creator: address, epochIds: ids, error: message });
             throw new Error(message);
         }
-        Api.invalidate('creator/earnings');
-
-        // Submitting already waited for the queue and, on the free tier, for
-        // PoW. Do not make the caller wait for the chain on top of that: the
-        // claim is expected to land, so the UI confirms now like every other
-        // action does. The reward rows still have to be re-read once the chain
-        // and indexer catch up, but that happens behind the confirmation
-        // instead of in front of it, and it puts the card back if the claim
-        // somehow did not land.
-        void settle(ids);
-        return result;
-    }, [address, selected, settle]);
+    }, [address, maxClaimEpochs, refresh, selected]);
 
     return {
         items,
         creatorEpochSeconds,
         originEpoch,
         originUnix,
+        maxClaimEpochs,
         claimable,
         selected,
         toggleEpoch,

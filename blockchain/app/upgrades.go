@@ -12,6 +12,7 @@ import (
 	storetypes "github.com/cosmos/cosmos-sdk/store/v2/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
 	upgradetypes "github.com/cosmos/cosmos-sdk/x/upgrade/types"
 
 	corekeeper "mirage/x/core/keeper"
@@ -52,6 +53,36 @@ func validateV1340Params(params coretypes.Params) error {
 	if params.BlockHashWindow < coretypes.MinBlockHashWindow {
 		return fmt.Errorf("v1.34.0: block_hash_window %d is below the %d-block floor after migration",
 			params.BlockHashWindow, coretypes.MinBlockHashWindow)
+	}
+	return nil
+}
+
+type upgradeAccountKeeper interface {
+	GetAccount(context.Context, sdk.AccAddress) sdk.AccountI
+	SetAccount(context.Context, sdk.AccountI)
+}
+
+func ensureCreatorModuleAccount(ctx context.Context, accounts upgradeAccountKeeper) error {
+	addr := authtypes.NewModuleAddress(coretypes.CreatorPoolName)
+	existing := accounts.GetAccount(ctx, addr)
+	var moduleAccount *authtypes.ModuleAccount
+	switch account := existing.(type) {
+	case nil:
+		moduleAccount = authtypes.NewEmptyModuleAccount(coretypes.CreatorPoolName, authtypes.Burner)
+	case *authtypes.ModuleAccount:
+		if account.GetName() != coretypes.CreatorPoolName || !account.GetAddress().Equals(addr) {
+			return fmt.Errorf("creator module address contains unexpected module account %q", account.GetName())
+		}
+		return nil
+	case *authtypes.BaseAccount:
+		moduleAccount = authtypes.NewModuleAccount(account, coretypes.CreatorPoolName, authtypes.Burner)
+	default:
+		return fmt.Errorf("creator module address contains unsupported account type %T", existing)
+	}
+	accounts.SetAccount(ctx, moduleAccount)
+	verified, ok := accounts.GetAccount(ctx, addr).(*authtypes.ModuleAccount)
+	if !ok || verified.GetName() != coretypes.CreatorPoolName {
+		return fmt.Errorf("creator module account activation verification failed")
 	}
 	return nil
 }
@@ -2458,6 +2489,9 @@ func (app *App) RegisterUpgradeHandlers() {
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, fmt.Errorf("v1.39.0: RunMigrations failed: %w", err)
+			}
+			if err := ensureCreatorModuleAccount(sdkCtx, app.AuthKeeper); err != nil {
+				return nil, fmt.Errorf("v1.39.0: creator module account: %w", err)
 			}
 			if err := app.CoreKeeper.MigrateV139(sdkCtx); err != nil {
 				return nil, fmt.Errorf("v1.39.0: %w", err)

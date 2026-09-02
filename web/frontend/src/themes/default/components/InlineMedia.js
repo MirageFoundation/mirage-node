@@ -199,7 +199,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
         // (FeedCol is 820px on desktop in default). We measure the
         // image's current left offset so the image can fill the space
         // from wherever it starts to the right edge of the viewport —
-        // matching bluemoon's behaviour.
+        // matching focused-thread behaviour.
         let viewportMax;
         if (typeof window !== 'undefined') {
             let leftOffset = 0;
@@ -215,7 +215,7 @@ function InlineMediaBody({ url, variant, autoPlay = false, mediaMeta = null }) {
         // NOTE: intentionally do NOT clamp drag-to-zoom to
         // `theme.layout.maxVideoWidth` — that token sets the INITIAL
         // render width cap only. Once the user starts drag-zooming we
-        // want the full viewport available (matches bluemoon).
+        // want the full viewport available.
         if (newWidth < minWidth) newWidth = minWidth;
         if (newWidth > maxWidth) newWidth = maxWidth;
         setDisplayWidth(newWidth);
