@@ -180,6 +180,22 @@ func (k Keeper) newCreatorEpoch(ctx sdk.Context, epoch int64) (types.CreatorEpoc
 	}, nil
 }
 
+// truncateCreatorEpochEnd shortens an epoch's recorded window to the instant it
+// actually stopped accruing. Only an epoch cut short by an interval change
+// needs this; a full one already ends on its own boundary.
+func (k Keeper) truncateCreatorEpochEnd(ctx sdk.Context, epoch, at int64) error {
+	var ce types.CreatorEpoch
+	found, err := k.getProto(ctx, types.KeyCreatorEpoch(epoch), &ce)
+	if err != nil || !found {
+		return err
+	}
+	if ce.EndUnix <= at {
+		return nil
+	}
+	ce.EndUnix = at
+	return k.setProto(ctx, types.KeyCreatorEpoch(epoch), &ce)
+}
+
 func (k Keeper) ensureOpenEpoch(ctx sdk.Context, epoch int64) (*types.CreatorEpoch, error) {
 	var ce types.CreatorEpoch
 	found, err := k.getProto(ctx, types.KeyCreatorEpoch(epoch), &ce)

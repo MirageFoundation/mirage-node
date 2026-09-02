@@ -110,6 +110,12 @@ func (k Keeper) settleCreatorEpochInFlight(ctx sdk.Context, epoch, now int64) er
 			return err
 		}
 	}
+	// The epoch is being cut short, so it ends when it stopped accruing rather
+	// than at the boundary it was born with. Leaving the nominal boundary would
+	// report a payout period still running after it had already been settled.
+	if err := k.truncateCreatorEpochEnd(ctx, epoch, now); err != nil {
+		return err
+	}
 	return k.closeCreatorEpoch(ctx, epoch)
 }
 

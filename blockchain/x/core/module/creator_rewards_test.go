@@ -472,6 +472,14 @@ func TestCreatorEpochIntervalChangeKeepsEarnedRewards(t *testing.T) {
 	require.NoError(t, reward.mk.ClaimCreatorRewards(reward.ctx, reward.creator, []int64{reward.epoch}))
 	require.Equal(t, reward.earned, reward.mk.bank.sentModuleToAccount.AmountOf(types.MintDenom))
 
+	// The epoch cut short by the change reports when it actually stopped
+	// accruing, not the boundary it was born with, so its payout period does
+	// not appear to still be running after it settled.
+	inFlight, err := reward.am.CreatorEpoch(reward.ctx, &types.QueryCreatorEpochRequest{EpochId: savedClock})
+	require.NoError(t, err)
+	require.Equal(t, reward.ctx.BlockTime().Unix(), inFlight.Epoch.EndUnix)
+	require.Less(t, inFlight.Epoch.StartUnix, inFlight.Epoch.EndUnix)
+
 	// Epoch ids never repeat: the new grid opens after the one in flight.
 	clock, err := reward.mk.GetCreatorClock(reward.ctx)
 	require.NoError(t, err)
