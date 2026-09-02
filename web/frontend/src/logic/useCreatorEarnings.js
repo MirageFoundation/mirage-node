@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Api from '../utils/api';
 import * as tx from '../utils/tx';
 import { formatError } from '../utils/errorMessages';
@@ -38,6 +38,10 @@ function validateEarnings(data) {
     return { items: data.items, creatorEpochSeconds, originEpoch, originUnix };
 }
 
+// The claim rows are re-read until the chain has the claim, but never forever.
+const CLAIM_SETTLE_TIMEOUT_MS = 120000;
+const CLAIM_SETTLE_INTERVAL_MS = 2000;
+
 export function normalizeClaimEpochs(values) {
     const ids = [...new Set((values || []).map(Number))].sort((a, b) => a - b);
     if (!ids.length) throw new Error('Select at least one claimable epoch');
@@ -75,8 +79,11 @@ export function useCreatorEarnings(creator) {
     const [error, setError] = useState('');
     const { getInfo, getStatus } = usePendingCuration();
     const pending = getInfo('claim_creator_rewards', '', 0, address);
+    const mounted = useRef(false);
 
-    const refresh = useCallback(async () => {
+    // `quiet` re-reads without touching `loading`, so the post-claim polling
+    // below does not flash a loading row on the ledger every two seconds.
+    const refresh = useCallback(async (quiet = false) => {
         if (!address) {
             setItems([]);
             setCreatorEpochSeconds(null);
@@ -85,8 +92,10 @@ export function useCreatorEarnings(creator) {
             setLoading(false);
             return [];
         }
-        setLoading(true);
-        setError('');
+        if (!quiet) {
+            setLoading(true);
+            setError('');
+        }
         try {
             const next = validateEarnings(await Api.get('creator/earnings', { creator: address, _cb: Date.now() }));
             setItems(next.items);
@@ -108,15 +117,44 @@ export function useCreatorEarnings(creator) {
             console.error('[earnings] load failed', { creator: address, error: message });
             throw err;
         } finally {
-            setLoading(false);
+            if (!quiet) setLoading(false);
         }
     }, [address]);
 
     useEffect(() => {
+        mounted.current = true;
         refresh().catch(() => {});
         const onUpdate = () => refresh().catch(() => {});
         window.addEventListener('creatorEarningsUpdated', onUpdate);
-        return () => window.removeEventListener('creatorEarningsUpdated', onUpdate);
+        return () => {
+            mounted.current = false;
+            window.removeEventListener('creatorEarningsUpdated', onUpdate);
+        };
+    }, [refresh]);
+
+    // Runs detached from the claim, so it must stop on its own: bounded by a
+    // deadline, and abandoned if the component that started it is gone.
+    const settle = useCallback(async (ids) => {
+        const deadline = Date.now() + CLAIM_SETTLE_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+            await new Promise((done) => setTimeout(done, CLAIM_SETTLE_INTERVAL_MS));
+            if (!mounted.current) return;
+            let next;
+            try {
+                next = await refresh(true);
+            } catch (err) {
+                console.error('[earnings] settle refresh failed', String(err?.message || err));
+                continue;
+            }
+            const rows = next.filter((item) => ids.includes(Number(item.epoch_id)));
+            if (rows.length === ids.length && rows.every((item) => item.claimed_height != null)) {
+                console.debug('[earnings] claim settled', { epochIds: ids });
+                await tx.refreshBalance();
+                window.dispatchEvent(new Event('creatorEarningsUpdated'));
+                return;
+            }
+        }
+        console.warn('[earnings] claim did not settle within the budget', { epochIds: ids });
     }, [refresh]);
 
     const claimable = useMemo(() => {
@@ -135,20 +173,27 @@ export function useCreatorEarnings(creator) {
     // `epochIds` lets the feed banner claim everything outstanding in one go,
     // while the profile panel claims whatever the user ticked.
     const claim = useCallback(async (epochIds = null) => {
-        epochIds = normalizeClaimEpochs(epochIds || selected);
+        const ids = normalizeClaimEpochs(epochIds || selected);
         setError('');
-        console.debug('[earnings] claiming', { creator: address, epochIds });
-        const result = await tx.claimCreatorRewards(epochIds);
+        console.debug('[earnings] claiming', { creator: address, epochIds: ids });
+        const result = await tx.claimCreatorRewards(ids);
         if (!result?.success) {
             const message = formatError(result);
             setError(message);
             throw new Error(message);
         }
         Api.invalidate('creator/earnings');
-        await Promise.all([refresh(), tx.refreshBalance()]);
-        window.dispatchEvent(new Event('creatorEarningsUpdated'));
+
+        // Submitting already waited for the queue and, on the free tier, for
+        // PoW. Do not make the caller wait for the chain on top of that: the
+        // claim is expected to land, so the UI confirms now like every other
+        // action does. The reward rows still have to be re-read once the chain
+        // and indexer catch up, but that happens behind the confirmation
+        // instead of in front of it, and it puts the card back if the claim
+        // somehow did not land.
+        void settle(ids);
         return result;
-    }, [address, refresh, selected]);
+    }, [address, selected, settle]);
 
     return {
         items,

@@ -563,7 +563,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	require.Equal(t, uint64(360), sub.EditingTimeMins)
 	require.Equal(t, 1.33, sub.VoteWeight)
 	require.Equal(t, uint64(10), sub.MaxCurationMemberships)
-	require.Equal(t, uint64(250), sub.MaxDailyRelays)
+	require.Equal(t, uint64(1000), sub.MaxDailyRelays)
 	require.True(t, sub.CanHaveBiography)
 	require.True(t, sub.CanHaveAvatar)
 	require.True(t, sub.CanHaveBanner)
@@ -572,7 +572,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	admin := tiers[2]
 	require.Equal(t, uint64(0), admin.PeriodFee)
 	require.Equal(t, uint64(1000), admin.MaxCurationMemberships)
-	require.Equal(t, uint64(1000), admin.MaxDailyRelays)
+	require.Equal(t, uint64(10000), admin.MaxDailyRelays)
 	require.Equal(t, uint64(20000), admin.MaxContentLength)
 }
 

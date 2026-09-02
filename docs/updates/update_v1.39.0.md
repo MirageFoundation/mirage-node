@@ -36,7 +36,7 @@ How often that pool pays out is its own governance setting, and it is genuinely 
 
 ### Subscriptions that are simpler to use
 
-Subscribers no longer keep a relay reserve. Signed subscriber actions pay no fee and no proof of work, up to two hundred and fifty messages each UTC day. Appointed admins get the same instant path without buying a subscription, with a higher daily cap. You can buy one to twelve months at a time, and auto-renewal tries a week before expiry so you do not lose leftover paid time. Existing paid time is kept through the upgrade. The old agent tier is gone: those accounts become ordinary subscribers.
+Subscribers no longer keep a relay reserve. Signed subscriber actions pay no fee and no proof of work, up to one thousand messages each UTC day. Appointed admins get the same instant path without buying a subscription, with a higher daily cap. You can buy one to twelve months at a time, and auto-renewal tries a week before expiry so you do not lose leftover paid time. Existing paid time is kept through the upgrade. The old agent tier is gone: those accounts become ordinary subscribers.
 
 ### Your name is your name
 

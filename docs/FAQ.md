@@ -1422,8 +1422,8 @@ accounts cannot lead or join curator teams.
 
 Subscriber is the convenience tier. It removes proof of work delays and transaction fees,
 increases limits, unlocks profile features like biography, avatar, and banner, and lets paid
-users lead or join curator teams (up to ten memberships). Subscribers get two hundred and
-fifty instant network actions each UTC day. After that they wait until the next day; there
+users lead or join curator teams (up to ten memberships). Subscribers get one thousand
+instant network actions each UTC day. After that they wait until the next day; there
 is no extra quota for sale.
 
 Admin accounts keep the high limits, skip proof of work with a higher daily action cap, give
@@ -1436,7 +1436,7 @@ It is the number of signed network actions your account can submit during the cu
 day without waiting for browser proof of work. Posts, comments, votes, follows, community
 changes, and other transactions all use the same allowance.
 
-The current defaults are 250 actions per day for Subscribers and 1,000 for appointed
+The current defaults are 1,000 actions per day for Subscribers and 10,000 for appointed
 admins. These are governance-controlled network limits, so the number shown on your profile
 or subscription screen is authoritative if the values change.
 

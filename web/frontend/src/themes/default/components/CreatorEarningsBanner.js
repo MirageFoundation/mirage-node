@@ -1,12 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Link } from 'react-router-dom';
 import { HiOutlineBanknotes, HiOutlineArrowUp, HiOutlineChatBubbleLeft } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import { formatMirageCompact } from '../../../utils/formatters';
 import { useCreatorEarnings } from '../../../logic/useCreatorEarnings';
-import { formatCreatorRewardTime } from './CreatorEarningsPanel';
 import { requireThemeColor } from '../../../utils/themeColor';
+import CreatorClaimCelebration from './CreatorClaimCelebration';
 
 /**
  * Claimable creator rewards, as a feed card — `default` theme.
@@ -16,11 +16,15 @@ import { requireThemeColor } from '../../../utils/themeColor';
  * at the top of the home and following feeds and disappears once there is
  * nothing left to claim.
  *
- * Geometry is the retired quest reward card's: header (icon tile, title stack,
+ * Geometry is the retired quest reward card's: header (icon tile, title,
  * right-aligned amount pill) over a body of reward rows and a full-width CTA.
  * The rows list the posts the money came from, so the number in the header is
  * accounted for rather than asserted. Colors go through tokens rather than the
  * raw hex that card inlined (RULES.md R213).
+ *
+ * The claim deadline is deliberately not here. It is per-epoch, so on a card
+ * that batches several it can only ever show one of them; the Earnings tab
+ * lists the real deadline against each period.
  */
 
 // Matches the post CardView (`width: 100%`, `margin: 4px 0`, 8px radius) so the
@@ -80,15 +84,9 @@ const IconTile = styled.div`
     }
 `;
 
-const TitleStack = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-    flex: 1;
-`;
-
 const TitleText = styled.div`
+    flex: 1;
+    min-width: 0;
     font-size: 0.72rem;
     font-weight: 600;
     color: ${({ theme }) => requireThemeColor(theme, 'text')};
@@ -96,16 +94,6 @@ const TitleText = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-`;
-
-const SubtitleText = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-    line-height: 1.25;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
 `;
 
 const HeaderBadge = styled.span`
@@ -219,11 +207,6 @@ const RewardValue = styled.div`
     line-height: 1.2;
 `;
 
-const MoreNote = styled.div`
-    font-size: 0.6rem;
-    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
-`;
-
 const CtaButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -270,6 +253,8 @@ const ClaimErrorMessage = styled.div`
     border: 1px solid ${({ theme }) => requireThemeColor(theme, 'buttonDangerBorder')};
 `;
 
+// Top earners only. The card is a prompt to claim, not the ledger; the Earnings
+// tab is where the full history belongs.
 const MAX_ROWS = 3;
 
 /** A post can earn across several epochs, so the rows are summed per post. */
@@ -310,31 +295,43 @@ function engagementLabel(post) {
 export default function CreatorEarningsBanner() {
     const address = String(Storage.load('publicKey', '') || '').toLowerCase();
     const earnings = useCreatorEarnings(address);
+    const [claiming, setClaiming] = useState(false);
+    const [claimed, setClaimed] = useState(null);
+    // The chain needs a few seconds to report the claim, and until it does the
+    // rewards still read as claimable. Drop them here so the card does not
+    // invite a second click on money that is already on its way.
+    const [submittedEpochs, setSubmittedEpochs] = useState([]);
 
     // A claim carries at most 30 epochs, so when more are outstanding take the
     // ones closest to expiring; the rest stay on the card for the next claim.
     const batch = useMemo(() => {
-        return [...earnings.claimable]
+        return earnings.claimable
+            .filter((item) => !submittedEpochs.includes(Number(item.epoch_id)))
             .sort((a, b) => Number(a.claim_deadline_unix) - Number(b.claim_deadline_unix))
             .slice(0, 30);
-    }, [earnings.claimable]);
+    }, [earnings.claimable, submittedEpochs]);
     const posts = useMemo(() => mergePosts(batch), [batch]);
 
-    if (!address || earnings.loading || !batch.length) return null;
+    // A confirmed claim empties `claimable`, so the celebration has to be able
+    // to outlive the card that started it.
+    if (claimed) {
+        return <CreatorClaimCelebration
+            claimedUmirage={claimed.umirage}
+            epochCount={claimed.epochCount}
+            onClose={() => setClaimed(null)}
+        />;
+    }
+    if (!address || !batch.length) return null;
 
     const total = batch.reduce((sum, item) => sum + (BigInt(item.earned) - BigInt(item.claimed)), 0n);
     const epochIds = batch.map((item) => Number(item.epoch_id));
-    const deadline = formatCreatorRewardTime(batch[0].claim_deadline_unix, earnings.creatorEpochSeconds);
     const rows = posts.slice(0, MAX_ROWS);
 
     return <CardContainer role="region" aria-label="Creator rewards ready to claim">
         <Header>
             <TitleRow>
                 <IconTile aria-hidden="true"><HiOutlineBanknotes /></IconTile>
-                <TitleStack>
-                    <TitleText>Creator earnings</TitleText>
-                    <SubtitleText>Claim before {deadline}</SubtitleText>
-                </TitleStack>
+                <TitleText>Creator earnings</TitleText>
             </TitleRow>
             <HeaderBadge>{formatMirageCompact(String(total))} MIRAGE</HeaderBadge>
         </Header>
@@ -354,15 +351,23 @@ export default function CreatorEarningsBanner() {
                     </RewardMeta>
                     <RewardValue>{formatMirageCompact(String(post.amount))}</RewardValue>
                 </RewardRow>)}
-                {posts.length > rows.length && <MoreNote>
-                    +{posts.length - rows.length} more post{posts.length - rows.length === 1 ? '' : 's'}
-                </MoreNote>}
             </RewardsList>}
             {earnings.error && <ClaimErrorMessage>{earnings.error}</ClaimErrorMessage>}
             <CtaButton
                 type="button"
-                disabled={earnings.pending}
-                onClick={() => earnings.claim(epochIds).catch(() => { })}
+                disabled={earnings.pending || claiming}
+                onClick={async () => {
+                    setClaiming(true);
+                    try {
+                        await earnings.claim(epochIds);
+                        setSubmittedEpochs((current) => [...current, ...epochIds]);
+                        setClaimed({ umirage: total.toString(), epochCount: epochIds.length });
+                    } catch (_) {
+                        // `claim` already surfaced the reason through earnings.error.
+                    } finally {
+                        setClaiming(false);
+                    }
+                }}
             >
                 {earnings.pendingStatus || 'Claim rewards'}
             </CtaButton>

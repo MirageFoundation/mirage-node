@@ -607,10 +607,10 @@ def test_tier_config_api(backend: str):
             "tierapi.admin_max_curation_memberships_1000",
             f"got={admin.get('max_curation_memberships')}",
         )
-    if int(admin.get("max_daily_relays", -1)) == 1000:
-        _pass("tierapi.admin_max_daily_relays_1000")
+    if int(admin.get("max_daily_relays", -1)) == 10000:
+        _pass("tierapi.admin_max_daily_relays_10000")
     else:
-        _fail("tierapi.admin_max_daily_relays_1000", f"got={admin.get('max_daily_relays')}")
+        _fail("tierapi.admin_max_daily_relays_10000", f"got={admin.get('max_daily_relays')}")
 
     _pass("tierapi.agent_tier_removed")
 

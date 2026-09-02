@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import styled from 'styled-components';
 import { useCreatorEarnings } from '../../../logic/useCreatorEarnings';
 import Button from './Button';
 import { requireThemeColor } from '../../../utils/themeColor';
+import CreatorClaimCelebration from './CreatorClaimCelebration';
 
 const Panel = styled.section`
     display: flex;
@@ -118,7 +120,16 @@ export function formatCreatorRewardTime(unixSeconds, epochSeconds) {
 
 export default function CreatorEarningsPanel({ creator, canClaim = false }) {
     const earnings = useCreatorEarnings(creator);
+    // `claim` resolves only once the chain has the claim, which outlives the
+    // queue's own pending flag, so the button needs its own busy state.
+    const [claiming, setClaiming] = useState(false);
+    const [claimResult, setClaimResult] = useState(null);
     return <Panel>
+        {claimResult && <CreatorClaimCelebration
+            claimedUmirage={claimResult.umirage}
+            epochCount={claimResult.epochCount}
+            onClose={() => setClaimResult(null)}
+        />}
         <Header>
             <Title>Creator earnings</Title>
             <Subtitle>MIRAGE rewards allocated to this creator. Each row shows when they were earned and when they expire.</Subtitle>
@@ -156,10 +167,27 @@ export default function CreatorEarningsPanel({ creator, canClaim = false }) {
         {canClaim && earnings.items.length > 0 && <Actions>
             <Button
                 size="sm"
-                disabled={!earnings.selected.length || earnings.pending}
-                onClick={() => earnings.claim().catch(() => { })}
+                disabled={!earnings.selected.length || earnings.pending || claiming}
+                onClick={async () => {
+                    const chosen = earnings.items.filter(
+                        (item) => earnings.selected.includes(Number(item.epoch_id)),
+                    );
+                    const umirage = chosen
+                        .reduce((sum, item) => sum + (BigInt(item.earned) - BigInt(item.claimed)), 0n)
+                        .toString();
+                    setClaiming(true);
+                    try {
+                        await earnings.claim();
+                        setClaimResult({ umirage, epochCount: chosen.length });
+                    } catch (_) {
+                        // `claim` already surfaced the reason through earnings.error.
+                    } finally {
+                        setClaiming(false);
+                    }
+                }}
             >
-                {earnings.pendingStatus || `Claim ${earnings.selected.length || ''} reward${earnings.selected.length === 1 ? '' : 's'}`}
+                {earnings.pendingStatus
+                    || `Claim ${earnings.selected.length || ''} reward${earnings.selected.length === 1 ? '' : 's'}`}
             </Button>
         </Actions>}
     </Panel>;

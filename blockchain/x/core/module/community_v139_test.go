@@ -455,7 +455,7 @@ func TestAdminCanCreateCurationTeamWithoutEffectivePaid(t *testing.T) {
 	adminTier := mk.GetParams(ctx).GetTierConfig(types.LevelAdminMin)
 	require.NotNil(t, adminTier)
 	require.Equal(t, uint64(1000), adminTier.MaxCurationMemberships)
-	require.Equal(t, uint64(1000), adminTier.MaxDailyRelays)
+	require.Equal(t, uint64(10000), adminTier.MaxDailyRelays)
 	require.NoError(t, mk.JoinCommunity(ctx, admin, slug, uint32(adminTier.MaxJoinedCommunities)))
 
 	teamID, err := mk.CreateCurationTeam(ctx, admin, slug, "AdminTeam", "admin without paid flag")

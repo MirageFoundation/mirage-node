@@ -119,8 +119,14 @@ def wait_for_epoch_runway(min_seconds: int) -> tuple[dict, int]:
 
     Without this the upvote could land a second either side of a boundary and
     the script would watch the wrong epoch.
+
+    `current_epoch` is the chain's stored clock, which the node advances in
+    BeginBlock once a boundary has passed, so just after a boundary it still
+    reports the epoch that has already ended and `left` goes negative. Sleeping
+    for that value spins, and then raises once it reaches -1.
     """
-    while True:
+    deadline = time.time() + 900
+    while time.time() < deadline:
         sched = schedule()
         epoch = sched["current_epoch"]
         _, end = epoch_bounds(sched, epoch)
@@ -128,7 +134,8 @@ def wait_for_epoch_runway(min_seconds: int) -> tuple[dict, int]:
         if left >= min_seconds:
             return sched, epoch
         print(f"  epoch {epoch} has only {left}s left; waiting for the next one")
-        time.sleep(min(left + 2, 30))
+        time.sleep(max(min(left + 2, 30), 2))
+    die(f"no epoch offered {min_seconds}s of runway within 15 minutes")
 
 
 def claim(wallet, epoch_ids: list[int]) -> dict:

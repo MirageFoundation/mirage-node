@@ -110,7 +110,7 @@ def check_params() -> None:
         ok("subscription_creator_bps=5000")
     else:
         fail(f"subscription_creator_bps={params.get('subscription_creator_bps')!r}")
-    # The upgrade seeds 250, but governance owns the value from then on and the
+    # The upgrade seeds 1000, but governance owns the value from then on and the
     # local rehearsal raises it so the suites do not spend a wallet's whole day.
     # What has to hold is that the parameter exists and is in the range the chain
     # accepts; pinning the default made a legitimately raised chain fail here.

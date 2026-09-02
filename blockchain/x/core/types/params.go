@@ -234,7 +234,7 @@ func DefaultTiers() []*TierConfig {
 			CanHaveFlair:           true,
 			MaxBiographyLength:     512,
 			MaxCurationMemberships: 10,
-			MaxDailyRelays:         250,
+			MaxDailyRelays:         1000,
 		},
 		{
 			// Admin is appointed via governance, not purchased. PeriodFee must stay 0.
@@ -254,7 +254,7 @@ func DefaultTiers() []*TierConfig {
 			CanHaveFlair:           true,
 			MaxBiographyLength:     512,
 			MaxCurationMemberships: 1000,
-			MaxDailyRelays:         1000,
+			MaxDailyRelays:         10000,
 		},
 	}
 }
@@ -337,7 +337,7 @@ func DefaultParams() Params {
 		CreatorEpochExpiriesPerBlock:        4,
 		SubscriptionEarlyRenewalDays:        7,
 		SubscriptionRenewalAttemptsPerBlock: 100,
-		SubscriberDailyRelayLimit:           250,
+		SubscriberDailyRelayLimit:           1000,
 		MaxSubscriptionPeriodsPerPurchase:   12,
 		CreatorEpochSeconds:                 DefaultCreatorEpochSeconds,
 	}

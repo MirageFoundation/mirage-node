@@ -22,11 +22,11 @@ func TestDefaultTiers(t *testing.T) {
 	require.Equal(t, uint64(100_000_000_000), tiers[1].PeriodFee)
 	require.Equal(t, uint64(500), tiers[1].MaxBlockedCommunities)
 	require.Equal(t, uint64(10), tiers[1].MaxCurationMemberships)
-	require.Equal(t, uint64(250), tiers[1].MaxDailyRelays)
+	require.Equal(t, uint64(1000), tiers[1].MaxDailyRelays)
 
 	require.Equal(t, uint64(0), tiers[2].PeriodFee)
 	require.Equal(t, uint64(1000), tiers[2].MaxCurationMemberships)
-	require.Equal(t, uint64(1000), tiers[2].MaxDailyRelays)
+	require.Equal(t, uint64(10000), tiers[2].MaxDailyRelays)
 }
 
 func TestLevelToTierIndex(t *testing.T) {
@@ -45,8 +45,8 @@ func TestLevelToTierIndex(t *testing.T) {
 func TestDailyRelayLimit(t *testing.T) {
 	p := DefaultParams()
 	require.Equal(t, uint64(0), p.DailyRelayLimit(0))
-	require.Equal(t, uint64(250), p.DailyRelayLimit(1))
-	require.Equal(t, uint64(1000), p.DailyRelayLimit(100))
+	require.Equal(t, uint64(1000), p.DailyRelayLimit(1))
+	require.Equal(t, uint64(10000), p.DailyRelayLimit(100))
 	require.Equal(t, uint64(0), p.DailyRelayLimit(10), "retired agent level has no quota")
 	require.False(t, p.GetTierConfig(0).UsesRelayPath())
 	require.True(t, p.GetTierConfig(1).UsesRelayPath())
