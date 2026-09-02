@@ -58,6 +58,21 @@ LOCAL_CONTAINER = "mirage"
 _local_miraged_path: str | None = None
 
 
+_NEW_MIRAGED = "/opt/mirage/blockchain/miraged"
+_OLD_MIRAGED = "/opt/mirage/blockchain/bin/miraged"
+
+
+def in_local_container() -> bool:
+    """True when this process is already running inside the local container.
+
+    Local mode normally reaches miraged through `docker exec`, but the upgrade
+    rehearsal's postflight phases run inside the container, which has no docker
+    binary at all. The binary sitting on this filesystem is the signal: the host
+    has no /opt/mirage.
+    """
+    return Path(_NEW_MIRAGED).is_file() or Path(_OLD_MIRAGED).is_file()
+
+
 def get_local_miraged_path() -> str:
     """Get the miraged binary path inside the local container.
 
@@ -68,20 +83,31 @@ def get_local_miraged_path() -> str:
     if _local_miraged_path is not None:
         return _local_miraged_path
 
-    # Check new path first, then fall back to old path
-    new_path = "/opt/mirage/blockchain/miraged"
-    old_path = "/opt/mirage/blockchain/bin/miraged"
+    if in_local_container():
+        _local_miraged_path = _NEW_MIRAGED if Path(_NEW_MIRAGED).is_file() else _OLD_MIRAGED
+        return _local_miraged_path
 
+    # Check new path first, then fall back to old path
     result = subprocess.run(
-        ["docker", "exec", LOCAL_CONTAINER, "test", "-f", new_path],
+        ["docker", "exec", LOCAL_CONTAINER, "test", "-f", _NEW_MIRAGED],
         capture_output=True,
     )
     if result.returncode == 0:
-        _local_miraged_path = new_path
+        _local_miraged_path = _NEW_MIRAGED
     else:
-        _local_miraged_path = old_path
+        _local_miraged_path = _OLD_MIRAGED
 
     return _local_miraged_path
+
+
+def local_miraged_cmd(interactive: bool = False) -> list[str]:
+    """Argv prefix that reaches miraged in local mode, inside or outside the container."""
+    if in_local_container():
+        return [get_local_miraged_path()]
+    prefix = ["docker", "exec"]
+    if interactive:
+        prefix.append("-i")
+    return prefix + [LOCAL_CONTAINER, get_local_miraged_path()]
 
 
 # Account names
@@ -192,11 +218,11 @@ def get_keyring_home() -> str:
 
 
 def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = False) -> subprocess.CompletedProcess:
-    """Run miraged command, via docker exec for local mode"""
+    """Run miraged command, via docker exec for local mode from the host"""
     miraged = get_miraged_path()
     bin_path = str(miraged) if miraged else "miraged"
     if _is_local_mode:
-        full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
+        full_cmd = local_miraged_cmd() + cmd
     else:
         full_cmd = [bin_path] + cmd
     log_debug(f"Running: {' '.join(full_cmd)}")
@@ -222,7 +248,7 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str], fatal: bool = True) -> dic
     """
     cmd_with_node = cmd + ["--node", rpc_endpoint, "-o", "json"]
     if _is_local_mode:
-        full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd_with_node
+        full_cmd = local_miraged_cmd() + cmd_with_node
     else:
         miraged = get_miraged_path()
         bin_path = str(miraged) if miraged else "miraged"
@@ -300,11 +326,10 @@ def run_with_pexpect(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
     """Run a command with pexpect, handle keyring password prompt, and return (exit_code, output).
     For local mode (test backend), uses simple subprocess since no password is needed."""
     if _is_local_mode:
-        # Build shell command string for docker exec (more reliable than list for complex args)
-        miraged_path = get_local_miraged_path()
+        # Build shell command string (more reliable than list for complex args)
         args_str = " ".join(shlex.quote(arg) for arg in cmd[1:])
-        shell_cmd = f"docker exec {LOCAL_CONTAINER} {miraged_path} {args_str}"
-        log_debug(f"Docker exec: {shell_cmd}")
+        shell_cmd = f"{shlex.join(local_miraged_cmd())} {args_str}"
+        log_debug(f"Local exec: {shell_cmd}")
         result = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         output = result.stdout + result.stderr
         log_debug(f"Output: {output}")
@@ -511,7 +536,7 @@ def get_address_from_seed(seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
+        full_cmd = local_miraged_cmd(interactive=True) + cmd
     else:
         full_cmd = [bin_path] + cmd
 
@@ -595,7 +620,7 @@ def import_key_from_seed(account_name: str, seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
+        full_cmd = local_miraged_cmd(interactive=True) + cmd
     else:
         full_cmd = [bin_path] + cmd
 
@@ -974,7 +999,7 @@ def main():
     info("\nSubmitting proposal...")
 
     proposal_path_for_cmd = str(proposal_file)
-    if _is_local_mode:
+    if _is_local_mode and not in_local_container():
         container_proposal_path = "/tmp/proposal.json"
         subprocess.run(["docker", "cp", str(proposal_file), f"{LOCAL_CONTAINER}:{container_proposal_path}"], check=True)
         proposal_path_for_cmd = container_proposal_path
@@ -1093,7 +1118,7 @@ def main():
                 try:
                     tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
                     if _is_local_mode:
-                        tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
+                        tx_cmd = local_miraged_cmd() + tx_args
                     else:
                         miraged = get_miraged_path()
                         bin_path = str(miraged) if miraged else "miraged"

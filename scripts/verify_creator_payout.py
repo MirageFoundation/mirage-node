@@ -14,6 +14,7 @@ import json
 import socket
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -94,11 +95,12 @@ def creator_epoch(epoch: int) -> dict | None:
 
 
 def backend_earnings(creator: str) -> list[dict]:
+    # No sort: the endpoint only accepts claim_deadline_asc or epoch_desc, and
+    # this probe scans for one epoch_id, so the default epoch_desc is fine.
     query = urllib.parse.urlencode(
         {
             "creator": creator,
             "limit": 100,
-            "sort": "oldest",
         }
     )
     with urllib.request.urlopen(f"{BACKEND}/api/creator/earnings?{query}", timeout=10) as response:
@@ -122,6 +124,14 @@ def wait_backend_claimed(creator: str, epoch: int, timeout: float = 120.0) -> di
                     f"claimed={last.get('claimed')}"
                 )
                 return last
+        except urllib.error.HTTPError as error:
+            # A 4xx means this probe and the route disagree on the contract. No
+            # amount of waiting fixes that, and retrying buries the real cause
+            # under a timeout message, so report it immediately.
+            if 400 <= error.code < 500:
+                body = error.read().decode("utf-8", errors="replace")[:300]
+                die(f"backend creator earnings rejected the query: HTTP {error.code} {body}")
+            last = {"error": repr(error)}
         except Exception as error:
             last = {"error": repr(error)}
         time.sleep(2)
