@@ -28,6 +28,12 @@ function validateEarnings(data) {
                 throw new Error(`Creator earnings ${field} is required`);
             }
         }
+        if (!Array.isArray(item.posts)) throw new Error('Creator earnings posts breakdown is required');
+        for (const post of item.posts) {
+            if (!post.txhash || typeof post.amount !== 'string') {
+                throw new Error('Creator earnings post breakdown must carry a txhash and amount');
+            }
+        }
     }
     return { items: data.items, creatorEpochSeconds, originEpoch, originUnix };
 }
@@ -126,8 +132,10 @@ export function useCreatorEarnings(creator) {
         ));
     }, []);
 
-    const claim = useCallback(async () => {
-        const epochIds = normalizeClaimEpochs(selected);
+    // `epochIds` lets the feed banner claim everything outstanding in one go,
+    // while the profile panel claims whatever the user ticked.
+    const claim = useCallback(async (epochIds = null) => {
+        epochIds = normalizeClaimEpochs(epochIds || selected);
         setError('');
         console.debug('[earnings] claiming', { creator: address, epochIds });
         const result = await tx.claimCreatorRewards(epochIds);

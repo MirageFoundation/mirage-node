@@ -23,6 +23,7 @@ import { requireThemeColor } from "../../../utils/themeColor";
 import CurationLensPicker from "../components/CurationLensPicker";
 import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import AccountStatusNotices from "../components/AccountStatusNotices";
+import CreatorEarningsBanner from "../components/CreatorEarningsBanner";
 import { usePendingBlocks } from "../../../logic/usePendingBlocks";
 import { isOptimisticallyCurationHidden } from "../../../utils/curationVisibility";
 import { joinPreferenceForLens } from "../../../utils/curation";
@@ -1321,6 +1322,7 @@ const MainView = ({
                                     </HomeFeedHeaderRow>
                                 </HomeFeedTitleBar>
                                 <AccountStatusNotices showQuota={false} />
+                                <CreatorEarningsBanner />
                             </FeedHeroColumn>}
 
                             {/* Android app banner - shown once for Android users until dismissed */}

@@ -1006,6 +1006,35 @@ def _build_pool():
         ".cosmos.base.query.v1beta1.PageResponse",
     )
 
+    target_earning = file_proto.message_type.add()
+    target_earning.name = "TargetEarning"
+    add_f(target_earning, "epoch_id", 1, INT64)
+    add_f(target_earning, "target", 2, STRING)
+    add_f(target_earning, "creator", 3, STRING)
+    add_f(target_earning, "upvote_units", 4, UINT64)
+    add_f(target_earning, "direct_reply_units", 5, UINT64)
+    add_f(target_earning, "amount", 6, STRING)
+
+    query_epoch_targets_req = file_proto.message_type.add()
+    query_epoch_targets_req.name = "QueryCreatorEpochTargetsRequest"
+    add_f(query_epoch_targets_req, "epoch_id", 1, INT64)
+    add_message_field(query_epoch_targets_req, "pagination", 2, ".cosmos.base.query.v1beta1.PageRequest")
+    query_epoch_targets_resp = file_proto.message_type.add()
+    query_epoch_targets_resp.name = "QueryCreatorEpochTargetsResponse"
+    add_message_field(
+        query_epoch_targets_resp,
+        "earnings",
+        1,
+        ".mirage.core.v1.TargetEarning",
+        repeated=True,
+    )
+    add_message_field(
+        query_epoch_targets_resp,
+        "pagination",
+        2,
+        ".cosmos.base.query.v1beta1.PageResponse",
+    )
+
     renewal_state = file_proto.message_type.add()
     renewal_state.name = "SubscriptionRenewalState"
     add_f(renewal_state, "expiry", 1, INT64)
@@ -1191,6 +1220,9 @@ QueryCreatorEpochRequest = _get_message_class("mirage.core.v1.QueryCreatorEpochR
 QueryCreatorEpochResponse = _get_message_class("mirage.core.v1.QueryCreatorEpochResponse")
 QueryCreatorEpochAccrualsRequest = _get_message_class("mirage.core.v1.QueryCreatorEpochAccrualsRequest")
 QueryCreatorEpochAccrualsResponse = _get_message_class("mirage.core.v1.QueryCreatorEpochAccrualsResponse")
+TargetEarning = _get_message_class("mirage.core.v1.TargetEarning")
+QueryCreatorEpochTargetsRequest = _get_message_class("mirage.core.v1.QueryCreatorEpochTargetsRequest")
+QueryCreatorEpochTargetsResponse = _get_message_class("mirage.core.v1.QueryCreatorEpochTargetsResponse")
 SubscriptionRenewalState = _get_message_class("mirage.core.v1.SubscriptionRenewalState")
 QuerySubscriptionRenewalRequest = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalRequest")
 QuerySubscriptionRenewalResponse = _get_message_class("mirage.core.v1.QuerySubscriptionRenewalResponse")

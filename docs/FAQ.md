@@ -464,11 +464,12 @@ They are gone. There is no quest board, no invite-and-earn payout, and no referr
 this version. Campaign links can still tell a node where a visitor came from; they do not
 mint tokens.
 
-Authors earn from a daily creator pool instead. Half of every new subscription payment is
-burned. The other half funds that day's pool for authors who received an upvote or a direct
-reply from a paying subscriber that day. The split is equal among those subscribers, then
-among the actions they took, so one frantic account cannot vacuum the pool. Authors have
-thirty days after a day's settlement to claim what they earned. Unused remainder is burned.
+Authors earn from a creator pool instead. Half of every new subscription payment is burned.
+The other half funds the pool for each payout period, shared among authors who received an
+upvote or a direct reply from a paying subscriber during that period. The split is equal
+among those subscribers, then among the actions they took, so one frantic account cannot
+vacuum the pool. Authors have thirty days after a period settles to claim what they earned.
+Unused remainder is burned.
 
 ### What is the difference between reports, personal blocks, curation bans, and filters?
 
@@ -1530,26 +1531,43 @@ to fund your own subscription and unlock upgrades without ever buying anything.
 
 So the short version is: the network pays nodes for real usage, nodes compete for users, and
 many nodes choose to share rewards with users to accelerate growth and reward genuine
-participation. Authors also earn from the daily creator pool when a paying subscriber
-upvotes or replies to their posts. That is separate from node rewards, and it has to be
-claimed within thirty days.
+participation. Authors also earn from the creator pool when a paying subscriber upvotes or
+replies to their posts. That is separate from node rewards, and it has to be claimed within
+thirty days.
 
 ### What are creator earnings?
 
-Creator earnings are daily MIRAGE rewards for authors who receive an upvote or direct reply
-from an active Subscriber. Half of new subscription payments funds that day's creator pool;
-the other half is burned. Each eligible Subscriber receives an equal share of the day's
+Creator earnings are MIRAGE rewards for authors who receive an upvote or direct reply from
+an active Subscriber. Half of new subscription payments funds the creator pool; the other
+half is burned. Each eligible Subscriber receives an equal share of the payout period's
 pool, and that share is divided among the eligible actions they made, preventing one very
 active account from taking the entire pool.
 
-The Earnings tab shows the UTC day when each reward was earned, the amount, whether it was
+Payouts settle every six hours by default. That interval is a governance setting and can be
+moved between five minutes and once a day without shortening anybody's subscription or
+affecting what has already been earned.
+
+The Earnings tab shows the period each reward was earned in, the amount, whether it was
 claimed, and the date by which it must be claimed.
+
+### Which of my posts earned the money?
+
+The claim card on your feed breaks a payout down by post, so you can see which posts and
+comments the money came from and how many upvotes and replies each one drew from paying
+subscribers. Amounts are per post and add up to the period total. The Earnings tab lists
+each payout period as a whole.
+
+Two things are worth knowing when the numbers look surprising. Your payout depends on how
+many other things the engaging subscriber did that period, everywhere on Mirage, not just on
+your posts, because their equal share is divided across all of their eligible actions. And
+only upvotes and direct replies from paying subscribers count, so engagement from free
+accounts, your own account, or downvotes earns nothing.
 
 ### Why is an Earnings tab empty?
 
 An empty Earnings tab means that profile has no creator reward allocation yet. Creator
-earnings are settled by UTC day, so an eligible upvote or direct reply does not become a
-claimable row until that day's pool has been settled.
+earnings settle per payout period, so an eligible upvote or direct reply does not become a
+claimable row until that period's pool has been settled.
 
 The tab is not hidden from profile visitors. When public earnings exist, everyone can see
 them; only the creator receives the claim controls.

@@ -90,7 +90,7 @@ const ErrorText = styled.div`
     }
 `;
 
-function formatMirage(umirage) {
+export function formatMirage(umirage) {
     const amount = BigInt(umirage);
     const whole = amount / 1000000n;
     const fraction = String(amount % 1000000n).padStart(6, '0').replace(/0+$/, '');

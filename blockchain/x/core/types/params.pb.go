@@ -303,7 +303,7 @@ type Params struct {
 	SubscriberDailyRelayLimit         uint64 `protobuf:"varint,76,opt,name=subscriber_daily_relay_limit,json=subscriberDailyRelayLimit,proto3" json:"subscriber_daily_relay_limit,omitempty"`
 	MaxSubscriptionPeriodsPerPurchase uint64 `protobuf:"varint,77,opt,name=max_subscription_periods_per_purchase,json=maxSubscriptionPeriodsPerPurchase,proto3" json:"max_subscription_periods_per_purchase,omitempty"`
 	// creator_epoch_seconds controls creator reward settlement boundaries.
-	// It must divide one UTC day exactly. Default: 86400; minimum: 300.
+	// It must divide one UTC day exactly. Default: 21600; minimum: 300.
 	CreatorEpochSeconds uint64 `protobuf:"varint,78,opt,name=creator_epoch_seconds,json=creatorEpochSeconds,proto3" json:"creator_epoch_seconds,omitempty"`
 }
 

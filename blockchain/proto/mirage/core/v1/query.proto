@@ -69,6 +69,9 @@ service Query {
   rpc TargetEarnings(QueryTargetEarningsRequest) returns (QueryTargetEarningsResponse) {
     option (google.api.http).get = "/mirage/core/v1/creator/target/{target}";
   }
+  rpc CreatorEpochTargets(QueryCreatorEpochTargetsRequest) returns (QueryCreatorEpochTargetsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/creator/epoch/{epoch_id}/targets";
+  }
   rpc SubscriptionTranches(QuerySubscriptionTranchesRequest) returns (QuerySubscriptionTranchesResponse) {
     option (google.api.http).get = "/mirage/core/v1/subscription/tranches/{address}";
   }
@@ -269,6 +272,18 @@ message TargetEarning {
   string amount = 6;
 }
 message QueryTargetEarningsResponse {
+  repeated TargetEarning earnings = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// CreatorEpochTargets lists every post that earned in one epoch. TargetEarnings
+// answers "what did this post earn", which cannot build a creator's breakdown
+// without one query per post.
+message QueryCreatorEpochTargetsRequest {
+  int64 epoch_id = 1;
+  cosmos.base.query.v1beta1.PageRequest pagination = 2;
+}
+message QueryCreatorEpochTargetsResponse {
   repeated TargetEarning earnings = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
 }

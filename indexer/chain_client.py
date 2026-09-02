@@ -571,6 +571,60 @@ class ChainClient:
                     return out
         raise RuntimeError(f"CreatorEpochAccruals exceeded 1001 pages for epoch {epoch}")
 
+    def query_creator_epoch_targets(self, epoch_id: int) -> list[dict]:
+        """Read the per-post earning breakdown for one epoch."""
+        from shared.datatypes import (
+            PageRequest,
+            QueryCreatorEpochTargetsRequest,
+            QueryCreatorEpochTargetsResponse,
+        )
+
+        epoch = int(epoch_id)
+        next_key = b""
+        out: list[dict] = []
+        seen: set[str] = set()
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/CreatorEpochTargets",
+                request_serializer=QueryCreatorEpochTargetsRequest.SerializeToString,
+                response_deserializer=QueryCreatorEpochTargetsResponse.FromString,
+            )
+            for _ in range(1001):
+                try:
+                    resp = method(
+                        QueryCreatorEpochTargetsRequest(
+                            epoch_id=epoch,
+                            pagination=PageRequest(key=next_key, limit=1000),
+                        ),
+                        timeout=30,
+                    )
+                except grpc.RpcError as e:
+                    raise RuntimeError(f"CreatorEpochTargets gRPC failed for {epoch}: {e}") from e
+                for value in resp.earnings:
+                    target = str(value.target).strip().lower()
+                    creator = str(value.creator).strip().lower()
+                    if not target or target in seen:
+                        raise RuntimeError(f"CreatorEpochTargets returned duplicate or empty target for epoch {epoch}")
+                    if not creator:
+                        raise RuntimeError(f"CreatorEpochTargets returned empty creator for {target} epoch {epoch}")
+                    if not value.amount:
+                        raise RuntimeError(f"CreatorEpochTargets returned incomplete amount for {target} epoch {epoch}")
+                    seen.add(target)
+                    out.append(
+                        {
+                            "epoch_id": int(value.epoch_id),
+                            "target_txhash": target,
+                            "creator": creator,
+                            "upvote_units": int(value.upvote_units),
+                            "direct_reply_units": int(value.direct_reply_units),
+                            "amount": str(value.amount),
+                        }
+                    )
+                next_key = bytes(resp.pagination.next_key) if resp.HasField("pagination") else b""
+                if not next_key:
+                    return out
+        raise RuntimeError(f"CreatorEpochTargets exceeded 1001 pages for epoch {epoch}")
+
     def query_creator_schedule(self, timeout: int = GRPC_TIMEOUT) -> dict:
         """Read the live creator-epoch grid."""
         from shared.datatypes import QueryCreatorScheduleRequest, QueryCreatorScheduleResponse

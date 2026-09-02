@@ -320,10 +320,12 @@ const ProfileFieldRow = styled.div`
     }
 `;
 
+/* `$top` for values that can wrap: centering a multi-line value against the
+ * taller action button pushes its first line below the row's label. */
 const ProfileFieldValue = styled.div`
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: ${({ $top }) => ($top ? 'flex-start' : 'center')};
     gap: 0.5rem;
     min-width: 0;
     flex-wrap: nowrap;
@@ -2016,7 +2018,7 @@ function ProfileViewAuthenticated({
                                                         fontSize: '0.75rem',
                                                         color: theme.colors.voteDown
                                                     }}>{bioError}</span>}
-                                                </div> : <ProfileFieldValue>
+                                                </div> : <ProfileFieldValue $top>
                                                     <Mono style={{
                                                         whiteSpace: 'pre-wrap',
                                                         wordBreak: 'break-word',

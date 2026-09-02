@@ -182,7 +182,7 @@ message Params {
   uint64 subscriber_daily_relay_limit = 76;
   uint64 max_subscription_periods_per_purchase = 77;
   // creator_epoch_seconds controls creator reward settlement boundaries.
-  // It must divide one UTC day exactly. Default: 86400; minimum: 300.
+  // It must divide one UTC day exactly. Default: 21600; minimum: 300.
   uint64 creator_epoch_seconds = 78;
 }
 

@@ -133,6 +133,19 @@ func settleCreatorReward(t *testing.T, directReply bool, epochSeconds uint64, de
 	require.Len(t, targetResponse.Earnings, 1)
 	require.Equal(t, earned.String(), targetResponse.Earnings[0].Amount)
 
+	// The epoch side of the same index. TargetEarnings answers "what did this
+	// post earn"; the breakdown a creator sees needs "which posts earned this
+	// epoch", and the two must agree.
+	epochTargets, err := am.CreatorEpochTargets(settledCtx, &types.QueryCreatorEpochTargetsRequest{EpochId: epoch})
+	require.NoError(t, err)
+	require.Len(t, epochTargets.Earnings, 1)
+	require.Equal(t, targetResponse.Earnings[0].Target, epochTargets.Earnings[0].Target)
+	require.Equal(t, creator, epochTargets.Earnings[0].Creator)
+	require.Equal(t, earned.String(), epochTargets.Earnings[0].Amount)
+	// Per-post amounts must reconcile with the creator's total, or the card
+	// would show a breakdown that does not add up to what is being claimed.
+	require.Equal(t, epochAccruals.Accruals[0].Amount, epochTargets.Earnings[0].Amount)
+
 	return settledCreatorReward{
 		mk:         mk,
 		am:         am,
@@ -329,7 +342,7 @@ func TestCreatorStreamConservesAcrossIntervalChange(t *testing.T) {
 	ensureUsername(t, mk, ctx, subscriber, "regrid-subscriber")
 
 	params := mk.GetParams(ctx)
-	require.Equal(t, uint64(types.SecondsPerUTCDay), params.CreatorEpochSeconds)
+	require.Equal(t, uint64(types.DefaultCreatorEpochSeconds), params.CreatorEpochSeconds)
 	tier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, tier)
 	fundAccount(mk, payer, tier.PeriodFee)
@@ -352,8 +365,8 @@ func TestCreatorStreamConservesAcrossIntervalChange(t *testing.T) {
 		genTxHash(220),
 	))
 
-	// Run a few days on daily epochs, then switch to five minutes partway
-	// through the subscription.
+	// Run a few days on the default six-hour epochs, then switch to five
+	// minutes partway through the subscription.
 	trancheEnd := start + int64(params.SubscriptionPeriod)*60
 	midway := advanceCreatorClockTo(t, mk, ctx, start+3*types.SecondsPerUTCDay)
 	paidBeforeChange, err := mk.CreatorStreamPaid(midway)

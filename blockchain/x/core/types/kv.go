@@ -422,6 +422,10 @@ func KeyEpochCreatorAccrualPrefix(epoch int64) []byte {
 	return concat([]byte(PfxEpochCreatorAccrual), i64(epoch))
 }
 
+func KeyEpochTargetPrefix(epoch int64) []byte {
+	return concat([]byte(PfxEpochTarget), i64(epoch))
+}
+
 func KeyCreatorEpochIdx(creator []byte, epoch int64) []byte {
 	return concat([]byte(PfxCreatorEpochIdx), creator, i64(epoch))
 }

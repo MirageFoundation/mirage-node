@@ -1,74 +1,89 @@
 import { useEffect, useState } from 'react';
-import styled, { css } from 'styled-components';
+import styled from 'styled-components';
 import { Link } from 'react-router-dom';
-import { HiOutlineBolt, HiOutlineClock } from 'react-icons/hi2';
+import { HiOutlineClock } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
 import { requireThemeColor } from '../../../utils/themeColor';
 
 /**
- * Account status hero cards — `default` theme.
+ * Account status notices — `default` theme.
  *
- * Follows `docs/guides/web-theme-default/RULES.md`: cards sit on `bg` with a
- * 1px border and 8px radius (R1/R3), the renewal card uses the canonical amber
- * warning pair (R2 `warning*`), and type stays on the compact scale (R7 —
- * 0.78rem/600 title, 0.68rem/600 tally, 0.65rem body, 0.65rem/600 action pill).
- * Card geometry mirrors the app-download and NSFW consent heroes in
- * `routes/MainView.js`; the action pill follows SubscriptionView's StatusBadge.
+ * The quota is a plain `label: value` row, matching the `Balance:` field rows it
+ * sits beside on Profile / Settings / Subscription. It is ambient information,
+ * not something to act on, so it gets no card, icon or meter.
  *
- * Both cards share one row order — header (icon, title, headline value) then
- * body then affordance — so the quota and renewal notices read as a set rather
- * than two unrelated blocks.
+ * The renewal warning is the one notice that needs attention, so it is a hero
+ * card: `bg` with a 1px border and 8px radius (R1/R3) using the canonical amber
+ * warning pair (R2 `warning*`), on the compact type scale (R7 — 0.78rem/600
+ * title, 0.68rem/600 tally, 0.65rem body, 0.65rem/600 action pill). Geometry
+ * mirrors the app-download and NSFW consent heroes in `routes/MainView.js`; the
+ * action pill follows SubscriptionView's StatusBadge.
  */
 
-// The horizontal inset tracks the gutter every host container uses, so the cards
-// line up with the heading above them: HomeFeedTitleBar (`0.5rem 1rem`) on the
-// feed, SectionBody (`0 1rem`, `0.85rem` at 1000px, flush at 600px) on
-// Subscription / Settings / Profile. Going flush here outdents the cards past
-// every sibling section.
+// Each notice owns its own spacing: the quota is a field row that has to sit on
+// the host's row rhythm, while the card is an inset block. A shared wrapper
+// margin would double up with the quota's row padding and push it out of line
+// with the `Balance:` row above it.
 const NoticeList = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin: 0.35rem 1rem;
+`;
+
+/* Plain label:value row for the quota. Geometry is copied from ProfileView's
+ * `ProfileFieldRow` so this row is indistinguishable from `Balance:` — same
+ * label column, same gap, same padding at every breakpoint. */
+const QuotaRow = styled.div`
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 1rem;
+    align-items: center;
+    padding: 0.55rem 1rem;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.3;
 
     @media (max-width: 1000px) {
-        margin: 0.35rem 0.85rem;
+        padding: 0.5rem 0.85rem;
     }
 
     @media (max-width: 600px) {
-        margin: 0.35rem 0;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.2rem;
+        padding: 0.5rem 0;
     }
 `;
 
+const QuotaLabel = styled.div`
+    font-weight: 500;
+    color: ${({ theme, $exhausted }) => requireThemeColor(theme, $exhausted ? 'voteDown' : 'text')};
+`;
+
+const QuotaValue = styled.div`
+    min-width: 0;
+`;
+
+// Full width with its own 1rem padding, like every other card in this column
+// (CardView, NsfwWelcomeHero, CreatorEarningsBanner). The host supplies the
+// gutter: FeedHeroColumn has none, so the card edge lines up with the posts
+// below, and SectionBody's `0 1rem` insets it on Subscription / Settings /
+// Profile. Adding a margin here as well double-insets it in SectionBody and
+// pushes the text to 2rem, out of line with the heading above it.
 const NoticeCard = styled.div`
     box-sizing: border-box;
     width: 100%;
-    max-width: 100%;
     align-self: flex-start;
+    margin: 4px 0;
     border-radius: 8px;
     padding: 0.7rem 1rem 0.75rem;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-
-    ${({ $tone, theme }) => {
-        if ($tone === 'warning') {
-            return css`
-                background: ${requireThemeColor(theme, 'warningBg')};
-                border: 1px solid ${requireThemeColor(theme, 'warningBorder')};
-            `;
-        }
-        if ($tone === 'danger') {
-            return css`
-                background: ${requireThemeColor(theme, 'buttonDangerBg')};
-                border: 1px solid ${requireThemeColor(theme, 'buttonDangerBorder')};
-            `;
-        }
-        return css`
-            background: ${requireThemeColor(theme, 'bg')};
-            border: 1px solid ${requireThemeColor(theme, 'border')};
-        `;
-    }}
+    background: ${({ theme }) => requireThemeColor(theme, 'warningBg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'warningBorder')};
 
     @media (max-width: 600px) {
         border-radius: 6px;
@@ -83,6 +98,8 @@ const NoticeHeader = styled.div`
     min-width: 0;
 `;
 
+// Deeper amber than the card itself, which is already `warningBg` — matching it
+// here leaves the tile with nothing to read against.
 const NoticeIconTile = styled.span`
     flex-shrink: 0;
     width: 24px;
@@ -91,35 +108,14 @@ const NoticeIconTile = styled.span`
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    background: ${({ theme }) => requireThemeColor(theme, 'warningHoverBg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'warningBorder')};
+    color: ${({ theme }) => requireThemeColor(theme, 'warningText')};
 
     svg {
         width: 0.85rem;
         height: 0.85rem;
     }
-
-    ${({ $tone, theme }) => {
-        if ($tone === 'warning') {
-            // Deeper amber than the card itself, which is already `warningBg` —
-            // matching it here leaves the tile with nothing to read against.
-            return css`
-                background: ${requireThemeColor(theme, 'warningHoverBg')};
-                border: 1px solid ${requireThemeColor(theme, 'warningBorder')};
-                color: ${requireThemeColor(theme, 'warningText')};
-            `;
-        }
-        if ($tone === 'danger') {
-            return css`
-                background: ${requireThemeColor(theme, 'buttonDangerBg')};
-                border: 1px solid ${requireThemeColor(theme, 'buttonDangerBorder')};
-                color: ${requireThemeColor(theme, 'voteDown')};
-            `;
-        }
-        return css`
-            background: ${requireThemeColor(theme, 'accentSubtle')};
-            border: 1px solid ${requireThemeColor(theme, 'border')};
-            color: ${requireThemeColor(theme, 'subtleText')};
-        `;
-    }}
 `;
 
 const NoticeTitle = styled.div`
@@ -134,16 +130,12 @@ const NoticeTitle = styled.div`
     white-space: nowrap;
 `;
 
-/** Right-aligned headline value (e.g. "95 left", "52 minutes"). */
+/** Right-aligned headline value (e.g. "52 minutes"). */
 const NoticeTally = styled.div`
     flex-shrink: 0;
     font-size: 0.68rem;
     font-weight: 600;
-    color: ${({ $tone, theme }) => {
-        if ($tone === 'danger') return requireThemeColor(theme, 'voteDown');
-        if ($tone === 'warning') return requireThemeColor(theme, 'warningText');
-        return requireThemeColor(theme, 'subtleText');
-    }};
+    color: ${({ theme }) => requireThemeColor(theme, 'warningText')};
 `;
 
 const NoticeBody = styled.div`
@@ -157,24 +149,6 @@ const NoticeBody = styled.div`
         color: ${({ theme }) => requireThemeColor(theme, 'text')};
         font-weight: 600;
     }
-`;
-
-const QuotaTrack = styled.div`
-    width: 100%;
-    height: 4px;
-    border-radius: 999px;
-    overflow: hidden;
-    background: ${({ theme }) => requireThemeColor(theme, 'accent')};
-`;
-
-const QuotaFill = styled.div`
-    height: 100%;
-    border-radius: 999px;
-    width: ${({ $pct }) => $pct}%;
-    background: ${({ $tone, theme }) => ($tone === 'danger'
-        ? requireThemeColor(theme, 'voteDown')
-        : requireThemeColor(theme, 'gradient'))};
-    transition: width 0.2s ease;
 `;
 
 /**
@@ -283,36 +257,20 @@ export default function AccountStatusNotices({ showQuota = true, showRenewal = t
     const renewalDays = renewal ? Math.max(0, Math.ceil((renewal.expiry * 1000 - Date.now()) / 86400000)) : 0;
     const showRenewalNotice = renewal && renewalDays <= 7;
     if (!quota && !showRenewalNotice) return null;
-    const quotaExhausted = quota ? quota.remaining === 0 : false;
-    const quotaPct = quota && quota.limit > 0
-        ? Math.min(100, Math.round((quota.used / quota.limit) * 100))
-        : 0;
     return <NoticeList>
-        {quota && <NoticeCard role="status" $tone={quotaExhausted ? 'danger' : 'neutral'}>
+        {quota && <QuotaRow role="status">
+            <QuotaLabel $exhausted={quota.remaining === 0}>Daily no-PoW:</QuotaLabel>
+            <QuotaValue>
+                {quota.used.toLocaleString()} of {quota.limit.toLocaleString()} used
+            </QuotaValue>
+        </QuotaRow>}
+        {showRenewalNotice && <NoticeCard role="alert">
             <NoticeHeader>
-                <NoticeIconTile aria-hidden="true" $tone={quotaExhausted ? 'danger' : 'neutral'}>
-                    <HiOutlineBolt />
-                </NoticeIconTile>
-                <NoticeTitle>Daily no-PoW</NoticeTitle>
-                <NoticeTally $tone={quotaExhausted ? 'danger' : 'neutral'}>
-                    {quota.remaining.toLocaleString()} left
-                </NoticeTally>
-            </NoticeHeader>
-            <QuotaTrack>
-                <QuotaFill $pct={quotaPct} $tone={quotaExhausted ? 'danger' : 'neutral'} />
-            </QuotaTrack>
-            <NoticeBody>
-                <strong>{quota.used.toLocaleString()}</strong> of {quota.limit.toLocaleString()} used
-                {' · '}resets in {formatCountdown(quota.reset_at)}
-            </NoticeBody>
-        </NoticeCard>}
-        {showRenewalNotice && <NoticeCard role="alert" $tone="warning">
-            <NoticeHeader>
-                <NoticeIconTile aria-hidden="true" $tone="warning">
+                <NoticeIconTile aria-hidden="true">
                     <HiOutlineClock />
                 </NoticeIconTile>
                 <NoticeTitle>Subscription renewal</NoticeTitle>
-                <NoticeTally $tone="warning">{formatCountdown(renewal.expiry)}</NoticeTally>
+                <NoticeTally>{formatCountdown(renewal.expiry)}</NoticeTally>
             </NoticeHeader>
             <NoticeBody>Expires {formatMoment(renewal.expiry)}</NoticeBody>
             <NoticeAction to="/subscription">Review renewal</NoticeAction>

@@ -749,6 +749,43 @@ def creator_earnings():
                 (creator,),
             )
             rows = cur.fetchall() or []
+            # The accrual is one number per epoch. The target rows break it down
+            # by the post that earned it, so a creator can see where the money
+            # came from instead of being handed an unexplained total.
+            epoch_ids = [r[0] for r in rows]
+            target_rows = []
+            if epoch_ids:
+                cur.execute(
+                    """
+                    SELECT t.epoch_id, t.target_txhash, t.amount,
+                           t.upvote_units, t.direct_reply_units,
+                           p.title, p.content, p.community, p.target, p.deleted
+                    FROM creator_target_earnings t
+                    LEFT JOIN posts p ON p.txhash = t.target_txhash
+                    WHERE LOWER(t.creator)=LOWER(%s) AND t.epoch_id = ANY(%s)
+                    ORDER BY t.epoch_id DESC, t.amount DESC
+                    LIMIT 500
+                    """,
+                    (creator, epoch_ids),
+                )
+                target_rows = cur.fetchall() or []
+        by_epoch: dict[int, list] = {}
+        for t in target_rows:
+            deleted = bool(t[9])
+            content = (t[6] or "").strip()
+            by_epoch.setdefault(t[0], []).append(
+                {
+                    "txhash": t[1],
+                    "amount": str(t[2]),
+                    "upvote_units": int(t[3]),
+                    "direct_reply_units": int(t[4]),
+                    "title": None if deleted else (t[5] or None),
+                    "excerpt": None if deleted else (content[:120] or None),
+                    "community": t[7],
+                    "is_comment": t[8] is not None,
+                    "deleted": deleted,
+                }
+            )
         schedule = expect_creator_schedule()
         creator_epoch_seconds = int(schedule["epoch_seconds"])
         # Times come from the epoch record, not from the live grid. Governance
@@ -763,6 +800,7 @@ def creator_earnings():
                 "epoch_end_unix": r[5],
                 "claim_deadline_unix": r[3],
                 "claimed_height": r[6],
+                "posts": by_epoch.get(r[0], []),
             }
             for r in rows
         ]

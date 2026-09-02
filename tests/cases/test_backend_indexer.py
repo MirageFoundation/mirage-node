@@ -987,6 +987,19 @@ def test_indexer_hardening(backend: str):
                 }
             ]
 
+        @staticmethod
+        def query_creator_epoch_targets(epoch_id):
+            return [
+                {
+                    "epoch_id": epoch_id,
+                    "target_txhash": "aabb",
+                    "creator": "mirage1creator",
+                    "upvote_units": 3,
+                    "direct_reply_units": 1,
+                    "amount": "1000",
+                }
+            ]
+
     creator_db = _StubCurationDB()
     creator_proc = MessageProcessor(creator_db, _CreatorChain(), lambda *a, **k: None, lambda t: "")
     creator_proc.process_creator_events(
@@ -1000,6 +1013,7 @@ def test_indexer_hardening(backend: str):
     )
     epoch_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_epochs" in s]
     accrual_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_accruals" in s]
+    target_writes = [p for s, p in creator_db.statements if "INSERT INTO creator_target_earnings" in s]
     # The epoch must carry its own wall-clock window. Epoch ids cannot be
     # converted to times after governance changes creator_epoch_seconds,
     # because the grid they were numbered on no longer exists.
@@ -1011,12 +1025,16 @@ def test_indexer_hardening(backend: str):
         and accrual_writes[0][0][0] == "mirage1creator"
         and accrual_writes[0][0][2] == "1000"
         and accrual_writes[0][0][4:7] == (1702678400, 1700000000, 1700086400)
+        # The per-post breakdown is what lets a creator see where the money came
+        # from; without it the accrual is an unexplained total.
+        and len(target_writes) == 1
+        and target_writes[0][0] == (20696, "aabb", "mirage1creator", 3, 1, "1000")
     ):
         _pass("indexer_hardening.creator_rewards_projected")
     else:
         _fail(
             "indexer_hardening.creator_rewards_projected",
-            f"epochs={epoch_writes!r} accruals={accrual_writes!r}",
+            f"epochs={epoch_writes!r} accruals={accrual_writes!r} targets={target_writes!r}",
         )
     begin_event = {
         "type": "creator_epoch_claimable",

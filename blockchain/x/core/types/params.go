@@ -42,6 +42,14 @@ const (
 	MaxSubscriptionPeriodMinutes = 525_600
 	SecondsPerUTCDay             = 86_400
 	MinCreatorEpochSeconds       = 300
+	// DefaultCreatorEpochSeconds is six hours: four payouts a day. Creator
+	// rewards have to be claimed, so a long interval makes a creator wait for
+	// money that is already theirs, while a short one settles the same amount
+	// into more epochs for them to claim. Six hours is the compromise, and it
+	// is only a default — governance moves it freely between
+	// MinCreatorEpochSeconds and SecondsPerUTCDay without touching
+	// subscriptions or forfeiting anything already earned.
+	DefaultCreatorEpochSeconds = 21_600
 	// MaxEnvelopeAgeSeconds is one day.
 	MaxEnvelopeAgeSeconds = 86_400
 	// MaxProfileListEntries keeps uint64 governance values representable by
@@ -331,7 +339,7 @@ func DefaultParams() Params {
 		SubscriptionRenewalAttemptsPerBlock: 100,
 		SubscriberDailyRelayLimit:           250,
 		MaxSubscriptionPeriodsPerPurchase:   12,
-		CreatorEpochSeconds:                 SecondsPerUTCDay,
+		CreatorEpochSeconds:                 DefaultCreatorEpochSeconds,
 	}
 }
 

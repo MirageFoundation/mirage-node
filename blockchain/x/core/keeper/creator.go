@@ -53,6 +53,54 @@ func (k Keeper) GetCreatorEpochAccrualsPaginated(
 	return accruals, nextKey, nil
 }
 
+// GetCreatorEpochTargetsPaginated walks every settled per-post earning in one
+// epoch. Settlement already records the split per post in TargetEarning, but
+// the only way to reach it was TargetEarnings, which is keyed by post: showing
+// a creator where their money came from would have meant one query per post
+// they have ever written. This walks the epoch side of the same index so the
+// indexer can project the breakdown in a single pass, exactly as it already
+// does for the creator-level rollup above.
+func (k Keeper) GetCreatorEpochTargetsPaginated(
+	ctx sdk.Context,
+	epoch int64,
+	pageKey []byte,
+	limit uint64,
+) (earnings []*types.TargetEarning, nextKey []byte, err error) {
+	if limit == 0 || limit > MaxCreatorAccrualQueryLimit {
+		limit = MaxCreatorAccrualQueryLimit
+	}
+	prefix := types.KeyEpochTargetPrefix(epoch)
+	start := prefix
+	if len(pageKey) > 0 {
+		start = append(append([]byte(nil), prefix...), pageKey...)
+	}
+	it, err := k.storeService.OpenKVStore(ctx).Iterator(start, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if closeErr := it.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	for ; it.Valid() && uint64(len(earnings)) < limit; it.Next() {
+		var earning types.TargetEarning
+		if err := k.cdc.Unmarshal(it.Value(), &earning); err != nil {
+			return nil, nil, err
+		}
+		earningCopy := earning
+		earnings = append(earnings, &earningCopy)
+	}
+	if err := it.Error(); err != nil {
+		return nil, nil, err
+	}
+	if it.Valid() {
+		fullKey := it.Key()
+		nextKey = append([]byte(nil), fullKey[len(prefix):]...)
+	}
+	return earnings, nextKey, nil
+}
+
 func (k Keeper) RecordUpvoteEngagement(ctx sdk.Context, voter, target string, direction int32) error {
 	if err := k.setVoteDir(ctx, voter, target, direction); err != nil {
 		return err

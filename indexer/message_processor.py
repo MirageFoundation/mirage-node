@@ -2687,6 +2687,14 @@ class MessageProcessor:
                 raise RuntimeError(
                     f"creator epoch {epoch_id} query returned accrual for epoch {accrual['epoch_id']}"
                 )
+        # The accrual is a per-creator total; the target rows say which post each
+        # part of it came from, which is what the earnings UI shows.
+        targets = self.chain.query_creator_epoch_targets(epoch_id)
+        for target in targets:
+            if target["epoch_id"] != epoch_id:
+                raise RuntimeError(
+                    f"creator epoch {epoch_id} query returned target for epoch {target['epoch_id']}"
+                )
         with self.db._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -2782,11 +2790,44 @@ class MessageProcessor:
                     )
                 else:
                     cur.execute("DELETE FROM creator_accruals WHERE epoch_id=%s", (epoch_id,))
+                target_hashes = [target["target_txhash"] for target in targets]
+                if targets:
+                    cur.executemany(
+                        """
+                        INSERT INTO creator_target_earnings(
+                            epoch_id, target_txhash, creator, upvote_units,
+                            direct_reply_units, amount
+                        ) VALUES(%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT(epoch_id, target_txhash) DO UPDATE SET
+                            creator=EXCLUDED.creator,
+                            upvote_units=EXCLUDED.upvote_units,
+                            direct_reply_units=EXCLUDED.direct_reply_units,
+                            amount=EXCLUDED.amount
+                        """,
+                        [
+                            (
+                                epoch_id,
+                                target["target_txhash"],
+                                target["creator"],
+                                target["upvote_units"],
+                                target["direct_reply_units"],
+                                target["amount"],
+                            )
+                            for target in targets
+                        ],
+                    )
+                    cur.execute(
+                        "DELETE FROM creator_target_earnings WHERE epoch_id=%s AND NOT (target_txhash=ANY(%s))",
+                        (epoch_id, target_hashes),
+                    )
+                else:
+                    cur.execute("DELETE FROM creator_target_earnings WHERE epoch_id=%s", (epoch_id,))
         logger.info(
-            "creator epoch projected epoch=%s status=%s accruals=%s height=%s",
+            "creator epoch projected epoch=%s status=%s accruals=%s targets=%s height=%s",
             epoch_id,
             epoch["status"],
             len(accruals),
+            len(targets),
             height,
         )
 
