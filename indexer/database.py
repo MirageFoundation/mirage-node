@@ -1957,8 +1957,8 @@ class DatabaseManager:
           AND (
             NOT %s
             OR (
-              LOWER(v.owner) = ANY(%s)
-              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
+              LOWER(v.owner) = ANY(%s::text[])
+              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s::text[])
             )
           )
         GROUP BY 1, 2
@@ -1977,8 +1977,8 @@ class DatabaseManager:
           AND (
             NOT %s
             OR (
-              LOWER(p.owner) = ANY(%s)
-              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s)
+              LOWER(p.owner) = ANY(%s::text[])
+              AND LOWER(COALESCE(NULLIF(p.root_community, ''), p.community)) = ANY(%s::text[])
             )
           )
         GROUP BY 1, 2
