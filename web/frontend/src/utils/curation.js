@@ -1,5 +1,7 @@
 import Api from './api';
 import { CURATOR_READ_ACTION, signReadParams } from './signPlain';
+import { communityLabel } from './community';
+import { formatUserLabel } from './UsernameCache';
 
 export const CURATION_MODE = Object.freeze({
     LIVE_DEFAULT: 0,
@@ -479,6 +481,76 @@ export async function waitForOwnCurationTeam(community, owner, name, options = {
         } catch (err) {
             console.warn('[curation] create team visibility poll failed', {
                 community: slug,
+                attempt,
+                error: String(err?.message || err),
+            });
+        }
+        if (attempt < maxAttempts) await sleep(interval);
+    }
+    return null;
+}
+
+export function curatorInviteHeroCopy({ community, name, inviterUsername, inviter }) {
+    const slugLabel = communityLabel(community);
+    const teamName = String(name || '').trim() || 'a curator team';
+    const who = formatUserLabel(inviterUsername, inviter) || 'A curator';
+    return {
+        title: `You're invited to curate ${slugLabel}`,
+        body: `${who} invited you to join ${teamName}. Accept to start shaping what subscribers see.`,
+    };
+}
+
+/**
+ * Poll team invitations until `invitee` has a pending row.
+ * Used after invite_curator so the pending list can drop the optimistic row
+ * once the indexer has caught up.
+ */
+export async function waitForCurationInvite(community, teamId, invitee, options = {}) {
+    const slug = requireCommunitySlug(community);
+    const id = requireTeamId(teamId);
+    const target = String(invitee || '').trim().toLowerCase();
+    if (!target) throw new Error('invitee is required');
+
+    const {
+        viewer = '',
+        interval = 1500,
+        maxAttempts = 10,
+        timeoutMs = 5000,
+        sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    } = options;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const params = await withCuratorRead(viewer, { _cb: Date.now() });
+            const data = await Api.get(
+                `communities/${encodeURIComponent(slug)}/teams/${id}/invitations`,
+                params,
+                { timeoutMs },
+            );
+            const items = Array.isArray(data?.items) ? data.items : [];
+            const found = items.find((invitation) => (
+                String(invitation?.invitee || invitation?.address || '').toLowerCase() === target
+                && Number(invitation?.status) === 0
+            ));
+            if (found) {
+                console.debug('[curation] invite visible', {
+                    community: slug,
+                    teamId: id,
+                    invitee: target.slice(0, 12),
+                    attempt,
+                });
+                return found;
+            }
+            console.debug('[curation] invite not indexed yet', {
+                community: slug,
+                teamId: id,
+                invitee: target.slice(0, 12),
+                attempt,
+            });
+        } catch (err) {
+            console.warn('[curation] invite poll failed', {
+                community: slug,
+                teamId: id,
                 attempt,
                 error: String(err?.message || err),
             });

@@ -1,25 +1,25 @@
 # Mirage v1.39.0 Release Notes
 
-### Open communities
+### REDDIT, BUT WITHOUT THE BULLSHIT
 
-The places you post are communities now. Every valid community name is open for conversation immediately, with no registration, founder, owner, or claim. Join the communities you want in your home feed and choose the view that suits you.
+Before building this release, we asked the community what Mirage should become, and we listened. You wanted Mirage to keep what makes Reddit useful: focused communities, threaded conversations, votes, a personalized home feed, and moderators who keep discussions usable. You also wanted us to remove centralized ownership, one-sided censorship, and platform games. Mirage v1.39.0 is our answer.
 
-### Curation without ownership
+### Communities belong to everyone
 
-Paid subscribers and appointed admins can form competing curator teams for any community. Teams can organize posts, apply familiar content tags, hide material from their own lens, and lock a thread from that point forward, but they never own the community or rewrite anyone else's words. A lock filters one team's view rather than blocking replies, and raw view remains available wherever node policy permits it. Community-wide tags still describe content in raw view; a team's per-post overrides do not.
+If you know Reddit, a Mirage community is the equivalent of a subreddit. A post starts a thread, replies continue the conversation, votes surface what users value, and joining communities brings them into your home feed. The crucial difference is that a Mirage community cannot be claimed or owned. It exists as soon as anyone posts to any valid community name. There is nothing to register, create, buy, or reserve first, and no founder can lock everyone else out.
 
-### Creator rewards
+### Moderation without censorship
 
-Half of every new subscription payment is burned, and half funds authors who receive an upvote or direct reply from a paying subscriber. Creator periods begin at six-hour intervals, split rewards so one highly active account cannot take the whole pool, and leave earnings claimable for thirty days before unused funds are burned. Governance may change the interval without shortening subscriptions or existing claim windows. Quests, invite bonuses, and referral payouts are retired.
+A Mirage moderation team is the closest equivalent to a Reddit moderator team, with one fundamental difference: no single team controls the community. Any active subscriber or appointed admin can start a team immediately, without an application or approval, then invite up to nine other users to help. The first team becomes the initial default, meaning users who have not made a choice will see its organized view first. This gives early teams a head start, not ownership. Users can pin any team they trust, which tells Mirage to keep showing that team's view even if the default later changes. Pins from active subscribers also count as support. The team with the most subscriber support becomes the default, and the oldest team wins a tie. Free users can pin a team for their own view, but their pins do not influence the default. Unlike Reddit moderators, these teams can only organize their own view. They can apply content tags, hide material, and lock threads within that view, but they cannot rewrite another user's words, erase posts from the network, or stop replies from being published. Users can change teams at any time, follow the changing default, or choose raw view wherever node policy allows it.
 
-### Simpler subscriptions
+### Subscriptions now support creators
 
-Subscribers no longer maintain a relay reserve. They receive up to 1,000 zero-fee relays per UTC day, while appointed admins receive up to 10,000; free users continue with fees and proof of work. Subscriptions can cover one to twelve months, renew early without losing paid time, and carry existing paid time through the upgrade. The old Agent tier is gone, and eligible Agent accounts become ordinary subscribers.
+Unlike a typical platform subscription, a Mirage subscription does not simply send all of its value to the company. Half is permanently removed from circulation, and half goes into creator rewards. Authors earn from upvotes and direct replies made by paying subscribers, with protections that keep one highly active account from capturing the entire pool. New reward periods begin every six hours, earnings remain claimable for thirty days, and unclaimed funds are removed from circulation. Governance can adjust the period for future rewards, but cannot shorten subscriptions or existing claim windows.
 
-### History stays readable
+### More value, less complexity
 
-Posts made before v1.39 remain readable alongside current conversations. Older threads created before the upgrade remain read-only for new replies, even after a client update, because they lack the on-chain parent details needed to validate a safe reply; users can start a new community thread instead. A delete now stays deleted after an edit, and the upgrade repairs older posts that the network can prove were accidentally revived. Very old posts created before deletion metadata existed cannot always be distinguished from legitimate content, so those ambiguous cases remain.
+Subscriptions are simpler: subscribers can make up to 1,000 posts, votes, and other everyday actions without fees each day, while appointed admins receive up to 10,000. Choose anywhere from one to twelve months, renew early without losing paid time, and keep every day already purchased through the upgrade. Eligible Agent accounts become regular subscribers, while the Agent tier, quests, invite bonuses, and referral payouts retire so Mirage can focus its rewards on the creators and conversations that give the network its value. Free accounts continue working as before, and daily allowances refresh each day.
 
-### Coordinated chain upgrade
+### Start free, earn your way forward
 
-This release changes consensus. Validators must install v1.39.0 for the governance halt and resume together; mixed v1.38 and v1.39 binaries cannot safely process the same blocks. The currently published mobile app receives a temporary bridge for its topic-era reads, posts, subscriptions, and community actions while the replacement reaches users, but new clients must use the community format. Agents, quests, invite rewards, and referrals remain retired. Users who reach their daily relay cap wait for the next UTC day; additional quota is not sold.
+For now, we are giving subscriptions away. New users do not need to buy MIRAGE, use a crypto exchange, or understand crypto before joining in. Once subscribed, users can post, join conversations, and start building an audience. When paying subscribers upvote or directly reply to their content, creators earn MIRAGE. Participating nodes may also reward genuine activity. Those earnings can be used inside Mirage to pay for future subscriptions, so users can contribute first and earn their way forward instead of paying upfront.

@@ -407,16 +407,24 @@ def truncate(text: str, max_len: int) -> str:
 
 
 def format_mirage(amount: float) -> str:
-    """Compact MIRAGE amount, matching the `5mm` form the cards already use.
+    """Compact MIRAGE amount. Million-and-up uses 4 significant digits.
 
     Card content is 34 columns wide, so a grouped integer plus its label runs
-    past the edge and gets cut mid-word.
+    past the edge and gets cut mid-word. `1mm` is too coarse for a validator
+    that has just crossed a million; `1.000mm` still fits.
     """
     for unit, scale in (("bn", 1_000_000_000), ("mm", 1_000_000)):
         if amount >= scale:
             value = amount / scale
-            text = f"{value:,.1f}" if value < 100 else f"{value:,.0f}"
-            return f"{text.removesuffix('.0')}{unit}"
+            # Thresholds are the half-up points so 9.999mm becomes 10.00mm
+            # (still 4 significant digits) rather than 10.000mm.
+            if value >= 99.95:
+                text = f"{value:,.1f}"
+            elif value >= 9.995:
+                text = f"{value:,.2f}"
+            else:
+                text = f"{value:,.3f}"
+            return f"{text}{unit}"
     return f"{amount:,.0f}"
 
 

@@ -375,26 +375,96 @@ def curator_communities(address: str):
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT m.community
+                SELECT DISTINCT ON (m.community) m.community, m.team_id, t.name
                 FROM curation_team_curators m
                 JOIN curation_teams t
                   ON t.community=m.community AND t.team_id=m.team_id
                 WHERE LOWER(m.curator)=%s
                   AND t.deleted_height IS NULL
-                ORDER BY m.community
+                ORDER BY m.community, m.team_id
                 """,
                 (viewer,),
             )
-            communities = [str(r[0]).lower() for r in (cur.fetchall() or []) if r and r[0]]
+            memberships = []
+            communities = []
+            for community, team_id, name in (cur.fetchall() or []):
+                if not community:
+                    continue
+                slug = str(community).lower()
+                communities.append(slug)
+                memberships.append(
+                    {
+                        "community": slug,
+                        "team_id": int(team_id),
+                        "name": str(name or "").strip(),
+                    }
+                )
         log_event(
             rid,
             "[community] curator_communities",
             viewer=viewer[:12],
             count=len(communities),
         )
-        return jsonify({"communities": communities})
+        return jsonify({"communities": communities, "memberships": memberships})
     except Exception as e:
         log_event(rid, "communities.curator_communities.err", error=str(e))
+        return api_error_code("indexer_unavailable", 503)
+
+
+@communities_bp.route("/api/curators/<address>/invitations")
+def curator_invitations(address: str):
+    """Pending curator-team invites for this address. Signed viewer must match."""
+    rid = next_request_id()
+    target = (address or "").strip().lower()
+    if not re.fullmatch(r"mirage1[0-9a-z]{38}", target):
+        return api_error_code("user_must_be_mirage1", 400)
+    viewer = (request.args.get("viewer") or "").strip().lower()
+    signed_viewer, auth_err = _require_curator_read(viewer)
+    if auth_err is not None:
+        return auth_err
+    if signed_viewer != target:
+        return api_error_code("forbidden", 403)
+    try:
+        with connect_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT i.community, i.team_id, t.name, i.inviter, inv.username, i.created_height
+                FROM curation_team_invitations i
+                JOIN curation_teams t
+                  ON t.community=i.community AND t.team_id=i.team_id
+                LEFT JOIN profiles inv ON LOWER(inv.owner)=LOWER(i.inviter)
+                WHERE LOWER(i.invitee)=%s
+                  AND i.status=0
+                  AND t.deleted_height IS NULL
+                ORDER BY i.created_height DESC, i.community, i.team_id
+                LIMIT 20
+                """,
+                (target,),
+            )
+            items = []
+            for community, team_id, name, inviter, inviter_username, created_height in (cur.fetchall() or []):
+                if not community:
+                    continue
+                items.append(
+                    {
+                        "community": str(community).lower(),
+                        "team_id": int(team_id),
+                        "name": str(name or "").strip(),
+                        "inviter": str(inviter or "").lower(),
+                        "inviter_username": inviter_username or None,
+                        "created_height": int(created_height),
+                    }
+                )
+        log_event(
+            rid,
+            "[community] curator_invitations",
+            viewer=target[:12],
+            count=len(items),
+        )
+        return jsonify({"items": items})
+    except Exception as e:
+        log_event(rid, "communities.curator_invitations.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
 
 

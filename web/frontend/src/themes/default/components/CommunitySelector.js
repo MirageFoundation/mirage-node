@@ -8,8 +8,10 @@ import {
     communityLabel,
     isValidCommunitySlug,
     sanitizeCommunitySlug,
+    splitJoinedCommunitiesForComposer,
     stripCommunityPrefix,
 } from '../../../utils/community';
+import { useViewerCuratorCommunities } from '../../../logic/useViewerCuratorMembership';
 
 const Container = styled.div`
     position: relative;
@@ -179,6 +181,12 @@ const SectionHeader = styled.div`
     text-transform: uppercase;
     letter-spacing: 0.05em;
     background-color: transparent;
+`;
+
+const ListDivider = styled.div`
+    height: 1px;
+    margin: 0.35rem 0.9rem;
+    background: ${({ theme }) => theme.colors.border};
 `;
 
 const CommunityItem = styled.div`
@@ -354,6 +362,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
     );
 
     const viewerAddress = Storage.load('publicKey', '') || '';
+    const { communities: curatedCommunities } = useViewerCuratorCommunities();
 
     // Load followed communities and all communities (use short-term cache, then refresh)
     useEffect(() => {
@@ -486,19 +495,37 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
         return map;
     }, [searchResults]);
 
-    const filteredFollowed = followedCommunities.filter(t =>
-        t.toLowerCase().includes(searchLower)
+    const { curated: curatedSlugs, joined: joinedSlugs } = React.useMemo(
+        () => splitJoinedCommunitiesForComposer(followedCommunities, curatedCommunities),
+        [followedCommunities, curatedCommunities],
     );
+    const ownSlugSet = React.useMemo(() => {
+        const set = new Set();
+        for (const slug of curatedSlugs) set.add(slug);
+        for (const slug of joinedSlugs) set.add(slug);
+        return set;
+    }, [curatedSlugs, joinedSlugs]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        console.debug('[CommunitySelector] grouped communities', {
+            curated: curatedSlugs,
+            joined: joinedSlugs,
+        });
+    }, [isOpen, curatedSlugs, joinedSlugs]);
+
+    const filteredCurated = curatedSlugs.filter(t => t.includes(searchLower));
+    const filteredJoined = joinedSlugs.filter(t => t.includes(searchLower));
+    const hasOwnCommunities = filteredCurated.length > 0 || filteredJoined.length > 0;
 
     const filteredAll = showSearchResults
         ? searchResults.filter(t => {
-            const community = String(t.community || '');
-            return community.toLowerCase().includes(searchLower) &&
-                !followedCommunities.map(ft => ft.toLowerCase()).includes(community.toLowerCase());
+            const community = String(t.community || '').toLowerCase();
+            return community.includes(searchLower) && !ownSlugSet.has(community);
         })
         : allCommunities
             .filter(t =>
-                t.toLowerCase().includes(searchLower) && !followedCommunities.includes(t)
+                t.toLowerCase().includes(searchLower) && !ownSlugSet.has(t.toLowerCase())
             )
             .sort((a, b) => (communityCounts[b] || 0) - (communityCounts[a] || 0))
             .slice(0, 20)
@@ -518,12 +545,13 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
         effectiveMaxLength,
     ) &&
         !allCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
-        !followedCommunities.map(t => t.toLowerCase()).includes(sanitizedSearch) &&
+        !ownSlugSet.has(sanitizedSearch) &&
         !filteredAllCommunities.map(t => String(t || '').toLowerCase()).includes(sanitizedSearch);
 
     // Build flat list for keyboard navigation
     const allItems = [
-        ...filteredFollowed.map(t => ({ type: 'followed', community: t })),
+        ...filteredCurated.map(t => ({ type: 'followed', community: t })),
+        ...filteredJoined.map(t => ({ type: 'followed', community: t })),
         ...filteredAllCommunities.map(t => ({ type: 'all', community: t })),
         ...(isNewCommunity ? [{ type: 'new', community: sanitizedSearch }] : [])
     ];
@@ -724,17 +752,44 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
                                 <EmptyState>Searching communities…</EmptyState>
                             ) : (
                                 <>
-                                    {filteredFollowed.length > 0 && (
+                                    {hasOwnCommunities && (
                                         <>
                                             <SectionHeader>Your communities</SectionHeader>
-                                            {filteredFollowed.map((community) => {
+                                            {filteredCurated.map((community) => {
                                                 itemIndex++;
                                                 const idx = itemIndex;
                                                 const count = getCommunityCount(community);
                                                 const flagLabels = getFlagLabels(community);
                                                 return (
                                                     <CommunityItem
-                                                        key={`followed-${community}`}
+                                                        key={`curated-${community}`}
+                                                        data-item-index={idx}
+                                                        $highlighted={highlightedIndex === idx}
+                                                        onClick={() => handleSelect(community)}
+                                                    >
+                                                        <CommunityItemName>{communityLabel(community)}</CommunityItemName>
+                                                        <CommunityMetaGroup>
+                                                            {flagLabels.length > 0 && (
+                                                                <FlagBadge>{flagLabels.join(', ')}</FlagBadge>
+                                                            )}
+                                                            {count > 0 && (
+                                                                <CommunityItemMeta>{formatCount(count)}</CommunityItemMeta>
+                                                            )}
+                                                        </CommunityMetaGroup>
+                                                    </CommunityItem>
+                                                );
+                                            })}
+                                            {filteredCurated.length > 0 && filteredJoined.length > 0 && (
+                                                <ListDivider role="separator" />
+                                            )}
+                                            {filteredJoined.map((community) => {
+                                                itemIndex++;
+                                                const idx = itemIndex;
+                                                const count = getCommunityCount(community);
+                                                const flagLabels = getFlagLabels(community);
+                                                return (
+                                                    <CommunityItem
+                                                        key={`joined-${community}`}
                                                         data-item-index={idx}
                                                         $highlighted={highlightedIndex === idx}
                                                         onClick={() => handleSelect(community)}
@@ -807,7 +862,7 @@ export const CommunitySelector = ({ value, onChange, maxLength, minLength, disab
                                         </CreateNewSection>
                                     )}
 
-                                    {!isLoading && filteredFollowed.length === 0 && filteredAll.length === 0 && !isNewCommunity && (
+                                    {!isLoading && !hasOwnCommunities && filteredAll.length === 0 && !isNewCommunity && (
                                         <EmptyState>
                                             {searchLower ? 'No listed community found. Use any valid slug.' : 'Start typing to search or enter a community slug.'}
                                         </EmptyState>

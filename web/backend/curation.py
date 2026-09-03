@@ -297,6 +297,33 @@ def _requested_lens_for(
     return lens, team_id
 
 
+def _load_post_tag_overrides(
+    cur,
+    lookups: list[tuple[str, int, str]],
+) -> dict[tuple[str, int, str], str]:
+    """Return {(community, team_id, post_id): tag} for the given triples."""
+    if not lookups:
+        return {}
+    communities = [row[0] for row in lookups]
+    team_ids = [row[1] for row in lookups]
+    post_ids = [row[2] for row in lookups]
+    cur.execute(
+        """
+        SELECT LOWER(community), team_id, LOWER(target_txhash), tag
+        FROM curation_post_tags
+        WHERE (community, team_id, LOWER(target_txhash)) IN (
+            SELECT c, t, h
+            FROM unnest(%s::text[], %s::int[], %s::text[]) AS x(c, t, h)
+        )
+        """,
+        (communities, team_ids, post_ids),
+    )
+    return {
+        (str(row[0]).lower(), int(row[1]), str(row[2]).lower()): str(row[3] or "")
+        for row in cur.fetchall()
+    }
+
+
 def resolve_effective_tags(
     cur,
     posts: list[dict],
@@ -324,6 +351,8 @@ def resolve_effective_tags(
     address = str(viewer or "").strip().lower()
     default_teams: dict[str, dict[str, Any] | None] = {}
     lens_teams: dict[str, int | None] = {}
+    planned: list[tuple[dict, str, str, int | None]] = []
+    override_lookups: list[tuple[str, int, str]] = []
     for post in posts:
         community = str(post.get("community") or "").strip().lower()
         post_id = str(post.get("post_id") or "").strip().lower()
@@ -331,7 +360,6 @@ def resolve_effective_tags(
             continue
         if community not in default_teams:
             default_teams[community] = get_default_team(cur, community)
-        default_team = default_teams[community]
 
         stamped_lens = post.get("lens") or {}
         stamped = stamped_lens.get("effective_team_id")
@@ -349,19 +377,21 @@ def resolve_effective_tags(
                     requested_team_id=requested_team_id,
                 )["effective_team_id"]
             lens_team_id = lens_teams[community]
-        row = None
+        planned.append((post, community, post_id, lens_team_id))
         if lens_team_id is not None:
-            cur.execute(
-                """
-                SELECT tag FROM curation_post_tags
-                WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
-                """,
-                (community, int(lens_team_id), post_id),
-            )
-            row = cur.fetchone()
+            override_lookups.append((community, int(lens_team_id), post_id))
+
+    overrides = _load_post_tag_overrides(cur, override_lookups)
+    for post, community, post_id, lens_team_id in planned:
+        default_team = default_teams[community]
+        row = (
+            overrides.get((community, int(lens_team_id), post_id))
+            if lens_team_id is not None
+            else None
+        )
         community_tag = default_team["tag"] if default_team else ""
         if row is not None:
-            effective = str(row[0] or "")
+            effective = row
         elif community_tag:
             effective = community_tag
         else:
@@ -376,6 +406,116 @@ def resolve_effective_tags(
                 effective,
             )
         post["tag"] = effective
+
+
+def _load_team_moderation(
+    cur,
+    pending: list[tuple[str, int, str, str, str]],
+) -> tuple[
+    set[tuple[str, int, str]],
+    set[tuple[str, int, str]],
+    dict[tuple[str, int], bool],
+    dict[tuple[str, int, str], tuple[Any, Any]],
+]:
+    """Load hide/lock/subscriber-only state for many posts in a few queries.
+
+    Home/bootstrap rank hundreds of candidates and then filter them. A per-post
+    EXISTS round-trip made that filter the cold-load stall: one SQL per card,
+    hundreds of times, before the first 15 posts could leave the backend.
+    """
+    hidden_posts: set[tuple[str, int, str]] = set()
+    hidden_users: set[tuple[str, int, str]] = set()
+    subscriber_only: dict[tuple[str, int], bool] = {}
+    locks: dict[tuple[str, int, str], tuple[Any, Any]] = {}
+    if not pending:
+        return hidden_posts, hidden_users, subscriber_only, locks
+
+    communities = [row[0] for row in pending]
+    team_ids = [int(row[1]) for row in pending]
+    post_ids = [row[2] for row in pending]
+    authors = [row[3] for row in pending]
+    cur.execute(
+        """
+        SELECT LOWER(community), team_id, LOWER(target_txhash)
+        FROM curation_hidden_posts
+        WHERE (community, team_id, LOWER(target_txhash)) IN (
+            SELECT c, t, h FROM unnest(%s::text[], %s::int[], %s::text[]) AS x(c, t, h)
+        )
+        """,
+        (communities, team_ids, post_ids),
+    )
+    hidden_posts = {(str(row[0]).lower(), int(row[1]), str(row[2]).lower()) for row in cur.fetchall()}
+
+    cur.execute(
+        """
+        SELECT LOWER(community), team_id, LOWER(target_user)
+        FROM curation_hidden_users
+        WHERE (community, team_id, LOWER(target_user)) IN (
+            SELECT c, t, u FROM unnest(%s::text[], %s::int[], %s::text[]) AS x(c, t, u)
+        )
+        """,
+        (communities, team_ids, authors),
+    )
+    hidden_users = {(str(row[0]).lower(), int(row[1]), str(row[2]).lower()) for row in cur.fetchall()}
+
+    pair_communities: list[str] = []
+    pair_team_ids: list[int] = []
+    seen_pairs: set[tuple[str, int]] = set()
+    for community, team_id, _post_id, _author, _root in pending:
+        key = (community, int(team_id))
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        pair_communities.append(community)
+        pair_team_ids.append(int(team_id))
+    cur.execute(
+        """
+        SELECT LOWER(community), team_id, COALESCE(subscriber_only, FALSE)
+        FROM curation_teams
+        WHERE deleted_height IS NULL
+          AND (community, team_id) IN (
+              SELECT c, t FROM unnest(%s::text[], %s::int[]) AS x(c, t)
+          )
+        """,
+        (pair_communities, pair_team_ids),
+    )
+    subscriber_only = {(str(row[0]).lower(), int(row[1])): bool(row[2]) for row in cur.fetchall()}
+
+    root_communities: list[str] = []
+    root_team_ids: list[int] = []
+    root_hashes: list[str] = []
+    seen_roots: set[tuple[str, int, str]] = set()
+    for community, team_id, _post_id, _author, root in pending:
+        key = (community, int(team_id), root)
+        if key in seen_roots:
+            continue
+        seen_roots.add(key)
+        root_communities.append(community)
+        root_team_ids.append(int(team_id))
+        root_hashes.append(root)
+    cur.execute(
+        """
+        SELECT LOWER(community), team_id, LOWER(root_txhash), lock_sequence, lock_windows
+        FROM curation_locks
+        WHERE (community, team_id, LOWER(root_txhash)) IN (
+            SELECT c, t, r FROM unnest(%s::text[], %s::int[], %s::text[]) AS x(c, t, r)
+        )
+        """,
+        (root_communities, root_team_ids, root_hashes),
+    )
+    locks = {
+        (str(row[0]).lower(), int(row[1]), str(row[2]).lower()): (row[3], row[4])
+        for row in cur.fetchall()
+    }
+    log.debug(
+        "curation.moderation_batch posts=%d hidden_posts=%d hidden_users=%d teams=%d locks=%d",
+        len(pending),
+        len(hidden_posts),
+        len(hidden_users),
+        len(subscriber_only),
+        len(locks),
+    )
+    return hidden_posts, hidden_users, subscriber_only, locks
 
 
 def filter_posts(
@@ -430,6 +570,7 @@ def filter_posts(
     lenses: dict[str, dict[str, Any]] = {}
     visible: list[dict] = []
     tombstones: list[dict] = []
+    pending: list[tuple[dict, str, dict[str, Any], dict[str, Any], str, int]] = []
     address = str(viewer or "").strip().lower()
     for post, post_id in zip(posts, ids):
         meta = metadata[post_id]
@@ -492,55 +633,17 @@ def filter_posts(
             post["thread_locked"] = False
             visible.append(post)
             continue
+        pending.append((post, post_id, meta, resolved, community, int(team_id)))
 
-        cur.execute(
-            """
-            SELECT
-                EXISTS(
-                    SELECT 1 FROM curation_hidden_posts
-                    WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=%s
-                ),
-                EXISTS(
-                    SELECT 1 FROM curation_hidden_users
-                    WHERE community=%s AND team_id=%s AND LOWER(target_user)=%s
-                ),
-                COALESCE((
-                    SELECT subscriber_only FROM curation_teams
-                    WHERE community=%s AND team_id=%s AND deleted_height IS NULL
-                ), FALSE),
-                (
-                    SELECT lock_sequence FROM curation_locks
-                    WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
-                ),
-                (
-                    SELECT lock_windows FROM curation_locks
-                    WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=%s
-                )
-            """,
-            (
-                community,
-                team_id,
-                post_id,
-                community,
-                team_id,
-                meta["author"],
-                community,
-                team_id,
-                community,
-                team_id,
-                meta["root_txhash"],
-                community,
-                team_id,
-                meta["root_txhash"],
-            ),
-        )
-        (
-            hidden_post,
-            hidden_author,
-            subscriber_only,
-            lock_sequence,
-            lock_windows,
-        ) = cur.fetchone()
+    hidden_posts, hidden_users, subscriber_only, locks = _load_team_moderation(
+        cur,
+        [
+            (community, team_id, post_id, meta["author"], meta["root_txhash"])
+            for _post, post_id, meta, _resolved, community, team_id in pending
+        ],
+    )
+    for post, post_id, meta, resolved, community, team_id in pending:
+        lock_sequence, lock_windows = locks.get((community, team_id, meta["root_txhash"]), (None, None))
         windows = _lock_windows(lock_sequence, lock_windows)
         visibility = resolve_visibility(
             viewer=address,
@@ -557,9 +660,9 @@ def filter_posts(
             stored_mode=resolved["effective_mode"],
             stored_team_id=team_id,
             default_team_id=team_id,
-            team_hidden_post=bool(hidden_post),
-            team_hidden_author=bool(hidden_author),
-            team_subscriber_only=bool(subscriber_only),
+            team_hidden_post=(community, team_id, post_id) in hidden_posts,
+            team_hidden_author=(community, team_id, meta["author"]) in hidden_users,
+            team_subscriber_only=bool(subscriber_only.get((community, team_id), False)),
             lock_windows=windows,
             temporary_raw=False,
             node_blocked=False,

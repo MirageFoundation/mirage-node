@@ -213,7 +213,7 @@ export default function CurationLensPicker({
     const hooksEnabled = Boolean(community) && activated;
     const { detail, loading: detailLoading } = useCommunityDetail(community, viewerAddr, hooksEnabled);
     const { teams, loading: teamsLoading } = useCurationTeams(community, { viewer: viewerAddr, enabled: hooksEnabled });
-    const { isCurator, teamId: curatorTeamId } = useViewerCuratorMembership(community);
+    const { isCurator, teamId: curatorTeamId } = useViewerCuratorMembership(community, { enabled: hooksEnabled });
     const { selectLens, pending, pendingStatus, error } = useCurationPreference(community, detail);
     const liveTeams = useMemo(() => teams.filter((team) => !team.deleted), [teams]);
     const rankedTeams = useMemo(() => sortTeamsBySubscribers(liveTeams), [liveTeams]);

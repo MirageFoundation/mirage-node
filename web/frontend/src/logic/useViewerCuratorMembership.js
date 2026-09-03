@@ -7,9 +7,50 @@ import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
 /** community → { teamId, teamName } | null */
 const membershipCache = new Map();
 const inflight = new Map();
+const curatorListInflight = new Map();
+/** viewer → { loaded, byCommunity: Map(slug → { teamId, teamName }) } */
+const curatorListByViewer = new Map();
 
 function cacheKey(viewer, community) {
     return `${String(viewer || '').toLowerCase()}::${String(community || '').toLowerCase()}`;
+}
+
+function rememberCuratorList(viewer, memberships) {
+    const owner = String(viewer || '').toLowerCase();
+    const byCommunity = new Map();
+    for (const item of memberships || []) {
+        const slug = String(item?.community || '').trim().toLowerCase();
+        const teamId = Number(item?.team_id);
+        if (!slug || !Number.isSafeInteger(teamId) || teamId <= 0) continue;
+        const teamName = typeof item?.name === 'string' ? item.name.trim() : '';
+        byCommunity.set(slug, { teamId, teamName });
+        membershipCache.set(cacheKey(owner, slug), {
+            teamId,
+            teamName,
+            memberCount: 1,
+            isLeader: false,
+        });
+    }
+    curatorListByViewer.set(owner, { loaded: true, byCommunity });
+    console.debug('[curation] curator list cached', {
+        viewer: owner.slice(0, 12),
+        count: byCommunity.size,
+    });
+}
+
+function membershipFromCuratorList(viewer, community) {
+    const owner = String(viewer || '').toLowerCase();
+    const slug = String(community || '').trim().toLowerCase();
+    const list = curatorListByViewer.get(owner);
+    if (!list?.loaded) return undefined;
+    const hit = list.byCommunity.get(slug);
+    if (!hit) return null;
+    return {
+        teamId: hit.teamId,
+        teamName: hit.teamName,
+        memberCount: 1,
+        isLeader: false,
+    };
 }
 
 function clearMembershipCache(community = '') {
@@ -17,6 +58,8 @@ function clearMembershipCache(community = '') {
     if (!slug) {
         membershipCache.clear();
         inflight.clear();
+        curatorListByViewer.clear();
+        curatorListInflight.clear();
         console.debug('[curation] membership cache cleared');
         return;
     }
@@ -25,6 +68,10 @@ function clearMembershipCache(community = '') {
     }
     for (const key of [...inflight.keys()]) {
         if (key.endsWith(`::${slug}`)) inflight.delete(key);
+    }
+    for (const [viewer, list] of curatorListByViewer) {
+        list.byCommunity.delete(slug);
+        membershipCache.delete(cacheKey(viewer, slug));
     }
     console.debug('[curation] membership cache cleared for community', { community: slug });
 }
@@ -48,8 +95,17 @@ export async function fetchViewerCuratorMembership(community, viewer, { fresh = 
     if (fresh) {
         membershipCache.delete(key);
         inflight.delete(key);
+        const list = curatorListByViewer.get(owner);
+        if (list?.loaded) list.byCommunity.delete(slug);
     }
     if (membershipCache.has(key)) return membershipCache.get(key);
+    if (!fresh) {
+        const fromList = membershipFromCuratorList(owner, slug);
+        if (fromList !== undefined) {
+            membershipCache.set(key, fromList);
+            return fromList;
+        }
+    }
     if (inflight.has(key)) return inflight.get(key);
 
     const pending = (async () => {
@@ -136,23 +192,40 @@ export function useViewerCuratorCommunities() {
         }
         setLoading(true);
         try {
-            const proof = await signReadParams(CURATOR_READ_ACTION, viewer);
-            const data = await Api.get(
-                `curators/${encodeURIComponent(viewer)}/communities`,
-                { viewer, _cb: Date.now(), ...proof },
-            );
-            if (!data || !Array.isArray(data.communities)) {
-                throw new Error('Invalid curator communities response');
+            if (curatorListInflight.has(viewer)) {
+                const reused = await curatorListInflight.get(viewer);
+                setCommunities(reused);
+                return reused;
             }
-            const next = data.communities
-                .map((slug) => String(slug || '').trim().toLowerCase())
-                .filter(Boolean);
-            setCommunities(next);
-            console.debug('[curation] viewer curator communities', {
-                viewer: viewer.slice(0, 12),
-                count: next.length,
-            });
-            return next;
+            const pending = (async () => {
+                const proof = await signReadParams(CURATOR_READ_ACTION, viewer);
+                const data = await Api.get(
+                    `curators/${encodeURIComponent(viewer)}/communities`,
+                    { viewer, ...proof },
+                );
+                if (!data || !Array.isArray(data.communities)) {
+                    throw new Error('Invalid curator communities response');
+                }
+                if (Array.isArray(data.memberships)) {
+                    rememberCuratorList(viewer, data.memberships);
+                }
+                const next = data.communities
+                    .map((slug) => String(slug || '').trim().toLowerCase())
+                    .filter(Boolean);
+                console.debug('[curation] viewer curator communities', {
+                    viewer: viewer.slice(0, 12),
+                    count: next.length,
+                });
+                return next;
+            })();
+            curatorListInflight.set(viewer, pending);
+            try {
+                const next = await pending;
+                setCommunities(next);
+                return next;
+            } finally {
+                curatorListInflight.delete(viewer);
+            }
         } catch (err) {
             console.error('[curation] curator communities failed', {
                 viewer: viewer.slice(0, 12),
@@ -188,10 +261,10 @@ export function useViewerCuratorCommunities() {
     return { communities, loading, refresh };
 }
 
-export function useViewerCuratorMembership(community) {
+export function useViewerCuratorMembership(community, { enabled: enabledOption = true } = {}) {
     const slug = String(community || '').trim().toLowerCase();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
-    const enabled = Boolean(slug && viewer && viewer !== 'guest');
+    const enabled = Boolean(enabledOption && slug && viewer && viewer !== 'guest');
     const [membership, setMembership] = useState(() => {
         if (!enabled) return null;
         return membershipCache.get(cacheKey(viewer, slug)) ?? null;
@@ -277,6 +350,135 @@ export function useViewerCuratorMembership(community) {
         refresh,
         isCurator: membership != null,
     };
+}
+
+const inviteListInflight = new Map();
+
+function normalizePendingInvite(item) {
+    const community = String(item?.community || '').trim().toLowerCase();
+    const teamId = Number(item?.team_id);
+    const name = typeof item?.name === 'string' ? item.name.trim() : '';
+    const inviter = String(item?.inviter || '').trim().toLowerCase();
+    const createdHeight = Number(item?.created_height);
+    if (!community || !Number.isSafeInteger(teamId) || teamId <= 0) {
+        throw new Error('Invalid pending curator invitation');
+    }
+    if (!name) throw new Error('Pending curator invitation is missing team name');
+    if (!inviter) throw new Error('Pending curator invitation is missing inviter');
+    if (!Number.isSafeInteger(createdHeight) || createdHeight < 0) {
+        throw new Error('Pending curator invitation is missing created_height');
+    }
+    const inviterUsername = item?.inviter_username;
+    if (inviterUsername != null && typeof inviterUsername !== 'string') {
+        throw new Error('Invalid inviter username');
+    }
+    return {
+        community,
+        teamId,
+        name,
+        inviter,
+        inviterUsername: inviterUsername?.trim() || null,
+        createdHeight,
+    };
+}
+
+/**
+ * Pending curator-team invitations for the logged-in viewer.
+ * Powers the home-feed invite hero.
+ */
+export function useViewerPendingCuratorInvites() {
+    const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
+    const enabled = Boolean(viewer && viewer !== 'guest');
+    const [invites, setInvites] = useState([]);
+    const [loading, setLoading] = useState(enabled);
+
+    const refresh = useCallback(async () => {
+        if (!enabled) {
+            setInvites([]);
+            setLoading(false);
+            return [];
+        }
+        setLoading(true);
+        try {
+            if (inviteListInflight.has(viewer)) {
+                const reused = await inviteListInflight.get(viewer);
+                setInvites(reused);
+                return reused;
+            }
+            const pending = (async () => {
+                const proof = await signReadParams(CURATOR_READ_ACTION, viewer);
+                const data = await Api.get(
+                    `curators/${encodeURIComponent(viewer)}/invitations`,
+                    { viewer, ...proof },
+                );
+                if (!data || !Array.isArray(data.items)) {
+                    throw new Error('Invalid curator invitations response');
+                }
+                const next = data.items.map(normalizePendingInvite);
+                console.debug('[curation] viewer pending invites', {
+                    viewer: viewer.slice(0, 12),
+                    count: next.length,
+                });
+                return next;
+            })();
+            inviteListInflight.set(viewer, pending);
+            try {
+                const next = await pending;
+                setInvites(next);
+                return next;
+            } finally {
+                inviteListInflight.delete(viewer);
+            }
+        } catch (err) {
+            console.error('[curation] pending invites failed', {
+                viewer: viewer.slice(0, 12),
+                error: String(err?.message || err),
+            });
+            setInvites([]);
+            return [];
+        } finally {
+            setLoading(false);
+        }
+    }, [enabled, viewer]);
+
+    useEffect(() => {
+        if (!enabled) {
+            setInvites([]);
+            setLoading(false);
+            return undefined;
+        }
+        let cancelled = false;
+        refresh().catch(() => {
+            if (!cancelled) setInvites([]);
+        });
+        const onUpdate = () => {
+            refresh().catch(() => {});
+        };
+        window.addEventListener('curationUpdated', onUpdate);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('curationUpdated', onUpdate);
+        };
+    }, [enabled, refresh]);
+
+    const dismiss = useCallback((community, teamId) => {
+        const slug = String(community || '').toLowerCase();
+        const id = Number(teamId);
+        setInvites((prev) => prev.filter((invite) => !(
+            invite.community === slug && invite.teamId === id
+        )));
+    }, []);
+
+    const restore = useCallback((invite) => {
+        setInvites((prev) => {
+            if (prev.some((item) => item.community === invite.community && item.teamId === invite.teamId)) {
+                return prev;
+            }
+            return [invite, ...prev];
+        });
+    }, []);
+
+    return { invites, loading, refresh, dismiss, restore };
 }
 
 export default useViewerCuratorMembership;

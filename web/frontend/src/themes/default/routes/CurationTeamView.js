@@ -16,6 +16,7 @@ import {
     requireCurationTeamName,
     runeLength,
     sliceRunes,
+    waitForCurationInvite,
     waitForCurationTeamGone,
     waitForCurationTeamProfile,
 } from '../../../utils/curation';
@@ -30,6 +31,7 @@ import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { TAG_OPTIONS } from '../../../logic/useCreatePost';
 import Button from '../components/Button';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { CommunityMentionText } from '../components/MarkdownRenderer';
 import { requireThemeColor } from '../../../utils/themeColor';
 
 const Page = styled.main`
@@ -273,6 +275,7 @@ export default function CurationTeamView() {
     const [inviteBusy, setInviteBusy] = useState(false);
     const [error, setError] = useState('');
     const [optimisticTag, setOptimisticTag] = useState(null);
+    const [optimisticInvites, setOptimisticInvites] = useState([]);
     const members = useMemo(() => team?.members || [], [team]);
     const invitations = useMemo(
         () => (team?.invitations || []).filter((invitation) => invitation.status === 0),
@@ -292,6 +295,17 @@ export default function CurationTeamView() {
         enabled: isCurator && activeTab === 'banned-posts',
     });
     const myInvitation = invitations.find((invite) => invite.address === viewer);
+    const displayedInvitations = useMemo(() => {
+        const server = invitations.filter((invite) => invite.address !== viewer);
+        const serverAddrs = new Set(server.map((invite) => String(invite.address).toLowerCase()));
+        const pendingOptimistic = optimisticInvites.filter(
+            (invite) => !serverAddrs.has(String(invite.address).toLowerCase()),
+        );
+        return [
+            ...pendingOptimistic.map((invite) => ({ ...invite, optimistic: true })),
+            ...server.map((invite) => ({ ...invite, optimistic: false })),
+        ];
+    }, [invitations, optimisticInvites, viewer]);
     const tabs = isCurator ? CURATOR_TABS : PUBLIC_TABS;
     const activeTabIndex = Math.max(0, tabs.findIndex((tab) => tab.id === activeTab));
 
@@ -318,6 +332,21 @@ export default function CurationTeamView() {
         }
         return undefined;
     }, [community, optimisticTag, team, teamId]);
+
+    useEffect(() => {
+        if (!optimisticInvites.length) return;
+        const serverAddrs = new Set(
+            invitations.map((invite) => String(invite.address).toLowerCase()),
+        );
+        setOptimisticInvites((prev) => {
+            const next = prev.filter((invite) => !serverAddrs.has(String(invite.address).toLowerCase()));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [invitations, optimisticInvites.length]);
+
+    useEffect(() => {
+        setOptimisticInvites([]);
+    }, [community, teamId]);
 
     useEffect(() => {
         if (!team) return;
@@ -502,25 +531,71 @@ export default function CurationTeamView() {
         }
         setError('');
         setInviteBusy(true);
+        let identity;
         try {
-            const identity = await resolveUserIdentity(raw);
-            console.debug('[curation] invite curator', {
-                community,
-                teamId: Number(teamId),
-                kind: identity.kind,
-                address: identity.address.slice(0, 12),
-                username: identity.username,
-            });
-            const result = await run(() => tx.inviteCurationTeamMember(
-                community,
-                Number(teamId),
-                identity.address,
-            ));
-            if (result?.success) setInvitee('');
+            identity = await resolveUserIdentity(raw);
         } catch (err) {
             const message = err instanceof Error ? err.message : formatError(err);
             setError(message);
+            setInviteBusy(false);
             console.error('[curation] invite resolve failed', { error: message });
+            return;
+        }
+        const address = identity.address;
+        if (address === viewer) {
+            setError('You cannot invite yourself.');
+            setInviteBusy(false);
+            return;
+        }
+        if (members.some((member) => String(member.address).toLowerCase() === address)) {
+            setError('That user is already a curator on this team.');
+            setInviteBusy(false);
+            return;
+        }
+        const alreadyPending = invitations.some((invite) => String(invite.address).toLowerCase() === address)
+            || optimisticInvites.some((invite) => String(invite.address).toLowerCase() === address);
+        if (alreadyPending) {
+            setError('That user already has a pending invite.');
+            setInviteBusy(false);
+            return;
+        }
+        const optimistic = { address, username: identity.username, status: 0 };
+        setOptimisticInvites((prev) => [optimistic, ...prev]);
+        setInvitee('');
+        console.debug('[curation] invite curator optimistic', {
+            community,
+            teamId: Number(teamId),
+            kind: identity.kind,
+            address: address.slice(0, 12),
+            username: identity.username,
+        });
+        try {
+            const result = await run(() => tx.inviteCurationTeamMember(
+                community,
+                Number(teamId),
+                address,
+            ));
+            if (!result?.success) {
+                setOptimisticInvites((prev) => prev.filter((invite) => invite.address !== address));
+                setInvitee(raw);
+                return;
+            }
+            const visible = await waitForCurationInvite(community, Number(teamId), address, { viewer });
+            if (visible) {
+                await refreshTeam();
+            } else {
+                console.error('[curation] invite not visible after index', {
+                    community,
+                    teamId,
+                    address: address.slice(0, 12),
+                });
+            }
+        } catch (err) {
+            setOptimisticInvites((prev) => prev.filter((invite) => invite.address !== address));
+            setInvitee(raw);
+            const message = err instanceof Error ? err.message : formatError(err);
+            setError(message);
+            console.error('[curation] invite failed', { error: message });
         } finally {
             setInviteBusy(false);
         }
@@ -663,7 +738,11 @@ export default function CurationTeamView() {
                 <>
                     <Card>
                         <CardTitle>Team profile</CardTitle>
-                        <Body>{team.description || 'No description provided.'}</Body>
+                        <Body>
+                            {team.description
+                                ? <CommunityMentionText text={team.description} />
+                                : 'No description provided.'}
+                        </Body>
                     </Card>
                     <Card>
                         <CardTitle>Community defaults</CardTitle>
@@ -736,9 +815,11 @@ export default function CurationTeamView() {
                         </Button>
                     </FormActions>
                 </Form>}
-                {invitations.filter((invite) => invite.address !== viewer).map((invite) => <Row key={invite.address}>
-                    <Meta title={invite.address}>Pending: {formatUserLabel(invite.username, invite.address)}</Meta>
-                    {isLeader && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
+                {displayedInvitations.map((invite) => <Row key={invite.address}>
+                    <Meta title={invite.address}>
+                        {invite.optimistic ? 'Inviting' : 'Pending'}: {formatUserLabel(invite.username, invite.address)}
+                    </Meta>
+                    {isLeader && !invite.optimistic && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
                         {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
                     </Button>}
                 </Row>)}

@@ -141,6 +141,7 @@ ROUTE_POLICY: Dict[str, str] = {
     "/api/communities/<slug>/teams/<int:team_id>/moderation": SIGNED_READ,
     # Same rows as CurationTeamMembers, keyed by curator instead of by team.
     "/api/curators/<address>/communities": PUBLIC,
+    "/api/curators/<address>/invitations": SIGNED_READ,
     "/api/communities/<slug>/teams/<int:team_id>/hidden-users": SIGNED_READ,
     "/api/communities/<slug>/teams/<int:team_id>/hidden-posts": SIGNED_READ,
     "/api/creator/earnings": PUBLIC,

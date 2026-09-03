@@ -25,6 +25,8 @@ import {
     teamIdWithMostSubscribers,
     viewingTeamId,
     waitForOwnCurationTeam,
+    waitForCurationInvite,
+    curatorInviteHeroCopy,
     writeLensPick,
 } from '../../src/utils/curation.js';
 import {
@@ -40,10 +42,10 @@ import { formatCreatorRewardTime } from '../../src/themes/default/components/Cre
 import {
     communityFromPathname,
     createPostPathForContext,
-} from '../../src/themes/default/components/MobileBottomNav.js';
-import {
     isValidCommunitySlug,
     sanitizeCommunitySlug,
+    splitCommunityMentions,
+    splitJoinedCommunitiesForComposer,
 } from '../../src/utils/community.js';
 import {
     CURATOR_READ_ACTION,
@@ -453,9 +455,22 @@ describe('v1.39 curation UI contracts', () => {
         // LIVE_DEFAULT stays Default — do not present the most-subscribed team as selected.
         expect(pickerSrc).not.toMatch(/teamIdWithMostSubscribers/);
         expect(pickerSrc).not.toMatch(/No explicit pin/);
-        expect(pickerSrc).toMatch(/useViewerCuratorMembership/);
+        expect(pickerSrc).toMatch(/useViewerCuratorMembership\(community, \{ enabled: hooksEnabled \}\)/);
         expect(pickerSrc).not.toMatch(/ManageLink/);
         expect(pickerSrc).not.toMatch(/Curator teams/);
+    });
+
+    it('reuses the curator-communities list instead of one /teams fetch per feed row', () => {
+        const membership = readFileSync(
+            join(frontendSrc, 'logic/useViewerCuratorMembership.js'),
+            'utf8',
+        );
+        expect(membership).toMatch(/function rememberCuratorList/);
+        expect(membership).toMatch(/function membershipFromCuratorList/);
+        expect(membership).toMatch(/Array\.isArray\(data\.memberships\)/);
+        expect(membership).toMatch(/curatorListInflight/);
+        expect(membership).toMatch(/`curators\/\$\{encodeURIComponent\(viewer\)\}\/communities`,\s*\{ viewer, \.\.\.proof \}/);
+        expect(membership).toMatch(/enabled: enabledOption = true/);
     });
 
     it('does not keep topic or agent routes as compatibility redirects', () => {
@@ -1198,6 +1213,58 @@ describe('waitForOwnCurationTeam', () => {
     });
 });
 
+describe('curator invite UX', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('writes invite hero copy with the team and inviter', () => {
+        expect(curatorInviteHeroCopy({
+            community: 'crypto',
+            name: 'Crypto Team',
+            inviterUsername: 'God',
+            inviter: 'mirage1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        })).toEqual({
+            title: "You're invited to curate [crypto]",
+            body: '@God invited you to join Crypto Team. Accept to start shaping what subscribers see.',
+        });
+    });
+
+    it('returns the invitation once the invitee appears as pending', async () => {
+        const sleep = vi.fn(async () => { });
+        const get = vi.spyOn(Api, 'get')
+            .mockResolvedValueOnce({ items: [] })
+            .mockResolvedValueOnce({
+                items: [{ invitee: 'mirage1invitee', status: 0 }],
+            });
+
+        const found = await waitForCurationInvite('crypto', 3, 'MIRAGE1INVITEE', {
+            viewer: 'mirage1owner',
+            interval: 10,
+            maxAttempts: 5,
+            sleep,
+        });
+
+        expect(found.status).toBe(0);
+        expect(get).toHaveBeenCalledTimes(2);
+        expect(sleep).toHaveBeenCalledTimes(1);
+    });
+
+    it('optimistically lists the invite and surfaces it on the home feed', () => {
+        const teamView = readFileSync(
+            join(frontendSrc, 'themes/default/routes/CurationTeamView.js'),
+            'utf8',
+        );
+        const mainView = readFileSync(
+            join(frontendSrc, 'themes/default/routes/MainView.js'),
+            'utf8',
+        );
+        expect(teamView).toMatch(/setOptimisticInvites/);
+        expect(teamView).toMatch(/waitForCurationInvite/);
+        expect(mainView).toMatch(/<CuratorInviteHero \/>/);
+    });
+});
+
 describe('community composer context', () => {
     it('preserves canonical internal hyphens', () => {
         expect(sanitizeCommunitySlug(' Foo-Bar ')).toBe('foo-bar');
@@ -1210,6 +1277,47 @@ describe('community composer context', () => {
         expect(community).toBe('foo-bar');
         expect(createPostPathForContext(true, community)).toBe('/create_post?community=foo-bar');
         expect(createPostPathForContext(false, community)).toBe('/create_post');
+        expect(communityFromPathname('/home')).toBe('');
+        expect(communityFromPathname('/c/all')).toBe('');
+        expect(createPostPathForContext(true, 'home')).toBe('/create_post');
+    });
+
+    it('lists curator communities before other joined ones', () => {
+        expect(splitJoinedCommunitiesForComposer(
+            ['joined-a', 'curated-one', 'joined-b'],
+            ['curated-one', 'curated-two'],
+        )).toEqual({
+            curated: ['curated-one', 'curated-two'],
+            joined: ['joined-a', 'joined-b'],
+        });
+        expect(splitJoinedCommunitiesForComposer(['alpha', 'beta'], [])).toEqual({
+            curated: [],
+            joined: ['alpha', 'beta'],
+        });
+        expect(splitJoinedCommunitiesForComposer(['alpha', 'alpha'], ['alpha', 'home'])).toEqual({
+            curated: ['alpha'],
+            joined: [],
+        });
+    });
+
+    it('turns [slug] in running text into community mentions', () => {
+        expect(splitCommunityMentions(
+            'Unmoderated at the moment. Direct all your Mirage related feedback to the [mirage] community.',
+        )).toEqual([
+            { type: 'text', value: 'Unmoderated at the moment. Direct all your Mirage related feedback to the ' },
+            { type: 'community', slug: 'mirage' },
+            { type: 'text', value: ' community.' },
+        ]);
+        expect(splitCommunityMentions('see [foo-bar] and c/baz plus [keep](https://example.com)')).toEqual([
+            { type: 'text', value: 'see ' },
+            { type: 'community', slug: 'foo-bar' },
+            { type: 'text', value: ' and ' },
+            { type: 'community', slug: 'baz' },
+            { type: 'text', value: ' plus [keep](https://example.com)' },
+        ]);
+        expect(splitCommunityMentions('[home] stays plain')).toEqual([
+            { type: 'text', value: '[home] stays plain' },
+        ]);
     });
 });
 

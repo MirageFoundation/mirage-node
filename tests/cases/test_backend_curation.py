@@ -580,9 +580,42 @@ def test_curation_team_lifecycle(backend: str) -> None:
             break
         time.sleep(0.5)
     if invited:
-        _pass("curation_team.invitation_listed_to_owner")
+        _pass("curation_team.invitation_listed_to_owner", team_id=team_id)
     else:
         _fail("curation_team.invitation_listed_to_owner", f"body={last_inv}")
+        return
+
+    invitee_invites_url = f"{backend}/api/curators/{curator_addr}/invitations"
+    unsigned_code, _ = _get(invitee_invites_url)
+    if unsigned_code == 401:
+        _pass("curation_team.invitee_invitations_requires_signature")
+    else:
+        _fail("curation_team.invitee_invitations_requires_signature", f"code={unsigned_code}")
+
+    other_code, _ = _get(invitee_invites_url, _signed_curator_params(owner_wallet))
+    if other_code == 403:
+        _pass("curation_team.invitee_invitations_rejects_other_viewer")
+    else:
+        _fail("curation_team.invitee_invitations_rejects_other_viewer", f"code={other_code}")
+
+    listed_to_invitee = False
+    last_mine: dict | None = None
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    while time.perf_counter() < deadline:
+        code, last_mine = _get(invitee_invites_url, _signed_curator_params(curator_wallet))
+        mine = [
+            item for item in ((last_mine or {}).get("items") or [])
+            if str(item.get("community") or "").lower() == slug
+            and int(item.get("team_id") or 0) == team_id
+        ]
+        if code == 200 and mine:
+            listed_to_invitee = True
+            break
+        time.sleep(0.5)
+    if listed_to_invitee:
+        _pass("curation_team.invitation_listed_to_invitee")
+    else:
+        _fail("curation_team.invitation_listed_to_invitee", f"body={last_mine}")
 
     # Only the owner may revoke. The invitee revoking its own invitation would
     # otherwise be indistinguishable from declining it.
@@ -632,7 +665,10 @@ def test_curation_team_lifecycle(backend: str) -> None:
         _fail("curation_team.roster_has_curator", f"curator={curator_addr[:12]}")
 
     code, curated = _get(f"{backend}/api/curators/{curator_addr}/communities")
-    if code == 200 and slug in [str(c).lower() for c in (curated or {}).get("communities") or []]:
+    if code == 200 and slug in [str(c).lower() for c in (curated or {}).get("communities") or []] and any(
+        str((m or {}).get("community") or "").lower() == slug and int((m or {}).get("team_id") or 0) == int(team_id)
+        for m in (curated or {}).get("memberships") or []
+    ):
         _pass("curation_team.curator_communities_lists_slug")
     else:
         _fail("curation_team.curator_communities_lists_slug", f"code={code} body={curated}")

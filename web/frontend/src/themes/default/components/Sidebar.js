@@ -20,7 +20,7 @@ import Storage from '../../../utils/Storage';
 import { fetchJoinedCommunities, loadSubscriptions } from '../../../utils/Subscriptions';
 import { fetchFollowedUsers, loadFollowedAuthors } from '../../../utils/FollowUsers';
 import { resolveUsernames } from '../../../utils/UsernameCache';
-import { communityLabel, communityPath } from '../../../utils/community';
+import { communityLabel, communityPath, communityFromPathname, createPostPathForContext } from '../../../utils/community';
 import { useViewerCuratorCommunities } from '../../../logic/useViewerCuratorMembership';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -262,9 +262,10 @@ const icons = {
 };
 
 function isActivePath(pathname, target) {
-    if (target === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/c/');
-    if (target === '/profile') return pathname === '/profile' || pathname.startsWith('/u/');
-    return pathname === target;
+    const pathOnly = String(target || '').split('?')[0];
+    if (pathOnly === '/home') return pathname === '/' || pathname === '/home' || pathname.startsWith('/c/');
+    if (pathOnly === '/profile') return pathname === '/profile' || pathname.startsWith('/u/');
+    return pathname === pathOnly;
 }
 
 function SidebarItem({ to, icon, label, pathname, onClick }) {
@@ -446,7 +447,7 @@ function Sidebar({ state }) {
                 <SidebarItem to="/following" icon={icons.following} label="Following" pathname={pathname} />
                 <SidebarItem to="/communities" icon={icons.communities} label="Communities" pathname={pathname} />
                 <SidebarItem to="/faq" icon={icons.faq} label="FAQ" pathname={pathname} />
-                <SidebarItem to="/create_post" icon={icons.create} label="Create post" pathname={pathname} />
+                <SidebarItem to={createPostPathForContext(isLoggedIn, communityFromPathname(pathname))} icon={icons.create} label="Create post" pathname={pathname} />
             </Section>
 
             {isLoggedIn && (

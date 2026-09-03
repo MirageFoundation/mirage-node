@@ -11,6 +11,7 @@ import UserAvatar from './UserAvatar.js';
 import { getAuthorColor, getAuthorTooltip } from '../../../utils/tierColors';
 import { signPlainPayload } from '../../../utils/signPlain';
 import { returnToFromLocation, withReturnTo } from '../../../utils/returnTo';
+import { communityFromPathname, createPostPathForContext } from '../../../utils/community';
 
 /**
  * Reddit-style TopBar for the default theme.
@@ -1146,7 +1147,7 @@ function TopBar({ state, onToggleSidebar, onToggleDrawer, sidebarHidden }) {
                             </svg>
                         </CompactSearchButton>
                         {isLoggedIn && (
-                            <CreateButton to="/create_post" aria-label="Create post">
+                            <CreateButton to={createPostPathForContext(isLoggedIn, communityFromPathname(path))} aria-label="Create post">
                                 <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
                                     <path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" d="M12 5v14M5 12h14" />
                                 </svg>

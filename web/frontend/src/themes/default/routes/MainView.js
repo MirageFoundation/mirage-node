@@ -24,6 +24,8 @@ import CurationLensPicker from "../components/CurationLensPicker";
 import CommunityMembershipButton from "../components/CommunityMembershipButton";
 import AccountStatusNotices from "../components/AccountStatusNotices";
 import CreatorEarningsBanner from "../components/CreatorEarningsBanner";
+import CuratorInviteHero from "../components/CuratorInviteHero";
+import { CommunityMentionText } from "../components/MarkdownRenderer";
 import { usePendingBlocks } from "../../../logic/usePendingBlocks";
 import { isOptimisticallyCurationHidden } from "../../../utils/curationVisibility";
 import { joinPreferenceForLens } from "../../../utils/curation";
@@ -1303,7 +1305,9 @@ const MainView = ({
                                     </CommunityLensTopRow>
                                     {activeCurationTeam?.description && (
                                         <CurationTeamHeader>
-                                            <CurationTeamDescription>{activeCurationTeam.description}</CurationTeamDescription>
+                                            <CurationTeamDescription>
+                                                <CommunityMentionText text={activeCurationTeam.description} />
+                                            </CurationTeamDescription>
                                         </CurationTeamHeader>
                                     )}
                                 </CommunityLensBar>
@@ -1323,6 +1327,7 @@ const MainView = ({
                                     </HomeFeedHeaderRow>
                                 </HomeFeedTitleBar>
                                 <AccountStatusNotices showQuota={false} />
+                                <CuratorInviteHero />
                                 <CreatorEarningsBanner />
                             </FeedHeroColumn>}
 

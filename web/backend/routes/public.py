@@ -4414,7 +4414,10 @@ def _build_bootstrap_view(
                 seen_posts=persisted_seen,
             )
         if resp.get("posts"):
+            _t = time.monotonic()
             _enrich_media_meta(cur, resp["posts"])
+            enrich_ms = round((time.monotonic() - _t) * 1000, 2)
+            _t = time.monotonic()
             resp["posts"], _ = _filter_posts_for_lens(
                 cur,
                 resp["posts"],
@@ -4435,12 +4438,27 @@ def _build_bootstrap_view(
             visible_posts = resp["posts"]
             resp["posts"] = visible_posts[:limit]
             resp["has_more"] = len(visible_posts) > limit
+            filter_ms = round((time.monotonic() - _t) * 1000, 2)
             _track_image_impressions(resp["posts"], rid, context=f"bootstrap.view.feed.{feed_name}")
         else:
             resp["has_more"] = False
+            enrich_ms = 0.0
+            filter_ms = 0.0
         resp["page"] = 1
         resp["limit"] = limit
-        resp.pop("_timings", None)
+        inner = resp.pop("_timings", None) or {}
+        view_ms = round((inner.get("score_ms") or 0) + (inner.get("cand_ms") or 0) + enrich_ms + filter_ms, 2)
+        if view_ms > 500 or filter_ms > 100:
+            log_event(
+                rid,
+                "bootstrap.view.timing",
+                feed=feed_name,
+                sort=sort_mode,
+                enrich_ms=enrich_ms,
+                filter_ms=filter_ms,
+                returned=len(resp.get("posts") or []),
+                **inner,
+            )
         if guest_key is not None:
             _guest_feed_cache_put(guest_key, resp)
         return {"kind": "feed", "feed": feed_name, **resp}
@@ -4593,6 +4611,7 @@ def bootstrap():
     # Static sections must survive user-section faults. Login clears nothing useful
     # when node_config is present; a missing relay-quota projection used to 503
     # the whole payload and leave the SPA on an endless skeleton + crash.
+    t0 = time.monotonic()
     try:
         allowed_tags = _viewer_allowed_tags(content_viewer)
         resp: Dict[str, Any] = {
@@ -4611,14 +4630,20 @@ def bootstrap():
         log_event(rid, "bootstrap.required.err", error=str(e))
         return api_error_code("indexer_unavailable", 503)
 
+    view_ms = 0.0
+    user_ms = 0.0
     try:
+        _t = time.monotonic()
         resp["view"] = _build_bootstrap_view(view_raw, content_viewer, by_raw, allowed_tags, limit, rid)
+        view_ms = round((time.monotonic() - _t) * 1000, 2)
         if address:
+            _t = time.monotonic()
             resp["user_status"] = _build_user_status(address)
             resp["user_followed"] = _build_user_followed(address)
             resp["user_blocked"] = _build_user_blocked(address)
             community_bootstrap = _build_community_bootstrap(address)
             resp.update(community_bootstrap)
+            user_ms = round((time.monotonic() - _t) * 1000, 2)
     except Exception as e:
         log_event(rid, "bootstrap.user.err", error=str(e), address=address)
         if isinstance(e, BackendUnavailable):
@@ -4641,6 +4666,9 @@ def bootstrap():
         sections=[k for k, v in resp.items() if v is not None],
         view_kind=(resp["view"] or {}).get("kind") if isinstance(resp.get("view"), dict) else None,
         user_sections_ok=bool(address is None or resp.get("user_status") is not None),
+        view_ms=view_ms,
+        user_ms=user_ms,
+        total_ms=round((time.monotonic() - t0) * 1000, 2),
     )
     return jsonify(resp)
 

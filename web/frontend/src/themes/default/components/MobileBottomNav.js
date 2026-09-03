@@ -15,6 +15,7 @@ import {
     HiOutlineUser,
 } from 'react-icons/hi2';
 import Storage from '../../../utils/Storage';
+import { communityFromPathname, createPostPathForContext } from '../../../utils/community';
 import { ProfileMenuContent } from './TopBar';
 import ConfirmDialog from './ConfirmDialog.js';
 
@@ -504,19 +505,6 @@ function MobileBottomNav({ state }) {
     );
 }
 
-export function communityFromPathname(pathname) {
-    try {
-        const match = String(pathname || '').match(/^\/c\/([^/]+)/);
-        return match?.[1] ? decodeURIComponent(match[1]) : '';
-    } catch (_) {
-        return '';
-    }
-}
-
-export function createPostPathForContext(hasPublicKey, community) {
-    return hasPublicKey && community
-        ? `/create_post?community=${encodeURIComponent(community)}`
-        : '/create_post';
-}
+export { communityFromPathname, createPostPathForContext };
 
 export default MobileBottomNav;

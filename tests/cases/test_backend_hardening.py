@@ -165,7 +165,7 @@ def _test_curation_visibility() -> None:
 
 
 class _TagCursor:
-    """Answers just the two queries resolve_effective_tags issues.
+    """Answers the queries resolve_effective_tags issues.
 
     default_tag is the community's blanket tag; overrides maps post id to the
     curator's decision, where a present '' is deliberately different from an
@@ -176,20 +176,38 @@ class _TagCursor:
         self._default_tag = default_tag
         self._overrides = overrides
         self._team_id = team_id
-        self._result = None
+        self._one = None
+        self._rows: list = []
 
     def execute(self, sql, params=()):
         flat = " ".join(str(sql).split())
         if "FROM curation_teams" in flat:
-            self._result = (self._team_id, "mirage1owner", "Team", "", False, 1, 10, 1, self._default_tag)
+            self._one = (self._team_id, "mirage1owner", "Team", "", False, 1, 10, 1, self._default_tag)
+            self._rows = []
         elif "FROM curation_post_tags" in flat:
-            post_id = params[2]
-            self._result = (self._overrides[post_id],) if post_id in self._overrides else None
+            hashes = params[2]
+            if isinstance(hashes, (list, tuple)):
+                self._rows = [
+                    ("test", self._team_id, h, self._overrides[h])
+                    for h in hashes
+                    if h in self._overrides
+                ]
+            else:
+                post_id = hashes
+                self._rows = (
+                    [("test", self._team_id, post_id, self._overrides[post_id])]
+                    if post_id in self._overrides
+                    else []
+                )
+            self._one = None
         else:
             raise AssertionError(f"unexpected query: {flat}")
 
     def fetchone(self):
-        return self._result
+        return self._one
+
+    def fetchall(self):
+        return list(self._rows)
 
 
 def _test_effective_tag_precedence() -> None:
@@ -244,6 +262,106 @@ def _test_effective_tag_precedence() -> None:
         _fail("backend_hardening.raw_tag_precedence", f"mismatches: {raw_bad}")
     else:
         _pass("backend_hardening.raw_tag_precedence", cases=len(raw_cases))
+
+
+class _FilterPostsCursor:
+    """Serves filter_posts without a database, and counts SQL round-trips."""
+
+    def __init__(self, posts: list[dict], team_id: int = 7):
+        self._posts = posts
+        self._team_id = team_id
+        self.executes: list[str] = []
+        self._rows: list = []
+
+    def execute(self, sql, params=()):
+        flat = " ".join(str(sql).split())
+        self.executes.append(flat)
+        if "FROM posts p" in flat and "LOWER(p.txhash)=ANY" in flat:
+            self._rows = [
+                (
+                    p["post_id"],
+                    p["author"],
+                    p["community"],
+                    0,
+                    p["post_id"],
+                    1,
+                    False,
+                )
+                for p in self._posts
+            ]
+        elif "FROM curation_teams t" in flat:
+            self._rows = [
+                (self._team_id, "mirage1owner", "Team", "", False, 1, 10, 1, ""),
+            ]
+        elif "FROM community_curation_preferences" in flat:
+            self._rows = []
+        elif "FROM curation_hidden_posts" in flat:
+            self._rows = []
+        elif "FROM curation_hidden_users" in flat:
+            self._rows = []
+        elif "FROM curation_teams" in flat and "subscriber_only" in flat:
+            self._rows = [(self._posts[0]["community"], self._team_id, False)]
+        elif "FROM curation_locks" in flat:
+            self._rows = []
+        else:
+            raise AssertionError(f"unexpected query: {flat}")
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+def _test_filter_posts_batches_moderation() -> None:
+    """Home/bootstrap filter hundreds of candidates; one SQL per post is a stall."""
+    backend_dir = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_dir) not in sys.path:
+        sys.path.insert(0, str(backend_dir))
+    from curation import filter_posts
+
+    posts = [
+        {
+            "post_id": f"{i:064x}",
+            "author": "mirage1authorxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "community": "politics",
+            "tag": "",
+        }
+        for i in range(40)
+    ]
+    cur = _FilterPostsCursor(posts)
+    visible, tombstones = filter_posts(
+        cur,
+        posts,
+        viewer="mirage1viewerxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        requested_lens="effective",
+        requested_team_id=None,
+        scope="current",
+    )
+    if tombstones:
+        _fail("backend_hardening.filter_posts_batches_moderation", f"tombstones={tombstones}")
+        return
+    if len(visible) != 40:
+        _fail("backend_hardening.filter_posts_batches_moderation", f"visible={len(visible)}")
+        return
+    if len(cur.executes) >= 40:
+        _fail(
+            "backend_hardening.filter_posts_batches_moderation",
+            f"per-post SQL still: executes={len(cur.executes)}",
+        )
+        return
+    batched = sum("unnest(" in sql for sql in cur.executes)
+    if batched < 4:
+        _fail(
+            "backend_hardening.filter_posts_batches_moderation",
+            f"missing unnest batches executes={cur.executes}",
+        )
+        return
+    _pass(
+        "backend_hardening.filter_posts_batches_moderation",
+        executes=len(cur.executes),
+        batched=batched,
+    )
 
 
 def _test_visible_comment_recount() -> None:
@@ -602,6 +720,7 @@ def test_backend_hardening(backend: str):
     _test_community_matcher()
     _test_curation_visibility()
     _test_effective_tag_precedence()
+    _test_filter_posts_batches_moderation()
     _test_visible_comment_recount()
     _test_thread_lock_is_read_only()
     _test_legacy_posts_reach_current_scope()

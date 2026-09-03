@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import styled from "styled-components";
+import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { markdownUrlTransform } from "../../../utils/markdownUrl";
 import remarkGfm from "remark-gfm";
 import { visit } from "unist-util-visit";
 import InlineMedia from "./InlineMedia";
-import { communityLabel, communityPath } from "../../../utils/community";
+import { communityLabel, communityPath, splitCommunityMentions } from "../../../utils/community";
 
 const Container = styled.div`
 	font-family: ${({ theme }) => theme.layout.contentFontFamily || 'inherit'};
@@ -110,7 +111,7 @@ const MentionLink = styled.a`
 	}
 `;
 
-const CommunityLink = styled.a`
+const CommunityLink = styled(Link)`
 	color: ${({ theme }) => theme.colors.link};
 	font-weight: 600;
 	text-decoration: none;
@@ -119,6 +120,18 @@ const CommunityLink = styled.a`
 		text-decoration: underline;
 	}
 `;
+
+export function CommunityMentionText({ text }) {
+    const parts = splitCommunityMentions(text);
+    return parts.map((part, index) => {
+        if (part.type !== 'community') return <React.Fragment key={index}>{part.value}</React.Fragment>;
+        return (
+            <CommunityLink key={index} to={communityPath(part.slug)}>
+                {communityLabel(part.slug)}
+            </CommunityLink>
+        );
+    });
+}
 
 function Spoiler({ children }) {
     const [revealed, setRevealed] = useState(false);
@@ -229,38 +242,24 @@ function remarkCommunities() {
     return (tree) => {
         visit(tree, 'text', (node, index, parent) => {
             if (!node.value || typeof node.value !== 'string') return;
-            if (!node.value.includes('[') && !node.value.includes('c/')) return;
+            const parts = splitCommunityMentions(node.value);
+            if (parts.length === 1 && parts[0].type === 'text') return;
 
-            const regex = /(?<![![])\[([a-z0-9]+(?:-[a-z0-9]+)*)\](?![(:\]])|(?<![a-zA-Z0-9/])c\/([a-z0-9]+(?:-[a-z0-9]+)*)(?![a-zA-Z0-9-])/g;
-            const parts = [];
-            let lastIndex = 0;
-            let match;
-
-            while ((match = regex.exec(node.value)) !== null) {
-                if (match.index > lastIndex) {
-                    parts.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
-                }
-                const slug = String(match[1] || match[2] || '').toLowerCase();
-                parts.push({
+            const nodes = parts.map((part) => {
+                if (part.type !== 'community') return { type: 'text', value: part.value };
+                return {
                     type: 'community',
                     data: {
                         hName: 'community-tag',
-                        hProperties: { community: slug },
+                        hProperties: { community: part.slug },
                     },
-                    children: [{ type: 'text', value: communityLabel(slug) }],
-                });
-                lastIndex = match.index + match[0].length;
-            }
-
-            if (lastIndex === 0) return;
-
-            if (lastIndex < node.value.length) {
-                parts.push({ type: 'text', value: node.value.slice(lastIndex) });
-            }
+                    children: [{ type: 'text', value: communityLabel(part.slug) }],
+                };
+            });
 
             if (parent && Array.isArray(parent.children)) {
-                parent.children.splice(index, 1, ...parts);
-                return index + parts.length;
+                parent.children.splice(index, 1, ...nodes);
+                return index + nodes.length;
             }
         });
     };
@@ -365,7 +364,7 @@ export default function MarkdownRenderer({ text }) {
                         </MentionLink>
                     ),
                     'community-tag': ({ community, children }) => (
-                        <CommunityLink href={communityPath(community)}>
+                        <CommunityLink to={communityPath(community)}>
                             {children}
                         </CommunityLink>
                     ),
