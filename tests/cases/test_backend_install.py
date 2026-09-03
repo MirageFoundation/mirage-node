@@ -3284,12 +3284,25 @@ def _test_governed_upgrade_prepare() -> None:
         )
         return
 
-    def _arm_harness(tmp: str, activation: str, plan: str, upgrade_name: str = "v-test") -> tuple[str, str]:
+    def _arm_harness(
+        tmp: str,
+        activation: str,
+        plan: str,
+        upgrade_name: str = "v-test",
+        halt_marker: dict | None = None,
+    ) -> tuple[str, str]:
         """Build a shell preamble whose stubbed tick installs the release manifest."""
         home = os.path.join(tmp, "home")
         work = os.path.join(tmp, "work")
         os.makedirs(os.path.join(home, ".mirage", "env"), exist_ok=True)
         os.makedirs(work, exist_ok=True)
+        if halt_marker is not None:
+            node_data = os.path.join(home, ".mirage", "node", "data")
+            upgrade_dir = os.path.join(home, ".mirage", "upgrade")
+            os.makedirs(node_data, exist_ok=True)
+            os.makedirs(upgrade_dir, exist_ok=True)
+            Path(node_data, "upgrade-info.json").write_text(json.dumps(halt_marker), encoding="utf-8")
+            Path(upgrade_dir, "halt-detected.txt").write_text("governed halt\n", encoding="utf-8")
         release = os.path.join(tmp, "release.json")
         Path(release).write_text(
             json.dumps(
@@ -3316,6 +3329,7 @@ tick() {{ cp {release!r} {installed!r}; }}
 systemctl() {{ :; }}
 disable_automatic_release_fetch() {{ :; }}
 curl() {{
+  if [[ {str(halt_marker is not None).lower()} == true ]]; then return 1; fi
   printf '%s\\n' {plan!r}
   return 0
 }}
@@ -3363,6 +3377,34 @@ query_local_rest() {{ curl "$@"; }}
         again = _run(["bash", "-c", preamble + "prepare\n"])
         if again.returncode != 0 or "already armed" not in (again.stdout or ""):
             _fail("install.upgrade.prepare_arm_idempotent", f"rc={again.returncode} out={again.stdout}")
+            return
+
+    with tempfile.TemporaryDirectory(prefix="prepare-after-halt-") as tmp:
+        preamble, prepared_path = _arm_harness(
+            tmp,
+            "upgrade-halt",
+            "",
+            halt_marker={"name": "v-test", "height": 4242},
+        )
+        r = _run(["bash", "-c", preamble + "prepare\n"])
+        if r.returncode != 0 or "using governed halt marker v-test at height 4242" not in (r.stdout or ""):
+            _fail("install.upgrade.prepare_after_halt", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        armed = json.loads(Path(prepared_path).read_text(encoding="utf-8"))
+        if armed.get("upgrade_name") != "v-test" or armed.get("plan_height") != 4242:
+            _fail("install.upgrade.prepare_after_halt_payload", armed)
+            return
+
+    with tempfile.TemporaryDirectory(prefix="prepare-wrong-halt-") as tmp:
+        preamble, _ = _arm_harness(
+            tmp,
+            "upgrade-halt",
+            "",
+            halt_marker={"name": "other", "height": 4242},
+        )
+        r = _run(["bash", "-c", preamble + "prepare\n"])
+        if r.returncode == 0 or "does not match" not in (r.stderr or ""):
+            _fail("install.upgrade.prepare_wrong_halt", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
             return
 
     # An ordinary release published after arming must not repoint "staged" and

@@ -87,6 +87,7 @@ tick() {
 # zero; the chain-written halt marker supplies the height during activation.
 arm_governed_upgrade() {
   local manifest="$1" upgrade_name image release_id prepared plan plan_name plan_h
+  local halt_marker halt_values
   upgrade_name=$(json_field "$manifest" upgrade_name)
   if [[ -z "$upgrade_name" ]]; then
     echo "ERROR: upgrade-halt manifest is missing upgrade_name" >&2
@@ -94,12 +95,32 @@ arm_governed_upgrade() {
   fi
   image=$(json_field "$manifest" image)
   release_id=$(json_field "$manifest" release_id)
-  if ! plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
-    echo "local REST is unavailable; cannot match the on-chain upgrade plan yet"
+  halt_marker="$HOME/.mirage/node/data/upgrade-info.json"
+  if plan=$(query_local_rest http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan); then
+    plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
+    plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
+  elif [[ -f "$HOME/.mirage/upgrade/halt-detected.txt" && -f "$halt_marker" ]]; then
+    if ! halt_values=$(python3 - "$halt_marker" <<'PY'
+import json, sys
+info = json.load(open(sys.argv[1]))
+name = info.get("name") or ""
+height = int(info.get("height") or 0)
+if not name or height <= 0:
+    raise SystemExit(1)
+print(name)
+print(height)
+PY
+); then
+      echo "ERROR: local governed halt marker is invalid: $halt_marker" >&2
+      exit 1
+    fi
+    plan_name=$(printf '%s\n' "$halt_values" | awk 'NR == 1')
+    plan_h=$(printf '%s\n' "$halt_values" | awk 'NR == 2')
+    echo "local REST is unavailable; using governed halt marker $plan_name at height $plan_h"
+  else
+    echo "ERROR: local REST is unavailable and no governed halt marker is present" >&2
     return 1
   fi
-  plan_name=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(p.get("name") or "")')
-  plan_h=$(echo "$plan" | python3 -c 'import json,sys; p=json.load(sys.stdin).get("plan") or {}; print(int(p.get("height") or 0))')
   if [[ -z "$plan_name" && "$plan_h" -ne 0 ]]; then
     echo "ERROR: on-chain upgrade plan has height $plan_h but no name" >&2
     exit 1
