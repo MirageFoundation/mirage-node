@@ -564,8 +564,14 @@ def test_legacy_topic_messages(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, owner)
     block = _build_msg_block_topic(wallet, lb, 0, _now_ms(), "", pattern, nonce=_gen_nonce())
     if submit(block, "/mirage.core.v1.MsgBlockTopic", "legacy_topic.block_wildcard"):
-        profile = _get_profile_full(backend, owner)
-        joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
+        deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+        joined: set[str] = set()
+        while time.perf_counter() < deadline:
+            profile = _get_profile_full(backend, owner)
+            joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
+            if first not in joined and second not in joined:
+                break
+            time.sleep(0.5)
         if first not in joined and second not in joined:
             _pass("legacy_topic.block_leaves_matches")
         else:
