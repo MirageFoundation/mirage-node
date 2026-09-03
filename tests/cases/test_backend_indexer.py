@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 from tests.common import (
@@ -3650,3 +3651,87 @@ def test_tx_index(backend: str):
         _pass("tx_index.tx_receipts_dropped")
     else:
         _fail("tx_index.tx_receipts_dropped", f"tx_receipts still exists: rc={rc2} out={out2}")
+
+
+_FEED_POST_INDEXES = ("idx_posts_feed_recent", "idx_posts_feed_owner")
+_FEED_VOTE_INDEXES = ("idx_votes_upvote_owner_target", "idx_votes_upvote_target_owner")
+
+
+def test_feed_candidate_indexes(backend: str) -> None:
+    """The home feed's candidate sources must stay off sequential scans.
+
+    Every source filters posts on a root/community/not-deleted predicate that is
+    not indexable on its own, so without the partial indexes below Postgres scans
+    all of `posts` and top-N sorts the survivors. That is not a slow query in the
+    abstract: it is what made /api/bootstrap take 3.4s of server time on a
+    production node with 132k posts, and it comes back the moment the predicate
+    text in `web/backend/routes/public.py` stops matching the index predicate,
+    because a partial index is only usable when the planner can prove the WHERE
+    clause implies it. Both are spelled by `shared.feed_sql`; these checks fail if
+    they drift or if the indexes are missing.
+    """
+    repo = Path(__file__).resolve().parents[2]
+    query_src = (repo / "web" / "backend" / "routes" / "public.py").read_text()
+    schema_src = (repo / "indexer" / "database.py").read_text()
+
+    # Both sides must build the predicate from shared.feed_sql rather than
+    # restating it. A second hand-written copy is exactly how the index stops
+    # matching, and it fails silently: the queries still return correct rows.
+    query_uses = query_src.count('feed_candidate_predicate("p")')
+    hardcoded = [
+        marker
+        for marker in ("_ROOT_FILTER =", "_COMMUNITY_FILTER =")
+        if marker in query_src or marker in schema_src
+    ]
+    if hardcoded:
+        _fail(
+            "feed_index.predicate_parity",
+            f"predicate restated instead of imported: {hardcoded}",
+        )
+    elif query_uses < 2:
+        _fail(
+            "feed_index.predicate_parity",
+            f"public.py builds the predicate {query_uses}x, expected >=2 (magic + newest feeds)",
+        )
+    elif "feed_candidate_predicate()" not in schema_src:
+        _fail("feed_index.predicate_parity", "indexer/database.py does not build the index predicate from shared.feed_sql")
+    else:
+        _pass("feed_index.predicate_parity", query_sites=query_uses)
+
+    if not _check_local_docker():
+        _fail("feed_index.indexes_present", "local docker required")
+        _fail("feed_index.candidates_index_driven", "local docker required")
+        return
+
+    db_name = _get_indexer_db_name()
+    want = _FEED_POST_INDEXES + _FEED_VOTE_INDEXES
+    rc, out = _docker_exec(
+        f"""su - postgres -c "psql -d {db_name} -tAc \\"SELECT string_agg(indexname, ',' ORDER BY indexname)
+FROM pg_indexes WHERE indexname IN ({','.join("'" + i + "'" for i in want)});\\" 2>&1" """,
+        timeout=15,
+    )
+    have = {i for i in out.strip().split(",") if i}
+    missing = sorted(set(want) - have)
+    if rc != 0:
+        _fail("feed_index.indexes_present", f"db query failed rc={rc} out={out.strip()[-200:]}")
+    elif missing:
+        _fail("feed_index.indexes_present", f"missing={missing}; redeploy the indexer to run _init_db")
+    else:
+        _pass("feed_index.indexes_present", count=len(have))
+
+    # The load-bearing assertion: EXPLAIN the real candidate queries and refuse a
+    # plan that sequentially scans posts or votes.
+    rc, out = _docker_exec(
+        "cd /opt/mirage && set -a; for f in /root/.mirage/env/*.env; do . \"$f\"; done; set +a; "
+        "PYTHONPATH=/opt/mirage python3 scripts/check_feed_index.py 2>&1; echo rc=$?",
+        timeout=120,
+    )
+    if "PASS: every candidate source is index-driven" in out:
+        timings = re.findall(r"^\[(\w+)\] ok ([\d.]+)ms", out, re.M)
+        _pass("feed_index.candidates_index_driven", **{n: f"{ms}ms" for n, ms in timings})
+    else:
+        offenders = re.findall(r"^\[(\w+)\] FAIL: ([^\n]+)", out, re.M)
+        _fail(
+            "feed_index.candidates_index_driven",
+            f"offenders={offenders or out.strip()[-400:]}",
+        )

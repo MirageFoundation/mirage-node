@@ -91,6 +91,7 @@ from tests.cases.test_backend_authz import (
 )
 from tests.cases.test_backend_retired import test_retired_endpoints
 from tests.cases.test_backend_indexer import (
+    test_feed_candidate_indexes,
     test_indexer_hardening,
     test_indexer_invariants,
     test_redgifs_thumbnails,
@@ -166,6 +167,7 @@ ALL_CATEGORIES = {
     "failed_tx": test_failed_tx_status,
     "failed_tx_npv": test_failed_tx_non_post_vote,
     "indexer_hardening": test_indexer_hardening,
+    "feed_index": test_feed_candidate_indexes,
     "redgifs_thumbnails": test_redgifs_thumbnails,
     "rumble_embeds": test_rumble_embeds,
     "backend_hardening": test_backend_hardening,
@@ -249,6 +251,7 @@ WALLETLESS_CATEGORIES = {
     "install",
     "legacy_mobile_source",
     "legacy_mobile_stats",
+    "feed_index",
 }
 
 # Every category is a release gate. A test that may skip without failing the

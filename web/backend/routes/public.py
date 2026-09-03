@@ -39,6 +39,7 @@ from node import require_runtime, derive_address_from_pubkey as _derive_address_
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards, community_matches_pattern
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
+from shared.feed_sql import CANDIDATE_WINDOW_SECONDS, MAX_CANDIDATES_PER_SOURCE, feed_candidate_predicate
 from curation import (
     filter_posts as _filter_posts_for_lens,
     resolve_effective_tags as _resolve_effective_tags,
@@ -58,6 +59,7 @@ from settings import (
 )
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import calendar
 from datetime import datetime as dt
 import math
@@ -1878,8 +1880,10 @@ def _get_home_feed_newest(
                    COALESCE(p.media, '[]') AS media,
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
-    _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _COMMUNITY_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
+    # Same string as the idx_posts_feed_recent predicate; see shared.feed_sql.
+    # This feed paginates chronologically so it takes no candidate window — the
+    # partial index alone turns it into an ordered scan that stops at LIMIT.
+    _FEED_FILTER = feed_candidate_predicate("p")
 
     bt_clause, bt_params = _blocked_communities_sql(
         blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer
@@ -1904,7 +1908,7 @@ def _get_home_feed_newest(
             f"""SELECT {_POST_COLS}
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-            WHERE {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
+            WHERE {_FEED_FILTER}
             {bt_clause} {ts_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
@@ -2039,7 +2043,7 @@ def _get_home_feed_magic(
             # 3. Load candidate posts.
             # Cap the per-source pool size on all pages so feed latency stays bounded
             # even when seen-post overfetch would otherwise multiply the query cost.
-            per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), 500)
+            per_source = min(limit * page * _seen_overfetch_factor(seen_posts, 4), MAX_CANDIDATES_PER_SOURCE)
             _t = time.monotonic()
             candidates, cand_timings = _load_home_candidates(
                 cur,
@@ -2502,13 +2506,18 @@ def _load_home_candidates(
                    COALESCE(p.media, '[]') AS media,
                    COALESCE(pr.created_at, 0) AS author_created_at,
                    COALESCE(p.relayer, '') AS relayer"""
-    _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
-    _COMMUNITY_FILTER = "p.community IS NOT NULL AND TRIM(p.community) != ''"
+    # Spelled by shared.feed_sql so it stays byte-identical to the predicate on
+    # idx_posts_feed_recent / idx_posts_feed_owner. Any divergence here drops
+    # every source below back to a sequential scan of posts.
+    _FEED_FILTER = feed_candidate_predicate("p")
     bt_clause, bt_params = _blocked_communities_sql(
         blocked_communities or set(), blocked_community_prefixes or tuple(), viewer=viewer
     )
 
     min_ts = int(now_ts) - 86400
+    # Sources 1-3 are bounded by the candidate window rather than scanning all
+    # history; see shared.feed_sql for why the window cannot change ranking.
+    window_ts = int(now_ts) - CANDIDATE_WINDOW_SECONDS
 
     # Source 0: Own posts (always included so the viewer always sees their content)
     _t = _time.monotonic()
@@ -2517,7 +2526,7 @@ def _load_home_candidates(
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE LOWER(p.owner) = %s
-          AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
+          AND {_FEED_FILTER}
           AND p.created_at >= %s
           {bt_clause}
         ORDER BY p.created_at DESC
@@ -2553,11 +2562,12 @@ def _load_home_candidates(
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
-              AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
+              AND {_FEED_FILTER}
+              AND p.created_at >= %s
               {bt_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
-            similar_list + bt_params + [max_posts],
+            similar_list + [window_ts] + bt_params + [max_posts],
         )
         for row in cur.fetchall():
             post = _row_to_post(
@@ -2577,9 +2587,14 @@ def _load_home_candidates(
     timings["src1_n"] = src1_n
 
     # Source 2: Posts UPVOTED by similar users.
-    # Drive from posts (uses idx_posts_created_at) and use EXISTS against the
-    # uniq_votes_owner_target index instead of seq-scanning votes. The old
-    # `FROM votes JOIN posts` plan did a full seq scan of ~128k upvote rows.
+    # Both sides of this have to stay index-only or the planner picks the shape
+    # that cost 1.1s in production: with no age bound on posts and no partial
+    # index on votes, it hash-aggregated every upvote those users ever cast
+    # (~100k rows) into ~69k distinct targets and probed posts once per target,
+    # touching ~270k buffers to return 15 posts. The window bound puts the posts
+    # side on idx_posts_feed_recent and idx_votes_upvote_owner_target makes the
+    # votes side index-only, which leaves a hash semi join between two small
+    # index scans.
     _t = _time.monotonic()
     src2_n = 0
     if similar_addrs:
@@ -2595,11 +2610,12 @@ def _load_home_candidates(
                   AND LOWER(v.owner) IN ({placeholders})
                   AND v.user_vote > 0
               )
-              AND {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
+              AND {_FEED_FILTER}
+              AND p.created_at >= %s
               {bt_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
-            similar_list + bt_params + [max_posts],
+            similar_list + [window_ts] + bt_params + [max_posts],
         )
         for row in cur.fetchall():
             post = _row_to_post(
@@ -2624,11 +2640,12 @@ def _load_home_candidates(
         f"""SELECT {_POST_COLS}
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE {_ROOT_FILTER} AND {_COMMUNITY_FILTER} AND p.deleted = false
+        WHERE {_FEED_FILTER}
+          AND p.created_at >= %s
         {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
-        bt_params + [max_posts],
+        [window_ts] + bt_params + [max_posts],
     )
     src3_n = 0
     for row in cur.fetchall():
@@ -4631,19 +4648,44 @@ def bootstrap():
         return api_error_code("indexer_unavailable", 503)
 
     view_ms = 0.0
-    user_ms = 0.0
+    # Residual cost of the user sections: what they still add once the view has
+    # finished, rather than what they cost in isolation. They now run concurrently
+    # with the view, so this is ~0 whenever the view is the longer of the two.
+    user_wait_ms = 0.0
     try:
-        _t = time.monotonic()
-        resp["view"] = _build_bootstrap_view(view_raw, content_viewer, by_raw, allowed_tags, limit, rid)
-        view_ms = round((time.monotonic() - _t) * 1000, 2)
-        if address:
+        # The four user sections read different tables from the view and from each
+        # other, so running them after it just added their latency to the response.
+        # They overlap with the view instead. The view itself stays on this thread:
+        # it reads `request` in two dozen places and Flask's request proxy is
+        # thread-local, so moving it would strip its own query arguments. The user
+        # builders touch `request` only for a route label on an error path, already
+        # guarded by has_request_context().
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            user_tasks = (
+                {
+                    "user_status": pool.submit(_build_user_status, address),
+                    "user_followed": pool.submit(_build_user_followed, address),
+                    "user_blocked": pool.submit(_build_user_blocked, address),
+                    "community": pool.submit(_build_community_bootstrap, address),
+                }
+                if address
+                else {}
+            )
             _t = time.monotonic()
-            resp["user_status"] = _build_user_status(address)
-            resp["user_followed"] = _build_user_followed(address)
-            resp["user_blocked"] = _build_user_blocked(address)
-            community_bootstrap = _build_community_bootstrap(address)
-            resp.update(community_bootstrap)
-            user_ms = round((time.monotonic() - _t) * 1000, 2)
+            try:
+                resp["view"] = _build_bootstrap_view(view_raw, content_viewer, by_raw, allowed_tags, limit, rid)
+            finally:
+                view_ms = round((time.monotonic() - _t) * 1000, 2)
+
+            if user_tasks:
+                _t = time.monotonic()
+                # .result() re-raises in this thread, so a failing user section
+                # still lands in the handler below with its original type.
+                resp["user_status"] = user_tasks["user_status"].result()
+                resp["user_followed"] = user_tasks["user_followed"].result()
+                resp["user_blocked"] = user_tasks["user_blocked"].result()
+                resp.update(user_tasks["community"].result())
+                user_wait_ms = round((time.monotonic() - _t) * 1000, 2)
     except Exception as e:
         log_event(rid, "bootstrap.user.err", error=str(e), address=address)
         if isinstance(e, BackendUnavailable):
@@ -4667,7 +4709,7 @@ def bootstrap():
         view_kind=(resp["view"] or {}).get("kind") if isinstance(resp.get("view"), dict) else None,
         user_sections_ok=bool(address is None or resp.get("user_status") is not None),
         view_ms=view_ms,
-        user_ms=user_ms,
+        user_wait_ms=user_wait_ms,
         total_ms=round((time.monotonic() - t0) * 1000, 2),
     )
     return jsonify(resp)

@@ -11,6 +11,8 @@ from urllib.parse import urlparse
 
 import psycopg
 
+from shared.feed_sql import UPVOTE_PREDICATE, feed_candidate_predicate
+
 logger = logging.getLogger(__name__)
 
 INDEXER_LIST_CAP = 100_000
@@ -194,6 +196,20 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root ON posts((COALESCE(target,'') = ''))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root_post_id ON posts(LOWER(root_post_id))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_relayer_lower ON posts(LOWER(relayer))")
+                # Home-feed candidate sources. The root/community/deleted predicate
+                # matches only ~19% of posts and none of it is indexable on its own,
+                # so without these the feed's "recent posts" and "posts by similar
+                # users" queries sequentially scan all of posts and top-N sort the
+                # survivors. Keeping the predicate in the index makes both an ordered
+                # index scan that stops at LIMIT.
+                feed_pred = feed_candidate_predicate()
+                cur.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_posts_feed_recent ON posts(created_at DESC) WHERE {feed_pred}"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_posts_feed_owner "
+                    f"ON posts(LOWER(owner), created_at DESC) WHERE {feed_pred}"
+                )
                 cur.execute(
                     """
                     UPDATE posts
@@ -284,6 +300,25 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_target_lower ON votes(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_created_at ON votes(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_relayer_lower ON votes(LOWER(relayer))")
+                # The home feed asks "which of these posts did similar users
+                # upvote" and Postgres answers it two ways depending on how many
+                # candidates the window holds: a hash semi join that reads every
+                # upvote by those users (owner-leading) or a nested loop that
+                # probes once per candidate post (target-leading). Both orderings
+                # are indexed because a plan flip between them must not put the
+                # feed back on the heap. The existing uniq_votes_owner_target and
+                # idx_votes_target_lower carry the same columns but are not
+                # restricted to upvotes, so reading either costs a heap fetch per
+                # row just to evaluate user_vote > 0 — those fetches are what made
+                # the feed pull ~100k vote rows off disk on every request.
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_votes_upvote_owner_target "
+                    f"ON votes(LOWER(owner), LOWER(target)) WHERE {UPVOTE_PREDICATE}"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_votes_upvote_target_owner "
+                    f"ON votes(LOWER(target), LOWER(owner)) WHERE {UPVOTE_PREDICATE}"
+                )
 
                 # tx_index: universal tx tracking (all types, success + failure)
                 cur.execute(
