@@ -67,6 +67,16 @@ node --experimental-strip-types scripts/legacy_mobile_canon_check.mjs [/path/to/
 
 It imports `src/api/write/signing/canonical.ts` verbatim and fails on the first byte of disagreement. Run it whenever a legacy vector or a canonical builder changes. It is not a suite test because the mobile repo does not exist inside the test container.
 
+That covers what the app sends. What it receives is checked the same way, against the app's own response declarations rather than this repo's understanding of them:
+
+```bash
+node scripts/legacy_mobile_shape_check.mjs [base-url] [/path/to/mirage-mobile-app]
+```
+
+It pulls all 29 reads the published app performs off a running node as a legacy client, then type-checks each payload against `src/api/types.ts` under `strict`. The app's response types are compile-time only, so a field the bridge stops sending is otherwise invisible: the app renders `undefined` and no test in either repo fails.
+
+Seven mismatches are expected and listed in the script's `BASELINE`, each with the reason it is not a bridge defect — `dominant_tag: null`, `ConfigResponse` over-declaring PoW fields `get_chain_config` never returned, and `get_user_posts` omitting `root_*`/`author` on submissions are all byte-identical to v1.38.11, so the published app already handles them against prod today. Anything outside that list fails the check. Run it after any change to the response aliases or the restored read handlers.
+
 The backend cannot translate these messages into modern message names because it cannot re-sign user bytes. The four topic messages therefore remain live through protobuf RPC registration, relay routing, signature ante, PoW/quota ante, chain handlers, and indexer projection for the bridge window. Agent and Annotate messages remain decode-only and retired.
 
 ## Known limitations and security boundary
@@ -132,7 +142,7 @@ Remove in reverse dependency order:
 5. In `blockchain/x/core/types/codec.go`, move `MsgFollowTopic`, `MsgUnfollowTopic`, `MsgBlockTopic`, and `MsgUnblockTopic` back to decode-only registration and restore them to `RetiredMsgTypeURLs()`.
 6. Remove those four messages from `blockchain/app/relay_messages.go`, `blockchain/app/ante_metasig.go`, `blockchain/app/ante_pow.go`, and compatibility logging in `blockchain/app/ante_log.go`.
 7. Restore unconditional modern tag-106 and tag-102 canonical encoding, strict protocol/subscription chain validation in `blockchain/x/core/module/module.go`, and delete `blockchain/app/legacy_mobile.go` plus `blockchain/x/core/module/legacy_mobile.go`.
-8. Delete `scripts/legacy_mobile_canon_check.mjs` and its `.gitignore` allowlist entry, then remove compatibility-only assertions and vectors from `blockchain/app/ante_canon_v139_parity_test.go`, `blockchain/app/ante_metasig_canon_completeness_test.go`, `blockchain/app/ante_metasig_test.go`, `blockchain/app/relay_messages_test.go`, `blockchain/x/core/module/block_community_test.go`, `blockchain/x/core/module/legacy_mobile_test.go`, `shared/testdata/canon_v139_vectors.json`, `tests/blockchain_helpers.py`, `tests/cases/test_blockchain_chain_rules.py`, `tests/cases/test_blockchain_envelope.py`, `tests/cases/test_blockchain_features.py`, `tests/cases/test_blockchain_pow.py`, `tests/cases/test_blockchain_social.py`, `tests/cases/test_blockchain_tiers.py`, and their category registrations in `tests/test_blockchain.py`. Delete `blockchain/x/core/module/legacy_mobile_test.go` when no permanent historical case remains.
+8. Delete `scripts/legacy_mobile_canon_check.mjs` and `scripts/legacy_mobile_shape_check.mjs` with their `.gitignore` allowlist entries, then remove compatibility-only assertions and vectors from `blockchain/app/ante_canon_v139_parity_test.go`, `blockchain/app/ante_metasig_canon_completeness_test.go`, `blockchain/app/ante_metasig_test.go`, `blockchain/app/relay_messages_test.go`, `blockchain/x/core/module/block_community_test.go`, `blockchain/x/core/module/legacy_mobile_test.go`, `shared/testdata/canon_v139_vectors.json`, `tests/blockchain_helpers.py`, `tests/cases/test_blockchain_chain_rules.py`, `tests/cases/test_blockchain_envelope.py`, `tests/cases/test_blockchain_features.py`, `tests/cases/test_blockchain_pow.py`, `tests/cases/test_blockchain_social.py`, `tests/cases/test_blockchain_tiers.py`, and their category registrations in `tests/test_blockchain.py`. Delete `blockchain/x/core/module/legacy_mobile_test.go` when no permanent historical case remains.
 9. Delete this file after its manifest has been applied and reviewed, then run the full blockchain-upgrade test and release process for the removal release.
 
 ## Keep permanently
