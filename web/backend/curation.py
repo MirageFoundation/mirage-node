@@ -568,18 +568,26 @@ def filter_posts(
         raise RuntimeError("post metadata query did not return every serialized post")
 
     lenses: dict[str, dict[str, Any]] = {}
-    visible: list[dict] = []
+    # Team moderation is loaded in one batched query, so posts that resolve to a
+    # team cannot be decided in this first pass. Recording each verdict against
+    # the post's input position and assembling the result at the end is what
+    # keeps the output in the caller's order: appending as verdicts arrive put
+    # every team-backed post behind every raw one, which silently reordered the
+    # feed. A community gaining its first curation team was enough to drop its
+    # posts from the front page — they were still returned, just at the back of
+    # a list the caller slices to a page.
+    kept: list[dict | None] = [None] * len(posts)
     tombstones: list[dict] = []
-    pending: list[tuple[dict, str, dict[str, Any], dict[str, Any], str, int]] = []
+    pending: list[tuple[int, dict, str, dict[str, Any], dict[str, Any], str, int]] = []
     address = str(viewer or "").strip().lower()
-    for post, post_id in zip(posts, ids):
+    for index, (post, post_id) in enumerate(zip(posts, ids)):
         meta = metadata[post_id]
         post["protocol_version"] = meta["protocol_version"]
         if scope == "legacy":
             # The legacy scope is the protocol-0 archive and nothing else.
             if meta["protocol_version"] != 0:
                 continue
-            visible.append(post)
+            kept[index] = post
             continue
         # Protocol-0 posts are curated like any other. The chain never recorded a
         # post_sequence or a subscriber flag for them, but only two of the rules
@@ -606,7 +614,7 @@ def filter_posts(
                 "effective_team_id": None,
             }
             post["thread_locked"] = False
-            visible.append(post)
+            kept[index] = post
             continue
         if community not in lenses:
             community_lens, community_team_id = _requested_lens_for(
@@ -631,18 +639,18 @@ def filter_posts(
                 "effective_team_id": None,
             }
             post["thread_locked"] = False
-            visible.append(post)
+            kept[index] = post
             continue
-        pending.append((post, post_id, meta, resolved, community, int(team_id)))
+        pending.append((index, post, post_id, meta, resolved, community, int(team_id)))
 
     hidden_posts, hidden_users, subscriber_only, locks = _load_team_moderation(
         cur,
         [
             (community, team_id, post_id, meta["author"], meta["root_txhash"])
-            for _post, post_id, meta, _resolved, community, team_id in pending
+            for _index, _post, post_id, meta, _resolved, community, team_id in pending
         ],
     )
-    for post, post_id, meta, resolved, community, team_id in pending:
+    for index, post, post_id, meta, resolved, community, team_id in pending:
         lock_sequence, lock_windows = locks.get((community, team_id, meta["root_txhash"]), (None, None))
         windows = _lock_windows(lock_sequence, lock_windows)
         visibility = resolve_visibility(
@@ -693,7 +701,7 @@ def filter_posts(
                 team_id,
             )
         if visibility["visible"]:
-            visible.append(post)
+            kept[index] = post
         elif direct and visibility["tombstone"]:
             tombstones.append(
                 {
@@ -703,7 +711,7 @@ def filter_posts(
                     "raw_view": f"?scope=current&lens=raw",
                 }
             )
-    return visible, tombstones
+    return [post for post in kept if post is not None], tombstones
 
 
 def thread_locked_for_lens(cur, community: str, root_id: str, team_id: int | None) -> bool:

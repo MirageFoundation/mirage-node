@@ -3275,6 +3275,7 @@ def _test_governed_upgrade_prepare() -> None:
 
     prepare = _shell_function(UPGRADE_SH, "prepare")
     arm = _shell_function(UPGRADE_SH, "arm_governed_upgrade")
+    wait_for_advance = _shell_function(UPDATE_SH, "wait_for_height_after_upgrade")
     activate = _shell_function(UPDATE_SH, "activate_if_halted")
     idx_disable = prepare.find("disable_automatic_release_fetch")
     idx_tick = prepare.find("tick")
@@ -3474,6 +3475,7 @@ tick
         home = os.path.join(tmp, "home")
         state_dir = os.path.join(tmp, "state")
         launch_log = os.path.join(tmp, "launch.log")
+        height_calls = os.path.join(tmp, "height.calls")
         launcher = os.path.join(tmp, "launch")
         os.makedirs(os.path.join(home, ".mirage", "upgrade"), exist_ok=True)
         os.makedirs(os.path.join(home, ".mirage", "node", "data"), exist_ok=True)
@@ -3507,14 +3509,33 @@ docker() {{
     printf '%s\\n' {digest!r}
     return 0
   fi
+  if [[ "$*" == *".Config.Image"* ]]; then
+    if [[ "${{RUNNING_TARGET:-false}}" == true ]]; then printf '%s\\n' {digest!r}; else printf '%s\\n' old; fi
+    return 0
+  fi
+  if [[ "$*" == *".State.Running"* ]]; then printf '%s\\n' true; return 0; fi
+  if [[ "$*" == *".State.Restarting"* ]]; then printf '%s\\n' false; return 0; fi
   echo "unexpected docker $*" >&2
   return 99
 }}
+sleep() {{ :; }}
 curl() {{
   if [[ "$*" == *current_plan* ]]; then printf '%s\\n' '{{"plan":null}}'; return 0; fi
+  if [[ "${{START_AT_HALT:-false}}" == true ]]; then
+    n=0
+    if [[ -f {height_calls!r} ]]; then n=$(cat {height_calls!r}); fi
+    n=$((n + 1))
+    printf '%s\\n' "$n" > {height_calls!r}
+    if (( n == 1 )); then
+      printf '%s\\n' '{{"result":{{"sync_info":{{"latest_block_height":"50"}}}}}}'
+      return 0
+    fi
+  fi
   printf '%s\\n' '{{"result":{{"sync_info":{{"latest_block_height":"80"}}}}}}'
 }}
 query_local_rest() {{ curl "$@"; }}
+ADVANCED_HEIGHT=0
+{wait_for_advance}
 {activate}
 activate_if_halted
 """
@@ -3550,14 +3571,19 @@ activate_if_halted
             json.dumps({"height": "0", "round": 0, "step": 0}) + "\n",
             encoding="utf-8",
         )
-        r = _run(["bash", "-c", base])
+        r = _run(["bash", "-c", "START_AT_HALT=true\n" + base])
         if (
             r.returncode != 0
             or not os.path.isfile(launch_log)
             or "matched v-test to halt marker at height 50" not in (r.stdout or "")
             or "did not sign the halt block" not in (r.stdout or "")
+            or "waiting for chain to advance past upgrade height 50" not in (r.stdout or "")
+            or "chain advanced past upgrade height after 3s" not in (r.stdout or "")
         ):
             _fail("install.upgrade.activate_never_signed", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        if Path(height_calls).read_text(encoding="utf-8").strip() != "2":
+            _fail("install.upgrade.waits_for_advance", Path(height_calls).read_text(encoding="utf-8"))
             return
         Path(launch_log).unlink()
         Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
@@ -3577,6 +3603,27 @@ activate_if_halted
             return
         if os.path.exists(os.path.join(home, ".mirage", "upgrade", "prepared.json")):
             _fail("install.upgrade.stale_prepared_cleared", "stale prepared.json survived a passed halt")
+            return
+
+        Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(
+            json.dumps({"upgrade_name": "v-test", "plan_height": 50, "image": "img@sha256:" + ("c" * 64)}),
+            encoding="utf-8",
+        )
+        Path(os.path.join(home, ".mirage", "node", "data", "priv_validator_state.json")).write_text(
+            json.dumps({"height": "51", "round": 0, "step": 0}) + "\n",
+            encoding="utf-8",
+        )
+        r = _run(["bash", "-c", "RUNNING_TARGET=true\n" + base])
+        if (
+            r.returncode != 0
+            or os.path.exists(launch_log)
+            or "resuming post-upgrade verification without recreating" not in (r.stdout or "")
+        ):
+            _fail("install.upgrade.activate_running_target", f"rc={r.returncode} out={r.stdout} err={r.stderr}")
+            return
+        state = json.loads(Path(state_dir, "state.json").read_text(encoding="utf-8"))
+        if state.get("active") != digest:
+            _fail("install.upgrade.activate_running_target_state", state)
             return
 
         Path(os.path.join(home, ".mirage", "upgrade", "prepared.json")).write_text(

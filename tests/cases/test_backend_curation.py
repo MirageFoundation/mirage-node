@@ -101,6 +101,30 @@ def _community_feed(
     return _get(f"{backend}/api/get_posts", params)
 
 
+def _home_feed_newest(backend: str, address: str, *, lens: str, limit: int = 50) -> tuple[int, dict]:
+    return _get(
+        f"{backend}/api/get_posts",
+        {
+            "address": address,
+            "feed": "home",
+            "lens": lens,
+            "scope": "current",
+            "by": "newest",
+            "page": 1,
+            "limit": limit,
+        },
+    )
+
+
+def _first_order_break(feed: dict | None) -> tuple[int, int, int] | None:
+    """Return (index, created_at, next_created_at) for the first out-of-order pair."""
+    stamps = [int(post.get("created_at") or 0) for post in (feed or {}).get("posts") or []]
+    for index in range(len(stamps) - 1):
+        if stamps[index] < stamps[index + 1]:
+            return index, stamps[index], stamps[index + 1]
+    return None
+
+
 def test_curation_backend(backend: str) -> None:
     """Create gates, team shape (no policy), hide + lens filter."""
     free = WALLETS["free"]
@@ -223,6 +247,47 @@ def test_curation_backend(backend: str) -> None:
         )
         _fail("curation.backend_raw_lens_shows_post", f"post never appeared in raw lens ({post_tx})")
         return
+
+    # A "newest" feed mixes communities that have a curator team with communities
+    # that do not, and the team-backed ones have to keep their place in it. The
+    # lens filter used to decide the two groups in separate passes and append as
+    # verdicts arrived, which returned every team-backed post behind every raw
+    # one. Nothing was hidden, so the page it returned was still in date order —
+    # the post had simply been pushed past the slice, which is why this asserts
+    # presence and not ordering. `post_tx` was just written into `slug`, which
+    # has a live default team, so it is both the newest post in this feed and
+    # team-backed: under the old code it came back last of the whole pool.
+    raw_code, raw_home = _home_feed_newest(backend, sub_addr, lens="raw")
+    eff_code, eff_home = _home_feed_newest(backend, sub_addr, lens="effective")
+    in_raw = post_tx in _feed_ids(raw_home)
+    in_eff = post_tx in _feed_ids(eff_home)
+    if raw_code != 200 or eff_code != 200:
+        _fail(
+            "curation.home_newest_keeps_team_backed_post",
+            f"raw_code={raw_code} eff_code={eff_code} err={(eff_home or {}).get('error')}",
+        )
+    elif not in_raw:
+        # Nothing to prove if the post is not in the window on the uncensored
+        # lens either — that would be a feed problem, not a curation one.
+        _fail("curation.home_newest_keeps_team_backed_post", f"post absent from raw home feed ({post_tx[:12]})")
+    elif not in_eff:
+        _fail(
+            "curation.home_newest_keeps_team_backed_post",
+            f"team-backed post dropped from effective lens while present in raw ({post_tx[:12]})",
+        )
+    else:
+        _pass("curation.home_newest_keeps_team_backed_post")
+
+    break_at = _first_order_break(eff_home)
+    if break_at is None:
+        _pass("curation.home_newest_stays_chronological")
+        _debug(f"curation.home_order posts={len((eff_home or {}).get('posts') or [])} lens=effective")
+    else:
+        index, older, newer = break_at
+        _fail(
+            "curation.home_newest_stays_chronological",
+            f"post {index} (created_at={older}) precedes a newer post (created_at={newer})",
+        )
 
     # Pin preference so effective/default can resolve to this team.
     pref = _do_set_curation_preference(backend, sub, slug, mode=1, pinned_team_id=team_id, skip_pow=True)

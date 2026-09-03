@@ -584,6 +584,34 @@ PY
   fi
 }
 
+ADVANCED_HEIGHT=0
+wait_for_height_after_upgrade() {
+  local upgrade_height="$1" budget=300 elapsed=0 status now_h
+  while (( elapsed < budget )); do
+    if status=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status); then
+      if now_h=$(echo "$status" | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"]))'); then
+        if (( now_h > upgrade_height )); then
+          ADVANCED_HEIGHT=$now_h
+          echo "chain advanced past upgrade height after ${elapsed}s (height $now_h)"
+          return 0
+        fi
+        if (( elapsed == 0 || elapsed % 60 == 0 )); then
+          echo "waiting for chain to advance past upgrade height $upgrade_height (currently $now_h)"
+        fi
+      fi
+    fi
+    if [[ "$(docker inspect -f '{{.State.Running}}' mirage 2>/dev/null || true)" != true \
+       && "$(docker inspect -f '{{.State.Restarting}}' mirage 2>/dev/null || true)" != true ]]; then
+      echo "ERROR: the prepared container stopped before the chain advanced" >&2
+      return 1
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  echo "ERROR: chain did not advance past upgrade height $upgrade_height within ${budget}s" >&2
+  return 1
+}
+
 activate_if_halted() {
   local prepared="$HOME/.mirage/upgrade/prepared.json"
   if [[ ! -f "$prepared" ]]; then
@@ -628,13 +656,21 @@ PY
   fi
   local signed_height
   signed_height=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["height"]))' "$pv")
+  local running_image running_state target_running=false
+  running_image=$(docker inspect --format '{{.Config.Image}}' mirage 2>/dev/null || true)
+  running_state=$(docker inspect --format '{{.State.Running}}' mirage 2>/dev/null || true)
+  if [[ "$running_image" == "$image" && "$running_state" == true ]]; then
+    target_running=true
+  fi
   # The chain writes the halt marker when it stops at the upgrade height, so the
   # marker checked above is already proof that this node reached the halt. The
   # signed height is a weaker second witness that only exists for a validator in
   # the active set: a jailed or not-yet-registered node never signs that block,
   # so demanding equality strands exactly the nodes that need the swap most.
-  # Refuse only when signing is past the halt, which means the marker is stale.
-  if (( signed_height > height )); then
+  # Signing past the halt means a marker is stale only when the prepared image
+  # is not currently running. If it is running, a previous activation reached
+  # the new binary and only its post-upgrade verification needs to resume.
+  if (( signed_height > height )) && [[ "$target_running" != true ]]; then
     echo "halt $height is behind signed height $signed_height; clearing the stale prepared upgrade"
     rm -f "$prepared" "$STATE_DIR/prepared.json"
     exit 0
@@ -653,11 +689,15 @@ PY
     exit 1
   fi
   echo "activating" > "$STATE_DIR/activating"
-  echo "==> Verified governed halt for $name at $height; recreating container from $image"
-  if ! "$LAUNCH" --image "$image"; then
-    rm -f "$STATE_DIR/activating"
-    echo "ERROR: failed to launch prepared image; node remains halted for operator action" >&2
-    exit 1
+  if [[ "$target_running" == true ]]; then
+    echo "prepared image is already running; resuming post-upgrade verification without recreating the container"
+  else
+    echo "==> Verified governed halt for $name at $height; recreating container from $image"
+    if ! "$LAUNCH" --image "$image"; then
+      rm -f "$STATE_DIR/activating"
+      echo "ERROR: failed to launch prepared image; node remains halted for operator action" >&2
+      exit 1
+    fi
   fi
   if ! wait_for_rpc; then
     rm -f "$STATE_DIR/activating"
@@ -673,13 +713,12 @@ PY
     exit 1
   fi
   local now_h
-  now_h=$(curl -fsS --max-time 5 http://127.0.0.1:26657/status \
-    | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["result"]["sync_info"]["latest_block_height"]))')
-  if (( now_h <= height )); then
+  if ! wait_for_height_after_upgrade "$height"; then
     rm -f "$STATE_DIR/activating"
-    echo "ERROR: height $now_h has not advanced past upgrade height $height" >&2
+    echo "ERROR: prepared upgrade remains armed and the target container was left running" >&2
     exit 1
   fi
+  now_h=$ADVANCED_HEIGHT
   install_hosttools_from_image "$image"
   python3 - "$STATE_FILE" "$image" <<'PY'
 import json, os, sys
