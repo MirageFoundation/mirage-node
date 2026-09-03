@@ -105,6 +105,8 @@ from tests.backend_helpers import (
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
+    _do_legacy_mobile_post,
+    _do_legacy_mobile_edit,
 )
 
 
@@ -1446,6 +1448,119 @@ def test_recent_content(backend: str) -> None:
             "recent_content.has_more_with_cursor",
             f"code={code_small} items={len(small_items)} has_more={(data_small or {}).get('has_more')}",
         )
+
+
+def test_legacy_mobile_content(backend: str):
+    wallet = WALLETS["sub1"]
+    owner = str(wallet.address()).lower()
+    topic = f"legacy{_rand_str(6).lower()}"
+    title = f"Legacy mobile {_rand_str(6)}"
+
+    code, response = _do_legacy_mobile_post(
+        backend, wallet, topic, title, "protocol zero root", skip_pow=True
+    )
+    root_hash = str((response or {}).get("tx_hash", "")).lower()
+    if code != 200 or not root_hash or not _wait_indexed(backend, owner, root_hash):
+        _fail("legacy_mobile_content.root_post", f"code={code} response={response}")
+        return
+    _pass("legacy_mobile_content.root_post", tx=root_hash)
+
+    code, posts_response = _get(f"{backend}/api/get_user_posts", {"owner": owner, "limit": 50})
+    root = next(
+        (
+            post
+            for post in (posts_response or {}).get("posts", [])
+            if str(post.get("post_id", "")).lower() == root_hash
+        ),
+        None,
+    )
+    if (
+        code == 200
+        and root
+        and root.get("community") == topic
+        and root.get("topic") == topic
+        and int(root.get("post_sequence") or 0) > 0
+        and int(root.get("created_height") or 0) > 0
+        and root.get("was_subscriber_at_creation") is True
+    ):
+        _pass("legacy_mobile_content.root_aliases_and_metadata")
+    else:
+        _fail("legacy_mobile_content.root_aliases_and_metadata", f"code={code} post={root}")
+
+    edited_title = f"{title} edited"
+    code, edit_response = _do_legacy_mobile_edit(
+        backend, wallet, root_hash, topic, edited_title, "legacy topic edit", skip_pow=True
+    )
+    edit_hash = str((edit_response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(edit_hash) if edit_hash else None
+    if code == 200 and delivered and delivered[0] == 0:
+        _pass("legacy_mobile_content.edit_topic", tx=edit_hash)
+    else:
+        _fail("legacy_mobile_content.edit_topic", f"code={code} response={edit_response} delivered={delivered}")
+
+    code, comment_response = _do_legacy_mobile_post(
+        backend,
+        wallet,
+        "",
+        "",
+        "protocol zero reply",
+        target=root_hash,
+        skip_pow=True,
+    )
+    comment_hash = str((comment_response or {}).get("tx_hash", "")).lower()
+    if code == 200 and comment_hash and _wait_comment_indexed(backend, root_hash, comment_hash):
+        _pass("legacy_mobile_content.comment", tx=comment_hash)
+    else:
+        _fail("legacy_mobile_content.comment", f"code={code} response={comment_response}")
+
+    code, comments_response = _get(f"{backend}/api/get_comments", {"post_id": root_hash})
+    comment = next(
+        (
+            item
+            for item in (comments_response or {}).get("comments", [])
+            if str(item.get("post_id", "")).lower() == comment_hash
+        ),
+        None,
+    )
+    if code == 200 and comment and comment.get("root_community") == topic and comment.get("root_topic") == topic:
+        _pass("legacy_mobile_content.comment_aliases")
+    else:
+        _fail("legacy_mobile_content.comment_aliases", f"code={code} comment={comment}")
+
+    code, readonly_response = _do_legacy_mobile_post(
+        backend,
+        wallet,
+        "",
+        "",
+        "reply to a historical thread",
+        target="ab" * 32,
+        skip_pow=True,
+    )
+    if code == 400 and (readonly_response or {}).get("error_code") == "legacy_thread_read_only":
+        _pass("legacy_mobile_content.old_thread_read_only")
+    else:
+        _fail("legacy_mobile_content.old_thread_read_only", f"code={code} response={readonly_response}")
+
+    minimal = {"timestamp": _now_ms(), "envelope_nonce": str(_fresh_nonce()), "community": topic}
+    code, missing_version = _post(f"{backend}/api/core/post", minimal)
+    if code == 426 and (missing_version or {}).get("error_code") == "upgrade_required":
+        _pass("legacy_mobile_content.modern_version_required")
+    else:
+        _fail("legacy_mobile_content.modern_version_required", f"code={code} response={missing_version}")
+
+    conflicting = dict(minimal, topic=f"{topic}other", protocol_version=1)
+    code, conflict_response = _post(f"{backend}/api/core/post", conflicting)
+    if code == 400 and (conflict_response or {}).get("error_code") == "invalid_input":
+        _pass("legacy_mobile_content.topic_community_conflict")
+    else:
+        _fail("legacy_mobile_content.topic_community_conflict", f"code={code} response={conflict_response}")
+
+    status = _wait_tx_status(backend, root_hash, expect_type="post")
+    details = (status or {}).get("details") or {}
+    if details.get("community") == topic and details.get("topic") == topic:
+        _pass("legacy_mobile_content.tx_status_aliases")
+    else:
+        _fail("legacy_mobile_content.tx_status_aliases", f"details={details}")
 
 
 def _visibility_probe(name: str, code: str) -> None:

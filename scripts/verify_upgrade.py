@@ -102,6 +102,34 @@ def http_status(url: str, method: str = "GET") -> int:
     raise RuntimeError(f"unreachable retry loop for {url}")
 
 
+def http_json_response(url: str, method: str = "GET", body: dict | None = None) -> tuple[int, object]:
+    encoded = json.dumps(body or {}).encode() if method == "POST" else None
+    req = urllib.request.Request(
+        url,
+        data=encoded,
+        method=method,
+        headers={"Accept": "application/json", "Content-Type": "application/json"},
+    )
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                raw = response.read().decode()
+                return int(response.status), json.loads(raw)
+        except urllib.error.HTTPError as e:
+            if e.code in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS:
+                delay = _retry_delay(e, attempt)
+                print(f"  DEBUG  {method} {url} -> {e.code}, retry {attempt}/{_MAX_ATTEMPTS} in {delay:.1f}s")
+                time.sleep(delay)
+                continue
+            raw = e.read().decode()
+            try:
+                payload: object = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {"raw": raw}
+            return int(e.code), payload
+    raise RuntimeError(f"unreachable retry loop for {url}")
+
+
 def run(command: list[str]) -> str:
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
@@ -309,39 +337,120 @@ def check_params_reach_backend() -> None:
     ok("indexed chain_params carries v1.39.0 subscription and creator epoch params")
 
 
-def check_gone_routes() -> None:
+def check_legacy_mobile_routes() -> None:
+    read_checks = (
+        ("/api/get_topics?limit=1", lambda body: isinstance(body.get("topics"), list), "topics list"),
+        ("/api/search_topics?q=ve&limit=1", lambda body: isinstance(body.get("topics"), list), "topic search"),
+        ("/api/get_agents", lambda body: body == {"agents": []}, "disabled Agent directory"),
+        (
+            "/api/get_invite_codes",
+            lambda body: body == {"codes": [], "total": 0, "available": 0},
+            "empty invite codes",
+        ),
+        (
+            "/api/rewards/summary",
+            lambda body: body
+            == {
+                "disabled": True,
+                "suspended": False,
+                "daily_quests": [],
+                "flash_quest": None,
+                "pending_rewards": [],
+                "seconds_until_reset": 0,
+                "reward_multiplier": 1,
+                "total_mirage": 0,
+                "total_mirage_after_multiplier": 0,
+                "pending_invite_codes": 0,
+                "claiming_available": False,
+                "debug": False,
+            },
+            "disabled rewards summary",
+        ),
+        (
+            "/api/rewards/achievements",
+            lambda body: body == {"achievements": []},
+            "empty achievements",
+        ),
+        (
+            "/api/referrals/precheck",
+            lambda body: body == {"valid": False, "available": 0, "error": "referrals_retired"},
+            "disabled referral precheck",
+        ),
+        (
+            "/api/referrals/summary",
+            lambda body: body
+            == {
+                "referrals": [],
+                "total": 0,
+                "period_start": 0,
+                "period_end": 0,
+                "limit": 50,
+                "offset": 0,
+                "has_more": False,
+            },
+            "empty referral summary",
+        ),
+        (
+            "/api/referral/stats",
+            lambda body: body
+            == {
+                "pending_total": 0,
+                "paid_total": 0,
+                "total_referrals": 0,
+                "referral_tree": {"address": "", "children": []},
+                "last_update_ts": 0,
+                "next_update_ts": 0,
+            },
+            "empty referral stats",
+        ),
+    )
+    for path, valid, label in read_checks:
+        status, payload = http_json_response(f"{BACKEND}{path}")
+        body = payload if isinstance(payload, dict) else {}
+        if status == 200 and valid(body):
+            ok(f"legacy mobile {label} available")
+        else:
+            fail(f"legacy mobile {label} status={status} payload={payload}")
+
+    for path in (
+        "/api/core/follow_topic",
+        "/api/core/unfollow_topic",
+        "/api/core/block_topic",
+        "/api/core/unblock_topic",
+    ):
+        status, payload = http_json_response(f"{BACKEND}{path}", "POST", {})
+        if status == 400 and not (isinstance(payload, dict) and payload.get("retired")):
+            ok(f"POST {path} routed to validation without broadcast")
+        else:
+            fail(f"POST {path} status={status} payload={payload}, expected validation error")
+
+
+def check_still_retired_routes() -> None:
     routes = (
-        ("GET", "/api/get_topics"),
-        ("GET", "/api/search_topics"),
-        ("GET", "/api/get_agents"),
-        ("POST", "/api/core/follow_topic"),
-        ("POST", "/api/core/unfollow_topic"),
-        ("POST", "/api/core/block_topic"),
-        ("POST", "/api/core/unblock_topic"),
         ("POST", "/api/core/enable_agent"),
         ("POST", "/api/core/disable_agent"),
         ("POST", "/api/core/set_agents"),
         ("POST", "/api/core/annotate"),
+        ("POST", "/api/rewards/claim"),
+        ("POST", "/api/admin/rewards/payout"),
+        ("POST", "/api/referrals/precheck_opt_in"),
+        ("POST", "/api/quests/claim"),
+        ("POST", "/api/validate_invite_code"),
         ("POST", "/api/core/create_community"),
         ("POST", "/api/core/set_community_metadata"),
         ("POST", "/api/core/transfer_community"),
-        ("GET", "/api/get_quests"),
-        ("GET", "/api/quests/daily"),
-        ("GET", "/api/achievements"),
-        ("GET", "/api/invite"),
-        ("GET", "/api/get_invite_codes"),
-        ("POST", "/api/validate_invite_code"),
-        ("GET", "/api/referrals/summary"),
-        ("GET", "/api/get_referral"),
-        ("POST", "/api/rewards/claim"),
-        ("POST", "/api/admin/rewards/payout"),
     )
     for method, path in routes:
-        status = http_status(f"{BACKEND}{path}", method)
-        if status == 410:
-            ok(f"{method} {path} -> 410")
+        status, payload = http_json_response(f"{BACKEND}{path}", method, {})
+        expected_label = path.rsplit("/", 1)[-1]
+        retired_label = payload.get("retired") if isinstance(payload, dict) else None
+        if status == 410 and retired_label == expected_label:
+            ok(f"{method} {path} -> 410 retired={retired_label}")
         else:
-            fail(f"{method} {path} status={status}, expected 410")
+            fail(
+                f"{method} {path} status={status} retired={retired_label!r}, "
+                f"expected 410 retired={expected_label!r}"
+            )
 
 
 def check_migration_state() -> None:
@@ -715,7 +824,8 @@ def main() -> int:
         check_params,
         check_preserved_params,
         check_params_reach_backend,
-        check_gone_routes,
+        check_legacy_mobile_routes,
+        check_still_retired_routes,
         check_migration_state,
         check_retired_financial_state,
         check_open_community_contract,

@@ -40,8 +40,10 @@ func TestMetasigCanonCoversEveryField(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "ante_metasig.go", nil, 0)
 	require.NoError(t, err)
+	helpers, err := parser.ParseFile(fset, "legacy_mobile.go", nil, 0)
+	require.NoError(t, err)
 
-	signed := signedFieldsByMessage(t, file)
+	signed := signedFieldsByMessage(t, file, helpers)
 	require.NotEmpty(t, signed, "found no signature closures; the switch was probably restructured")
 
 	for _, proto := range relayMessagePrototypes() {
@@ -75,8 +77,10 @@ func TestEveryRelayMessageHasASignatureClosure(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "ante_metasig.go", nil, 0)
 	require.NoError(t, err)
+	helpers, err := parser.ParseFile(fset, "legacy_mobile.go", nil, 0)
+	require.NoError(t, err)
 
-	signed := signedFieldsByMessage(t, file)
+	signed := signedFieldsByMessage(t, file, helpers)
 	for _, proto := range relayMessagePrototypes() {
 		name := reflect.TypeOf(proto).Elem().Name()
 		require.Contains(t, signed, name,
@@ -88,9 +92,33 @@ func TestEveryRelayMessageHasASignatureClosure(t *testing.T) {
 
 // signedFieldsByMessage returns, per message type name, the set of field names
 // referenced inside that type's verifyRelaySignature closure.
-func signedFieldsByMessage(t *testing.T, file *ast.File) map[string]map[string]bool {
+func signedFieldsByMessage(t *testing.T, file *ast.File, helperFiles ...*ast.File) map[string]map[string]bool {
 	t.Helper()
 	out := map[string]map[string]bool{}
+	helperFields := map[string]map[string]bool{}
+	for _, helperFile := range helperFiles {
+		for _, decl := range helperFile.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			fields := map[string]bool{}
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				s, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				recv, ok := s.X.(*ast.Ident)
+				if ok && recv.Name == "m" {
+					fields[s.Sel.Name] = true
+				}
+				return true
+			})
+			if len(fields) > 0 {
+				helperFields[fn.Name.Name] = fields
+			}
+		}
+	}
 
 	ast.Inspect(file, func(n ast.Node) bool {
 		clause, ok := n.(*ast.CaseClause)
@@ -129,6 +157,13 @@ func signedFieldsByMessage(t *testing.T, file *ast.File) map[string]map[string]b
 				}
 				// Collect m.X fields from the whole call (envelope args plus the fill closure).
 				ast.Inspect(call, func(node ast.Node) bool {
+					if nested, ok := node.(*ast.CallExpr); ok {
+						if helper, ok := nested.Fun.(*ast.Ident); ok {
+							for field := range helperFields[helper.Name] {
+								fields[field] = true
+							}
+						}
+					}
 					s, ok := node.(*ast.SelectorExpr)
 					if !ok {
 						return true

@@ -512,3 +512,41 @@ def test_stats_pure(backend):
         _pass("stats.aggregate_tracking_since")
     else:
         _fail("stats.aggregate_tracking_since", f"earliest={earliest} blank={blank}")
+
+
+def test_legacy_mobile_stats_aliases(backend):
+    from flask import Flask, jsonify
+
+    backend_src = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "web", "backend")
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    import legacy_mobile_wiring
+
+    app = Flask("legacy-mobile-stats")
+
+    @app.get("/api/get_stats")
+    def _stats():
+        return jsonify(
+            {
+                "most_active_communities": [
+                    {"community": "general", "count": 4},
+                    {"community": "science", "count": 2},
+                ]
+            }
+        )
+
+    legacy_mobile_wiring.install_legacy_mobile_wiring(app)
+    response = app.test_client().get("/api/get_stats")
+    body = response.get_json()
+    expected_modern = [
+        {"community": "general", "topic": "general", "count": 4},
+        {"community": "science", "topic": "science", "count": 2},
+    ]
+    if (
+        response.status_code == 200
+        and body.get("most_active_communities") == expected_modern
+        and body.get("most_active_topics") == ["general", "science"]
+    ):
+        _pass("legacy_mobile_stats.alias_and_modern_value")
+    else:
+        _fail("legacy_mobile_stats.alias_and_modern_value", f"code={response.status_code} body={body}")

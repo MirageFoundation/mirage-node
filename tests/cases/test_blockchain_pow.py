@@ -207,3 +207,78 @@ def test_pow(backend: str) -> None:
     _check_reject("pow.pow_on_award", code, log)
 
 
+def test_legacy_topic_pow(backend: str) -> None:
+    free_wallet = WALLETS["free"]
+    paid_wallet = WALLETS["sub1"]
+    free_address = str(free_wallet.address()).lower()
+    paid_address = str(paid_wallet.address()).lower()
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, free_address)
+    timestamp = _now_ms()
+    topic = f"ltp{_rand_str(5).lower()}"
+    zero_pow = _build_msg_follow_topic(
+        free_wallet, lb, diff, timestamp, free_address, topic, pow_val=0, nonce=_gen_nonce()
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(zero_pow, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        free_wallet.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_topic_pow.free_requires_pow", check_code, deliver_code, deliver_log)
+
+    nonce = _gen_nonce()
+    timestamp = _now_ms()
+    topic = f"ltv{_rand_str(5).lower()}"
+    base = _canon_base_follow_topic_raw(
+        free_wallet.public_key().public_key_bytes,
+        _lb_bytes(lb),
+        diff,
+        timestamp,
+        free_address,
+        topic,
+        nonce=nonce,
+    )
+    proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+    valid_pow = _build_msg_follow_topic(
+        free_wallet,
+        lb,
+        diff,
+        timestamp,
+        free_address,
+        topic,
+        pow_val=proof,
+        nonce=nonce,
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(valid_pow, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        free_wallet.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("legacy_topic_pow.free_valid_pow", check_code, deliver_code, deliver_log)
+
+    lb, _, _, _ = _get_pow_params(backend, paid_address)
+    paid = _build_msg_follow_topic(
+        paid_wallet,
+        lb,
+        0,
+        _now_ms(),
+        paid_address,
+        f"lts{_rand_str(5).lower()}",
+        pow_val=0,
+        nonce=_gen_nonce(),
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(paid, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        paid_wallet.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("legacy_topic_pow.subscriber_quota_path", check_code, deliver_code, deliver_log)
+
+

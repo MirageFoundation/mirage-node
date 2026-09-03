@@ -106,6 +106,7 @@ from tests.backend_helpers import (
     _feed_missing_post,
     _rpc_latest_height,
     _wait_next_block,
+    _do_legacy_mobile_topic_action,
 )
 
 
@@ -517,7 +518,9 @@ def test_hard_cap_vs_deque(backend: str):
     free_addr = str(free_wallet.address())
 
     # Fetch tier configs via chain config API (get_parameters only has PoW params)
-    code, params_resp = _get(f"{backend}/api/get_chain_config")
+    code, params_resp = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     if code != 200:
         _fail("hardcap.fetch_params", f"code={code}")
         return
@@ -676,7 +679,9 @@ def test_indexer_deque_storage(backend: str):
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
 
-    code, params_resp = _get(f"{backend}/api/get_chain_config")
+    code, params_resp = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     tiers = (params_resp or {}).get("tiers") or []
     sub_tier = tiers[1] if len(tiers) > 1 else {}
     max_blocked_users_sub = int(sub_tier.get("max_blocked_users", 500))
@@ -749,3 +754,96 @@ def test_indexer_deque_storage(backend: str):
 # =========================================================================
 # Category 23: Subscriber Content Length Limits (backend API)
 # =========================================================================
+
+
+def test_legacy_mobile_social(backend: str):
+    wallet = WALLETS["sub1"]
+    owner = str(wallet.address()).lower()
+    stem = f"lms{_rand_str(5).lower()}"
+    first = f"{stem}one"
+    second = f"{stem}two"
+    pattern = f"{stem}*"
+
+    code, response = _do_legacy_mobile_topic_action(
+        backend, wallet, "block_topic", pattern, skip_pow=True
+    )
+    block_hash = str((response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(block_hash) if block_hash else None
+    if code == 200 and delivered and delivered[0] == 0 and _wait_blocked_community(backend, owner, pattern):
+        _pass("legacy_mobile_social.block_empty_target")
+    else:
+        _fail("legacy_mobile_social.block_empty_target", f"code={code} response={response} delivered={delivered}")
+        return
+
+    code, response = _do_legacy_mobile_topic_action(
+        backend, wallet, "follow_topic", first, skip_pow=True
+    )
+    follow_hash = str((response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(follow_hash) if follow_hash else None
+    if (
+        code == 200
+        and delivered
+        and delivered[0] == 0
+        and _wait_followed_community(backend, owner, first)
+        and _wait_blocked_community_state(backend, owner, pattern, False)
+    ):
+        _pass("legacy_mobile_social.follow_unblocks_and_joins")
+    else:
+        _fail("legacy_mobile_social.follow_unblocks_and_joins", f"code={code} response={response} delivered={delivered}")
+
+    code, response = _do_legacy_mobile_topic_action(
+        backend, wallet, "unfollow_topic", first, skip_pow=True
+    )
+    unfollow_hash = str((response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(unfollow_hash) if unfollow_hash else None
+    if code == 200 and delivered and delivered[0] == 0 and _wait_followed_community(backend, owner, first, False):
+        _pass("legacy_mobile_social.unfollow")
+    else:
+        _fail("legacy_mobile_social.unfollow", f"code={code} response={response} delivered={delivered}")
+
+    for community in (first, second):
+        code, response = _do_legacy_mobile_topic_action(
+            backend, wallet, "follow_topic", community, skip_pow=True
+        )
+        tx_hash = str((response or {}).get("tx_hash", "")).lower()
+        delivered = _wait_tx_deliver(tx_hash) if tx_hash else None
+        if code != 200 or not delivered or delivered[0] != 0:
+            _fail("legacy_mobile_social.block_setup", f"community={community} code={code} response={response}")
+            return
+
+    code, response = _do_legacy_mobile_topic_action(
+        backend, wallet, "block_topic", pattern, skip_pow=True
+    )
+    block_hash = str((response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(block_hash) if block_hash else None
+    left_all = all(_wait_followed_community(backend, owner, community, False) for community in (first, second))
+    if code == 200 and delivered and delivered[0] == 0 and left_all:
+        _pass("legacy_mobile_social.block_wildcard_leaves_matches")
+    else:
+        _fail("legacy_mobile_social.block_wildcard_leaves_matches", f"code={code} response={response} delivered={delivered}")
+
+    code, response = _do_legacy_mobile_topic_action(
+        backend, wallet, "unblock_topic", pattern, skip_pow=True
+    )
+    unblock_hash = str((response or {}).get("tx_hash", "")).lower()
+    delivered = _wait_tx_deliver(unblock_hash) if unblock_hash else None
+    if (
+        code == 200
+        and delivered
+        and delivered[0] == 0
+        and _wait_blocked_community_state(backend, owner, pattern, False)
+    ):
+        _pass("legacy_mobile_social.unblock_empty_target")
+    else:
+        _fail("legacy_mobile_social.unblock_empty_target", f"code={code} response={response} delivered={delivered}")
+
+    for path, modern_key, legacy_key in (
+        ("get_user_followed", "joined_communities", "followed_topics"),
+        ("get_user_blocked", "blocked_communities", "blocked_topics"),
+        ("get_profile", "joined_communities", "followed_topics"),
+    ):
+        code, data = _get(f"{backend}/api/{path}", {"address": owner})
+        if code == 200 and modern_key in (data or {}) and data.get(legacy_key) == data.get(modern_key):
+            _pass(f"legacy_mobile_social.{path}_aliases")
+        else:
+            _fail(f"legacy_mobile_social.{path}_aliases", f"code={code} data={data}")

@@ -90,6 +90,7 @@ const ERROR_MAP = {
     post_community_required: "A community is required for new posts.",
     comment_content_required: "Comment text is required.",
     comment_not_found: "Comment not found.",
+    legacy_thread_read_only: "This older thread is read-only after the community upgrade.",
     post_not_found: "Post not found.",
     invalid_target: "Invalid target.",
     invalid_target_format: "Invalid target format.",

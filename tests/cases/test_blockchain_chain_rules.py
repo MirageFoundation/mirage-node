@@ -1343,6 +1343,94 @@ def test_malicious_inputs(backend: str) -> None:
         )
         _check_deliver_reject(f"malicious.{label}", ccode, dcode, dlog)
 
+
+def test_legacy_post_protocol_versions(backend: str) -> None:
+    wallet = WALLETS["sub1"]
+    address = str(wallet.address()).lower()
+    pubkey = wallet.public_key().public_key_bytes
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+
+    for version in (0, 1):
+        lb, _, _, _ = _get_pow_params(backend, address)
+        message = _build_msg_post(
+            wallet,
+            lb,
+            0,
+            _now_ms(),
+            f"lpv{version}{_rand_str(4).lower()}",
+            f"Protocol {version}",
+            "accepted protocol",
+            nonce=_gen_nonce(),
+            protocol_version=version,
+        )
+        _, check_code, _, deliver_code, deliver_log = _submit_tx(
+            [(message, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            pubkey,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(
+            f"legacy_post_protocol.version_{version}_accepted",
+            check_code,
+            deliver_code,
+            deliver_log,
+        )
+
+    lb, _, _, _ = _get_pow_params(backend, address)
+    invalid_version = _build_msg_post(
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        f"lpvi{_rand_str(4).lower()}",
+        "Protocol invalid",
+        "rejected protocol",
+        nonce=_gen_nonce(),
+        protocol_version=2,
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(invalid_version, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_post_protocol.version_2_rejected", check_code, deliver_code, deliver_log)
+
+    lb, _, _, _ = _get_pow_params(backend, address)
+    old_parent = _build_msg_post(
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        "",
+        "",
+        "historical parent reply",
+        target="cd" * 32,
+        nonce=_gen_nonce(),
+        protocol_version=0,
+    )
+    _, check_code, check_log, deliver_code, deliver_log = _submit_tx(
+        [(old_parent, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    if "legacy_thread_read_only" in str(check_log or deliver_log or ""):
+        _check_deliver_reject(
+            "legacy_post_protocol.old_parent_read_only",
+            check_code,
+            deliver_code,
+            deliver_log,
+        )
+    else:
+        _fail(
+            "legacy_post_protocol.old_parent_read_only",
+            f"check={check_code} deliver={deliver_code} log={check_log or deliver_log}",
+        )
+
     # ─── NUL bytes (\x00) in every text field ─────────────────────
     _submit_post("nul_in_community", community=f"nul\x00community", title="Title", content="body")
     _submit_post("nul_in_title", community=f"t{_rand_str(4)}", title="Nul\x00Title", content="body")

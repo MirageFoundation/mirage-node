@@ -320,7 +320,9 @@ def test_indexer(backend: str):
     # ── Group 3: Chain params & config ───────────────────────────────────
 
     cfg_block_time = None
-    code, cfg = _get(f"{backend}/api/get_chain_config")
+    code, cfg = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     if code != 200 or not cfg:
         _fail("indexer.chain_config_has_tiers", f"fetch failed code={code}")
     else:
@@ -1992,6 +1994,99 @@ def _indexer_v139_projection_checks() -> None:
         _pass("indexer_v139.governance_block_projects")
     else:
         _fail("indexer_v139.governance_block_projects", f"calls={gov_db.calls}")
+
+    from cosmpy.aerial.wallet import LocalWallet
+    from cosmpy.crypto.keypairs import PrivateKey
+    from shared.datatypes import MsgBlockTopic, MsgFollowTopic, MsgUnblockTopic, MsgUnfollowTopic
+
+    class _LegacyTopicDb:
+        def __init__(self):
+            self.joined = set()
+            self.blocked = {"legacy*"}
+
+        def unblock_communities_matching(self, owner, community):
+            matching = {pattern for pattern in self.blocked if community.startswith(pattern.rstrip("*"))}
+            self.blocked -= matching
+            return len(matching)
+
+        def join_community(self, owner, community):
+            self.joined.add(community)
+
+        def leave_community(self, owner, community):
+            self.joined.discard(community)
+
+        def block_community(self, owner, community, blocked_at=0):
+            self.blocked.add(community)
+
+        def leave_communities_matching(self, owner, pattern):
+            matching = {community for community in self.joined if community.startswith(pattern.rstrip("*"))}
+            self.joined -= matching
+            return len(matching)
+
+        def unblock_community(self, owner, community):
+            self.blocked.discard(community)
+
+    legacy_db = _LegacyTopicDb()
+    legacy_processor = MessageProcessor(legacy_db, None, lambda *a, **k: None, lambda value: str(value))
+    legacy_wallet = LocalWallet(PrivateKey(bytes.fromhex("11" * 32)), prefix="mirage")
+    pubkey = legacy_wallet.public_key().public_key_bytes
+
+    follow = MsgFollowTopic()
+    follow.envelope_pubkey = pubkey
+    follow.topic = "legacyone"
+    legacy_processor._handle_follow_topic("", follow.SerializeToString(), 100)
+    follow_state = (set(legacy_db.joined), set(legacy_db.blocked))
+
+    unfollow = MsgUnfollowTopic()
+    unfollow.envelope_pubkey = pubkey
+    unfollow.topic = "legacyone"
+    legacy_processor._handle_unfollow_topic("", unfollow.SerializeToString(), 101)
+    unfollow_state = (set(legacy_db.joined), set(legacy_db.blocked))
+
+    legacy_db.joined.update({"legacyone", "legacytwo", "other"})
+    block = MsgBlockTopic()
+    block.envelope_pubkey = pubkey
+    block.topic = "legacy*"
+    legacy_processor._handle_block_topic("", block.SerializeToString(), 102)
+    legacy_processor._handle_block_topic("", block.SerializeToString(), 102)
+    block_state = (set(legacy_db.joined), set(legacy_db.blocked))
+
+    unblock = MsgUnblockTopic()
+    unblock.envelope_pubkey = pubkey
+    unblock.topic = "legacy*"
+    legacy_processor._handle_unblock_topic("", unblock.SerializeToString(), 103)
+    legacy_processor._handle_unblock_topic("", unblock.SerializeToString(), 103)
+    unblock_state = (set(legacy_db.joined), set(legacy_db.blocked))
+
+    if (
+        follow_state == ({"legacyone"}, set())
+        and unfollow_state == (set(), set())
+        and block_state == ({"other"}, {"legacy*"})
+        and unblock_state == ({"other"}, set())
+    ):
+        _pass("indexer_v139.legacy_topic_projection_idempotent")
+    else:
+        _fail(
+            "indexer_v139.legacy_topic_projection_idempotent",
+            f"follow={follow_state} unfollow={unfollow_state} block={block_state} unblock={unblock_state}",
+        )
+
+    topic_handlers = (
+        MessageProcessor._handle_follow_topic,
+        MessageProcessor._handle_unfollow_topic,
+        MessageProcessor._handle_block_topic,
+        MessageProcessor._handle_unblock_topic,
+    )
+    malformed = [
+        handler.__name__
+        for handler in topic_handlers
+        if 'msg_dict.get("topic", "")' not in inspect.getsource(handler)
+        or 'msg_dict.get("community"' in inspect.getsource(handler)
+    ]
+    if not malformed:
+        _pass("indexer_v139.legacy_topic_field_strict")
+    else:
+        _fail("indexer_v139.legacy_topic_field_strict", f"handlers={malformed}")
 
     block_source = inspect.getsource(indexer_main.Indexer._process_block)
     if (

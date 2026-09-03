@@ -84,6 +84,10 @@ def create_app(init_runtime: bool = True) -> Flask:
     app.register_blueprint(core_bp)
     app.register_blueprint(communities_bp)
 
+    from legacy_mobile_wiring import install_legacy_mobile_wiring
+
+    install_legacy_mobile_wiring(app)
+
     # Single chokepoint for every route v1.39.0 retired. This runs before URL
     # matching raises, so a retired path answers 410 whether or not a handler is
     # still registered for it — which is why no retired stub handlers exist in

@@ -879,12 +879,27 @@ def _build_msg_post(
     authority_override: Optional[str] = None,
     lb_override: Optional[str] = None,
     diff_override: Optional[int] = None,
+    protocol_version: int = 1,
 ) -> MsgPost:
     pub = wallet.public_key().public_key_bytes
     d = diff if diff_override is None else diff_override
     lb_hex = lb_override or lb
     lb_bytes = _lb_bytes(lb_hex)
-    base = _canon_base_post_raw(pub, lb_bytes, d, ts, target, community, title, content, tag, 0, media or [], nonce=nonce)
+    base = _canon_base_post_raw(
+        pub,
+        lb_bytes,
+        d,
+        ts,
+        target,
+        community,
+        title,
+        content,
+        tag,
+        0,
+        media or [],
+        nonce=nonce,
+        protocol_version=protocol_version,
+    )
     sig = sig_override or _sign_relay(wallet, base, pow_val)
     msg = MsgPost()
     msg.authority = authority_override or _VALIDATOR_ADDR or ""
@@ -900,7 +915,7 @@ def _build_msg_post(
     msg.title = title
     msg.content = content
     msg.tag = tag
-    msg.protocol_version = 1
+    msg.protocol_version = int(protocol_version)
     for m in media or []:
         msg.media.append(m)
     return msg
@@ -1207,13 +1222,13 @@ def _build_msg_block_topic(
     diff: int,
     ts: int,
     target: str,
-    community: str,
+    topic: str,
     pow_val: int = 0,
     nonce: int = 0,
 ) -> MsgBlockTopic:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_block_topic_raw(pub, lb_bytes, diff, ts, target, community, nonce=nonce)
+    base = _canon_base_block_topic_raw(pub, lb_bytes, diff, ts, target, topic, nonce=nonce)
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgBlockTopic()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1225,7 +1240,7 @@ def _build_msg_block_topic(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.community = community
+    msg.topic = topic
     return msg
 
 
@@ -1238,10 +1253,20 @@ def _build_msg_subscribe(
     target: str = "",
     pow_val: int = 0,
     nonce: int = 0,
+    period_count: int = 1,
 ) -> MsgSubscribe:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_subscribe_raw(pub, lb_bytes, diff, ts, level, target=target, nonce=nonce)
+    base = _canon_base_subscribe_raw(
+        pub,
+        lb_bytes,
+        diff,
+        ts,
+        level,
+        target=target,
+        nonce=nonce,
+        period_count=period_count,
+    )
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgSubscribe()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1253,7 +1278,7 @@ def _build_msg_subscribe(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.level = int(level)
-    msg.period_count = 1
+    msg.period_count = int(period_count)
     if target:
         msg.target = target
     return msg
@@ -1449,13 +1474,13 @@ def _build_msg_follow_topic(
     diff: int,
     ts: int,
     target: str,
-    community: str,
+    topic: str,
     pow_val: int = 0,
     nonce: int = 0,
 ) -> MsgFollowTopic:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_follow_topic_raw(pub, lb_bytes, diff, ts, target, community, nonce=nonce)
+    base = _canon_base_follow_topic_raw(pub, lb_bytes, diff, ts, target, topic, nonce=nonce)
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgFollowTopic()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1467,7 +1492,7 @@ def _build_msg_follow_topic(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.community = community
+    msg.topic = topic
     return msg
 
 
@@ -1477,13 +1502,13 @@ def _build_msg_unfollow_topic(
     diff: int,
     ts: int,
     target: str,
-    community: str,
+    topic: str,
     pow_val: int = 0,
     nonce: int = 0,
 ) -> MsgUnfollowTopic:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_unfollow_topic_raw(pub, lb_bytes, diff, ts, target, community, nonce=nonce)
+    base = _canon_base_unfollow_topic_raw(pub, lb_bytes, diff, ts, target, topic, nonce=nonce)
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgUnfollowTopic()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1495,7 +1520,7 @@ def _build_msg_unfollow_topic(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.community = community
+    msg.topic = topic
     return msg
 
 
@@ -1642,13 +1667,13 @@ def _build_msg_unblock_topic(
     diff: int,
     ts: int,
     target: str,
-    community: str,
+    topic: str,
     pow_val: int = 0,
     nonce: int = 0,
 ) -> MsgUnblockTopic:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_unblock_topic_raw(pub, lb_bytes, diff, ts, target, community, nonce=nonce)
+    base = _canon_base_unblock_topic_raw(pub, lb_bytes, diff, ts, target, topic, nonce=nonce)
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgUnblockTopic()
     msg.authority = _VALIDATOR_ADDR or ""
@@ -1660,7 +1685,7 @@ def _build_msg_unblock_topic(
     msg.envelope_nonce = int(nonce)
     msg.envelope_signature = sig
     msg.target = target
-    msg.community = community
+    msg.topic = topic
     return msg
 
 

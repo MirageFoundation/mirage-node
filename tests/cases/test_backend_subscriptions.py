@@ -100,6 +100,7 @@ from tests.backend_helpers import (
     _wait_comment_indexed,
     _rpc_latest_height,
     _wait_next_block,
+    _do_legacy_mobile_subscribe,
 )
 
 
@@ -143,7 +144,9 @@ def test_subscriber(backend: str):
 
     # 7.2b Gift subscription extends expiry and keeps auto_renew unchanged
     try:
-        code, cfg = _get(f"{backend}/api/get_chain_config")
+        code, cfg = _get(
+            f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+        )
         if code != 200 or not isinstance(cfg, dict):
             _fail("tiers.gift_extends_expiry", f"get_chain_config code={code}")
         else:
@@ -469,7 +472,9 @@ def test_auto_renewal(backend: str):
 def test_tier_config_api(backend: str):
     """Verify tier configurations are correctly served through the API."""
 
-    code, params_resp = _get(f"{backend}/api/get_chain_config")
+    code, params_resp = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     if code != 200:
         _fail("tierapi.fetch_params", f"code={code}")
         return
@@ -731,3 +736,87 @@ def test_subscribe_gift_repeat(backend: str):
 # =========================================================================
 # Category 21: Subscribe Validation (backend API)
 # =========================================================================
+
+
+def test_legacy_mobile_subscriptions(backend: str):
+    payer = WALLETS["sub1"]
+    recipient = WALLETS["sub2"]
+    payer_address = str(payer.address()).lower()
+    recipient_address = str(recipient.address()).lower()
+
+    code, config = _get(f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "modern-tests"})
+    tiers = (config or {}).get("tiers") or []
+    period_fee = int((tiers[1] or {}).get("period_fee", 0)) if len(tiers) > 1 else 0
+    if code != 200 or period_fee <= 0:
+        _fail("legacy_mobile_subscriptions.setup", f"code={code} tiers={tiers}")
+        return
+
+    payer_before = get_user_status(backend, payer_address)
+    recipient_before = get_user_status(backend, recipient_address)
+    payer_expiry = int(payer_before.get("subscription_expiry", 0) or 0)
+    recipient_expiry = int(recipient_before.get("subscription_expiry", 0) or 0)
+    payer_balance = int(payer_before.get("balance", 0) or 0)
+
+    submissions = (
+        ("level1_omitted_period", 1, ""),
+        ("level10_omitted_period", 10, ""),
+        ("gift_omitted_period", 1, recipient_address),
+    )
+    for name, level, target in submissions:
+        code, response = _do_legacy_mobile_subscribe(backend, payer, level, target=target)
+        tx_hash = str((response or {}).get("tx_hash", "")).lower()
+        delivered = _wait_tx_deliver(tx_hash) if tx_hash else None
+        if code == 200 and delivered and delivered[0] == 0:
+            _pass(f"legacy_mobile_subscriptions.{name}", tx=tx_hash)
+        else:
+            _fail(
+                f"legacy_mobile_subscriptions.{name}",
+                f"code={code} response={response} delivered={delivered}",
+            )
+            return
+
+    deadline = time.time() + INDEX_TIMEOUT_SEC
+    payer_after = payer_before
+    recipient_after = recipient_before
+    while time.time() < deadline:
+        payer_after = get_user_status(backend, payer_address)
+        recipient_after = get_user_status(backend, recipient_address)
+        if (
+            int(payer_after.get("subscription_expiry", 0) or 0) > payer_expiry
+            and int(recipient_after.get("subscription_expiry", 0) or 0) > recipient_expiry
+            and int(payer_after.get("balance", 0) or 0) <= payer_balance - (3 * period_fee)
+        ):
+            break
+        time.sleep(1)
+
+    payer_expiry_delta = int(payer_after.get("subscription_expiry", 0) or 0) - payer_expiry
+    recipient_expiry_delta = int(recipient_after.get("subscription_expiry", 0) or 0) - recipient_expiry
+    balance_delta = payer_balance - int(payer_after.get("balance", 0) or 0)
+    if payer_expiry_delta > 0 and recipient_expiry_delta > 0:
+        _pass("legacy_mobile_subscriptions.one_period_semantics")
+    else:
+        _fail(
+            "legacy_mobile_subscriptions.one_period_semantics",
+            f"payer_delta={payer_expiry_delta} recipient_delta={recipient_expiry_delta}",
+        )
+    if balance_delta == 3 * period_fee:
+        _pass("legacy_mobile_subscriptions.subscriber_price", charged=balance_delta)
+    else:
+        _fail(
+            "legacy_mobile_subscriptions.subscriber_price",
+            f"charged={balance_delta} expected={3 * period_fee}",
+        )
+
+    code, response = _do_legacy_mobile_subscribe(
+        backend, payer, 1, include_period_count=True
+    )
+    if code == 400 and not (response or {}).get("tx_hash"):
+        _pass("legacy_mobile_subscriptions.explicit_zero_rejected")
+    else:
+        _fail("legacy_mobile_subscriptions.explicit_zero_rejected", f"code={code} response={response}")
+
+    code, response = _do_legacy_mobile_subscribe(backend, payer, 2)
+    if code == 400 and not (response or {}).get("tx_hash"):
+        _pass("legacy_mobile_subscriptions.invalid_level_rejected")
+    else:
+        _fail("legacy_mobile_subscriptions.invalid_level_rejected", f"code={code} response={response}")

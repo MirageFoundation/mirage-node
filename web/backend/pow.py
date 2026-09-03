@@ -90,6 +90,7 @@ def canon_base_post(
     tag: str = "",
     media: list[str] | None = None,
     nonce: int = 0,
+    protocol_version: int = 1,
 ) -> bytes:
     return canon_shared.canon_base_post(
         pub_dec,
@@ -103,6 +104,7 @@ def canon_base_post(
         tag,
         media=media,
         nonce=int(nonce),
+        protocol_version=int(protocol_version),
     )
 
 

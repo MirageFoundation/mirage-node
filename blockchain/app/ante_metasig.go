@@ -67,15 +67,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeString(100, m.Target)
-				w.writeString(101, m.Community)
-				w.writeString(102, m.Title)
-				w.writeString(103, m.Content)
-				w.writeString(104, m.Tag)
-				for _, media := range m.Media {
-					w.writeString(105, media)
-				}
-				w.writeUvarint(106, uint64(m.ProtocolVersion))
+				appendPostPayload(w, m)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
@@ -267,6 +259,34 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 			if err := d.Keeper.SetEnvelopeNonce(ctx, pubHash[:16], m.EnvelopeNonce, nonceExpiry); err != nil {
 				ctx.Logger().Error("RelaySig: failed to record nonce", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, fmt.Errorf("failed to record nonce: %w", err)
+			}
+		case *coretypes.MsgFollowTopic:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgFollowTopic", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Topic)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgUnfollowTopic:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgUnfollowTopic", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Topic)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgBlockTopic:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgBlockTopic", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Topic)
+			}); err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgUnblockTopic:
+			if err := d.authEnvelope(ctx, govAuthority, maxAge, "MsgUnblockTopic", m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, m.EnvelopeTimestamp, m.EnvelopeNonce, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Topic)
+			}); err != nil {
+				return ctx, err
 			}
 		case *coretypes.MsgBlockPost:
 			if m.Authority == govAuthority {
@@ -580,11 +600,7 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeUvarint(7, m.EnvelopeNonce)
-				w.writeUvarint(100, uint64(uint32(m.Level)))
-				if m.Target != "" {
-					w.writeString(101, m.Target)
-				}
-				w.writeUvarint(102, uint64(m.PeriodCount))
+				appendSubscribePayload(w, m)
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSubscribe", "err", err.Error())
 				return ctx, err

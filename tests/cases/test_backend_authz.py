@@ -383,18 +383,9 @@ def test_admin_authz(backend):
 
 
 def test_reward_claim_authz(backend):
-    """The whole quest/reward surface was removed in v1.39.0 and must answer 410.
-
-    The claim endpoint moved tokens and the admin suspend/unsuspend pair moved a
-    user's earning ability, so a route that quietly came back — or a proxy that
-    answered for it — is worth catching. The reads are here too: they are what a
-    stale client polls, and a 200 from any of them means the retired quest tables
-    are being served from somewhere.
-    """
+    """Reward mutations stay gone while legacy mobile reads are explicitly disabled."""
     for name, call in (
         ("claim", lambda: _post(f"{backend}/api/rewards/claim", {"owner": "x"})),
-        ("summary", lambda: _get(f"{backend}/api/rewards/summary", params={"address": "x"})),
-        ("achievements", lambda: _get(f"{backend}/api/rewards/achievements", params={"address": "x"})),
         ("debug", lambda: _get(f"{backend}/api/rewards/debug", params={"address": "x"})),
         ("admin_suspend", lambda: _post(f"{backend}/api/admin/rewards/suspend", {"address": "x"})),
         ("admin_unsuspend", lambda: _post(f"{backend}/api/admin/rewards/unsuspend", {"address": "x"})),
@@ -404,6 +395,21 @@ def test_reward_claim_authz(backend):
             _pass(f"reward_claim_authz.{name}_gone")
         else:
             _fail(f"reward_claim_authz.{name}_gone", f"expected 410, got {code}: {resp}")
+
+    code, summary = _get(f"{backend}/api/rewards/summary", params={"address": "x"})
+    if code == 200 and (summary or {}).get("disabled") is True and (summary or {}).get("pending_rewards") == []:
+        _pass("reward_claim_authz.summary_disabled")
+    else:
+        _fail("reward_claim_authz.summary_disabled", f"expected disabled model, got {code}: {summary}")
+
+    code, achievements = _get(f"{backend}/api/rewards/achievements", params={"address": "x"})
+    if code == 200 and (achievements or {}).get("achievements") == []:
+        _pass("reward_claim_authz.achievements_disabled")
+    else:
+        _fail(
+            "reward_claim_authz.achievements_disabled",
+            f"expected empty model, got {code}: {achievements}",
+        )
 
 
 # Reads that were overstated as H-2 private. Kept here as a documentation
@@ -422,7 +428,7 @@ _PUBLIC_BY_DESIGN = (
 def test_cross_user_reads(backend):
     """H-2 reclassification: chain-derived / deliberate-disclosure reads stay public.
 
-    Invite codes and referrals were retired in v1.39.0 and must answer 410.
+    Invite-code reads are empty for old mobile clients; invite validation stays retired.
     """
     victim = str(_generate_wallet().address())
 
@@ -438,14 +444,18 @@ def test_cross_user_reads(backend):
                 f"expected public read (200), got {code}: {resp}",
             )
 
-    # Invite codes were retired in v1.39.0.
     code, resp = _get(f"{backend}/api/get_invite_codes", params={"address": victim})
-    if code == 410:
-        _pass("cross_user_read.get_invite_codes_gone", code=code)
+    if (
+        code == 200
+        and (resp or {}).get("codes") == []
+        and (resp or {}).get("total") == 0
+        and (resp or {}).get("available") == 0
+    ):
+        _pass("cross_user_read.get_invite_codes_disabled", code=code)
     else:
         _fail(
-            "cross_user_read.get_invite_codes_gone",
-            f"invite codes must 410 after v1.39.0; got {code}: {resp}",
+            "cross_user_read.get_invite_codes_disabled",
+            f"invite-code read must be empty during the bridge; got {code}: {resp}",
         )
 
     code, resp = _post(f"{backend}/api/validate_invite_code", {"code": "ABCD-EFGH"})

@@ -1458,8 +1458,12 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	params := am.k.GetParams(sdkCtx)
-	if req.GetProtocolVersion() != types.ProtocolVersionV139 {
-		return nil, fmt.Errorf("protocol_version must be %d", types.ProtocolVersionV139)
+	protocolVersion := req.GetProtocolVersion()
+	if protocolVersion != 0 && protocolVersion != types.ProtocolVersionV139 {
+		return nil, fmt.Errorf("protocol_version must be 0 or %d", types.ProtocolVersionV139)
+	}
+	if protocolVersion == 0 {
+		sdkCtx.Logger().Info("legacy_mobile", "message", "MsgPost", "protocol_version", 0)
 	}
 	txbz := sdkCtx.TxBytes()
 	if len(txbz) == 0 {
@@ -1559,10 +1563,10 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 			return nil, err
 		}
 		if !found {
-			return nil, fmt.Errorf("parent post metadata not found")
+			return nil, fmt.Errorf("legacy_thread_read_only")
 		}
 		if parent.Community == "" {
-			return nil, fmt.Errorf("legacy parent cannot receive new comments")
+			return nil, fmt.Errorf("legacy_thread_read_only")
 		}
 		meta.ParentHash = target
 		meta.RootHash = parent.RootHash
@@ -2318,14 +2322,6 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	return &types.MsgUnblockUserResponse{}, nil
 }
 
-func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
-	return nil, fmt.Errorf("retired message MsgBlockTopic is not accepted after v1.39.0")
-}
-
-func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
-	return nil, fmt.Errorf("retired message MsgUnblockTopic is not accepted after v1.39.0")
-}
-
 // FollowUser follows a user (adds to followed users list, capped deque)
 func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*types.MsgFollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -2490,14 +2486,6 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	}
 
 	return &types.MsgUnfollowUserResponse{}, nil
-}
-
-func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) (*types.MsgFollowTopicResponse, error) {
-	return nil, fmt.Errorf("retired message MsgFollowTopic is not accepted after v1.39.0")
-}
-
-func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTopic) (*types.MsgUnfollowTopicResponse, error) {
-	return nil, fmt.Errorf("retired message MsgUnfollowTopic is not accepted after v1.39.0")
 }
 
 // Delete validates and logs deletion of a post/comment (not persisted on-chain).
@@ -2899,6 +2887,8 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+	wireLevel := req.GetLevel()
+	wirePeriod := req.GetPeriodCount()
 
 	var payer string
 	var isGov bool
@@ -2936,22 +2926,28 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSubscribe cannot use PoW, must pay with tokens")
 	}
-	if req.GetLevel() != 0 && int(req.GetLevel()) != types.LevelSubscriber {
-		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber)", req.GetLevel(), types.LevelSubscriber)
+	if wireLevel != 0 && int(wireLevel) != types.LevelSubscriber && wireLevel != 10 {
+		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber)", wireLevel, types.LevelSubscriber)
+	}
+	if wireLevel == 10 && wirePeriod != 0 {
+		return nil, fmt.Errorf("legacy level 10 requires period_count 0")
+	}
+	if wirePeriod == 0 && wireLevel != uint32(types.LevelSubscriber) && wireLevel != 10 {
+		return nil, fmt.Errorf("period_count must be at least 1")
 	}
 	if _, err := am.requireUsername(sdkCtx, recipient, "Subscribe"); err != nil {
 		return nil, err
 	}
-	periodCount := req.GetPeriodCount()
-	if periodCount < 1 {
-		return nil, fmt.Errorf("period_count must be at least 1")
+	effectivePeriod := wirePeriod
+	if effectivePeriod == 0 {
+		effectivePeriod = 1
 	}
 	txhash := ""
 	if bz := sdkCtx.TxBytes(); len(bz) > 0 {
 		sum := sha256.Sum256(bz)
 		txhash = hex.EncodeToString(sum[:])
 	}
-	if err := am.k.CreateTranche(sdkCtx, payer, recipient, source, periodCount, txhash); err != nil {
+	if err := am.k.CreateTranche(sdkCtx, payer, recipient, source, effectivePeriod, txhash); err != nil {
 		return nil, err
 	}
 	if err := am.k.ConsumeSubscriberQuota(sdkCtx, payer); err != nil {
@@ -2961,8 +2957,14 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 		"payer", payer,
 		"recipient", recipient,
 		"source", source.String(),
-		"period_count", periodCount,
+		"period_count", effectivePeriod,
 	)
+	if wirePeriod == 0 {
+		sdkCtx.Logger().Info("legacy_mobile", "message", "MsgSubscribe", "period_count", 0)
+	}
+	if wireLevel == 10 {
+		sdkCtx.Logger().Info("legacy_mobile", "message", "MsgSubscribe", "level", 10)
+	}
 	return &types.MsgSubscribeResponse{}, nil
 }
 

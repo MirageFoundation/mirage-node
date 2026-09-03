@@ -68,6 +68,10 @@ func (d LoggingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 			logger.Info("--> Tx FollowTopic", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "topic", m.Topic)
 		case *coretypes.MsgUnfollowTopic:
 			logger.Info("--> Tx UnfollowTopic", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "topic", m.Topic)
+		case *coretypes.MsgBlockTopic:
+			logger.Info("legacy_mobile", "phase", phase, "tx", hash, "message", "MsgBlockTopic", "topic", m.Topic)
+		case *coretypes.MsgUnblockTopic:
+			logger.Info("legacy_mobile", "phase", phase, "tx", hash, "message", "MsgUnblockTopic", "topic", m.Topic)
 		case *coretypes.MsgBlockPost:
 			logger.Info("--> Tx BlockPost", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target)
 		case *coretypes.MsgUnblockPost:

@@ -110,6 +110,7 @@ ERRORS = {
     "comment_content_required": "comment content required",
     "comment_not_found": "comment not found or invalid",
     "comment_must_not_include_community": "comments must not include community",
+    "legacy_thread_read_only": "this older thread is read-only after the community upgrade",
     "post_not_found": "post not found",
     "invalid_target": "invalid target",
     "invalid_target_format": "invalid target format",

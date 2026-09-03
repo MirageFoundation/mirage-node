@@ -145,7 +145,8 @@ def canon_base_post(
     out += _enc_str(104, tag)
     for m in media or []:
         out += _enc_str(105, m)
-    out += _enc_u64(106, protocol_version)
+    if protocol_version != 0:
+        out += _enc_u64(106, protocol_version)
     return bytes(out)
 
 
@@ -584,7 +585,8 @@ def canon_base_subscribe(
     out += _enc_u64(100, level)
     if target:
         out += _enc_str(101, target)
-    out += _enc_u64(102, period_count)
+    if period_count != 0:
+        out += _enc_u64(102, period_count)
     return bytes(out)
 
 

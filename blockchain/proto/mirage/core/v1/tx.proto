@@ -37,6 +37,11 @@ service Msg {
   // UnfollowUser removes a user from the signer's followed users list.
   rpc UnfollowUser(MsgUnfollowUser) returns (MsgUnfollowUserResponse);
 
+  rpc FollowTopic(MsgFollowTopic) returns (MsgFollowTopicResponse);
+  rpc UnfollowTopic(MsgUnfollowTopic) returns (MsgUnfollowTopicResponse);
+  rpc BlockTopic(MsgBlockTopic) returns (MsgBlockTopicResponse);
+  rpc UnblockTopic(MsgUnblockTopic) returns (MsgUnblockTopicResponse);
+
   rpc JoinCommunity(MsgJoinCommunity) returns (MsgJoinCommunityResponse);
   rpc LeaveCommunity(MsgLeaveCommunity) returns (MsgLeaveCommunityResponse);
 

@@ -396,7 +396,9 @@ def test_security(backend: str) -> None:
     # 1. Verify LevelToTierIndex correctness via chain config endpoint.
     #    Free (0), subscriber (1), admin (2). Agent is gone.
     try:
-        _, params = _get(f"{backend}/api/get_chain_config")
+        _, params = _get(
+            f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "blockchain-tests"}
+        )
         params = params or {}
         tiers = params.get("tiers", [])
         if len(tiers) != 3:

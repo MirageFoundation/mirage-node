@@ -150,7 +150,9 @@ def test_params(backend: str):
 
     # 1.4b three-tier max_blocked_communities. Tier config lives on
     # get_chain_config; get_parameters carries only the PoW envelope inputs.
-    _cc_code, chain_config = _get(f"{backend}/api/get_chain_config")
+    _cc_code, chain_config = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     if _cc_code != 200:
         _fail("params.get_chain_config returns valid data", f"code={_cc_code}")
         return
@@ -219,7 +221,9 @@ def test_params(backend: str):
             _fail("params.network_stats has earned_24h", earned_24h=earned)
 
     # 1.6 get_chain_config returns valid governance params
-    code3, cfg = _get(f"{backend}/api/get_chain_config")
+    code3, cfg = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
     if code3 == 200 and cfg.get("subscription_period"):
         _pass("params.get_chain_config valid", keys=list(cfg.keys()))
     else:
@@ -258,6 +262,55 @@ def test_params(backend: str):
         _pass("params.get_node_config valid")
     else:
         _fail("params.get_node_config valid", f"code={code3b}")
+
+    address = str(WALLETS["free"].address())
+    code_legacy_params, legacy_params = _get(f"{backend}/api/get_parameters", {"address": address})
+    if code_legacy_params == 200 and int((legacy_params or {}).get("user_level", -1)) == 0:
+        _pass("params.legacy_user_level")
+    else:
+        _fail("params.legacy_user_level", f"code={code_legacy_params} body={legacy_params}")
+
+    code_legacy_cfg, legacy_cfg = _get(f"{backend}/api/get_chain_config")
+    legacy_tiers = (legacy_cfg or {}).get("tiers") or []
+    if (
+        code_legacy_cfg == 200
+        and len(legacy_tiers) == 2
+        and legacy_cfg.get("max_topic_size") == legacy_cfg.get("max_community_size")
+        and all(
+            tier.get("max_followed_topics") == str(tier.get("max_joined_communities"))
+            and tier.get("max_blocked_topics") == str(tier.get("max_blocked_communities"))
+            and tier.get("max_enabled_agents") == "0"
+            and tier.get("can_be_agent") is False
+            for tier in legacy_tiers
+        )
+    ):
+        _pass("params.legacy_chain_config")
+    else:
+        _fail("params.legacy_chain_config", f"code={code_legacy_cfg} config={legacy_cfg}")
+
+    if len(tiers) == 3 and "max_topic_size" not in chain_config:
+        _pass("params.modern_chain_config_unchanged")
+    else:
+        _fail("params.modern_chain_config_unchanged", f"config={chain_config}")
+
+    if (
+        code3b == 200
+        and ncfg.get("auto_enabled_agents") == []
+        and ncfg.get("quests_enabled") is False
+        and ncfg.get("quest_payouts_enabled") is False
+        and ncfg.get("registration_invite_code_required") is False
+    ):
+        _pass("params.legacy_node_config")
+    else:
+        _fail("params.legacy_node_config", f"code={code3b} config={ncfg}")
+
+    modern_node_code, modern_node = _get(
+        f"{backend}/api/get_node_config", headers={"X-Mirage-Visitor": "backend-tests"}
+    )
+    if modern_node_code == 200 and "auto_enabled_agents" not in (modern_node or {}):
+        _pass("params.modern_node_config_unchanged")
+    else:
+        _fail("params.modern_node_config_unchanged", f"code={modern_node_code} config={modern_node}")
 
     # 1.9 get_total_supply positive (returns plain text, not JSON)
     try:
@@ -331,10 +384,15 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.anonymous node_config valid", f"got={type(nc).__name__}")
 
     cc = body.get("chain_config")
-    if isinstance(cc, dict) and "tiers" in cc and "award_configs" in cc:
-        _pass("bootstrap.anonymous chain_config valid")
+    if (
+        isinstance(cc, dict)
+        and len(cc.get("tiers") or []) == 2
+        and "max_topic_size" in cc
+        and "award_configs" in cc
+    ):
+        _pass("bootstrap.anonymous legacy chain_config valid")
     else:
-        _fail("bootstrap.anonymous chain_config valid", f"got_keys={list((cc or {}).keys())[:8]}")
+        _fail("bootstrap.anonymous legacy chain_config valid", f"config={cc}")
 
     user_sections = {k: body.get(k) for k in ("user_status", "user_followed", "user_blocked", "rewards_summary")}
     if all(v is None for v in user_sections.values()):
@@ -384,24 +442,38 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.logged_in user_blocked valid", f"got_keys={list((ub or {}).keys())[:8]}")
 
     ic = body2.get("invite_codes")
-    invite_required = bool((body2.get("node_config") or {}).get("registration_invite_code_required", False))
-    if invite_required:
-        if isinstance(ic, dict) and "codes" in ic and "total" in ic and "available" in ic:
-            _pass("bootstrap.logged_in invite_codes valid")
-        else:
-            _fail("bootstrap.logged_in invite_codes valid", f"got_keys={list((ic or {}).keys())[:8]}")
+    if ic == {"codes": [], "total": 0, "available": 0}:
+        _pass("bootstrap.logged_in legacy invite_codes disabled")
     else:
-        if "invite_codes" in body2:
-            _fail("bootstrap.logged_in omits invite_codes when feature off", "invite_codes key present")
-        else:
-            _pass("bootstrap.logged_in omits invite_codes when feature off")
+        _fail("bootstrap.logged_in legacy invite_codes disabled", f"got={ic}")
 
-    # rewards_summary is retired with quests
     rs = body2.get("rewards_summary")
-    if rs is None:
-        _pass("bootstrap.logged_in rewards_summary omitted")
+    if isinstance(rs, dict) and rs.get("disabled") is True and rs.get("daily_quests") == []:
+        _pass("bootstrap.logged_in legacy rewards_summary disabled")
     else:
-        _fail("bootstrap.logged_in rewards_summary omitted", f"got={type(rs).__name__}")
+        _fail("bootstrap.logged_in legacy rewards_summary disabled", f"got={rs}")
+
+    timestamp = _now_ms()
+    nonce = _fresh_nonce()
+    legacy_payload = f"get_invite_codes:{addr.lower()}:{timestamp}:{nonce}".encode("utf-8")
+    legacy_signature = sign_canonical(wallet, legacy_payload)
+    code_signed, signed_body = _get(
+        f"{backend}/api/bootstrap",
+        {
+            "address": addr,
+            "pubkey": _b64(wallet.public_key().public_key_bytes),
+            "signature": _b64(legacy_signature),
+            "timestamp": timestamp,
+            "envelope_nonce": nonce,
+        },
+    )
+    if code_signed == 200 and isinstance((signed_body or {}).get("user_status"), dict):
+        _pass("bootstrap.logged_in legacy signed payload")
+    else:
+        _fail(
+            "bootstrap.logged_in legacy signed payload",
+            f"code={code_signed} body={signed_body}",
+        )
 
     # ----- Cross-check: per-endpoint /api/get_user_followed shape matches the bootstrap section -----
     code3, ufp = _get(f"{backend}/api/get_user_followed", {"address": addr})
@@ -446,6 +518,16 @@ def test_bootstrap(backend: str):
     else:
         _fail("bootstrap.view thread missing returns found:false", f"code={code5}")
 
+    code6, body6 = _get(
+        f"{backend}/api/bootstrap",
+        {"address": addr, "view": "topic:test", "by": "newest", "limit": "5"},
+    )
+    view6 = (body6 or {}).get("view") or {}
+    if code6 == 200 and view6.get("community") == "test" and view6.get("topic") == "test":
+        _pass("bootstrap.view legacy topic")
+    else:
+        _fail("bootstrap.view legacy topic", f"code={code6} view={view6}")
+
 
 # =========================================================================
 # Category 2: Account & Username
@@ -454,8 +536,30 @@ def test_bootstrap(backend: str):
 
 def test_search(backend: str):
 
-    # The retired get_topics / search_topics paths are covered by
-    # tests/cases/test_backend_retired.py.
+    code, topics = _get(f"{backend}/api/get_topics", {"limit": 5})
+    topic_items = (topics or {}).get("topics")
+    if code == 200 and isinstance(topic_items, list) and all("topic" in item for item in topic_items):
+        _pass("search.legacy_get_topics")
+    else:
+        _fail("search.legacy_get_topics", f"code={code} body={topics}")
+
+    code, searched_topics = _get(f"{backend}/api/search_topics", {"q": "test", "limit": 5, "offset": 0})
+    searched_items = (searched_topics or {}).get("topics")
+    if code == 200 and isinstance(searched_items, list) and all("topic" in item for item in searched_items):
+        _pass("search.legacy_search_topics")
+    else:
+        _fail("search.legacy_search_topics", f"code={code} body={searched_topics}")
+
+    code, unified = _get(f"{backend}/api/search", {"q": "test", "type": "topics", "limit": 5})
+    if (
+        code == 200
+        and isinstance((unified or {}).get("communities"), list)
+        and unified.get("topics") == unified.get("communities")
+        and unified.get("search_type") == "topic"
+    ):
+        _pass("search.legacy_unified_topics")
+    else:
+        _fail("search.legacy_unified_topics", f"code={code} body={unified}")
 
     # 8.3 search general
     code, sr = _get(f"{backend}/api/search", {"q": "test", "limit": 5})
@@ -2015,3 +2119,177 @@ def test_runner_accounting(backend: str):
         _fail("runner.walletless_has_no_lease", "WALLETS resolved without a wallet lease")
     except RuntimeError:
         _pass("runner.walletless_has_no_lease")
+
+
+def test_legacy_mobile_source_contract(backend: str):
+    from pathlib import Path
+    import sys
+
+    from flask import Flask
+
+    backend_src = Path(__file__).resolve().parents[2] / "web" / "backend"
+    if str(backend_src) not in sys.path:
+        sys.path.insert(0, str(backend_src))
+    import legacy_mobile_wiring as wiring
+    from shared import canon
+
+    app = Flask("legacy-mobile-source-contract")
+    with app.test_request_context("/api/core/post", method="POST"):
+        prepared, protocol, legacy, error = wiring.prepare_post_request({"topic": "general"})
+        if error is None and legacy and protocol == 0 and prepared == {"community": "general"}:
+            _pass("legacy_mobile_source.post_omits_protocol")
+        else:
+            _fail(
+                "legacy_mobile_source.post_omits_protocol",
+                f"prepared={prepared} protocol={protocol} legacy={legacy} error={error}",
+            )
+
+        _prepared, _protocol, _legacy, conflict = wiring.prepare_post_request(
+            {"topic": "one", "community": "two"}
+        )
+        if conflict is not None and conflict[1] == 400:
+            _pass("legacy_mobile_source.post_conflict")
+        else:
+            _fail("legacy_mobile_source.post_conflict", f"error={conflict}")
+
+    with app.test_request_context("/api/core/edit", method="POST"):
+        prepared, legacy, error = wiring.prepare_edit_request({"topic": "general", "title": "changed"})
+        if error is None and legacy and prepared.get("community") == "general" and "topic" not in prepared:
+            _pass("legacy_mobile_source.edit_topic")
+        else:
+            _fail("legacy_mobile_source.edit_topic", f"prepared={prepared} legacy={legacy} error={error}")
+
+    with app.test_request_context("/api/core/subscribe", method="POST"):
+        cases = (
+            ({"level": 1}, (1, 0, 1, 1)),
+            ({"level": 10}, (10, 0, 1, 1)),
+            ({"level": 1, "target": "mirage1gift"}, (1, 0, 1, 1)),
+        )
+        mismatches = []
+        for request_body, expected in cases:
+            plan, error = wiring.prepare_subscribe_request(request_body)
+            actual = (
+                plan.get("wire_level"),
+                plan.get("wire_period_count"),
+                plan.get("effective_level"),
+                plan.get("effective_period_count"),
+            )
+            if error is not None or actual != expected:
+                mismatches.append((request_body, actual, error))
+        if not mismatches:
+            _pass("legacy_mobile_source.subscription_wire_values")
+        else:
+            _fail("legacy_mobile_source.subscription_wire_values", f"mismatches={mismatches}")
+
+        plan, error = wiring.prepare_subscribe_request({"level": 1, "period_count": 0})
+        if error is None and plan.get("wire_period_count") == 0 and plan.get("effective_period_count") == 0:
+            _pass("legacy_mobile_source.explicit_zero_stays_modern")
+        else:
+            _fail("legacy_mobile_source.explicit_zero_stays_modern", f"plan={plan} error={error}")
+
+    alias_input = {
+        "topic": "existing",
+        "community": "modern",
+        "child": {"root_community": "root", "joined_communities": ["one"]},
+    }
+    aliased, changed = wiring._add_recursive_aliases(alias_input)
+    if (
+        changed == 2
+        and aliased["topic"] == "existing"
+        and aliased["community"] == "modern"
+        and aliased["child"]["root_topic"] == "root"
+        and aliased["child"]["followed_topics"] == ["one"]
+    ):
+        _pass("legacy_mobile_source.aliases_additive")
+    else:
+        _fail("legacy_mobile_source.aliases_additive", f"changed={changed} value={aliased}")
+
+    vector_path = Path(__file__).resolve().parents[2] / "shared" / "testdata" / "canon_v139_vectors.json"
+    vector_file = json.loads(vector_path.read_text())
+    mismatched_vectors = []
+    checked_vectors = 0
+    for vector in vector_file["vectors"]:
+        if vector["msg"] not in {
+            "MsgPost",
+            "MsgSubscribe",
+            "MsgFollowTopic",
+            "MsgUnfollowTopic",
+            "MsgBlockTopic",
+            "MsgUnblockTopic",
+        }:
+            continue
+        envelope = vector_file[
+            "legacy_mobile_envelope" if vector.get("envelope") == "legacy_mobile" else "envelope"
+        ]
+        pubkey = bytes.fromhex(envelope["pubkey_hex"])
+        block_hash = bytes.fromhex(envelope["block_hash_hex"])
+        difficulty = int(envelope["difficulty"])
+        timestamp = int(envelope["timestamp"])
+        nonce = int(envelope["nonce"])
+        fields = vector["fields"]
+        if vector["msg"] == "MsgPost":
+            actual = canon.canon_base_post(
+                pubkey,
+                block_hash,
+                difficulty,
+                timestamp,
+                fields["target"],
+                fields["community"],
+                fields["title"],
+                fields["content"],
+                fields["tag"],
+                media=fields["media"],
+                nonce=nonce,
+                protocol_version=int(fields["protocol_version"]),
+            )
+        elif vector["msg"] == "MsgSubscribe":
+            actual = canon.canon_base_subscribe(
+                pubkey,
+                block_hash,
+                difficulty,
+                timestamp,
+                int(fields["level"]),
+                target=fields["target"],
+                nonce=nonce,
+                period_count=int(fields["period_count"]),
+            )
+        else:
+            builder = {
+                "MsgFollowTopic": canon.canon_base_follow_topic,
+                "MsgUnfollowTopic": canon.canon_base_unfollow_topic,
+                "MsgBlockTopic": canon.canon_base_block_topic,
+                "MsgUnblockTopic": canon.canon_base_unblock_topic,
+            }[vector["msg"]]
+            actual = builder(
+                pubkey,
+                block_hash,
+                difficulty,
+                timestamp,
+                fields["target"],
+                fields["topic"],
+                nonce=nonce,
+            )
+        checked_vectors += 1
+        if actual.hex() != vector["canon_hex"]:
+            mismatched_vectors.append(vector["msg"])
+    if checked_vectors == 12 and not mismatched_vectors:
+        _pass("legacy_mobile_source.golden_vectors", count=checked_vectors)
+    else:
+        _fail(
+            "legacy_mobile_source.golden_vectors",
+            f"checked={checked_vectors} mismatches={mismatched_vectors}",
+        )
+
+    source = (Path(__file__).resolve().parents[2] / "web" / "backend" / "factory.py").read_text()
+    if source.index("install_legacy_mobile_wiring(app)") < source.index("def _reject_retired_v139_routes"):
+        _pass("legacy_mobile_source.installed_before_retirement")
+    else:
+        _fail("legacy_mobile_source.installed_before_retirement")
+
+    wiring.install_legacy_mobile_wiring(app)
+    try:
+        wiring.install_legacy_mobile_wiring(app)
+    except RuntimeError:
+        _pass("legacy_mobile_source.install_once")
+    else:
+        _fail("legacy_mobile_source.install_once", "second installation succeeded")

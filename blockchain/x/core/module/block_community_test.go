@@ -277,26 +277,12 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	require.Equal(t, []string{target}, blocked)
 }
 
-// TestRetiredMessageHandlersReject pins the v1.39.0 retirement at the
-// msg-server level. The ante decorator already rejects these type URLs, but a
-// handler that still wrote to the drained legacy stores would silently produce
-// state nothing reads if that decorator were ever removed.
+// TestRetiredMessageHandlersReject pins the messages that remain retired at the
+// msg-server level.
 func TestRetiredMessageHandlersReject(t *testing.T) {
 	_, ctx, am := setupModule(t)
 
-	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{})
-	require.ErrorContains(t, err, "retired message MsgFollowTopic")
-
-	_, err = am.UnfollowTopic(ctx, &types.MsgUnfollowTopic{})
-	require.ErrorContains(t, err, "retired message MsgUnfollowTopic")
-
-	_, err = am.BlockTopic(ctx, &types.MsgBlockTopic{})
-	require.ErrorContains(t, err, "retired message MsgBlockTopic")
-
-	_, err = am.UnblockTopic(ctx, &types.MsgUnblockTopic{})
-	require.ErrorContains(t, err, "retired message MsgUnblockTopic")
-
-	_, err = am.EnableAgent(ctx, &types.MsgEnableAgent{})
+	_, err := am.EnableAgent(ctx, &types.MsgEnableAgent{})
 	require.ErrorContains(t, err, "retired message MsgEnableAgent")
 
 	_, err = am.DisableAgent(ctx, &types.MsgDisableAgent{})

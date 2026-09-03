@@ -1091,7 +1091,9 @@ def test_frontend_bypass(backend: str):
         user_level = 1
 
     try:
-        _, params = _get(f"{backend}/api/get_chain_config")
+        _, params = _get(
+            f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
+        )
         params = params or {}
         tiers = params.get("tiers") or []
         idx = 0 if user_level == 0 else 1 if user_level == 1 else 2 if user_level >= 100 else -1

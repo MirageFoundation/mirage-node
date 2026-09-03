@@ -319,6 +319,11 @@ THREAD_READ_ACTION = "get_comments"
 def _signed_content_viewer(claimed_address: str, action: str = FEED_READ_ACTION):
     proof_fields = ("pubkey", "signature", "timestamp", "envelope_nonce")
     if not any(request.args.get(field) not in (None, "") for field in proof_fields):
+        from legacy_mobile_wiring import legacy_unsigned_content_viewer
+
+        legacy_viewer = legacy_unsigned_content_viewer(claimed_address, action)
+        if legacy_viewer is not None:
+            return legacy_viewer, None
         return "", None
     from routes.core import _require_signed_read
 
@@ -4570,7 +4575,12 @@ def bootstrap():
     read_action = THREAD_READ_ACTION if str(view_raw or "").startswith("thread:") else FEED_READ_ACTION
     content_viewer, auth_err = _signed_content_viewer(address or "", read_action)
     if auth_err is not None:
-        return auth_err
+        from legacy_mobile_wiring import legacy_bootstrap_signed_viewer
+
+        legacy_viewer = legacy_bootstrap_signed_viewer(address or "")
+        if legacy_viewer is None:
+            return auth_err
+        content_viewer = legacy_viewer
     by_raw = (request.args.get("by", default="", type=str) or "").strip().lower()
     limit = request.args.get("limit", 15, type=int)
     log_event(rid, "bootstrap.begin", address=address, view=view_raw)

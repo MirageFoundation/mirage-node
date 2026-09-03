@@ -647,6 +647,27 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgFollowTopic:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgFollowTopic", buildCanonForFollowTopic(m), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgUnfollowTopic:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgUnfollowTopic", buildCanonForUnfollowTopic(m), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgBlockTopic:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgBlockTopic", buildCanonForBlockTopic(m), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+		case *coretypes.MsgUnblockTopic:
+			ctx, err = d.standardPoW(ctx, govAuthority, m.Authority, m.EnvelopePubkey, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, params, msgCounts[string(m.EnvelopePubkey)], "MsgUnblockTopic", buildCanonForUnblockTopic(m), verifyPoW)
+			if err != nil {
+				return ctx, err
+			}
+
 		case *coretypes.MsgBlockPost:
 			if m.Authority == govAuthority {
 				continue
@@ -1002,15 +1023,7 @@ func buildCanonForPost(m *coretypes.MsgPost) []byte {
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeUvarint(7, m.EnvelopeNonce)
-	cw.writeString(100, m.Target)
-	cw.writeString(101, m.Community)
-	cw.writeString(102, m.Title)
-	cw.writeString(103, m.Content)
-	cw.writeString(104, m.Tag)
-	for _, media := range m.Media {
-		cw.writeString(105, media)
-	}
-	cw.writeUvarint(106, uint64(m.ProtocolVersion))
+	appendPostPayload(cw, m)
 	return cw.buf
 }
 
@@ -1283,11 +1296,7 @@ func buildCanonForSubscribe(m *coretypes.MsgSubscribe) []byte {
 	// envelope_pow (field 5) is NOT used for subscribe (no PoW allowed)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeUvarint(7, m.EnvelopeNonce)
-	cw.writeUvarint(100, uint64(m.Level))
-	if m.Target != "" {
-		cw.writeString(101, m.Target)
-	}
-	cw.writeUvarint(102, uint64(m.PeriodCount))
+	appendSubscribePayload(cw, m)
 	return cw.buf
 }
 

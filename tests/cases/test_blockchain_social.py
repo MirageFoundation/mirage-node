@@ -46,7 +46,7 @@ from tests.blockchain_helpers import (
     _build_msg_post, _build_msg_vote, _build_msg_set_username,
     _build_msg_set_biography, _build_msg_send_tokens,
     _build_msg_delete, _build_msg_delete_user, _build_msg_award,
-    _build_msg_edit, _build_msg_block_post, _build_msg_block_user, _build_msg_block_community,
+    _build_msg_edit, _build_msg_block_post, _build_msg_block_user, _build_msg_block_community, _build_msg_block_topic,
     _build_msg_subscribe,
     _build_msg_follow_user, _build_msg_unfollow_user,
     _build_msg_join_community, _build_msg_leave_community,
@@ -515,4 +515,74 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         _pass(f"hardcap.blocked_community_deque_fill ({total_to_block_communities} blocked, no rejection)")
 
     _pass("hardcap.agent_lists_removed")
+
+
+def test_legacy_topic_messages(backend: str) -> None:
+    wallet = WALLETS["sub1"]
+    owner = str(wallet.address()).lower()
+    pubkey = wallet.public_key().public_key_bytes
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    stem = f"lct{_rand_str(5).lower()}"
+    first = f"{stem}one"
+    second = f"{stem}two"
+    pattern = f"{stem}*"
+
+    def submit(msg, type_url: str, name: str) -> bool:
+        _, check_code, _, deliver_code, deliver_log = _submit_tx(
+            [(msg, type_url)], DEFAULT_GAS_LIMIT, fee_payer, pubkey, wait_deliver=True
+        )
+        _check_deliver_accept(name, check_code, deliver_code, deliver_log)
+        return check_code == 0 and deliver_code == 0
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    block = _build_msg_block_topic(wallet, lb, 0, _now_ms(), "", pattern, nonce=_gen_nonce())
+    if not submit(block, "/mirage.core.v1.MsgBlockTopic", "legacy_topic.block_empty_target"):
+        return
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    follow = _build_msg_follow_topic(wallet, lb, 0, _now_ms(), owner, first, nonce=_gen_nonce())
+    if not submit(follow, "/mirage.core.v1.MsgFollowTopic", "legacy_topic.follow"):
+        return
+    profile = _get_profile_full(owner)
+    joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
+    blocked = set(profile.get("blocked_communities") or profile.get("blockedCommunities") or [])
+    if first in joined and pattern not in blocked:
+        _pass("legacy_topic.follow_unblocks_and_joins")
+    else:
+        _fail("legacy_topic.follow_unblocks_and_joins", f"joined={joined} blocked={blocked}")
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    unfollow = _build_msg_unfollow_topic(wallet, lb, 0, _now_ms(), owner, first, nonce=_gen_nonce())
+    submit(unfollow, "/mirage.core.v1.MsgUnfollowTopic", "legacy_topic.unfollow")
+
+    for community in (first, second):
+        lb, _, _, _ = _get_pow_params(backend, owner)
+        follow = _build_msg_follow_topic(wallet, lb, 0, _now_ms(), owner, community, nonce=_gen_nonce())
+        if not submit(follow, "/mirage.core.v1.MsgFollowTopic", f"legacy_topic.join_{community[-3:]}"):
+            return
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    block = _build_msg_block_topic(wallet, lb, 0, _now_ms(), "", pattern, nonce=_gen_nonce())
+    if submit(block, "/mirage.core.v1.MsgBlockTopic", "legacy_topic.block_wildcard"):
+        profile = _get_profile_full(owner)
+        joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
+        if first not in joined and second not in joined:
+            _pass("legacy_topic.block_leaves_matches")
+        else:
+            _fail("legacy_topic.block_leaves_matches", f"joined={joined}")
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    unblock = _build_msg_unblock_topic(wallet, lb, 0, _now_ms(), "", pattern, nonce=_gen_nonce())
+    submit(unblock, "/mirage.core.v1.MsgUnblockTopic", "legacy_topic.unblock_empty_target")
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    invalid = _build_msg_follow_topic(wallet, lb, 0, _now_ms(), "", first, nonce=_gen_nonce())
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(invalid, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_topic.follow_requires_owner_target", check_code, deliver_code, deliver_log)
 

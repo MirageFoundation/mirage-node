@@ -719,8 +719,8 @@ class MessageProcessor:
             media=media,
             protocol_version=protocol_version,
         )
-        if protocol_version == 1:
-            metadata = self.chain.query_post_metadata(txhash)
+        metadata = self.chain.query_post_metadata(txhash, required=protocol_version == 1)
+        if metadata is not None:
             if metadata["author"] != owner:
                 raise RuntimeError(
                     f"PostMetadata author mismatch for {txhash}: message={owner} metadata={metadata['author']}"
@@ -1669,7 +1669,7 @@ class MessageProcessor:
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
-        community = str(msg_dict.get("community", "") or msg_dict.get("community", "")).strip().lower()
+        community = str(msg_dict.get("topic", "") or "").strip().lower()
         if not owner or not community:
             return
         removed = self.db.unblock_communities_matching(owner, community)
@@ -1682,7 +1682,7 @@ class MessageProcessor:
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
-        community = str(msg_dict.get("community", "") or msg_dict.get("community", "")).strip().lower()
+        community = str(msg_dict.get("topic", "") or "").strip().lower()
         if not owner or not community:
             return
         self.db.leave_community(owner, community)
@@ -1788,7 +1788,7 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = derive_owner_from_msg(msg_dict)
-            community = str(msg_dict.get("community", "")).strip().lower()
+            community = str(msg_dict.get("topic", "") or "").strip().lower()
 
             if not owner or not community:
                 logger.warning("Rejected block_community: missing owner or community")
@@ -1841,7 +1841,7 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = derive_owner_from_msg(msg_dict)
-            community = str(msg_dict.get("community", "")).strip().lower()
+            community = str(msg_dict.get("topic", "") or "").strip().lower()
 
             if not owner or not community:
                 logger.warning("Rejected unblock_community: missing owner or community")
@@ -1943,8 +1943,12 @@ class MessageProcessor:
                     with conn.cursor() as cur:
                         cur.execute("SELECT protocol_version FROM posts WHERE LOWER(txhash)=LOWER(%s)", (target,))
                         row = cur.fetchone()
-                if row and int(row[0]) == 1:
-                    metadata = self.chain.query_post_metadata(target)
+                if row:
+                    protocol_version = int(row[0])
+                    metadata = self.chain.query_post_metadata(target, required=protocol_version == 1)
+                else:
+                    metadata = None
+                if metadata is not None:
                     if int(metadata["deleted_height"]) <= 0:
                         raise RuntimeError(f"PostMetadata did not report deletion for {target} at height {height}")
                     self.db.update_post_protocol_metadata(target, metadata)

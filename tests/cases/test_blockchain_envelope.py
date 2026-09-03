@@ -464,3 +464,69 @@ def test_envelope_fields(backend: str) -> None:
     _check_deliver_reject("envelope.vote_zero_sig_rejected", code, dcode, dlog)
 
 
+def test_legacy_topic_envelope(backend: str) -> None:
+    wallet = WALLETS["sub1"]
+    owner = str(wallet.address()).lower()
+    pubkey = wallet.public_key().public_key_bytes
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, owner)
+
+    tampered = _build_msg_follow_topic(
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        owner,
+        f"les{_rand_str(4).lower()}",
+        nonce=_gen_nonce(),
+    )
+    tampered.topic = f"changed{_rand_str(4).lower()}"
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(tampered, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_topic_envelope.tampered_topic", check_code, deliver_code, deliver_log)
+
+    lb, _, _, _ = _get_pow_params(backend, owner)
+    message = _build_msg_follow_topic(
+        wallet,
+        lb,
+        0,
+        _now_ms(),
+        owner,
+        f"ler{_rand_str(4).lower()}",
+        nonce=_gen_nonce(),
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(message, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("legacy_topic_envelope.valid_signature", check_code, deliver_code, deliver_log)
+
+    _, replay_code, replay_log, replay_deliver_code, replay_deliver_log = _submit_tx(
+        [(message, "/mirage.core.v1.MsgFollowTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    if "replay" in (replay_log or replay_deliver_log or "").lower():
+        _check_deliver_reject(
+            "legacy_topic_envelope.replay_nonce",
+            replay_code,
+            replay_deliver_code,
+            replay_deliver_log,
+        )
+    else:
+        _fail(
+            "legacy_topic_envelope.replay_nonce",
+            f"check={replay_code} deliver={replay_deliver_code} log={replay_log or replay_deliver_log}",
+        )
+
+

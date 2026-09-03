@@ -43,6 +43,7 @@ from tests.cases.test_backend_infra import (
     test_block_hash_window_margin,
     test_node_join_bootstrap,
     test_runner_accounting,
+    test_legacy_mobile_source_contract,
 )
 from tests.cases.test_backend_accounts import test_account, test_profile_fields, test_subscribe_validation
 from tests.cases.test_backend_content import (
@@ -56,8 +57,9 @@ from tests.cases.test_backend_content import (
     test_upload_media,
     test_recent_content,
     test_anon_visibility,
+    test_legacy_mobile_content,
 )
-from tests.cases.test_backend_social import test_social_graph
+from tests.cases.test_backend_social import test_legacy_mobile_social, test_social_graph
 from tests.cases.test_backend_tokens import test_pow, test_tokens
 from tests.cases.test_backend_subscriptions import (
     test_subscriber,
@@ -65,6 +67,7 @@ from tests.cases.test_backend_subscriptions import (
     test_tier_config_api,
     test_subscribe_gift_validation,
     test_subscribe_gift_repeat,
+    test_legacy_mobile_subscriptions,
 )
 from tests.cases.test_backend_edge_cases import test_edge_cases, test_frontend_bypass, test_rate_limit
 from tests.cases.test_backend_security import (
@@ -78,6 +81,7 @@ from tests.cases.test_backend_security import (
     test_indexer_drift,
     test_fleet_url_validation,
     test_analytics_identity_trust,
+    test_legacy_mobile_unsigned_read_security,
 )
 from tests.cases.test_backend_authz import (
     test_route_authz_parity,
@@ -99,7 +103,12 @@ from tests.cases.test_backend_curation import (
     test_curation_thread_lock_windows,
 )
 from tests.cases.test_backend_net_tags import test_net_tags, test_net_tags_live
-from tests.cases.test_backend_stats import test_stats_admin_auth, test_stats_attribution, test_stats_pure
+from tests.cases.test_backend_stats import (
+    test_legacy_mobile_stats_aliases,
+    test_stats_admin_auth,
+    test_stats_attribution,
+    test_stats_pure,
+)
 from tests.cases.test_backend_install import test_install
 from tests.cases.test_backend_push_outbox import (
     test_push_outbox_schema,
@@ -182,6 +191,12 @@ ALL_CATEGORIES = {
     "push_outbox_retry": test_push_outbox_retry,
     "push_outbox_cleanup": test_push_outbox_cleanup,
     "install": test_install,
+    "legacy_mobile_source": test_legacy_mobile_source_contract,
+    "legacy_mobile_content": test_legacy_mobile_content,
+    "legacy_mobile_social": test_legacy_mobile_social,
+    "legacy_mobile_subscriptions": test_legacy_mobile_subscriptions,
+    "legacy_mobile_security": test_legacy_mobile_unsigned_read_security,
+    "legacy_mobile_stats": test_legacy_mobile_stats_aliases,
 }
 
 # Categories that must run alone. Everything else runs concurrently, each
@@ -232,6 +247,8 @@ WALLETLESS_CATEGORIES = {
     "push_outbox_cleanup",
     "net_tags",
     "install",
+    "legacy_mobile_source",
+    "legacy_mobile_stats",
 }
 
 # Every category is a release gate. A test that may skip without failing the

@@ -449,8 +449,16 @@ def _tx_error(
     info.setdefault("endpoint", endpoint)
     info.setdefault("tx_hash", tx_hash)
 
-    # If chain returned an empty or whitespace-only message, normalize it.
-    message = (info.get("message") or "").strip() or "rejected"
+    from legacy_mobile_wiring import classify_legacy_exception
+
+    legacy_result = classify_legacy_exception(raw_log)
+    if legacy_result is not None:
+        message, status = legacy_result
+        info["message"] = message
+    else:
+        # If chain returned an empty or whitespace-only message, normalize it.
+        message = (info.get("message") or "").strip() or "rejected"
+        status = 400
 
     # Record a structured log entry for backend debugging.
     try:
@@ -467,7 +475,7 @@ def _tx_error(
         # Never fail the request just because logging failed.
         pass
 
-    return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), 400
+    return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), status
 
 
 def _classify_exception(err_str: str):
@@ -476,6 +484,12 @@ def _classify_exception(err_str: str):
     Checks for known error patterns and returns user-safe messages.
     Unknown exceptions get a generic message (details are in server logs).
     """
+    from legacy_mobile_wiring import classify_legacy_exception
+
+    legacy_result = classify_legacy_exception(err_str)
+    if legacy_result is not None:
+        return legacy_result
+
     # Read the live exception rather than sniffing err_str: every caller is inside
     # an except block, and an indexer outage must be reported as 503
     # indexer_unavailable, not folded into the generic 500 (M-6). Outside an
@@ -2254,7 +2268,12 @@ def core_edit():
     try:
         if is_node_catching_up():
             return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
+        raw = request.get_json(force=True) or {}
+        from legacy_mobile_wiring import prepare_edit_request
+
+        data, _legacy, compat_error = prepare_edit_request(raw)
+        if compat_error is not None:
+            return compat_error
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
@@ -2527,7 +2546,12 @@ def core_post():
     try:
         if is_node_catching_up():
             return api_error_code("node_catching_up", 503)
-        data = request.get_json(force=True) or {}
+        raw = request.get_json(force=True) or {}
+        from legacy_mobile_wiring import prepare_post_request
+
+        data, wire_protocol_version, legacy, compat_error = prepare_post_request(raw)
+        if compat_error is not None:
+            return compat_error
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
@@ -2560,11 +2584,7 @@ def core_post():
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
         tag = _normalize_tag(data.get("tag", ""))
-        try:
-            protocol_version = int(data.get("protocol_version", 0))
-        except (TypeError, ValueError):
-            protocol_version = 0
-        if protocol_version != 1:
+        if wire_protocol_version != 1 and not legacy:
             return api_error_code("upgrade_required", 426)
 
         if _has_unsafe_chars(community, title, content, target, tag):
@@ -2721,6 +2741,7 @@ def core_post():
                     tag,
                     media=media,
                     nonce=nonce,
+                    protocol_version=wire_protocol_version,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -2747,6 +2768,7 @@ def core_post():
                 tag,
                 media=media,
                 nonce=nonce,
+                protocol_version=wire_protocol_version,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -2769,7 +2791,7 @@ def core_post():
         msg.title = title
         msg.content = content
         msg.tag = tag
-        msg.protocol_version = 1
+        msg.protocol_version = wire_protocol_version
         for m in media:
             msg.media.append(m)
 
@@ -3246,6 +3268,11 @@ def core_subscribe():
         if is_node_catching_up():
             return api_error_code("node_catching_up", 503)
         data = request.get_json(force=True) or {}
+        from legacy_mobile_wiring import prepare_subscribe_request
+
+        subscribe_plan, compat_error = prepare_subscribe_request(data)
+        if compat_error is not None:
+            return compat_error
         log_event(rid, "subscribe.data", data=data)
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -3260,21 +3287,20 @@ def core_subscribe():
         nonce, err = _parse_envelope_nonce(data)
         if err is not None:
             return err[0], err[1]
-        level = int(data.get("level", 0))
-        try:
-            period_count = int(data.get("period_count", 1))
-        except (TypeError, ValueError):
-            period_count = 0
+        wire_level = subscribe_plan["wire_level"]
+        wire_period_count = subscribe_plan["wire_period_count"]
+        effective_level = subscribe_plan["effective_level"]
+        effective_period_count = subscribe_plan["effective_period_count"]
 
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
 
-        if level != 1:
+        if effective_level != 1:
             return (
                 jsonify({"error": "invalid level (must be 1; use set_auto_renewal to change auto-renewal)"}),
                 400,
             )
-        if period_count < 1 or period_count > 12:
+        if effective_period_count < 1 or effective_period_count > 12:
             return jsonify({"error": "period_count must be in [1,12]"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
@@ -3299,7 +3325,7 @@ def core_subscribe():
             except Exception as db_err:
                 log_event(rid, "subscribe.db_error", error=str(db_err))
                 return api_error_code("indexer_unavailable", 503)
-            if recipient_level > level:
+            if recipient_level > effective_level:
                 return api_error_code("gift_rejected_higher_tier")
 
         validator_addr = require_runtime().validator_payer_addr
@@ -3309,14 +3335,14 @@ def core_subscribe():
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
-            tier_idx = {0: 0, 1: 1}.get(level, -1)
+            tier_idx = {0: 0, 1: 1}.get(effective_level, -1)
             if isinstance(tiers, list) and 0 <= tier_idx < len(tiers):
                 tf = tiers[tier_idx] or {}
                 period_fee = int(tf.get("period_fee", 0) or 0)
         except Exception:
             period_fee = 0
-        if level > 0 and period_fee > 0:
-            needed = int(period_fee) * int(period_count)
+        if effective_level > 0 and period_fee > 0:
+            needed = int(period_fee) * int(effective_period_count)
             try:
                 bal = get_balance(user_addr)
                 have = int(bal)
@@ -3332,14 +3358,14 @@ def core_subscribe():
                 last_block_hash,
                 0,
                 timestamp,
-                level,
+                wire_level,
                 target=target if is_gift else "",
                 nonce=nonce,
-                period_count=period_count,
+                period_count=wire_period_count,
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
-                log_event(rid, "subscribe.bad_signature", user=user_addr, period_count=period_count)
+                log_event(rid, "subscribe.bad_signature", user=user_addr, period_count=wire_period_count)
                 return jsonify({"error": "invalid signature"}), 400
         except Exception as sig_exc:
             log_event(rid, "subscribe.signature_error", error=str(sig_exc))
@@ -3354,8 +3380,8 @@ def core_subscribe():
         msg.envelope_timestamp = int(timestamp)
         msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
-        msg.level = level
-        msg.period_count = period_count
+        msg.level = wire_level
+        msg.period_count = wire_period_count
         if is_gift:
             msg.target = target
 
@@ -3376,7 +3402,10 @@ def core_subscribe():
             extra = {
                 "height": height,
                 "user_addr": user_addr,
-                "level": int(level),
+                "level": int(wire_level),
+                "effective_level": int(effective_level),
+                "period_count": int(wire_period_count),
+                "effective_period_count": int(effective_period_count),
                 "last_block_hash": last_block_hash,
                 "target": target,
             }
@@ -3395,7 +3424,7 @@ def core_subscribe():
                     actor=user_addr,
                     event_type="subscription_gift",
                     created_at=int(time.time()),
-                    amount=int(level),
+                    amount=int(effective_level),
                     tx_hash=tx_hash,
                 )
                 log_event(
@@ -3403,7 +3432,7 @@ def core_subscribe():
                     "subscribe.inbox",
                     recipient=target,
                     actor=user_addr,
-                    level=int(level),
+                    level=int(effective_level),
                     was_subscriber=was_subscriber,
                     inserted=inserted,
                 )

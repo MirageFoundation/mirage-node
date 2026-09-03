@@ -465,8 +465,8 @@ class ChainClient:
             "effective_team_id": int(resp.effective_team_id),
         }
 
-    def query_post_metadata(self, txhash: str, timeout: int = GRPC_TIMEOUT) -> dict:
-        """Read required protocol-1 post metadata."""
+    def query_post_metadata(self, txhash: str, timeout: int = GRPC_TIMEOUT, *, required: bool = True) -> dict | None:
+        """Read post metadata, allowing absence only for historical protocol-0 posts."""
         from shared.datatypes import QueryPostMetadataRequest, QueryPostMetadataResponse
 
         target = str(txhash).strip().lower()
@@ -481,6 +481,8 @@ class ChainClient:
             try:
                 resp = method(QueryPostMetadataRequest(txhash=target), timeout=timeout)
             except grpc.RpcError as e:
+                if not required and e.code() == grpc.StatusCode.NOT_FOUND:
+                    return None
                 raise RuntimeError(f"PostMetadata gRPC failed for {target}: {e}") from e
         metadata = resp.metadata
         result = {

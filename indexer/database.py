@@ -1217,7 +1217,7 @@ class DatabaseManager:
                 )
 
     def update_post_protocol_metadata(self, txhash: str, metadata: dict) -> None:
-        """Persist the chain's absolute protocol-1 post metadata."""
+        """Persist absolute chain metadata for a post that has it."""
         target = str(txhash).strip().lower()
         root_hash = str(metadata["root_hash"]).strip().lower()
         community = str(metadata["community"]).strip().lower()
@@ -1236,7 +1236,7 @@ class DatabaseManager:
                         was_subscriber_at_creation = %s,
                         deleted_height = NULLIF(%s, 0),
                         deleted_epoch = NULLIF(%s, 0)
-                    WHERE LOWER(txhash) = %s AND protocol_version = 1
+                    WHERE LOWER(txhash) = %s
                     """,
                     (
                         community,
@@ -1253,7 +1253,7 @@ class DatabaseManager:
                     ),
                 )
                 if cur.rowcount != 1:
-                    raise RuntimeError(f"protocol-1 metadata target is missing from posts: {target}")
+                    raise RuntimeError(f"post metadata target is missing from posts: {target}")
 
     def update_subscription_runtime(self, owner: str, runtime: dict) -> None:
         """Persist quota and renewal state in the existing profile columns."""

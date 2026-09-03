@@ -214,14 +214,17 @@ def test_account(backend: str):
     else:
         _fail("account.get_user_followed returns 200", f"code={code}")
 
-    # 2.9 The referral surface must stay retired. v1.39 dropped referral_links,
-    # referral_user_settings and invite_codes, so a node that answers here is
-    # serving an endpoint whose storage no longer exists.
-    summary_code, _ = _get(f"{backend}/api/referrals/summary", {"address": addr})
-    if summary_code == 410:
-        _pass("account.referrals_retired")
+    # 2.9 The temporary mobile bridge returns a typed empty referral summary.
+    summary_code, summary = _get(f"{backend}/api/referrals/summary", {"address": addr})
+    if (
+        summary_code == 200
+        and (summary or {}).get("referrals") == []
+        and (summary or {}).get("total") == 0
+        and (summary or {}).get("has_more") is False
+    ):
+        _pass("account.referrals_disabled")
     else:
-        _fail("account.referrals_retired", f"code={summary_code}")
+        _fail("account.referrals_disabled", f"code={summary_code} body={summary}")
 
 
 # =========================================================================

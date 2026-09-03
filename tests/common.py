@@ -284,11 +284,11 @@ def _lb_bytes(lb_hex: str) -> bytes:
         return lb_hex.encode()
 
 
-def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
+def _get(url: str, params: dict | None = None, headers: dict | None = None) -> Tuple[int, dict]:
     max_retries = 7
     for attempt in range(1, max_retries + 1):
         try:
-            r = requests.get(url, params=params or {}, timeout=10)
+            r = requests.get(url, params=params or {}, headers=headers or {}, timeout=10)
         except requests.RequestException as e:
             if attempt >= max_retries:
                 raise
@@ -834,9 +834,11 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
     - post award: quality_post
     - comment award: receipts
     - token send happy path: 1000 umirage
-    - gift subscription to sub2: one period_fee for level 1
+    - subscription coverage: one existing gift plus three legacy-wire purchases
     """
-    code, cfg = _get(f"{backend}/api/get_chain_config")
+    code, cfg = _get(
+        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "test-runner"}
+    )
     if code != 200 or not isinstance(cfg, dict):
         raise RuntimeError(f"get_chain_config failed (code={code})")
 
@@ -878,7 +880,7 @@ def _required_sub1_spend_budget_umirage(backend: str) -> int:
         + int(costs["receipts"])
         + token_send_amount
         + indexer_transfer_test
-        + gift_fee
+        + (4 * gift_fee)
         + fee_buffer
     )
 

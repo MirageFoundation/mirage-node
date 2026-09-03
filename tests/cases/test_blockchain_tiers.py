@@ -539,3 +539,64 @@ def test_tier_features(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_accept("tierfeature.sub_content_1050_accepted", ccode, dcode, dlog)
+
+
+def test_legacy_subscribe_wire_values(backend: str) -> None:
+    payer = WALLETS["sub1"]
+    recipient = WALLETS["sub2"]
+    payer_address = str(payer.address()).lower()
+    recipient_address = str(recipient.address()).lower()
+    pubkey = payer.public_key().public_key_bytes
+    fee_payer = _bh._VALIDATOR_ADDR or ""
+
+    accepted = (
+        (1, "", "level1_period0"),
+        (10, "", "level10_period0"),
+        (1, recipient_address, "gift_period0"),
+    )
+    for level, target, name in accepted:
+        lb, _, _, _ = _get_pow_params(backend, payer_address)
+        msg = _build_msg_subscribe(
+            payer,
+            lb,
+            0,
+            _now_ms(),
+            level,
+            target=target,
+            period_count=0,
+            nonce=_gen_nonce(),
+        )
+        _, check_code, _, deliver_code, deliver_log = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSubscribe")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            pubkey,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(f"legacy_subscribe.{name}", check_code, deliver_code, deliver_log)
+
+    lb, _, _, _ = _get_pow_params(backend, payer_address)
+    invalid_level = _build_msg_subscribe(
+        payer, lb, 0, _now_ms(), 2, period_count=0, nonce=_gen_nonce()
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(invalid_level, "/mirage.core.v1.MsgSubscribe")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_subscribe.invalid_level", check_code, deliver_code, deliver_log)
+
+    lb, _, _, _ = _get_pow_params(backend, payer_address)
+    level10_modern_period = _build_msg_subscribe(
+        payer, lb, 0, _now_ms(), 10, period_count=1, nonce=_gen_nonce()
+    )
+    _, check_code, _, deliver_code, deliver_log = _submit_tx(
+        [(level10_modern_period, "/mirage.core.v1.MsgSubscribe")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pubkey,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("legacy_subscribe.level10_requires_period0", check_code, deliver_code, deliver_log)

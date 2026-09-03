@@ -2050,3 +2050,49 @@ def test_analytics_identity_trust(backend):
             "analytics_identity.unsigned_address_not_recorded",
             f"an unsigned query address produced last-seen state: rc={rc} out={out.strip()}",
         )
+
+
+def test_legacy_mobile_unsigned_read_security(backend):
+    from flask import Flask, g
+
+    backend_src = _backend_src()
+    if backend_src not in sys.path:
+        sys.path.insert(0, backend_src)
+    from routes import public
+
+    app = Flask("legacy-mobile-unsigned-read")
+    address = str(WALLETS["free"].address()).lower()
+
+    with app.test_request_context(f"/api/get_posts?address={address}"):
+        viewer, error = public._signed_content_viewer(address)
+        verified = getattr(g, "verified_request_address", None)
+        if viewer == address and error is None and verified is None:
+            _pass("legacy_mobile_security.unsigned_personalization_only")
+        else:
+            _fail(
+                "legacy_mobile_security.unsigned_personalization_only",
+                f"viewer={viewer} error={error} verified={verified}",
+            )
+
+    with app.test_request_context(
+        f"/api/get_posts?address={address}", headers={"X-Mirage-Visitor": "modern-test"}
+    ):
+        viewer, error = public._signed_content_viewer(address)
+        if viewer == "" and error is None:
+            _pass("legacy_mobile_security.visitor_unsigned_is_guest")
+        else:
+            _fail("legacy_mobile_security.visitor_unsigned_is_guest", f"viewer={viewer} error={error}")
+
+    with app.test_request_context(f"/api/get_posts?address={address}&pubkey=partial"):
+        viewer, error = public._signed_content_viewer(address)
+        if not viewer and error is not None:
+            _pass("legacy_mobile_security.partial_proof_fails")
+        else:
+            _fail("legacy_mobile_security.partial_proof_fails", f"viewer={viewer} error={error}")
+
+    with app.test_request_context(f"/api/get_posts?address={address}"):
+        viewer, error = public._signed_content_viewer(address, "curator_read")
+        if viewer == "" and error is None:
+            _pass("legacy_mobile_security.not_reused_for_authorization")
+        else:
+            _fail("legacy_mobile_security.not_reused_for_authorization", f"viewer={viewer} error={error}")

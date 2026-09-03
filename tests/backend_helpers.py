@@ -190,6 +190,140 @@ def _do_post(
     return txh if txh else None
 
 
+def _legacy_mobile_envelope(backend: str, wallet, canon_fn, canon_args: tuple, *, skip_pow: bool, canon_kwargs=None):
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    difficulty = 0 if skip_pow else diff
+    base = canon_fn(
+        pub,
+        _lb_bytes(lb),
+        difficulty,
+        ts,
+        *canon_args,
+        nonce=nonce,
+        **(canon_kwargs or {}),
+    )
+    proof = 0 if skip_pow else compute_pow(base, diff, base_bits, pow_factor, lb)
+    signature = sign_canonical(wallet, canon_signed_with_pow(base, int(proof)))
+    return {
+        "pubkey": _b64(pub),
+        "signature": _b64(signature),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "envelope_nonce": str(nonce),
+        "pow_difficulty": difficulty,
+        "pow": int(proof),
+    }
+
+
+def _do_legacy_mobile_post(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    *,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> tuple[int, dict]:
+    payload = _legacy_mobile_envelope(
+        backend,
+        wallet,
+        _canon_base_post_raw,
+        (target, topic, title, content, tag, 0, None),
+        skip_pow=skip_pow,
+        canon_kwargs={"protocol_version": 0},
+    )
+    payload.update({"target": target, "topic": topic, "title": title, "content": content, "tag": tag})
+    return _post(f"{backend}/api/core/post", payload)
+
+
+def _do_legacy_mobile_edit(
+    backend: str,
+    wallet,
+    override: str,
+    topic: str,
+    title: str,
+    content: str,
+    *,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> tuple[int, dict]:
+    payload = _legacy_mobile_envelope(
+        backend,
+        wallet,
+        _canon_base_edit_raw,
+        (target, topic, title, content, tag, override, None),
+        skip_pow=skip_pow,
+    )
+    payload.update(
+        {
+            "target": target,
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": tag,
+            "override": override,
+        }
+    )
+    return _post(f"{backend}/api/core/edit", payload)
+
+
+def _do_legacy_mobile_topic_action(
+    backend: str,
+    wallet,
+    action: str,
+    topic: str,
+    *,
+    skip_pow: bool = False,
+) -> tuple[int, dict]:
+    actions = {
+        "follow_topic": (_canon_base_follow_topic_raw, str(wallet.address())),
+        "unfollow_topic": (_canon_base_unfollow_topic_raw, str(wallet.address())),
+        "block_topic": (_canon_base_block_topic_raw, ""),
+        "unblock_topic": (_canon_base_unblock_topic_raw, ""),
+    }
+    canon_fn, target = actions[action]
+    payload = _legacy_mobile_envelope(
+        backend,
+        wallet,
+        canon_fn,
+        (target, topic),
+        skip_pow=skip_pow,
+    )
+    payload.update({"target": target, "topic": topic})
+    return _post(f"{backend}/api/core/{action}", payload)
+
+
+def _do_legacy_mobile_subscribe(
+    backend: str,
+    wallet,
+    level: int,
+    *,
+    target: str = "",
+    include_period_count: bool = False,
+) -> tuple[int, dict]:
+    payload = _legacy_mobile_envelope(
+        backend,
+        wallet,
+        _canon_base_subscribe_raw,
+        (int(level),),
+        skip_pow=True,
+        canon_kwargs={"target": target, "period_count": 0},
+    )
+    payload["level"] = int(level)
+    if target:
+        payload["target"] = target
+    if include_period_count:
+        payload["period_count"] = 0
+    return _post(f"{backend}/api/core/subscribe", payload)
+
+
 def _do_post_at_timestamp(
     backend: str,
     wallet,

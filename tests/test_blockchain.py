@@ -44,8 +44,9 @@ from tests.cases.test_blockchain_envelope import (
     test_envelope_replay,
     test_mandatory_nonce,
     test_envelope_fields,
+    test_legacy_topic_envelope,
 )
-from tests.cases.test_blockchain_pow import test_pow
+from tests.cases.test_blockchain_pow import test_legacy_topic_pow, test_pow
 from tests.cases.test_blockchain_chain_rules import (
     test_authority,
     test_fee,
@@ -54,13 +55,16 @@ from tests.cases.test_blockchain_chain_rules import (
     test_msg_validation,
     test_msg_format,
     test_malicious_inputs,
+    test_legacy_post_protocol_versions,
 )
 from tests.cases.test_blockchain_tiers import (
     test_tier_enforcement,
     test_subscribe_validation,
     test_subscribe_gift_extends_expiry,
     test_tier_features,
+    test_legacy_subscribe_wire_values,
 )
+from tests.cases.test_blockchain_social import test_legacy_topic_messages
 from tests.cases.test_blockchain_governance import test_governance_reject, test_direct_bank
 from tests.cases.test_blockchain_params import (
     test_params_schema,
@@ -103,6 +107,11 @@ ALL_CATEGORIES = {
     "envelope_fields": test_envelope_fields,
     "curation": test_curation_chain,
     "curation_team": test_curation_team_chain,
+    "legacy_topic_messages": test_legacy_topic_messages,
+    "legacy_subscribe": test_legacy_subscribe_wire_values,
+    "legacy_topic_envelope": test_legacy_topic_envelope,
+    "legacy_topic_pow": test_legacy_topic_pow,
+    "legacy_post_protocol": test_legacy_post_protocol_versions,
 }
 
 # Categories that must run alone. Everything else runs concurrently, each

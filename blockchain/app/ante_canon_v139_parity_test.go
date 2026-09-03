@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+
+	coretypes "mirage/x/core/types"
 )
 
 // The relay signature and the PoW preimage are produced independently by the
@@ -15,18 +17,22 @@ import (
 // vectors are generated from shared/canon.py so the two implementations are
 // pinned to each other byte for byte.
 
+type canonEnvelope struct {
+	PubkeyHex    string `json:"pubkey_hex"`
+	BlockHashHex string `json:"block_hash_hex"`
+	Difficulty   uint64 `json:"difficulty"`
+	Timestamp    uint64 `json:"timestamp"`
+	Nonce        uint64 `json:"nonce"`
+}
+
 type canonVectorFile struct {
-	Envelope struct {
-		PubkeyHex    string `json:"pubkey_hex"`
-		BlockHashHex string `json:"block_hash_hex"`
-		Difficulty   uint64 `json:"difficulty"`
-		Timestamp    uint64 `json:"timestamp"`
-		Nonce        uint64 `json:"nonce"`
-	} `json:"envelope"`
-	Vectors []struct {
+	Envelope             canonEnvelope `json:"envelope"`
+	LegacyMobileEnvelope canonEnvelope `json:"legacy_mobile_envelope"`
+	Vectors              []struct {
 		Msg      string         `json:"msg"`
 		Fields   map[string]any `json:"fields"`
 		CanonHex string         `json:"canon_hex"`
+		Envelope string         `json:"envelope"`
 	} `json:"vectors"`
 }
 
@@ -38,14 +44,6 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 	var file canonVectorFile
 	if err := json.Unmarshal(raw, &file); err != nil {
 		t.Fatalf("parse vectors: %v", err)
-	}
-	pubkey, err := hex.DecodeString(file.Envelope.PubkeyHex)
-	if err != nil {
-		t.Fatalf("decode pubkey: %v", err)
-	}
-	blockHash, err := hex.DecodeString(file.Envelope.BlockHashHex)
-	if err != nil {
-		t.Fatalf("decode block hash: %v", err)
 	}
 	if len(file.Vectors) == 0 {
 		t.Fatal("vector file is empty")
@@ -84,11 +82,95 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 		}
 		return b
 	}
+	stringsList := func(fields map[string]any, key string) []string {
+		v, ok := fields[key]
+		if !ok {
+			t.Fatalf("vector missing list field %q", key)
+		}
+		values, ok := v.([]any)
+		if !ok {
+			t.Fatalf("vector field %q is not a list", key)
+		}
+		out := make([]string, len(values))
+		for i, value := range values {
+			s, ok := value.(string)
+			if !ok {
+				t.Fatalf("vector field %q item %d is not a string", key, i)
+			}
+			out[i] = s
+		}
+		return out
+	}
 
 	for _, vec := range file.Vectors {
+		envelope := file.Envelope
+		if vec.Envelope == "legacy_mobile" {
+			envelope = file.LegacyMobileEnvelope
+		} else if vec.Envelope != "" {
+			t.Fatalf("vector uses unknown envelope %q", vec.Envelope)
+		}
+		pubkey, err := hex.DecodeString(envelope.PubkeyHex)
+		if err != nil {
+			t.Fatalf("decode pubkey: %v", err)
+		}
+		blockHash, err := hex.DecodeString(envelope.BlockHashHex)
+		if err != nil {
+			t.Fatalf("decode block hash: %v", err)
+		}
 		fields := vec.Fields
 		var fill func(w *canonWriter)
+		var gotBytes []byte
 		switch vec.Msg {
+		case "MsgPost":
+			gotBytes = buildCanonForPost(&coretypes.MsgPost{
+				EnvelopePubkey:     pubkey,
+				EnvelopeBlockHash:  blockHash,
+				EnvelopeDifficulty: envelope.Difficulty,
+				EnvelopeTimestamp:  envelope.Timestamp,
+				EnvelopeNonce:      envelope.Nonce,
+				Target:             str(fields, "target"),
+				Community:          str(fields, "community"),
+				Title:              str(fields, "title"),
+				Content:            str(fields, "content"),
+				Tag:                str(fields, "tag"),
+				Media:              stringsList(fields, "media"),
+				ProtocolVersion:    uint32(u64(fields, "protocol_version")),
+			})
+		case "MsgSubscribe":
+			gotBytes = buildCanonForSubscribe(&coretypes.MsgSubscribe{
+				EnvelopePubkey:     pubkey,
+				EnvelopeBlockHash:  blockHash,
+				EnvelopeDifficulty: envelope.Difficulty,
+				EnvelopeTimestamp:  envelope.Timestamp,
+				EnvelopeNonce:      envelope.Nonce,
+				Level:              uint32(u64(fields, "level")),
+				Target:             str(fields, "target"),
+				PeriodCount:        uint32(u64(fields, "period_count")),
+			})
+		case "MsgFollowTopic":
+			gotBytes = buildCanonForFollowTopic(&coretypes.MsgFollowTopic{
+				EnvelopePubkey: pubkey, EnvelopeBlockHash: blockHash,
+				EnvelopeDifficulty: envelope.Difficulty, EnvelopeTimestamp: envelope.Timestamp,
+				EnvelopeNonce: envelope.Nonce, Target: str(fields, "target"), Topic: str(fields, "topic"),
+			})
+		case "MsgUnfollowTopic":
+			gotBytes = buildCanonForUnfollowTopic(&coretypes.MsgUnfollowTopic{
+				EnvelopePubkey: pubkey, EnvelopeBlockHash: blockHash,
+				EnvelopeDifficulty: envelope.Difficulty, EnvelopeTimestamp: envelope.Timestamp,
+				EnvelopeNonce: envelope.Nonce, Target: str(fields, "target"), Topic: str(fields, "topic"),
+			})
+		case "MsgBlockTopic":
+			gotBytes = buildCanonForBlockTopic(&coretypes.MsgBlockTopic{
+				EnvelopePubkey: pubkey, EnvelopeBlockHash: blockHash,
+				EnvelopeDifficulty: envelope.Difficulty, EnvelopeTimestamp: envelope.Timestamp,
+				EnvelopeNonce: envelope.Nonce, Target: str(fields, "target"), Topic: str(fields, "topic"),
+			})
+		case "MsgUnblockTopic":
+			gotBytes = buildCanonForUnblockTopic(&coretypes.MsgUnblockTopic{
+				EnvelopePubkey: pubkey, EnvelopeBlockHash: blockHash,
+				EnvelopeDifficulty: envelope.Difficulty, EnvelopeTimestamp: envelope.Timestamp,
+				EnvelopeNonce: envelope.Nonce, Target: str(fields, "target"), Topic: str(fields, "topic"),
+			})
 		case "MsgCreateCurationTeam":
 			fill = func(w *canonWriter) {
 				w.writeString(100, str(fields, "community"))
@@ -169,18 +251,41 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 			t.Fatalf("vector for unknown message %q — add the Go canon layout here", vec.Msg)
 		}
 
-		got := hex.EncodeToString(buildCanonV139(
-			vec.Msg,
-			pubkey,
-			blockHash,
-			file.Envelope.Difficulty,
-			file.Envelope.Timestamp,
-			file.Envelope.Nonce,
-			fill,
-		))
+		if gotBytes == nil {
+			gotBytes = buildCanonV139(
+				vec.Msg,
+				pubkey,
+				blockHash,
+				envelope.Difficulty,
+				envelope.Timestamp,
+				envelope.Nonce,
+				fill,
+			)
+		}
+		got := hex.EncodeToString(gotBytes)
 		if got != vec.CanonHex {
 			t.Errorf("%s canon mismatch with shared/canon.py\n fields: %v\n go:     %s\n python: %s",
 				vec.Msg, fields, got, vec.CanonHex)
 		}
+	}
+}
+
+func TestLegacyCanonDiffersOnlyByOmittedVersionFields(t *testing.T) {
+	post := &coretypes.MsgPost{Media: []string{"https://example.com/a.jpg"}}
+	legacyPost := buildCanonForPost(post)
+	post.ProtocolVersion = 1
+	modernPost := buildCanonForPost(post)
+	expectedPost := append(append([]byte{}, legacyPost...), 106, 1)
+	if string(modernPost) != string(expectedPost) {
+		t.Fatalf("modern post canon does not differ only by tag 106")
+	}
+
+	subscribe := &coretypes.MsgSubscribe{Level: 1}
+	legacySubscribe := buildCanonForSubscribe(subscribe)
+	subscribe.PeriodCount = 1
+	modernSubscribe := buildCanonForSubscribe(subscribe)
+	expectedSubscribe := append(append([]byte{}, legacySubscribe...), 102, 1)
+	if string(modernSubscribe) != string(expectedSubscribe) {
+		t.Fatalf("modern subscribe canon does not differ only by tag 102")
 	}
 }
