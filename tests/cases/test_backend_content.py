@@ -1679,6 +1679,30 @@ def test_legacy_mobile_content(backend: str):
     else:
         _fail("legacy_mobile_content.tx_status_aliases", f"details={details}")
 
+    # Feed weights are learned from votes, so a second wallet has to vote before
+    # /api/get_preferences has anything to alias. Asserting on an empty list
+    # would pass even if the topic key were dropped entirely.
+    voter = WALLETS["sub2"]
+    voter_addr = str(voter.address()).lower()
+    _do_vote(backend, voter, root_hash, 1, skip_pow=True)
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    preferences: dict = {}
+    while time.perf_counter() < deadline:
+        code, preferences = _get(f"{backend}/api/get_preferences", {"address": voter_addr})
+        if code == 200 and (preferences or {}).get("communities"):
+            break
+        time.sleep(0.5)
+    weighted = (preferences or {}).get("communities") or []
+    aliased = (preferences or {}).get("topics")
+    if (
+        weighted
+        and aliased == weighted
+        and any(item.get("community") == topic and item.get("topic") == topic for item in weighted)
+    ):
+        _pass("legacy_mobile_content.preference_aliases", count=len(weighted))
+    else:
+        _fail("legacy_mobile_content.preference_aliases", f"communities={weighted} topics={aliased}")
+
 
 def _visibility_probe(name: str, code: str) -> None:
     """Run `code` in the container; pass when it prints OK and exits cleanly.
