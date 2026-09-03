@@ -543,9 +543,18 @@ def test_legacy_topic_messages(backend: str) -> None:
     follow = _build_msg_follow_topic(wallet, lb, 0, _now_ms(), owner, first, nonce=_gen_nonce())
     if not submit(follow, "/mirage.core.v1.MsgFollowTopic", "legacy_topic.follow"):
         return
-    profile = _get_profile_full(backend, owner)
-    joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
-    blocked = set(profile.get("blocked_communities") or profile.get("blockedCommunities") or [])
+    # Delivery only means the block was committed; the indexer projection this
+    # reads lands a moment later, so poll instead of sampling once.
+    deadline = time.perf_counter() + INDEX_TIMEOUT_SEC
+    joined: set[str] = set()
+    blocked: set[str] = set()
+    while time.perf_counter() < deadline:
+        profile = _get_profile_full(backend, owner)
+        joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
+        blocked = set(profile.get("blocked_communities") or profile.get("blockedCommunities") or [])
+        if first in joined and pattern not in blocked:
+            break
+        time.sleep(0.5)
     if first in joined and pattern not in blocked:
         _pass("legacy_topic.follow_unblocks_and_joins")
     else:

@@ -449,11 +449,9 @@ def _tx_error(
     info.setdefault("endpoint", endpoint)
     info.setdefault("tx_hash", tx_hash)
 
-    from legacy_mobile_wiring import classify_legacy_exception
-
-    legacy_result = classify_legacy_exception(raw_log)
-    if legacy_result is not None:
-        message, status = legacy_result
+    thread_read_only = _classify_thread_read_only(raw_log)
+    if thread_read_only is not None:
+        message, status = thread_read_only
         info["message"] = message
     else:
         # If chain returned an empty or whitespace-only message, normalize it.
@@ -478,17 +476,29 @@ def _tx_error(
     return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), status
 
 
+def _classify_thread_read_only(raw: str) -> tuple[str, int] | None:
+    """A reply to a thread with no chain metadata is a client error, not a 500.
+
+    A root created before v1.39 has no `PostMetadata`, so the chain cannot
+    resolve the root of a new reply and rejects it with `legacy_thread_read_only`.
+    This rule is permanent and protocol-independent: a modern protocol-1 reply to
+    a pre-v1.39 thread is refused the same way, so this classification outlives
+    the published-app bridge.
+    """
+    if "legacy_thread_read_only" not in (raw or "").lower():
+        return None
+    return get_message("legacy_thread_read_only"), 400
+
+
 def _classify_exception(err_str: str):
     """Return (message, http_status) for common chain exceptions.
 
     Checks for known error patterns and returns user-safe messages.
     Unknown exceptions get a generic message (details are in server logs).
     """
-    from legacy_mobile_wiring import classify_legacy_exception
-
-    legacy_result = classify_legacy_exception(err_str)
-    if legacy_result is not None:
-        return legacy_result
+    thread_read_only = _classify_thread_read_only(err_str)
+    if thread_read_only is not None:
+        return thread_read_only
 
     # Read the live exception rather than sniffing err_str: every caller is inside
     # an except block, and an indexer outage must be reported as 503

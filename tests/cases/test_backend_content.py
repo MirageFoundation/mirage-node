@@ -107,6 +107,7 @@ from tests.backend_helpers import (
     _wait_next_block,
     _do_legacy_mobile_post,
     _do_legacy_mobile_edit,
+    _do_post_at_timestamp,
 )
 
 
@@ -465,6 +466,25 @@ def test_comments(backend: str):
         return
     _wait_indexed(backend, addr, parent_txh)
     _pass("comments.parent_post created", tx=parent_txh)
+
+    # A thread whose root carries no chain metadata cannot accept a reply: the
+    # chain has no root to attach it to. That is a permanent, protocol-independent
+    # rule, so a modern protocol-1 client must get the same 400 the published app
+    # gets, and this must keep holding after the legacy bridge is removed.
+    code, orphan = _do_post_at_timestamp(
+        backend,
+        wallet,
+        "",
+        "",
+        "reply to a thread without chain metadata",
+        _now_ms(),
+        target="ab" * 32,
+        skip_pow=True,
+    )
+    if code == 400 and (orphan or {}).get("error_code") == "legacy_thread_read_only":
+        _pass("comments.reply_needs_parent_metadata")
+    else:
+        _fail("comments.reply_needs_parent_metadata", f"code={code} response={orphan}")
 
     # 4.1 Create comment on post
     c1_txh = _do_post(backend, wallet, "", "", "First comment", target=parent_txh)
@@ -1541,6 +1561,69 @@ def test_legacy_mobile_content(backend: str):
         _pass("legacy_mobile_content.comment_aliases")
     else:
         _fail("legacy_mobile_content.comment_aliases", f"code={code} comment={comment}")
+
+    # The community seeded above has exactly one titled root and one comment, so
+    # the restored topic reads can be checked against known values instead of a
+    # predicate that also passes on an empty list.
+    code, topic_list = _get(
+        f"{backend}/api/get_topics", {"address": owner, "min_posts": 1, "limit": 200}
+    )
+    listed = next(
+        (item for item in ((topic_list or {}).get("topics") or []) if item.get("topic") == topic),
+        None,
+    )
+    if (
+        code == 200
+        and listed
+        and listed.get("post_count") == 1
+        and listed.get("count") == 1
+        and listed.get("comment_count") == 1
+        and listed.get("dominant_tag") is None
+        and isinstance(listed.get("flags"), dict)
+        and (topic_list or {}).get("min_posts") == 1
+        and isinstance((topic_list or {}).get("small_topics_count"), int)
+    ):
+        _pass("legacy_mobile_content.topic_list_contract")
+    else:
+        _fail("legacy_mobile_content.topic_list_contract", f"code={code} item={listed}")
+
+    # Skips the "legacy" stem, so a prefix-only search cannot return this slug.
+    infix = topic[3:9]
+    code, searched = _get(f"{backend}/api/search_topics", {"q": infix, "limit": 50})
+    found = next(
+        (item for item in ((searched or {}).get("topics") or []) if item.get("topic") == topic),
+        None,
+    )
+    if (
+        code == 200
+        and found
+        and found.get("post_count") == 1
+        and found.get("count") == 1
+        and isinstance(found.get("flags"), dict)
+    ):
+        _pass("legacy_mobile_content.topic_search_infix", q=infix)
+    else:
+        _fail("legacy_mobile_content.topic_search_infix", f"code={code} q={infix} item={found}")
+
+    code, filtered = _get(f"{backend}/api/get_posts", {"topic": topic, "address": owner, "limit": 25})
+    filtered_posts = (filtered or {}).get("posts") or []
+    if (
+        code == 200
+        and filtered_posts
+        and all(str(post.get("community") or "") == topic for post in filtered_posts)
+        and any(str(post.get("post_id", "")).lower() == root_hash for post in filtered_posts)
+    ):
+        _pass("legacy_mobile_content.topic_filter_rewrite", count=len(filtered_posts))
+    else:
+        _fail("legacy_mobile_content.topic_filter_rewrite", f"code={code} posts={len(filtered_posts)}")
+
+    code, query_conflict = _get(
+        f"{backend}/api/get_posts", {"topic": topic, "community": f"{topic}x", "limit": 5}
+    )
+    if code == 400 and (query_conflict or {}).get("error_code") == "invalid_input":
+        _pass("legacy_mobile_content.topic_query_conflict")
+    else:
+        _fail("legacy_mobile_content.topic_query_conflict", f"code={code} response={query_conflict}")
 
     code, readonly_response = _do_legacy_mobile_post(
         backend,

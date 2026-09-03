@@ -3,13 +3,14 @@ from __future__ import annotations
 """Temporary HTTP compatibility for the published pre-v1.39 mobile app."""
 
 import json
+import re
 from collections import Counter
 from urllib.parse import parse_qsl, urlencode
 
 from bech32 import bech32_decode, convertbits
-from flask import Flask, current_app, g, has_request_context, jsonify, request
+from flask import Flask, current_app, g, jsonify, request
 
-from error_utils import api_error_code, get_message
+from error_utils import api_error_code
 from logging_utils import logger, next_request_id
 from shared.datatypes import MsgBlockTopic, MsgFollowTopic, MsgUnblockTopic, MsgUnfollowTopic
 
@@ -44,28 +45,12 @@ TYPED_DISABLED_READ_PATHS = frozenset(
     }
 )
 
-LEGACY_ERROR_CODES = {
-    "community_required": "topic_required",
-    "community_too_short": "topic_too_short",
-    "community_too_long": "topic_too_long",
-    "community_invalid_format": "topic_invalid_format",
-    "community_too_many_wildcards": "topic_too_many_wildcards",
-    "post_community_required": "topic_required",
-    "comment_must_not_include_community": "comment_must_not_include_topic",
-    "community_already_blocked": "topic_already_blocked",
-    "community_already_joined": "topic_already_followed",
-}
+# Renamed codes the bridge can actually emit. `community_required` is raised by
+# the restored topic writes below; every other v1.39 community code is either
+# unreachable from a legacy path or already worded the way the app expects.
+LEGACY_ERROR_CODES = {"community_required": "topic_required"}
 
-LEGACY_ERROR_MESSAGES = {
-    "topic_too_short": "topic too short",
-    "topic_too_long": "topic too long",
-    "topic_invalid_format": "invalid topic format",
-    "topic_too_many_wildcards": "too many wildcards in topic pattern",
-    "topic_required": "topic required",
-    "comment_must_not_include_topic": "comments must not include topic",
-    "topic_already_blocked": "topic is already blocked",
-    "topic_already_followed": "topic is already followed",
-}
+LEGACY_ERROR_MESSAGES = {"topic_required": "topic required"}
 
 RESPONSE_KEY_ALIASES = {
     "community": "topic",
@@ -75,6 +60,19 @@ RESPONSE_KEY_ALIASES = {
 }
 
 _CONTENT_READ_ACTIONS = frozenset({"get_posts", "get_comments"})
+
+# The published app sends `address` unsigned on exactly these reads, so the
+# bridge is bounded to them by path rather than by action name: several routes
+# share the `get_posts` action and must not inherit unsigned personalization.
+_UNSIGNED_READ_PATHS = frozenset(
+    {
+        "/api/get_posts",
+        "/api/get_comments",
+        "/api/get_user_posts",
+        "/api/search",
+        "/api/bootstrap",
+    }
+)
 _COUNTERS: Counter[str] = Counter()
 
 _DISABLED_REWARDS = {
@@ -206,6 +204,7 @@ def legacy_unsigned_content_viewer(claimed_address: str, action: str) -> str | N
     if (
         request.headers.get("X-Mirage-Visitor") is not None
         or action not in _CONTENT_READ_ACTIONS
+        or (request.path.rstrip("/") or "/") not in _UNSIGNED_READ_PATHS
         or not _valid_mirage_address(claimed)
     ):
         return None
@@ -231,15 +230,6 @@ def legacy_bootstrap_signed_viewer(claimed_address: str) -> str | None:
     g.legacy_mobile_request = True
     _record("legacy_mobile.bootstrap_signed_read", address_prefix=viewer[:12])
     return viewer
-
-
-def classify_legacy_exception(message: str) -> tuple[str, int] | None:
-    low = (message or "").lower()
-    if "legacy_thread_read_only" not in low and "parent post metadata not found" not in low:
-        return None
-    if has_request_context():
-        _record("legacy_mobile.thread_read_only", path=request.path)
-    return get_message("legacy_thread_read_only"), 400
 
 
 def _query_rewrite():
@@ -348,199 +338,239 @@ def _disabled_read(path: str):
     return jsonify(payload)
 
 
-def _legacy_topics():
-    try:
-        requested = int(request.args.get("limit", 50))
-    except (TypeError, ValueError):
-        return _legacy_error("invalid_input_type")
-    limit = min(max(1, requested), 200)
-    address = (request.args.get("address") or "").strip()
-    allowed_tags = request.args.get("allowed_tags")
-    items: list[dict] = []
-    cursor = ""
-    seen_cursors: set[str] = set()
-
-    from routes import communities as communities_routes
-
-    while len(items) < limit:
-        query = [("limit", str(min(100, limit - len(items))))]
-        if cursor:
-            query.append(("cursor", cursor))
-        with current_app.test_request_context("/api/communities", query_string=query):
-            page_response = _make_response(communities_routes.list_communities())
-            page_data = page_response.get_json(silent=True)
-        if page_response.status_code != 200:
-            return page_response
-        if not isinstance(page_data, dict) or not isinstance(page_data.get("items"), list):
-            raise RuntimeError("legacy topic list received malformed community response")
-        page_items = page_data["items"]
-        items.extend(page_items)
-        next_cursor = str(page_data.get("next_cursor") or "")
-        if not page_data.get("has_more") or not page_items:
-            break
-        if not next_cursor or next_cursor in seen_cursors:
-            raise RuntimeError("legacy topic list cursor repeated")
-        seen_cursors.add(next_cursor)
-        cursor = next_cursor
-
-    slugs = [str(item.get("community") or "").strip().lower() for item in items[:limit]]
-    if not slugs:
-        return jsonify({"topics": []})
-    from db import connect_db
+def _legacy_allowed_tags() -> set:
+    """Historical `allowed_tags` handling for restored topic search."""
     from routes import public as public_routes
+
+    return public_routes._parse_allowed_tags(
+        request.args.get("allowed_tags", default="sensitive", type=str)
+    )
+
+
+def _legacy_viewer_address() -> str:
+    """Claimed viewer for a restored legacy-only read.
+
+    These paths exist solely for the published app, so the unsigned `address`
+    is honored here the way v1.38 honored it everywhere: for blocked-list and
+    tag filtering only. It never establishes identity.
+    """
+    claimed = (request.args.get("address") or "").strip()
+    if not _valid_mirage_address(claimed):
+        return ""
+    address = claimed.lower()
+    g.legacy_mobile_request = True
+    _record("legacy_mobile.unsigned_read", action=request.path, address_prefix=address[:12])
+    return address
+
+
+def _legacy_topics():
+    """`GET /api/get_topics` as the published app knows it.
+
+    Mirrors the pre-v1.39 aggregate exactly: titled root posts grouped by
+    community, `min_posts` applied in SQL, comment counts from `root_community`,
+    live dominant-tag flags, viewer blocked-community filtering, and the
+    `small_topics_count` / `min_posts` envelope.
+    """
+    limit = min(max(1, request.args.get("limit", default=50, type=int)), 200)
+    min_posts = request.args.get("min_posts", default=10, type=int)
+    viewer = _legacy_viewer_address()
+
+    from db import connect_db
+    from params import expect_params
+    from routes import public as public_routes
+
+    allowed = public_routes._viewer_allowed_tags(viewer)
+    params = expect_params()
+    min_size = int(params["min_community_size"])
+    max_size = int(params["max_community_size"])
+    deleted = public_routes._deleted_filter()
 
     try:
         with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
             cur = conn.cursor()
             cur.execute(
-                """
-                WITH requested AS (
-                    SELECT UNNEST(%s::text[]) AS community
-                ),
-                comments AS (
-                    SELECT LOWER(TRIM(COALESCE(NULLIF(root_community, ''), community))) AS community,
-                           COUNT(*) AS comment_count
-                    FROM posts
-                    WHERE COALESCE(target, '') <> ''
-                      AND deleted = FALSE
-                      AND LOWER(TRIM(COALESCE(NULLIF(root_community, ''), community))) = ANY(%s)
-                    GROUP BY LOWER(TRIM(COALESCE(NULLIF(root_community, ''), community)))
-                ),
-                tags AS (
-                    SELECT LOWER(TRIM(community)) AS community,
-                           COUNT(*) AS total_posts,
-                           COUNT(*) FILTER (WHERE LOWER(COALESCE(tag, '')) = 'sensitive') AS sensitive_count,
-                           COUNT(*) FILTER (WHERE LOWER(COALESCE(tag, '')) IN ('adult', 'porn')) AS adult_count,
-                           COUNT(*) FILTER (WHERE LOWER(COALESCE(tag, '')) = 'gore') AS gore_count,
-                           COUNT(*) FILTER (WHERE LOWER(COALESCE(tag, '')) = 'violence') AS violence_count,
-                           COUNT(*) FILTER (WHERE LOWER(COALESCE(tag, '')) = 'death') AS death_count
-                    FROM posts
-                    WHERE COALESCE(target, '') = ''
-                      AND deleted = FALSE
-                      AND LOWER(TRIM(community)) = ANY(%s)
-                    GROUP BY LOWER(TRIM(community))
-                )
-                SELECT r.community,
-                       COALESCE(c.comment_count, 0),
-                       COALESCE(t.total_posts, 0),
-                       COALESCE(t.sensitive_count, 0),
-                       COALESCE(t.adult_count, 0),
-                       COALESCE(t.gore_count, 0),
-                       COALESCE(t.violence_count, 0),
-                       COALESCE(t.death_count, 0)
-                FROM requested r
-                LEFT JOIN comments c USING (community)
-                LEFT JOIN tags t USING (community)
+                f"""
+                SELECT LOWER(TRIM(p.community)) AS community, COUNT(1) AS post_count
+                FROM posts p
+                WHERE COALESCE(p.target, '') = ''
+                  AND LENGTH(COALESCE(p.title, '')) > 0
+                  AND p.community IS NOT NULL
+                  AND LENGTH(TRIM(p.community)) >= %s
+                  AND LENGTH(TRIM(p.community)) <= %s
+                  {deleted}
+                GROUP BY LOWER(TRIM(p.community))
+                HAVING COUNT(1) >= %s
+                ORDER BY post_count DESC, community ASC
+                LIMIT %s
                 """,
-                (slugs, slugs, slugs),
+                (min_size, max_size, min_posts, limit),
             )
-            topic_stats = {}
-            for row in cur.fetchall():
-                total = int(row[2] or 0)
-                counts = {
-                    "sensitive": int(row[3] or 0),
-                    "adult": int(row[4] or 0),
-                    "gore": int(row[5] or 0),
-                    "violence": int(row[6] or 0),
-                    "death": int(row[7] or 0),
-                }
-                dominant_tag = ""
-                dominant_ratio = 0.0
-                if total:
-                    for tag, count in counts.items():
-                        ratio = count / total
-                        if ratio >= 0.5 and ratio > dominant_ratio:
-                            dominant_tag = tag
-                            dominant_ratio = ratio
-                topic_stats[str(row[0])] = {
-                    "comment_count": int(row[1] or 0),
-                    "dominant_tag": dominant_tag,
-                    "dominant_ratio": dominant_ratio,
-                }
+            ranked = [
+                (str(row[0]), int(row[1] or 0))
+                for row in cur.fetchall()
+                if row[0] and int(row[1] or 0) > 0
+            ]
+
+            small_topics_count = 0
+            if min_posts > 1:
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*) FROM (
+                        SELECT LOWER(TRIM(p.community))
+                        FROM posts p
+                        WHERE COALESCE(p.target, '') = ''
+                          AND LENGTH(COALESCE(p.title, '')) > 0
+                          AND p.community IS NOT NULL
+                          AND LENGTH(TRIM(p.community)) >= %s
+                          AND LENGTH(TRIM(p.community)) <= %s
+                          {deleted}
+                        GROUP BY LOWER(TRIM(p.community))
+                        HAVING COUNT(1) > 0 AND COUNT(1) < %s
+                    ) small_communities
+                    """,
+                    (min_size, max_size, min_posts),
+                )
+                small_topics_count = int(cur.fetchone()[0] or 0)
+
+            blocked_exact, blocked_patterns = public_routes._split_blocked_communities(
+                public_routes._get_blocked_communities(cur, viewer)
+            )
+            visible = [
+                (slug, post_count)
+                for slug, post_count in ranked
+                if not public_routes._community_is_blocked(slug, blocked_exact, blocked_patterns)
+            ]
+            slugs = [slug for slug, _ in visible]
+
+            comment_counts: dict[str, int] = {}
+            if slugs:
+                cur.execute(
+                    f"""
+                    SELECT LOWER(TRIM(p.root_community)) AS community, COUNT(1) AS comment_count
+                    FROM posts p
+                    WHERE COALESCE(p.target, '') <> ''
+                      AND p.root_community IS NOT NULL
+                      AND LENGTH(TRIM(p.root_community)) > 0
+                      AND LOWER(TRIM(p.root_community)) = ANY(%s)
+                      {deleted}
+                    GROUP BY LOWER(TRIM(p.root_community))
+                    """,
+                    (slugs,),
+                )
+                comment_counts = {str(row[0]): int(row[1] or 0) for row in cur.fetchall()}
+            stats = public_routes._compute_dominant_flags(cur, slugs) if slugs else {}
     except Exception as exc:
         _record("legacy_mobile.topic_list_error", path=request.path, error=type(exc).__name__)
         return api_error_code("indexer_unavailable", 503)
 
-    visitor_header = request.headers.get("X-Mirage-Visitor")
-    with current_app.test_request_context(
-        "/api/get_topics",
-        query_string={
-            **({"address": address} if address else {}),
-            **({"allowed_tags": allowed_tags} if allowed_tags is not None else {}),
-        },
-        headers={"X-Mirage-Visitor": visitor_header} if visitor_header is not None else None,
-    ):
-        viewer = legacy_unsigned_content_viewer(address, "get_posts") or ""
-        allowed = public_routes._viewer_allowed_tags(viewer)
+    # Never hint at hidden communities while a content filter is active.
+    if not set(public_routes._COMMUNITY_TAGS).issubset(allowed):
+        small_topics_count = 0
 
     topics = []
-    for item in items[:limit]:
-        slug = str(item.get("community") or "").strip().lower()
-        stat = topic_stats[slug]
-        dominant_tag = public_routes._normalize_api_tag(stat.get("dominant_tag") or "")
-        if dominant_tag and dominant_tag not in allowed:
+    for slug, post_count in visible:
+        item, dropped = _legacy_topic_item(public_routes, slug, post_count, stats, allowed)
+        if dropped:
             continue
-        ratio = float(stat.get("dominant_ratio") or 0.0)
-        flags = {tag: dominant_tag == tag for tag in ("sensitive", "adult", "gore", "violence", "death")}
-        comment_count = int(stat["comment_count"])
-        topics.append(
-            {
-                "topic": slug,
-                "post_count": int(item.get("post_count") or 0),
-                "count": comment_count,
-                "comment_count": comment_count,
-                "flags": flags,
-                "dominant_tag": dominant_tag,
-                "dominant_ratio": ratio,
-            }
-        )
-    return jsonify({"topics": topics})
+        item["comment_count"] = comment_counts.get(slug, 0)
+        topics.append(item)
+    return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
+
+
+def _legacy_topic_item(public_routes, slug: str, post_count: int, stats: dict, allowed: set) -> tuple[dict, bool]:
+    stat = stats.get(slug) or {}
+    dominant_tag = public_routes._normalize_api_tag(stat.get("dominant_tag") or "")
+    if dominant_tag and dominant_tag not in allowed:
+        return {}, True
+    return (
+        {
+            "topic": slug,
+            "post_count": post_count,
+            "count": post_count,
+            "flags": {tag: dominant_tag == tag for tag in public_routes._COMMUNITY_TAGS},
+            "dominant_tag": dominant_tag or None,
+            "dominant_ratio": float(stat.get("dominant_ratio") or 0.0),
+        },
+        False,
+    )
 
 
 def _legacy_search_topics():
-    query = (request.args.get("q") or "").strip()
-    if not query:
-        return api_error_code("query_required", 400)
-    if query.startswith("#"):
-        query = query[1:]
-    query = query.strip()
-    if len(query) < 2:
-        return api_error_code("invalid_input", 400)
-    try:
-        limit = min(max(1, int(request.args.get("limit", 10))), 50)
-        offset = max(0, int(request.args.get("offset", 0)))
-    except (TypeError, ValueError):
-        return _legacy_error("invalid_input_type")
-    nested = {
-        "q": f"#{query}",
-        "type": "communities",
-        "limit": str(limit),
-        "offset": str(offset),
-    }
-    for key in ("address", "allowed_tags"):
-        value = request.args.get(key)
-        if value is not None:
-            nested[key] = value
+    """`GET /api/search_topics` as the published app knows it.
 
+    Substring match on the sanitized query with the historical relevance order
+    (exact, then prefix, then contains; ties by post count then name), the
+    historical default limit of 20, an empty result for queries shorter than
+    two alphanumeric characters, and the historical item shape.
+    """
+    limit = min(max(1, request.args.get("limit", default=20, type=int)), 50)
+    offset = max(0, request.args.get("offset", default=0, type=int))
+    allowed = _legacy_allowed_tags()
+    query = re.sub(r"[^a-zA-Z0-9]", "", str(request.args.get("q") or "")).lower()
+    if len(query) < 2:
+        return jsonify({"topics": []})
+    viewer = _legacy_viewer_address()
+
+    from db import connect_db
+    from params import expect_params
     from routes import public as public_routes
 
-    visitor_header = request.headers.get("X-Mirage-Visitor")
-    with current_app.test_request_context(
-        "/api/search",
-        query_string=nested,
-        headers={"X-Mirage-Visitor": visitor_header} if visitor_header is not None else None,
-    ):
-        result = _make_response(public_routes.search())
-        data = result.get_json(silent=True)
-    if result.status_code != 200:
-        return result
-    if not isinstance(data, dict) or not isinstance(data.get("communities"), list):
-        raise RuntimeError("legacy topic search received malformed search response")
+    params = expect_params()
+    min_size = int(params["min_community_size"])
+    max_size = int(params["max_community_size"])
+    deleted = public_routes._deleted_filter()
+
+    try:
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"""
+                WITH community_base AS (
+                    SELECT LOWER(TRIM(p.community)) AS community,
+                           COUNT(1) AS post_count
+                    FROM posts p
+                    WHERE COALESCE(p.target, '') = ''
+                      AND p.community IS NOT NULL
+                      AND LENGTH(TRIM(p.community)) >= %s
+                      AND LENGTH(TRIM(p.community)) <= %s
+                      AND LOWER(p.community) LIKE %s
+                      {deleted}
+                    GROUP BY LOWER(TRIM(p.community))
+                )
+                SELECT cb.community,
+                       cb.post_count,
+                       CASE
+                           WHEN cb.community = %s THEN 0
+                           WHEN cb.community LIKE %s THEN 1
+                           ELSE 2
+                       END AS relevance
+                FROM community_base cb
+                ORDER BY relevance ASC, post_count DESC, community ASC
+                LIMIT %s
+                OFFSET %s
+                """,
+                (min_size, max_size, f"%{query}%", query, f"{query}%", limit, offset),
+            )
+            ranked = [(str(row[0]), int(row[1] or 0)) for row in cur.fetchall() if row[0]]
+            blocked_exact, blocked_patterns = public_routes._split_blocked_communities(
+                public_routes._get_blocked_communities(cur, viewer)
+            )
+            visible = [
+                (slug, post_count)
+                for slug, post_count in ranked
+                if not public_routes._community_is_blocked(slug, blocked_exact, blocked_patterns)
+            ]
+            stats = public_routes._compute_dominant_flags(cur, [slug for slug, _ in visible]) if visible else {}
+    except Exception as exc:
+        _record("legacy_mobile.topic_search_error", path=request.path, error=type(exc).__name__)
+        return api_error_code("indexer_unavailable", 503)
+
     topics = []
-    for item in data["communities"]:
-        mapped = dict(item)
-        mapped.setdefault("topic", mapped.get("community", ""))
-        topics.append(mapped)
+    for slug, post_count in visible:
+        item, dropped = _legacy_topic_item(public_routes, slug, post_count, stats, allowed)
+        if dropped:
+            continue
+        topics.append(item)
     return jsonify({"topics": topics})
 
 
@@ -814,5 +844,4 @@ __all__ = [
     "prepare_subscribe_request",
     "legacy_unsigned_content_viewer",
     "legacy_bootstrap_signed_viewer",
-    "classify_legacy_exception",
 ]

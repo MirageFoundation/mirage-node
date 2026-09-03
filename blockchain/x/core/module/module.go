@@ -2926,14 +2926,14 @@ func (am AppModule) Subscribe(ctx context.Context, req *types.MsgSubscribe) (*ty
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSubscribe cannot use PoW, must pay with tokens")
 	}
-	if wireLevel != 0 && int(wireLevel) != types.LevelSubscriber && wireLevel != 10 {
+	// Subscriber is the only purchasable level. 10 is the retired Agent level the
+	// published app still signs; it buys exactly one subscriber period and is
+	// only accepted on the legacy wire shape, which omits period_count.
+	if int(wireLevel) != types.LevelSubscriber && wireLevel != 10 {
 		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber)", wireLevel, types.LevelSubscriber)
 	}
 	if wireLevel == 10 && wirePeriod != 0 {
 		return nil, fmt.Errorf("legacy level 10 requires period_count 0")
-	}
-	if wirePeriod == 0 && wireLevel != uint32(types.LevelSubscriber) && wireLevel != 10 {
-		return nil, fmt.Errorf("period_count must be at least 1")
 	}
 	if _, err := am.requireUsername(sdkCtx, recipient, "Subscribe"); err != nil {
 		return nil, err

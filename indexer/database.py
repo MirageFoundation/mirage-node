@@ -23,6 +23,11 @@ MAX_ANCESTOR_WALK_DEPTH = 100
 META_LAST_HEIGHT = "last_height"
 META_LAST_BLOCK_HASH = "last_block_hash"
 META_CHAIN_ID = "chain_id"
+# First height at which the chain writes PostMetadata for every post, including
+# the protocol-0 posts the published mobile app still signs. Written by the
+# v1.39.0 migration; absent (or 0) means the activation height is unknown for
+# this database, which is the case when reindexing a chain from genesis.
+META_POST_METADATA_FROM_HEIGHT = "post_metadata_from_height"
 
 # Set for the duration of DatabaseManager.transaction(); every _connect() inside
 # the same context joins that connection instead of opening an autocommit one.

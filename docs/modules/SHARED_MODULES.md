@@ -247,15 +247,20 @@ def canon_base_post(
 
 Tag 101 is named `community`; it was `topic` before v1.39.0 and the rename went
 through the wire format rather than being aliased. Tag 106
-(`protocol_version`) is always emitted and must be `1` — a client that omits it
-produces a signature the chain will not verify.
+(`protocol_version`) must be `1` for every new client. It is omitted only when
+`protocol_version=0` is passed explicitly, which exists for the published-app
+compatibility window described in `docs/mobile/LEGACY_SHIM.md`.
 
 `canon.py` still exports builders for messages the chain no longer accepts —
 `canon_base_annotate`, `canon_base_enable_agent`, `canon_base_disable_agent`,
-`canon_base_set_agents`, `canon_base_follow_topic`, `canon_base_unfollow_topic`,
-`canon_base_block_topic`, `canon_base_unblock_topic`. They keep their original
-names so historical transactions can still be re-derived and verified. Do not
-sign new transactions with them; the chain rejects those message types.
+`canon_base_set_agents`. They keep their original names so historical
+transactions can still be re-derived and verified. Do not sign new transactions
+with them; the chain rejects those message types.
+
+`canon_base_follow_topic`, `canon_base_unfollow_topic`,
+`canon_base_block_topic`, and `canon_base_unblock_topic` are also historical,
+but their messages execute again for the duration of the compatibility window
+and are retired with it. New clients sign the community messages instead.
 
 ### Encoding Primitives
 

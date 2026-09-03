@@ -73,7 +73,7 @@ from indexer.settings import (
     COMMUNITY_VOTE_MAX_POSTS,
     COMMUNITY_VOTE_BOOST_MULTIPLIER,
 )
-from indexer.database import DatabaseManager
+from indexer.database import META_POST_METADATA_FROM_HEIGHT, DatabaseManager
 import re
 from urllib.parse import urlparse
 
@@ -346,6 +346,23 @@ class MessageProcessor:
         self.chain = chain_client
         self.log_yaml = log_yaml_fn
         self.iso_timestamp = iso_timestamp_fn
+        self._metadata_from_height: int | None = None
+
+    def _post_metadata_required(self, height: int) -> bool:
+        """True when a post at `height` must have chain metadata.
+
+        The chain writes PostMetadata for every post it finalizes from v1.39 on,
+        including the protocol-0 posts the published mobile app still signs. So
+        for those heights a NOT_FOUND is a chain or node fault, not history, and
+        must stop projection rather than commit null sequence/root/height
+        columns. Below the recorded activation height, and in a database that
+        never had a pre-v1.39 cursor, absence is legitimate history.
+        """
+        if self._metadata_from_height is None:
+            stored = self.db.get_meta(META_POST_METADATA_FROM_HEIGHT)
+            self._metadata_from_height = int(stored) if stored else 0
+            logger.debug("post_metadata_from_height=%d", self._metadata_from_height)
+        return self._metadata_from_height > 0 and int(height or 0) >= self._metadata_from_height
 
     def process_core_message(
         self,
@@ -719,7 +736,10 @@ class MessageProcessor:
             media=media,
             protocol_version=protocol_version,
         )
-        metadata = self.chain.query_post_metadata(txhash, required=protocol_version == 1)
+        metadata = self.chain.query_post_metadata(
+            txhash,
+            required=protocol_version == 1 or self._post_metadata_required(height),
+        )
         if metadata is not None:
             if metadata["author"] != owner:
                 raise RuntimeError(
@@ -1941,11 +1961,18 @@ class MessageProcessor:
             if rows_affected > 0:
                 with self.db._connect() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT protocol_version FROM posts WHERE LOWER(txhash)=LOWER(%s)", (target,))
+                        cur.execute(
+                            "SELECT protocol_version, created_height FROM posts WHERE LOWER(txhash)=LOWER(%s)",
+                            (target,),
+                        )
                         row = cur.fetchone()
                 if row:
                     protocol_version = int(row[0])
-                    metadata = self.chain.query_post_metadata(target, required=protocol_version == 1)
+                    created_height = int(row[1] or 0)
+                    metadata = self.chain.query_post_metadata(
+                        target,
+                        required=protocol_version == 1 or self._post_metadata_required(created_height),
+                    )
                 else:
                     metadata = None
                 if metadata is not None:

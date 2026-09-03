@@ -392,11 +392,21 @@ func TestSubscribeRejectsLegacyAliasesOutsideLegacyWireShape(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "legacy level 10 requires period_count 0")
 
-	_, err = am.Subscribe(ctx, &types.MsgSubscribe{
-		Authority:      testAccAddressString(),
-		EnvelopePubkey: pub,
-		Level:          0,
-		PeriodCount:    0,
-	})
-	require.ErrorContains(t, err, "period_count must be at least 1")
+	// Level 0 is not purchasable on either wire shape. The legacy exemption is
+	// for level 10 only, and an omitted period_count must never turn an invalid
+	// level into a subscriber tranche.
+	for _, period := range []uint32{0, 1, 12} {
+		before := mk.bank.balances[owner]
+		_, err = am.Subscribe(ctx, &types.MsgSubscribe{
+			Authority:      testAccAddressString(),
+			EnvelopePubkey: pub,
+			Level:          0,
+			PeriodCount:    period,
+		})
+		require.ErrorContains(t, err, "invalid level 0")
+		require.True(t, mk.bank.balances[owner].Equal(before))
+		core := loadCore(t, mk, ctx, owner)
+		require.NotEqual(t, int32(types.LevelSubscriber), core.Level)
+		require.Equal(t, int64(0), core.SubscriptionExpiry)
+	}
 }

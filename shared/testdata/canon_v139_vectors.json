@@ -329,8 +329,8 @@
                 "target": "",
                 "period_count": 0
             },
-            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680b883a1f73207076401",
-            "envelope": "legacy_mobile"
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04000680b883a1f73207076401",
+            "envelope": "legacy_mobile_paid"
         },
         {
             "msg": "MsgSubscribe",
@@ -339,8 +339,8 @@
                 "target": "",
                 "period_count": 0
             },
-            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680b883a1f7320707640a",
-            "envelope": "legacy_mobile"
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04000680b883a1f7320707640a",
+            "envelope": "legacy_mobile_paid"
         },
         {
             "msg": "MsgSubscribe",
@@ -349,8 +349,8 @@
                 "target": "mirage1gift",
                 "period_count": 0
             },
-            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680b883a1f73207076401650b6d69726167653167696674",
-            "envelope": "legacy_mobile"
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04000680b883a1f73207076401650b6d69726167653167696674",
+            "envelope": "legacy_mobile_paid"
         },
         {
             "msg": "MsgSubscribe",
@@ -359,8 +359,8 @@
                 "target": "",
                 "period_count": 1
             },
-            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680b883a1f732070764016601",
-            "envelope": "legacy_mobile"
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04000680b883a1f732070764016601",
+            "envelope": "legacy_mobile_paid"
         },
         {
             "msg": "MsgSubscribe",
@@ -369,8 +369,8 @@
                 "target": "",
                 "period_count": 3
             },
-            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04150680b883a1f732070764016603",
-            "envelope": "legacy_mobile"
+            "canon_hex": "6d69726167652e636f72652e76313a4d73675375627363726962650002210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980320aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa04000680b883a1f732070764016603",
+            "envelope": "legacy_mobile_paid"
         },
         {
             "msg": "MsgFollowTopic",
@@ -413,6 +413,14 @@
         "pubkey_hex": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         "block_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "difficulty": 21,
+        "timestamp": 1750000000000,
+        "nonce": 7,
+        "pow": 42
+    },
+    "legacy_mobile_paid_envelope": {
+        "pubkey_hex": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "block_hash_hex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "difficulty": 0,
         "timestamp": 1750000000000,
         "nonce": 7,
         "pow": 42

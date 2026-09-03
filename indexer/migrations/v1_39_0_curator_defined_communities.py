@@ -1,5 +1,6 @@
 """v1.39.0: remove claimed-community state and finalize curator projections."""
 
+from indexer.database import META_LAST_HEIGHT, META_POST_METADATA_FROM_HEIGHT
 from indexer.migrations import run_db_migration
 
 MIGRATION_KEY = "v1.39.0_curator_defined_communities"
@@ -212,6 +213,23 @@ def run(db, chain, logger):
             )
             if cur.rowcount != 1:
                 raise RuntimeError(f"post metadata backfill target disappeared: {txhash}")
+
+        # From v1.39 on the chain writes PostMetadata for every post it
+        # finalizes, including the protocol-0 posts the published mobile app
+        # still signs. Record the first such height so the message processor can
+        # tell a genuinely historical protocol-0 post, which has no metadata,
+        # from a missing record it must refuse to project. A database with no
+        # pre-v1.39 cursor (a from-genesis reindex) stores 0, meaning unknown.
+        cur.execute("SELECT value FROM meta WHERE key=%s", (META_LAST_HEIGHT,))
+        cursor_row = cur.fetchone()
+        pre_upgrade_height = int(cursor_row[0]) if cursor_row and cursor_row[0] else 0
+        cur.execute(
+            "INSERT INTO meta(key, value) VALUES(%s, %s) ON CONFLICT(key) DO NOTHING",
+            (
+                META_POST_METADATA_FROM_HEIGHT,
+                str(pre_upgrade_height + 1 if pre_upgrade_height > 0 else 0),
+            ),
+        )
 
         cur.execute("DROP TABLE IF EXISTS community_founder_history")
         cur.execute("DROP TABLE IF EXISTS communities")

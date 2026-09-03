@@ -837,13 +837,105 @@ def test_legacy_mobile_social(backend: str):
     else:
         _fail("legacy_mobile_social.unblock_empty_target", f"code={code} response={response} delivered={delivered}")
 
+    tag_filter = "sensitive,adult,gore,violence,death"
+    code, topic_list = _get(
+        f"{backend}/api/get_topics",
+        {"address": owner, "allowed_tags": tag_filter, "limit": 1, "min_posts": 1},
+    )
+    visible_topics = (topic_list or {}).get("topics") or []
+    visible_topic = str(visible_topics[0].get("topic") or "") if visible_topics else ""
+    if code != 200 or not visible_topic:
+        _fail("legacy_mobile_social.blocked_topic_list_setup", f"code={code} body={topic_list}")
+    else:
+        code, response = _do_legacy_mobile_topic_action(
+            backend, wallet, "block_topic", visible_topic, skip_pow=True
+        )
+        tx_hash = str((response or {}).get("tx_hash", "")).lower()
+        delivered = _wait_tx_deliver(tx_hash) if tx_hash else None
+        blocked = _wait_blocked_community(backend, owner, visible_topic)
+        list_code, blocked_list = _get(
+            f"{backend}/api/get_topics",
+            {"address": owner, "allowed_tags": tag_filter, "limit": 1, "min_posts": 1},
+        )
+        blocked_topics = {
+            str(item.get("topic") or "").lower() for item in ((blocked_list or {}).get("topics") or [])
+        }
+        if (
+            code == 200
+            and delivered
+            and delivered[0] == 0
+            and blocked
+            and list_code == 200
+            and visible_topic not in blocked_topics
+        ):
+            _pass("legacy_mobile_social.blocked_topic_hidden_from_list")
+        else:
+            _fail(
+                "legacy_mobile_social.blocked_topic_hidden_from_list",
+                f"block_code={code} delivered={delivered} list_code={list_code} topics={blocked_topics}",
+            )
+        code, response = _do_legacy_mobile_topic_action(
+            backend, wallet, "unblock_topic", visible_topic, skip_pow=True
+        )
+        tx_hash = str((response or {}).get("tx_hash", "")).lower()
+        delivered = _wait_tx_deliver(tx_hash) if tx_hash else None
+        if (
+            code == 200
+            and delivered
+            and delivered[0] == 0
+            and _wait_blocked_community_state(backend, owner, visible_topic, False)
+        ):
+            _pass("legacy_mobile_social.blocked_topic_list_cleanup")
+        else:
+            _fail(
+                "legacy_mobile_social.blocked_topic_list_cleanup",
+                f"code={code} response={response} delivered={delivered}",
+            )
+
+    code, renamed = _do_legacy_mobile_topic_action(backend, wallet, "follow_topic", "", skip_pow=True)
+    if (
+        code == 400
+        and (renamed or {}).get("error_code") == "topic_required"
+        and (renamed or {}).get("error") == "topic required"
+    ):
+        _pass("legacy_mobile_social.renamed_error_code")
+    else:
+        _fail("legacy_mobile_social.renamed_error_code", f"code={code} response={renamed}")
+
+    # The alias checks below compare list values, so both lists have to hold
+    # something: two equal empty lists prove nothing about the aliasing.
+    block_pattern = f"{stem}blk*"
+    populated = True
+    for action, target, confirm in (
+        ("follow_topic", first, lambda: _wait_followed_community(backend, owner, first)),
+        ("block_topic", block_pattern, lambda: _wait_blocked_community(backend, owner, block_pattern)),
+    ):
+        code, response = _do_legacy_mobile_topic_action(backend, wallet, action, target, skip_pow=True)
+        tx_hash = str((response or {}).get("tx_hash", "")).lower()
+        delivered = _wait_tx_deliver(tx_hash) if tx_hash else None
+        if code != 200 or not delivered or delivered[0] != 0 or not confirm():
+            populated = False
+            _fail(
+                "legacy_mobile_social.alias_population",
+                f"action={action} code={code} response={response} delivered={delivered}",
+            )
+            break
+    if populated:
+        _pass("legacy_mobile_social.alias_population")
+
     for path, modern_key, legacy_key in (
         ("get_user_followed", "joined_communities", "followed_topics"),
         ("get_user_blocked", "blocked_communities", "blocked_topics"),
         ("get_profile", "joined_communities", "followed_topics"),
     ):
         code, data = _get(f"{backend}/api/{path}", {"address": owner})
-        if code == 200 and modern_key in (data or {}) and data.get(legacy_key) == data.get(modern_key):
-            _pass(f"legacy_mobile_social.{path}_aliases")
+        modern_value = (data or {}).get(modern_key)
+        if (
+            code == 200
+            and isinstance(modern_value, list)
+            and (modern_value or not populated)
+            and data.get(legacy_key) == modern_value
+        ):
+            _pass(f"legacy_mobile_social.{path}_aliases", count=len(modern_value))
         else:
             _fail(f"legacy_mobile_social.{path}_aliases", f"code={code} data={data}")

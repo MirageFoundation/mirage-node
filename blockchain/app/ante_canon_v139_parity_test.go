@@ -16,6 +16,12 @@ import (
 // field combination that diverged — a false boolean, for instance. These
 // vectors are generated from shared/canon.py so the two implementations are
 // pinned to each other byte for byte.
+//
+// The legacy_mobile vectors are additionally verified against the published
+// mobile app's own builder (src/api/write/signing/canonical.ts), which is what
+// actually signs the requests the compatibility bridge must accept. Regenerate
+// that comparison with scripts/legacy_mobile_canon_check.mjs; it needs the
+// mobile checkout, so it is not part of either suite.
 
 type canonEnvelope struct {
 	PubkeyHex    string `json:"pubkey_hex"`
@@ -26,9 +32,10 @@ type canonEnvelope struct {
 }
 
 type canonVectorFile struct {
-	Envelope             canonEnvelope `json:"envelope"`
-	LegacyMobileEnvelope canonEnvelope `json:"legacy_mobile_envelope"`
-	Vectors              []struct {
+	Envelope                 canonEnvelope `json:"envelope"`
+	LegacyMobileEnvelope     canonEnvelope `json:"legacy_mobile_envelope"`
+	LegacyMobilePaidEnvelope canonEnvelope `json:"legacy_mobile_paid_envelope"`
+	Vectors                  []struct {
 		Msg      string         `json:"msg"`
 		Fields   map[string]any `json:"fields"`
 		CanonHex string         `json:"canon_hex"`
@@ -104,9 +111,13 @@ func TestCanonV139MatchesSharedPythonVectors(t *testing.T) {
 
 	for _, vec := range file.Vectors {
 		envelope := file.Envelope
-		if vec.Envelope == "legacy_mobile" {
+		switch vec.Envelope {
+		case "":
+		case "legacy_mobile":
 			envelope = file.LegacyMobileEnvelope
-		} else if vec.Envelope != "" {
+		case "legacy_mobile_paid":
+			envelope = file.LegacyMobilePaidEnvelope
+		default:
 			t.Fatalf("vector uses unknown envelope %q", vec.Envelope)
 		}
 		pubkey, err := hex.DecodeString(envelope.PubkeyHex)

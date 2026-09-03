@@ -538,7 +538,18 @@ def test_search(backend: str):
 
     code, topics = _get(f"{backend}/api/get_topics", {"limit": 5})
     topic_items = (topics or {}).get("topics")
-    if code == 200 and isinstance(topic_items, list) and all("topic" in item for item in topic_items):
+    if (
+        code == 200
+        and isinstance(topic_items, list)
+        and (topics or {}).get("min_posts") == 10
+        and isinstance((topics or {}).get("small_topics_count"), int)
+        and all(
+            "topic" in item
+            and int(item.get("post_count") or 0) >= 10
+            and item.get("count") == item.get("post_count")
+            for item in topic_items
+        )
+    ):
         _pass("search.legacy_get_topics")
     else:
         _fail("search.legacy_get_topics", f"code={code} body={topics}")
@@ -549,6 +560,12 @@ def test_search(backend: str):
         _pass("search.legacy_search_topics")
     else:
         _fail("search.legacy_search_topics", f"code={code} body={searched_topics}")
+
+    code, empty_topics = _get(f"{backend}/api/search_topics", {"q": "#"})
+    if code == 200 and (empty_topics or {}).get("topics") == []:
+        _pass("search.legacy_search_topics_sanitized_empty")
+    else:
+        _fail("search.legacy_search_topics_sanitized_empty", f"code={code} body={empty_topics}")
 
     code, unified = _get(f"{backend}/api/search", {"q": "test", "type": "topics", "limit": 5})
     if (
@@ -2121,6 +2138,77 @@ def test_runner_accounting(backend: str):
         _pass("runner.walletless_has_no_lease")
 
 
+_CANON_ENVELOPE_KEYS = {
+    "": "envelope",
+    "legacy_mobile": "legacy_mobile_envelope",
+    # The published app signs difficulty 0 for the paid, PoW-free subscription
+    # messages, so those vectors carry their own envelope.
+    "legacy_mobile_paid": "legacy_mobile_paid_envelope",
+}
+_LEGACY_CANON_ENVELOPES = ("legacy_mobile", "legacy_mobile_paid")
+
+
+def _published_app_canon(msg: str, envelope: dict, fields: dict) -> bytes | None:
+    """Canonical bytes as the published mobile app builds them.
+
+    Transcribed from `src/api/write/signing/canonical.ts` in the mobile repo:
+    a one-byte tag, then a uvarint value for numbers or uvarint length plus
+    UTF-8 bytes for strings; header tags 2, 3, 4, 6, 7; payload from tag 100.
+    The two v1.39 additions (post tag 106, subscription tag 102) follow the
+    migration guide. Deliberately independent of `shared/canon.py`.
+    """
+
+    def uvarint(value: int) -> bytes:
+        value = int(value) & 0xFFFFFFFFFFFFFFFF
+        out = bytearray()
+        while True:
+            byte = value & 0x7F
+            value >>= 7
+            out.append(byte | 0x80 if value else byte)
+            if not value:
+                return bytes(out)
+
+    def enc_bytes(tag: int, raw: bytes) -> bytes:
+        return bytes([tag]) + uvarint(len(raw)) + raw
+
+    def enc_str(tag: int, text: str) -> bytes:
+        return enc_bytes(tag, (text or "").encode("utf-8"))
+
+    def enc_u64(tag: int, value: int) -> bytes:
+        return bytes([tag]) + uvarint(value)
+
+    out = bytearray(b"mirage.core.v1:" + msg.encode("utf-8") + b"\x00")
+    out += enc_bytes(2, bytes.fromhex(envelope["pubkey_hex"]))
+    out += enc_bytes(3, bytes.fromhex(envelope["block_hash_hex"]))
+    out += enc_u64(4, int(envelope["difficulty"]))
+    out += enc_u64(6, int(envelope["timestamp"]))
+    out += enc_u64(7, int(envelope["nonce"]))
+
+    if msg == "MsgPost":
+        out += enc_str(100, fields["target"])
+        out += enc_str(101, fields["community"])
+        out += enc_str(102, fields["title"])
+        out += enc_str(103, fields["content"])
+        out += enc_str(104, fields["tag"])
+        for url in fields["media"]:
+            out += enc_str(105, url)
+        if int(fields["protocol_version"]) != 0:
+            out += enc_u64(106, int(fields["protocol_version"]))
+        return bytes(out)
+    if msg == "MsgSubscribe":
+        out += enc_u64(100, int(fields["level"]))
+        if fields["target"]:
+            out += enc_str(101, fields["target"])
+        if int(fields["period_count"]) != 0:
+            out += enc_u64(102, int(fields["period_count"]))
+        return bytes(out)
+    if msg in ("MsgFollowTopic", "MsgUnfollowTopic", "MsgBlockTopic", "MsgUnblockTopic"):
+        out += enc_str(100, fields["target"])
+        out += enc_str(101, fields["topic"])
+        return bytes(out)
+    return None
+
+
 def test_legacy_mobile_source_contract(backend: str):
     from pathlib import Path
     import sys
@@ -2218,9 +2306,7 @@ def test_legacy_mobile_source_contract(backend: str):
             "MsgUnblockTopic",
         }:
             continue
-        envelope = vector_file[
-            "legacy_mobile_envelope" if vector.get("envelope") == "legacy_mobile" else "envelope"
-        ]
+        envelope = vector_file[_CANON_ENVELOPE_KEYS[vector.get("envelope", "")]]
         pubkey = bytes.fromhex(envelope["pubkey_hex"])
         block_hash = bytes.fromhex(envelope["block_hash_hex"])
         difficulty = int(envelope["difficulty"])
@@ -2280,11 +2366,55 @@ def test_legacy_mobile_source_contract(backend: str):
             f"checked={checked_vectors} mismatches={mismatched_vectors}",
         )
 
-    source = (Path(__file__).resolve().parents[2] / "web" / "backend" / "factory.py").read_text()
-    if source.index("install_legacy_mobile_wiring(app)") < source.index("def _reject_retired_v139_routes"):
+    # Independent parity: the vectors above are produced by shared/canon.py, so
+    # comparing them against that same module cannot detect a shared mistake.
+    # This encoder is transcribed from the published app's
+    # src/api/write/signing/canonical.ts (encodeHeader tags 2,3,4,6,7 then the
+    # payload tags each builder writes), plus the two v1.39 payload tags the
+    # migrated app must add. Nothing here imports shared.canon.
+    legacy_mismatches = []
+    legacy_checked = 0
+    for vector in vector_file["vectors"]:
+        if vector.get("envelope", "") not in _LEGACY_CANON_ENVELOPES:
+            continue
+        envelope = vector_file[_CANON_ENVELOPE_KEYS[vector["envelope"]]]
+        expected = _published_app_canon(vector["msg"], envelope, vector["fields"])
+        if expected is None:
+            continue
+        legacy_checked += 1
+        if expected.hex() != vector["canon_hex"]:
+            legacy_mismatches.append(vector["msg"])
+    if legacy_checked == 12 and not legacy_mismatches:
+        _pass("legacy_mobile_source.published_app_parity", count=legacy_checked)
+    else:
+        _fail(
+            "legacy_mobile_source.published_app_parity",
+            f"checked={legacy_checked} mismatches={legacy_mismatches}",
+        )
+
+    # Order matters: the wiring must answer restored paths before the v1.39
+    # retirement gate can 410 them. Read the factory's statement order from its
+    # AST rather than from raw substring positions, which comments can reorder.
+    import ast
+
+    tree = ast.parse((Path(__file__).resolve().parents[2] / "web" / "backend" / "factory.py").read_text())
+    install_lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "install_legacy_mobile_wiring"
+    ]
+    gate_lines = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_reject_retired_v139_routes"
+    ]
+    if len(install_lines) == 1 and len(gate_lines) == 1 and install_lines[0] < gate_lines[0]:
         _pass("legacy_mobile_source.installed_before_retirement")
     else:
-        _fail("legacy_mobile_source.installed_before_retirement")
+        _fail(
+            "legacy_mobile_source.installed_before_retirement",
+            f"install={install_lines} gate={gate_lines}",
+        )
 
     wiring.install_legacy_mobile_wiring(app)
     try:

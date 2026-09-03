@@ -111,6 +111,9 @@ scripts/*
 !scripts/divergence_watchdog.py
 !scripts/stuck_node_alert.py
 !scripts/replay_divergence.sh
+# Temporary: verifies the legacy mobile canonical vectors against the published
+# app. Remove with the compatibility shim (docs/mobile/LEGACY_SHIM.md).
+!scripts/legacy_mobile_canon_check.mjs
 !scripts/tests/
 !scripts/tests/**
 # The re-include above is the last matching rule for this subtree, so it also
