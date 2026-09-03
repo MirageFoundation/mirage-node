@@ -29,6 +29,38 @@ RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 BACKEND = "http://127.0.0.1:80"
 STATUS_DIR = Path("/root/.mirage/upgrade_tests")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def resolve_backend() -> str:
+    """Return a backend base URL whose HTTP surface is actually reachable.
+
+    A node with a domain serves no cleartext, so Caddy answers :80 with a 308
+    whose Location echoes the request host. Following it lands on
+    https://127.0.0.1, where there is no certificate for that SNI, and every
+    HTTP check dies as a TLS alert or reads the redirect as the response. Those
+    hosts have to be reached by the name the certificate is for.
+    """
+    opener = urllib.request.build_opener(_NoRedirect)
+    request = urllib.request.Request(f"{BACKEND}/api/get_node_config", method="GET")
+    try:
+        with opener.open(request, timeout=10) as response:
+            status = response.status
+    except urllib.error.HTTPError as error:
+        status = error.code
+    if status not in (301, 302, 307, 308):
+        return BACKEND
+    domain = os.environ.get("DOMAIN", "").strip()
+    if not domain:
+        raise SystemExit(
+            f"backend redirects cleartext ({status}) but DOMAIN is unset: "
+            "cannot reach the HTTPS surface by name"
+        )
+    return f"https://{domain}"
 passed = 0
 failed = 0
 
@@ -249,6 +281,13 @@ def check_params() -> None:
 def check_preserved_params() -> None:
     snapshot_path = STATUS_DIR / "pre_upgrade_params.json"
     after_path = STATUS_DIR / "post_upgrade_params.json"
+    # Only test_upgrade.sh captures these, and it captures them either side of
+    # the halt. A real host never has them, so demanding them turns every
+    # production run into a failure. Absent directory means "not the
+    # rehearsal"; an absent file inside it means the rehearsal broke.
+    if not STATUS_DIR.is_dir():
+        print(f"  SKIP  parameter drift comparison (rehearsal-only, {STATUS_DIR} absent)")
+        return
     if not snapshot_path.is_file():
         fail(f"pre-upgrade parameter snapshot missing: {snapshot_path}")
         return
@@ -483,11 +522,17 @@ def check_migration_state() -> None:
                 (marker_keys + checksum_keys + ["migration_checksum_repin"],),
             )
             meta = {str(key): value for key, value in cursor.fetchall()}
+            # Deleted accounts keep a tombstone row holding the values the
+            # profile had when it was removed, and the chain has no profile for
+            # them at all (Query/Profile answers NotFound). Auditing those rows
+            # against post-upgrade invariants reports a migration failure for
+            # state no live account can reach.
             cursor.execute(
                 "SELECT count(*) FROM profiles "
-                "WHERE level = 10 OR reserve_funds <> 0 "
+                "WHERE (deleted_at IS NULL OR deleted_at = 0) "
+                "AND (level = 10 OR reserve_funds <> 0 "
                 "OR (level = 1 AND effective_paid = FALSE) "
-                "OR (level = 0 AND effective_paid = TRUE)"
+                "OR (level = 0 AND effective_paid = TRUE))"
             )
             invalid_profiles = int(cursor.fetchone()[0])
             cursor.execute("SELECT count(*) FROM preferences WHERE pref_type = 'topic'")
@@ -817,7 +862,10 @@ def check_progress() -> None:
 
 
 def main() -> int:
+    global BACKEND
     print(f"verify_upgrade.py for {VERSION} (consensus change: communities, no Agent, no relay reserve)")
+    BACKEND = resolve_backend()
+    print(f"backend base: {BACKEND}")
     checks = (
         check_versions,
         check_upgrade_applied,
