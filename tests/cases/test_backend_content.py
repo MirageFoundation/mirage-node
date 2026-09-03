@@ -479,7 +479,6 @@ def test_comments(backend: str):
         "reply to a thread without chain metadata",
         _now_ms(),
         target="ab" * 32,
-        skip_pow=True,
     )
     if code == 400 and (orphan or {}).get("error_code") == "legacy_thread_read_only":
         _pass("comments.reply_needs_parent_metadata")
@@ -1563,13 +1562,12 @@ def test_legacy_mobile_content(backend: str):
         _fail("legacy_mobile_content.comment_aliases", f"code={code} comment={comment}")
 
     # The community seeded above has exactly one titled root and one comment, so
-    # the restored topic reads can be checked against known values instead of a
-    # predicate that also passes on an empty list.
-    code, topic_list = _get(
-        f"{backend}/api/get_topics", {"address": owner, "min_posts": 1, "limit": 200}
-    )
+    # the item shape can be checked against known values instead of a predicate
+    # that also passes on an empty list. It has to be reached by name: the list
+    # read ranks by post count and this chain has six figures of posts.
+    code, exact_search = _get(f"{backend}/api/search_topics", {"q": topic, "limit": 50})
     listed = next(
-        (item for item in ((topic_list or {}).get("topics") or []) if item.get("topic") == topic),
+        (item for item in ((exact_search or {}).get("topics") or []) if item.get("topic") == topic),
         None,
     )
     if (
@@ -1577,15 +1575,36 @@ def test_legacy_mobile_content(backend: str):
         and listed
         and listed.get("post_count") == 1
         and listed.get("count") == 1
-        and listed.get("comment_count") == 1
         and listed.get("dominant_tag") is None
+        and listed.get("dominant_ratio") == 0.0
         and isinstance(listed.get("flags"), dict)
-        and (topic_list or {}).get("min_posts") == 1
-        and isinstance((topic_list or {}).get("small_topics_count"), int)
+        # v1.38 search never carried a comment count; only the list read did.
+        and "comment_count" not in listed
     ):
-        _pass("legacy_mobile_content.topic_list_contract")
+        _pass("legacy_mobile_content.topic_item_contract")
     else:
-        _fail("legacy_mobile_content.topic_list_contract", f"code={code} item={listed}")
+        _fail("legacy_mobile_content.topic_item_contract", f"code={code} item={listed}")
+
+    # The list read carries the envelope the published app reads and applies the
+    # requested floor, which is the part a community-era handler would drop.
+    code, topic_list = _get(f"{backend}/api/get_topics", {"address": owner, "min_posts": 3, "limit": 5})
+    ranked = (topic_list or {}).get("topics") or []
+    if (
+        code == 200
+        and ranked
+        and (topic_list or {}).get("min_posts") == 3
+        and isinstance((topic_list or {}).get("small_topics_count"), int)
+        and all(
+            "topic" in item
+            and int(item.get("post_count") or 0) >= 3
+            and item.get("count") == item.get("post_count")
+            and isinstance(item.get("comment_count"), int)
+            for item in ranked
+        )
+    ):
+        _pass("legacy_mobile_content.topic_list_contract", count=len(ranked))
+    else:
+        _fail("legacy_mobile_content.topic_list_contract", f"code={code} body={topic_list}")
 
     # Skips the "legacy" stem, so a prefix-only search cannot return this slug.
     infix = topic[3:9]

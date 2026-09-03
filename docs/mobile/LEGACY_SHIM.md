@@ -7,7 +7,7 @@ This document describes the temporary compatibility layer for the mobile release
 Restored reads:
 
 - `GET /api/get_topics` returns `{"topics":[...]}`. Each item has `topic`, `post_count`, `count`, `comment_count`, content-tag `flags`, `dominant_tag`, and `dominant_ratio`.
-- `GET /api/search_topics?q=...` returns `{"topics":[...]}` with the same item shape. The query is stripped to alphanumerics, a query shorter than two characters returns an empty list, matching is substring, and results are ordered exact match, then prefix, then contains, each tie broken by post count then name. The default limit is 20 and the maximum is 50.
+- `GET /api/search_topics?q=...` returns `{"topics":[...]}` with the same item shape minus `comment_count`, which the topic-era search never carried either. The query is stripped to alphanumerics, a query shorter than two characters returns an empty list, matching is substring, and results are ordered exact match, then prefix, then contains, each tie broken by post count then name. The default limit is 20 and the maximum is 50.
 - `GET /api/get_agents` returns `{"agents":[]}`.
 - `GET /api/get_invite_codes` returns `{"codes":[],"total":0,"available":0}`.
 - `GET /api/rewards/summary` returns a complete disabled rewards model; `GET /api/rewards/achievements` returns `{"achievements":[]}`.
