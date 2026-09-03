@@ -29,12 +29,43 @@ if [ -z "$VALOPER" ]; then
   exit 0
 fi
 
+QUERY_ERR=$(mktemp)
+trap 'rm -f "$QUERY_ERR"' EXIT
+
+# Prints the on-chain moniker, or fails when the query could not answer at all.
+# Those are different outcomes and only the caller knows which one is fatal: a
+# query that cannot reach the node must never be read as "the moniker differs".
 current_moniker() {
-  "$MIRAGED" q staking validator "$VALOPER" --home "$NODE_HOME" --node "$NODE_RPC" -o json 2>/dev/null |
-    jq -r '.validator.description.moniker // ""'
+  local out
+  out=$("$MIRAGED" q staking validator "$VALOPER" --home "$NODE_HOME" --node "$NODE_RPC" -o json 2>"$QUERY_ERR") || return 1
+  printf '%s' "$out" | jq -r '.validator.description.moniker // ""'
 }
 
-CURRENT=$(current_moniker)
+# The container accepts `docker exec` several seconds before the node's RPC
+# starts serving, so this runs against a closed port on every deploy that
+# restarts the node. That used to end the deploy in silence: the query's stderr
+# went to /dev/null and `set -e` killed the script from inside the command
+# substitution, so deploy.sh exited 1 printing nothing and the fleet loop
+# abandoned every host after this one, production included. Exhaustion is
+# checked after the loop rather than in it, because an unanswered query leaves
+# CURRENT empty, which is indistinguishable from a moniker that differs, and
+# broadcasting on that would edit the validator off a reading we never got.
+CURRENT=""
+ANSWERED=0
+for _ in $(seq 1 30); do
+  if CURRENT=$(current_moniker); then
+    ANSWERED=1
+    break
+  fi
+  sleep 2
+done
+
+if [ "$ANSWERED" -ne 1 ]; then
+  echo "ERROR: validator query on $NODE_RPC still failing 60s after container start:" >&2
+  cat "$QUERY_ERR" >&2
+  exit 1
+fi
+
 if [ "$CURRENT" = "$WANTED" ]; then
   echo "Validator moniker already \"$WANTED\""
   exit 0
@@ -72,11 +103,11 @@ fi
 # to one that never needed changing. Confirm against the chain, on a budget.
 for _ in $(seq 1 15); do
   sleep 2
-  if [ "$(current_moniker)" = "$WANTED" ]; then
+  if [ "$(current_moniker || true)" = "$WANTED" ]; then
     echo "Validator moniker now \"$WANTED\""
     exit 0
   fi
 done
 
-echo "ERROR: moniker still \"$(current_moniker)\" 30s after broadcasting $(printf '%s' "$JSON" | jq -r '.txhash')" >&2
+echo "ERROR: moniker still \"$(current_moniker || echo '?')\" 30s after broadcasting $(printf '%s' "$JSON" | jq -r '.txhash')" >&2
 exit 1
