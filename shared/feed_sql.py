@@ -43,6 +43,34 @@ CANDIDATE_WINDOW_SECONDS = CANDIDATE_WINDOW_DAYS * 86400
 # post and a genuinely strong older post can therefore still place.
 MAX_CANDIDATES_PER_SOURCE = 150
 
+# Posts fetched per request before the media-meta, lens and content-tag filters
+# run. Those filters drop rows, so the feed has to overfetch and truncate
+# afterwards, but the overfetch used to be a flat MAX_CANDIDATE_POOL: a 15-post
+# page media-enriched, lens-filtered and tag-resolved 500 posts and threw away
+# 485 of them, which is where the 400-670ms of filter_ms came from once
+# candidate loading itself was fixed. Four times the requested page window
+# absorbs the ~20% drop rate those filters actually exhibit.
+FEED_FILTER_OVERFETCH = 4
+
+# Floor for the above, so a tiny `limit` still has enough slack for the filters
+# to discard a few rows without shortening the page.
+MIN_FEED_FILTER_POOL = 60
+
+# Floor for a single chronological fetch. Only reason to batch larger than the
+# page needs is that blocked posts, users and communities are dropped in Python
+# after the row comes back, and refilling costs a round trip.
+MIN_FEED_BATCH = 100
+
+
+def feed_pool_size(limit: int, page: int, ceiling: int) -> int:
+    """Rows to fetch so `page` survives the lens and content-tag filters.
+
+    The feed is always fetched at page 1 and paginated by slicing, so the pool
+    has to span every page up to `page` plus one row to answer `has_more`.
+    """
+    window = page * max(1, int(limit or 0)) + 1
+    return min(max(window * FEED_FILTER_OVERFETCH, MIN_FEED_FILTER_POOL), ceiling)
+
 
 def feed_candidate_predicate(alias: str = "") -> str:
     """Return the root-post predicate, qualified by `alias` (e.g. "p")."""

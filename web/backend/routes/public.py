@@ -39,7 +39,13 @@ from node import require_runtime, derive_address_from_pubkey as _derive_address_
 from seen_posts import get_seen_map, ingest_seen_batch, normalize_post_id
 from community_glob import MAX_COMMUNITY_WILDCARDS, count_wildcards, community_matches_pattern
 from params import PARAMS_REFRESH_SECONDS, load_params, expect_params
-from shared.feed_sql import CANDIDATE_WINDOW_SECONDS, MAX_CANDIDATES_PER_SOURCE, feed_candidate_predicate
+from shared.feed_sql import (
+    CANDIDATE_WINDOW_SECONDS,
+    MAX_CANDIDATES_PER_SOURCE,
+    MIN_FEED_BATCH,
+    feed_candidate_predicate,
+    feed_pool_size,
+)
 from curation import (
     filter_posts as _filter_posts_for_lens,
     resolve_effective_tags as _resolve_effective_tags,
@@ -1896,7 +1902,10 @@ def _get_home_feed_newest(
     factor = _seen_overfetch_factor(seen_posts, 3)
     seen: set[str] = set()
     posts: list[dict] = []
-    batch_size = min(max(500, need * factor), MAX_CANDIDATE_POOL)
+    # `max(500, ...)` under a `min(..., 500)` ceiling made this exactly
+    # MAX_CANDIDATE_POOL for every request, so the batching below was decorative
+    # and a 15-post page always built 500 post dicts for the caller to filter.
+    batch_size = min(max(need * factor, MIN_FEED_BATCH), MAX_CANDIDATE_POOL)
     last_ts = None
     viewer_lower = (viewer or "").strip().lower()
     downvote_votes: dict[str, int] = {}
@@ -1936,6 +1945,12 @@ def _get_home_feed_newest(
         last_ts = rows[-1][2]
         if len(rows) < batch_size:
             break
+
+    # A batch is appended whole, so the loop can overshoot `need`. Trim before
+    # returning: the surplus is invisible to this page but the caller runs the
+    # media, lens and tag filters over every row it receives. `need` is one past
+    # the last row of the page, which is exactly what `has_more` below tests.
+    del posts[need:]
 
     if not posts:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -4393,7 +4408,10 @@ def _build_bootstrap_view(
     conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
     try:
         cur = conn.cursor()
-        source_limit = MAX_CANDIDATE_POOL
+        # The bootstrap view only ever renders page 1; it does not need the whole
+        # candidate pool handed back to it, only enough rows to survive the
+        # filters below.
+        source_limit = feed_pool_size(limit, 1, MAX_CANDIDATE_POOL)
         blocked_posts = _get_blocked_posts(cur, addr)
         blocked_users = _get_blocked_users(cur, addr)
         blocked_communities = _get_blocked_communities(cur, addr)
@@ -5782,7 +5800,9 @@ def get_posts():
                 pass
 
             _t_feed = time.monotonic()
-            source_limit = MAX_CANDIDATE_POOL
+            # Fetched at page 1 and sliced by `offset` below, so the pool has to
+            # reach the requested page rather than just cover one page's worth.
+            source_limit = feed_pool_size(limit, page, MAX_CANDIDATE_POOL)
             # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
