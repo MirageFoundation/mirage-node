@@ -167,14 +167,19 @@ cache_dir() {
 hash_tree() {
   # hash_tree <abs_path_1> [<abs_path_2> ...]
   # Computes a stable hash of file contents under the provided paths.
-  local tmp
+  # pipefail + SIGPIPE (find/xargs closing a pipe) would otherwise abort the
+  # caller with exit 141; hashing is advisory so keep going.
+  local tmp hash
   tmp="$(mktemp)"
+  set +o pipefail
   for p in "$@"; do
     if [ -e "$p" ]; then
       find "$p" -type f -print0
     fi
-  done | sort -z | xargs -0 sha256sum 2>/dev/null > "$tmp" || true
-  sha256sum "$tmp" | awk '{print $1}'
+  done | sort -z | xargs -0 sha256sum > "$tmp" 2>/dev/null || true
+  hash="$(sha256sum "$tmp")"
+  set -o pipefail
+  printf '%s\n' "${hash%% *}"
   rm -f "$tmp"
 }
 
@@ -244,7 +249,7 @@ maybe_proto_gen_and_go_build() {
       "$REPO_ROOT/blockchain/app" \
       "$REPO_ROOT/blockchain/cmd" \
       "$REPO_ROOT/blockchain/x" \
-      -type f -newer "$miraged_bin" 2>/dev/null | head -1)"
+      -type f -newer "$miraged_bin" -print -quit 2>/dev/null || true)"
     if [ -n "$newest_source" ]; then
       echo "==> Source newer than miraged: $newest_source"
       need_build=1
@@ -256,7 +261,9 @@ maybe_proto_gen_and_go_build() {
   if [ "$need_build" -eq 0 ]; then
     local want_version have_version
     want_version="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION" 2>/dev/null || echo "")"
-    have_version="$("$miraged_bin" version 2>/dev/null | tail -n 1 | tr -d '[:space:]')"
+    have_version="$("$miraged_bin" version 2>/dev/null || true)"
+    have_version="${have_version##*$'\n'}"
+    have_version="${have_version//[$' \t\r\n']/}"
     have_version="${have_version%-dirty}"
     if [ -n "$want_version" ] && [ "$want_version" != "$have_version" ]; then
       echo "==> miraged reports '$have_version' but VERSION is '$want_version'; rebuild needed"
