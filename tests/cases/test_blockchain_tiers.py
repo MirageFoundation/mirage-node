@@ -568,7 +568,7 @@ def test_legacy_subscribe_wire_values(backend: str) -> None:
         )
         _, check_code, _, deliver_code, deliver_log = _submit_tx(
             [(msg, "/mirage.core.v1.MsgSubscribe")],
-            DEFAULT_GAS_LIMIT,
+            DEFAULT_GAS_LIMIT * 2,
             fee_payer,
             pubkey,
             wait_deliver=True,

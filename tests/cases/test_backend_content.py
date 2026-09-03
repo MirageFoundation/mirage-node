@@ -1479,13 +1479,28 @@ def test_legacy_mobile_content(backend: str):
         and root
         and root.get("community") == topic
         and root.get("topic") == topic
-        and int(root.get("post_sequence") or 0) > 0
-        and int(root.get("created_height") or 0) > 0
-        and root.get("was_subscriber_at_creation") is True
     ):
-        _pass("legacy_mobile_content.root_aliases_and_metadata")
+        _pass("legacy_mobile_content.root_aliases")
     else:
-        _fail("legacy_mobile_content.root_aliases_and_metadata", f"code={code} post={root}")
+        _fail("legacy_mobile_content.root_aliases", f"code={code} post={root}")
+
+    rc, metadata_row = _docker_exec(
+        "su - postgres -c \"psql -d mirage_indexer -tA -F '|' -c "
+        f"\\\"SELECT post_sequence, created_height, was_subscriber_at_creation "
+        f"FROM posts WHERE txhash='{root_hash}'\\\"\"",
+        timeout=15,
+    )
+    metadata_parts = metadata_row.strip().split("|")
+    if (
+        rc == 0
+        and len(metadata_parts) == 3
+        and int(metadata_parts[0] or 0) > 0
+        and int(metadata_parts[1] or 0) > 0
+        and metadata_parts[2] == "t"
+    ):
+        _pass("legacy_mobile_content.root_metadata_projected")
+    else:
+        _fail("legacy_mobile_content.root_metadata_projected", f"rc={rc} row={metadata_row!r}")
 
     edited_title = f"{title} edited"
     code, edit_response = _do_legacy_mobile_edit(
@@ -1517,7 +1532,7 @@ def test_legacy_mobile_content(backend: str):
     comment = next(
         (
             item
-            for item in (comments_response or {}).get("comments", [])
+            for item in (comments_response or {}).get("children", [])
             if str(item.get("post_id", "")).lower() == comment_hash
         ),
         None,

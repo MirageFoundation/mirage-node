@@ -612,20 +612,11 @@ def test_backend_hardening(backend: str):
         _fail("backend_hardening.container_probes", "local docker required")
         return
 
-    # Community ownership, the topic-era follow/block calls and agents all went
-    # away in v1.39.0, and the chain rejects their messages outright, so the
-    # backend must refuse before it ever builds a transaction. These paths keep
-    # their pre-rename spelling on purpose: an outdated client sends `follow_topic`
-    # verbatim, so that is the string the gate has to answer 410 for. The live
-    # replacements are join_community / leave_community / block_community.
+    # Community ownership and Agent routes remain retired.
     for route in (
         "create_community",
         "set_community_metadata",
         "transfer_community",
-        "follow_topic",
-        "unfollow_topic",
-        "block_topic",
-        "unblock_topic",
         "enable_agent",
         "disable_agent",
         "set_agents",
@@ -635,6 +626,15 @@ def test_backend_hardening(backend: str):
             _pass(f"backend_hardening.{route}_retired")
         else:
             _fail(f"backend_hardening.{route}_retired", f"code={code} body={body}")
+
+    # Topic routes are temporarily live and must reach normal validation instead
+    # of the v1.39 retirement gate.
+    for route in ("follow_topic", "unfollow_topic", "block_topic", "unblock_topic"):
+        code, body = _post(f"{backend}/api/core/{route}", {"topic": "test"})
+        if code == 400 and body.get("error_code") != "gone" and body.get("retired") is None:
+            _pass(f"backend_hardening.{route}_restored")
+        else:
+            _fail(f"backend_hardening.{route}_restored", f"code={code} body={body}")
 
     # ── C-1: the deployed matcher is exact and linear ────────────────────
     _probe(

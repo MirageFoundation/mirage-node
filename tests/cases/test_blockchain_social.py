@@ -543,7 +543,7 @@ def test_legacy_topic_messages(backend: str) -> None:
     follow = _build_msg_follow_topic(wallet, lb, 0, _now_ms(), owner, first, nonce=_gen_nonce())
     if not submit(follow, "/mirage.core.v1.MsgFollowTopic", "legacy_topic.follow"):
         return
-    profile = _get_profile_full(owner)
+    profile = _get_profile_full(backend, owner)
     joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
     blocked = set(profile.get("blocked_communities") or profile.get("blockedCommunities") or [])
     if first in joined and pattern not in blocked:
@@ -564,7 +564,7 @@ def test_legacy_topic_messages(backend: str) -> None:
     lb, _, _, _ = _get_pow_params(backend, owner)
     block = _build_msg_block_topic(wallet, lb, 0, _now_ms(), "", pattern, nonce=_gen_nonce())
     if submit(block, "/mirage.core.v1.MsgBlockTopic", "legacy_topic.block_wildcard"):
-        profile = _get_profile_full(owner)
+        profile = _get_profile_full(backend, owner)
         joined = set(profile.get("joined_communities") or profile.get("joinedCommunities") or [])
         if first not in joined and second not in joined:
             _pass("legacy_topic.block_leaves_matches")
