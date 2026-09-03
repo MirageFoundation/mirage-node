@@ -14,6 +14,7 @@ Each check was validated by reverting its fix and confirming the check went red.
 
 from __future__ import annotations
 
+import re
 import sys
 import time
 from pathlib import Path
@@ -597,7 +598,14 @@ def _test_v139_backend_contracts() -> None:
         "INSERT INTO user_inbox_state"
     ):
         problems.append("mark_inbox_viewed writes before signature verification")
-    if public.count("source_limit = MAX_CANDIDATE_POOL") < 2:
+    # Both feed paths now size the candidate pool from the page being served
+    # instead of always pulling the ceiling, which is what made a 15-post page
+    # rank over a thousand candidates. The ceiling is still what bounds them,
+    # so what this guards is that neither path can ask for an unbounded pool.
+    bounded_pools = re.findall(
+        r"source_limit = feed_pool_size\([^)]*MAX_CANDIDATE_POOL\)", public
+    )
+    if len(bounded_pools) < 2:
         problems.append("feed filtering has no bounded overfetch")
     if public.index('resp["posts"] = _filter_posts_by_allowed_tags(') > public.index(
         'visible_posts = resp["posts"]'

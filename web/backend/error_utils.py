@@ -77,6 +77,8 @@ ERRORS = {
     "curation_team_not_found": "curator team not found",
     "missing_viewer": "viewer is required",
     "missing_post_id": "post_id is required",
+    "invalid_post_id": "post_id must be a 64-character transaction hash",
+    "too_many_post_ids": "at most 50 post_ids",
     "missing_author": "author is required",
     "missing_creator": "creator is required",
     "invalid_offset": "offset must be a non-negative integer",

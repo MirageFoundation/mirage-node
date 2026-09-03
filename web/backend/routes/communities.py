@@ -667,6 +667,38 @@ def community_team_invitations(slug: str, team_id: int):
         return api_error_code("indexer_unavailable", 503)
 
 
+# The curate menu needs this state for every post a curator can see, so asking
+# one post at a time made opening a menu cost a round trip. The batch form below
+# answers a whole feed page in one signed call.
+#
+# Capped at one feed page, which is also what a GET can carry: each id is 64
+# hex characters, so a larger batch builds a query string the proxy rejects with
+# a bodyless 400 before Flask sees it. The cap has to stay at or under the feed
+# limit for that reason, not merely to bound the query.
+MODERATION_BATCH_CAP = 50
+
+
+def _parse_moderation_post_ids(raw: str):
+    """Split and validate the batch ``post_ids`` parameter."""
+    post_ids: list[str] = []
+    seen: set[str] = set()
+    for chunk in raw.split(","):
+        candidate = chunk.strip().lower()
+        if not candidate:
+            continue
+        if len(candidate) != 64 or any(char not in "0123456789abcdef" for char in candidate):
+            return None, api_error_code("invalid_post_id", 400)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        post_ids.append(candidate)
+    if not post_ids:
+        return None, api_error_code("missing_post_id", 400)
+    if len(post_ids) > MODERATION_BATCH_CAP:
+        return None, api_error_code("too_many_post_ids", 400)
+    return post_ids, None
+
+
 @communities_bp.route("/api/communities/<slug>/teams/<int:team_id>/moderation")
 def community_team_moderation(slug: str, team_id: int):
     """Return this team's hide/lock state for one post — curator viewers only."""
@@ -682,6 +714,97 @@ def community_team_moderation(slug: str, team_id: int):
     if auth_err is not None:
         return auth_err
     viewer = signed_viewer
+    batch_raw = (request.args.get("post_ids") or "").strip()
+    if batch_raw:
+        post_ids, parse_err = _parse_moderation_post_ids(batch_raw)
+        if parse_err is not None:
+            return parse_err
+        try:
+            with connect_db() as conn:
+                cur = conn.cursor()
+                if not _viewer_is_team_curator(cur, slug, team_id, viewer):
+                    return api_error_code("forbidden", 403)
+                # Author and root come from the posts table rather than the
+                # client: the caller has no business asserting whose post this
+                # is, and the root is what the lock is keyed on.
+                cur.execute(
+                    """
+                    WITH meta AS (
+                        SELECT LOWER(p.txhash) AS post_id,
+                               LOWER(p.owner) AS author,
+                               LOWER(COALESCE(p.root_txhash, p.root_post_id, p.txhash)) AS root
+                        FROM posts p
+                        WHERE LOWER(p.txhash)=ANY(%s)
+                    )
+                    SELECT
+                        m.post_id,
+                        EXISTS(
+                            SELECT 1 FROM curation_hidden_posts
+                            WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=m.post_id
+                        ),
+                        EXISTS(
+                            SELECT 1 FROM curation_hidden_users
+                            WHERE community=%s AND team_id=%s AND LOWER(target_user)=m.author
+                        ),
+                        EXISTS(
+                            SELECT 1 FROM curation_locks
+                            WHERE community=%s AND team_id=%s AND LOWER(root_txhash)=m.root
+                              AND lock_sequence IS NOT NULL
+                        ),
+                        (
+                            SELECT tag FROM curation_post_tags
+                            WHERE community=%s AND team_id=%s AND LOWER(target_txhash)=m.post_id
+                        )
+                    FROM meta m
+                    """,
+                    (
+                        post_ids,
+                        slug,
+                        team_id,
+                        slug,
+                        team_id,
+                        slug,
+                        team_id,
+                        slug,
+                        team_id,
+                    ),
+                )
+                rows = cur.fetchall() or []
+            items = [
+                {
+                    "post_id": str(row[0]).lower(),
+                    "post_hidden": bool(row[1]),
+                    "user_hidden": bool(row[2]),
+                    "thread_locked": bool(row[3]),
+                    # null means this team has no opinion; "" means the curator
+                    # explicitly marked the post untagged.
+                    "post_tag": row[4],
+                }
+                for row in rows
+            ]
+            log_event(
+                rid,
+                "[community] teams.moderation.batch",
+                community=slug,
+                team_id=team_id,
+                viewer=viewer[:12],
+                requested=len(post_ids),
+                count=len(items),
+                # A requested post with no row is a post the indexer has not
+                # seen; the caller asks for it individually rather than being
+                # handed a guess.
+                missing=len(post_ids) - len(items),
+            )
+            return jsonify(
+                {
+                    "community": slug,
+                    "team_id": str(team_id),
+                    "items": items,
+                }
+            )
+        except Exception as e:
+            log_event(rid, "communities.moderation.batch.err", error=str(e))
+            return api_error_code("indexer_unavailable", 503)
     if not post_id:
         return api_error_code("missing_post_id", 400)
     if not author:

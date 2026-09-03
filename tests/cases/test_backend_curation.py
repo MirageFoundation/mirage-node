@@ -580,6 +580,17 @@ def _moderation(backend: str, slug: str, team_id: int, wallet, post_id: str, aut
     )
 
 
+def _moderation_batch(
+    backend: str, slug: str, team_id: int, wallet, post_ids: list[str]
+) -> tuple[int, dict]:
+    params = _signed_curator_params(wallet)
+    params["post_ids"] = ",".join(post_ids)
+    return _get(
+        f"{backend}/api/communities/{slug}/teams/{team_id}/moderation",
+        params,
+    )
+
+
 def _wait_moderation(
     backend: str,
     slug: str,
@@ -930,6 +941,58 @@ def test_curation_team_lifecycle(backend: str) -> None:
         _pass("curation_team.moderation_reports_cleared_post_tag")
     else:
         _fail("curation_team.moderation_reports_cleared_post_tag", f"body={body}")
+
+    # The batch form exists so the curate menu costs no round trip on open, so
+    # what it reports has to be the same verdict the per-post form gives. A
+    # divergence here would show up as a menu whose toggles disagree with the
+    # chain, which is worse than the extra request it replaced.
+    code, single = _moderation(backend, slug, team_id, curator_wallet, post_tx, author_addr)
+    batch_code, batch = _moderation_batch(backend, slug, team_id, curator_wallet, [post_tx])
+    items = (batch or {}).get("items") if isinstance(batch, dict) else None
+    entry = None
+    if isinstance(items, list):
+        entry = next((i for i in items if str(i.get("post_id", "")).lower() == post_tx), None)
+    fields = ("post_hidden", "user_hidden", "thread_locked", "post_tag")
+    if (
+        code == 200
+        and batch_code == 200
+        and isinstance(single, dict)
+        and isinstance(entry, dict)
+        and all(entry.get(f) == single.get(f) for f in fields)
+    ):
+        _pass("curation_team.moderation_batch_matches_single")
+    else:
+        _fail(
+            "curation_team.moderation_batch_matches_single",
+            f"single={code}/{single} batch={batch_code}/{entry}",
+        )
+
+    # Same signature gate as the per-post form: a non-curator must not learn
+    # which posts a team has acted on, in bulk least of all.
+    code, forbidden = _moderation_batch(backend, slug, team_id, WALLETS["free"], [post_tx])
+    if code == 403:
+        _pass("curation_team.moderation_batch_curator_only")
+    else:
+        _fail("curation_team.moderation_batch_curator_only", f"code={code} body={forbidden}")
+
+    # Unbounded batches would let one request scan the whole team, so the cap
+    # is a rejection rather than a silent truncation. One over the cap has to
+    # come back as this code from the backend: a batch large enough to overflow
+    # the query string gets a bodyless 400 from the proxy instead, which is why
+    # the cap is one feed page rather than something larger.
+    code, capped = _moderation_batch(
+        backend, slug, team_id, curator_wallet, [f"{i:064x}" for i in range(51)]
+    )
+    if code == 400 and isinstance(capped, dict) and capped.get("error_code") == "too_many_post_ids":
+        _pass("curation_team.moderation_batch_caps_post_ids")
+    else:
+        _fail("curation_team.moderation_batch_caps_post_ids", f"code={code} body={capped}")
+
+    code, malformed = _moderation_batch(backend, slug, team_id, curator_wallet, ["not-a-txhash"])
+    if code == 400 and isinstance(malformed, dict) and malformed.get("error_code") == "invalid_post_id":
+        _pass("curation_team.moderation_batch_rejects_malformed_post_id")
+    else:
+        _fail("curation_team.moderation_batch_rejects_malformed_post_id", f"code={code} body={malformed}")
 
     # An unwhitelisted tag never reaches the chain: this route validates before
     # broadcasting.

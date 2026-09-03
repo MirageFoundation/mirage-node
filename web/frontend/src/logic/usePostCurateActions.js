@@ -19,6 +19,11 @@ import { TAG_OPTIONS } from './useCreatePost';
 import { viewingTeamId as viewingTeamIdOf } from '../utils/curation';
 import { setOptimisticCurationVisibility } from '../utils/curationVisibility';
 import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
+import {
+    getCachedTeamModeration,
+    requestTeamModeration,
+    setCachedTeamModeration,
+} from './teamModerationCache';
 
 // Distinct from the '' tag: '' is the curator saying "untagged", this is the
 // curator having no opinion so the community tag and author tag apply again.
@@ -46,7 +51,7 @@ function postCommunity(post) {
  * curator of a team in that post's community AND the post is currently
  * being viewed through that team's lens (not uncensored, not another team).
  *
- * Pass `active` (menu open) so moderation state is fetched only then.
+ * Pass `active` (menu open) so the cached moderation state is re-read then.
  * Each pair is a toggle: Hide XOR Show, never both.
  */
 export function usePostCurateActions(post, { active = false, updatePost } = {}) {
@@ -73,94 +78,139 @@ export function usePostCurateActions(post, { active = false, updatePost } = {}) 
     // later picks "No override" so the badge can revert without a round-trip.
     const inheritedTagRef = useRef(storedOptimistic?.inheritedTag);
 
+    // Resolved as soon as the viewer is looking through their own team's lens
+    // rather than when the menu opens. Every post on the page needs the same
+    // team's verdict, so the misses coalesce into one signed request and the
+    // menu already has its answer by the time it is clicked. `active` stays in
+    // the deps so opening re-reads the cache and picks up any invalidation a
+    // curation write published since mount.
     useEffect(() => {
-        if (!active || !viewingAsCuratorTeam || !teamId || !community || !postId || !author || !viewer || viewer === 'guest') {
+        if (!viewingAsCuratorTeam || !teamId || !community || !postId || !author || !viewer || viewer === 'guest') {
             return undefined;
         }
         let cancelled = false;
         const tagAtOpen = typeof post?.tag === 'string' ? post.tag : '';
-        setModLoading(true);
-        setModError('');
-        console.debug('[curation] load moderation state', {
-            community,
-            teamId,
-            postId: postId.slice(0, 12),
-        });
-        signReadParams(CURATOR_READ_ACTION, viewer)
-            .then((proof) => Api.get(
-                `communities/${encodeURIComponent(community)}/teams/${teamId}/moderation`,
-                {
-                    viewer,
-                    post_id: postId,
-                    author,
-                    root: rootHash,
-                    _cb: Date.now(),
-                    ...proof,
-                },
-            ))
-            .then((data) => {
-                if (cancelled) return;
-                if (typeof data?.post_hidden !== 'boolean'
-                    || typeof data?.user_hidden !== 'boolean'
-                    || typeof data?.thread_locked !== 'boolean') {
-                    throw new Error('Invalid moderation state response');
-                }
-                const fetchedTag = typeof data.post_tag === 'string' ? data.post_tag : null;
-                if (fetchedTag === null && inheritedTagRef.current === undefined) {
-                    inheritedTagRef.current = tagAtOpen;
-                }
-                const pending = optimisticRef.current;
-                const next = {
-                    postHidden: data.post_hidden,
-                    userHidden: data.user_hidden,
-                    threadLocked: data.thread_locked,
-                    // null means this team has no tag opinion on the post; ''
-                    // means a curator marked it untagged.
-                    postTag: fetchedTag,
-                };
-                if (pending && typeof pending === 'object') {
-                    const confirmed = Object.keys(pending).every((key) => next[key] === pending[key]);
-                    if (confirmed) {
-                        optimisticRef.current = null;
-                        if (cacheKey) optimisticByPost.delete(cacheKey);
-                        console.debug('[curation] optimistic confirmed by fetch', {
-                            community,
-                            teamId,
-                            postId: postId.slice(0, 12),
-                            pending,
-                        });
-                    } else {
-                        Object.assign(next, pending);
-                        console.debug('[curation] keeping optimistic over stale fetch', {
-                            community,
-                            teamId,
-                            postId: postId.slice(0, 12),
-                            pending,
-                        });
-                    }
-                }
-                setModState(next);
-                setModError('');
-            })
-            .catch((err) => {
-                if (cancelled) return;
-                const message = String(err?.message || err);
-                if (optimisticRef.current) {
-                    console.error('[curation] moderation state failed, keeping optimistic', {
+
+        // Reconcile an authoritative read against a write we have submitted but
+        // not yet seen indexed: the optimistic patch wins until the read agrees
+        // with it, or the menu snaps back after "Transaction submitted".
+        const apply = (state) => {
+            if (state.postTag === null && inheritedTagRef.current === undefined) {
+                inheritedTagRef.current = tagAtOpen;
+            }
+            const pending = optimisticRef.current;
+            const next = { ...state };
+            if (pending && typeof pending === 'object') {
+                const confirmed = Object.keys(pending).every((key) => next[key] === pending[key]);
+                if (confirmed) {
+                    optimisticRef.current = null;
+                    if (cacheKey) optimisticByPost.delete(cacheKey);
+                    console.debug('[curation] optimistic confirmed by fetch', {
                         community,
                         teamId,
-                        error: message,
+                        postId: postId.slice(0, 12),
+                        pending,
                     });
-                    setModError('');
-                    return;
+                } else {
+                    Object.assign(next, pending);
+                    console.debug('[curation] keeping optimistic over stale fetch', {
+                        community,
+                        teamId,
+                        postId: postId.slice(0, 12),
+                        pending,
+                    });
                 }
-                setModState(null);
-                setModError(message);
-                console.error('[curation] moderation state failed', {
+            }
+            setModState(next);
+            setModError('');
+        };
+
+        const failed = (err) => {
+            const message = String(err?.message || err);
+            if (optimisticRef.current) {
+                console.error('[curation] moderation state failed, keeping optimistic', {
                     community,
                     teamId,
                     error: message,
                 });
+                setModError('');
+                return;
+            }
+            setModState(null);
+            setModError(message);
+            console.error('[curation] moderation state failed', {
+                community,
+                teamId,
+                error: message,
+            });
+        };
+
+        const cached = getCachedTeamModeration(viewer, community, teamId, postId);
+        if (cached) {
+            apply(cached);
+            setModLoading(false);
+            console.debug('[curation] moderation state from cache', {
+                community,
+                teamId,
+                postId: postId.slice(0, 12),
+            });
+            return undefined;
+        }
+
+        // Only reached for a post the batch could not answer — one the indexer
+        // has not seen yet, or one past the batch cap. The per-post read is the
+        // same authoritative query, not a guess.
+        const readOne = () => {
+            console.debug('[curation] load moderation state', {
+                community,
+                teamId,
+                postId: postId.slice(0, 12),
+            });
+            return signReadParams(CURATOR_READ_ACTION, viewer)
+                .then((proof) => Api.get(
+                    `communities/${encodeURIComponent(community)}/teams/${teamId}/moderation`,
+                    {
+                        viewer,
+                        post_id: postId,
+                        author,
+                        root: rootHash,
+                        _cb: Date.now(),
+                        ...proof,
+                    },
+                ))
+                .then((data) => {
+                    if (cancelled) return;
+                    if (typeof data?.post_hidden !== 'boolean'
+                        || typeof data?.user_hidden !== 'boolean'
+                        || typeof data?.thread_locked !== 'boolean') {
+                        throw new Error('Invalid moderation state response');
+                    }
+                    const state = {
+                        postHidden: data.post_hidden,
+                        userHidden: data.user_hidden,
+                        threadLocked: data.thread_locked,
+                        // null means this team has no tag opinion on the post;
+                        // '' means a curator marked it untagged.
+                        postTag: typeof data.post_tag === 'string' ? data.post_tag : null,
+                    };
+                    setCachedTeamModeration(viewer, community, teamId, postId, state);
+                    apply(state);
+                });
+        };
+
+        setModLoading(true);
+        setModError('');
+        requestTeamModeration(viewer, community, teamId, postId)
+            .then((state) => {
+                if (cancelled) return undefined;
+                if (state) {
+                    apply(state);
+                    return undefined;
+                }
+                return readOne();
+            })
+            .catch((err) => {
+                if (!cancelled) failed(err);
             })
             .finally(() => {
                 if (!cancelled) setModLoading(false);

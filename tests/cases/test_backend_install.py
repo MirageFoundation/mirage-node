@@ -965,12 +965,21 @@ prune_forensic_captures() {{ return 0; }}
 
 
 def _test_moniker_precedence() -> None:
-    """A chosen name must survive a domain being set.
+    """A chosen name must survive a domain being set — but the default is not a choice.
 
     init.sh used to overwrite MONIKER with https://DOMAIN whenever a domain was
     configured, which silently discarded the name the installer asks for and
     then registers on-chain. The site URL is now only the unnamed default, so
     the existing public nodes keep the name they already render.
+
+    "mirage-node" is that default, though, and reading it as a deliberate name
+    is what stranded a node that had a domain: /network probes a peer's moniker
+    before anything else and otherwise only tries http://<ip>, which a node
+    terminating TLS answers with an empty redirect, so it was listed
+    "unconfirmed" and nothing could discover the domain it serves — the
+    addresses a node declares about itself are only read from a probe that
+    already succeeded. deploy.sh and mirage-launch both already treat that value
+    as no choice; this makes init.sh agree.
     """
     init_sh = os.path.join(REPO_ROOT, "deploy", "init.sh")
     lines = Path(init_sh).read_text(encoding="utf-8").splitlines()
@@ -985,7 +994,9 @@ def _test_moniker_precedence() -> None:
         ("chosen", "example.com"): "chosen",
         ("", "example.com"): "https://example.com",
         ("", ""): "validator",
-        ("mirage-node", "mirage.talk"): "mirage-node",
+        ("mirage-node", "mirage.talk"): "https://mirage.talk",
+        # The default with no domain has nothing better to become.
+        ("mirage-node", ""): "mirage-node",
     }
     for (moniker, domain), expected in cases.items():
         r = _run(["bash", "-c", snippet], env={**os.environ, "MONIKER": moniker, "DOMAIN": domain})

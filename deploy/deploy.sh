@@ -757,6 +757,15 @@ else
   DOMAIN_VALUE=$(run_ssh "grep -E '^DOMAIN=' \$HOME/.mirage/env/node.env 2>/dev/null | cut -d= -f2- | tr -d '\"' | tr -d \"'\"" 2>/dev/null || true)
 fi
 
+# Same derivation init.sh performs for the p2p moniker, so the on-chain one does
+# not stay behind. Without it the update below is skipped by its own "not the
+# default" guard on exactly the nodes that need it: one that has a domain but
+# never had a name chosen for it.
+if [ -n "$DOMAIN_VALUE" ] && { [ -z "$MONIKER_VALUE" ] || [ "$MONIKER_VALUE" = "mirage-node" ]; }; then
+  MONIKER_VALUE="https://$DOMAIN_VALUE"
+  echo "==> Moniker derived from DOMAIN: $MONIKER_VALUE"
+fi
+
 # Set hostname: prefer DOMAIN, fallback to MONIKER
 # Replace dots with dashes for container hostname compatibility
 if [ -n "$DOMAIN_VALUE" ]; then

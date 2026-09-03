@@ -138,8 +138,17 @@ fi
 # must not overwrite that answer. The site URL is only the default for a node
 # that was never given a name, which is how the public nodes came to be called
 # after their sites.
-if [ -z "${MONIKER:-}" ] && [ -n "${DOMAIN:-}" ]; then
-  MONIKER="https://${DOMAIN}"
+# "mirage-node" is the deploy default, not a name anybody picked, and deploy.sh
+# and mirage-launch both already treat it as no choice at all. Reading it as a
+# deliberate name here is what left a node with a domain publishing a label no
+# peer can dial: /network probes a peer's moniker first and otherwise only tries
+# http://<ip>, which a node terminating TLS redirects away with an empty body,
+# so it stayed "unconfirmed" with no route to the domain it serves. An operator
+# who actually chose a name still keeps it.
+if [ -z "${MONIKER:-}" ] || [ "${MONIKER}" = "mirage-node" ]; then
+  if [ -n "${DOMAIN:-}" ]; then
+    MONIKER="https://${DOMAIN}"
+  fi
 fi
 MONIKER="${MONIKER:-validator}"
 

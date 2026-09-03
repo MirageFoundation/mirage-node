@@ -64,6 +64,8 @@ const ERROR_MAP = {
     invalid_creator_cursor: "That creator earnings page isn't valid.",
     invalid_creator_limit: "That request wasn't valid. Please try again.",
     missing_author: "An author is required.",
+    invalid_post_id: "That request wasn't valid. Please try again.",
+    too_many_post_ids: "That request asked about too many posts at once.",
     missing_creator: "A creator is required.",
 
     // PoW
