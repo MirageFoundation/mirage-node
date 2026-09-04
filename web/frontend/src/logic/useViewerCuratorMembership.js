@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Api from '../utils/api';
 import Storage from '../utils/Storage';
 import { requireCommunitySlug } from '../utils/curation';
+import { onSessionReset } from '../utils/sessionLifecycle';
 import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
 
 /** community → { teamId, teamName } | null */
@@ -87,6 +88,104 @@ if (typeof window !== 'undefined') {
     });
 }
 
+/**
+ * Memberships the viewer just gained by accepting an invite or gave up by
+ * leaving, before the indexer projects either. Same reason these live at module
+ * scope as the roster patches in `useCurationTeams`: the landed transaction
+ * fires `curationUpdated`, every listener refetches immediately, and those
+ * reads still describe the old membership — so the sidebar highlight and the
+ * curate menu would come straight back. An entry deletes itself once a server
+ * read agrees with it.
+ *
+ * `viewer::community` → { teamId, teamName } | null (null = no longer a curator)
+ */
+const membershipOverrides = new Map();
+
+onSessionReset(({ reason }) => {
+    membershipOverrides.clear();
+    console.debug('[curation] optimistic membership cleared on session reset', { reason });
+});
+
+function announceMembershipOverride(viewer, community) {
+    window.dispatchEvent(new CustomEvent('curatorMembershipOptimistic', {
+        detail: { viewer, community },
+    }));
+}
+
+/** Pass `null` for "left the team", or `{ teamId, teamName }` for "joined it". */
+export function setOptimisticCuratorMembership(viewer, community, membership) {
+    const owner = String(viewer || '').trim().toLowerCase();
+    const slug = requireCommunitySlug(community);
+    if (!owner || owner === 'guest') throw new Error('Optimistic membership needs a viewer');
+    if (membership !== null) {
+        const teamId = Number(membership?.teamId);
+        if (!Number.isSafeInteger(teamId) || teamId <= 0) {
+            throw new Error('Invalid optimistic curator membership team id');
+        }
+    }
+    const key = cacheKey(owner, slug);
+    membershipOverrides.set(key, membership === null ? null : {
+        teamId: Number(membership.teamId),
+        teamName: typeof membership.teamName === 'string' ? membership.teamName : '',
+        memberCount: 1,
+        isLeader: false,
+    });
+    membershipCache.delete(key);
+    inflight.delete(key);
+    announceMembershipOverride(owner, slug);
+    console.debug('[curation] optimistic membership', {
+        community: slug,
+        teamId: membership === null ? null : Number(membership.teamId),
+    });
+}
+
+export function clearOptimisticCuratorMembership(viewer, community) {
+    const owner = String(viewer || '').trim().toLowerCase();
+    const slug = requireCommunitySlug(community);
+    const key = cacheKey(owner, slug);
+    if (!membershipOverrides.delete(key)) return;
+    membershipCache.delete(key);
+    inflight.delete(key);
+    announceMembershipOverride(owner, slug);
+    console.debug('[curation] optimistic membership reverted', { community: slug });
+}
+
+/** Server truth wins once it agrees; until then the override does. */
+function reconcileMembership(viewer, community, serverValue) {
+    const key = cacheKey(viewer, community);
+    if (!membershipOverrides.has(key)) return serverValue;
+    const override = membershipOverrides.get(key);
+    const satisfied = override === null
+        ? serverValue == null
+        : serverValue != null && serverValue.teamId === override.teamId;
+    if (satisfied) {
+        membershipOverrides.delete(key);
+        console.debug('[curation] optimistic membership caught up', { community });
+        return serverValue;
+    }
+    return override;
+}
+
+/** Synchronous best answer for a first render, override included. */
+function peekMembership(viewer, community) {
+    const key = cacheKey(viewer, community);
+    if (membershipOverrides.has(key)) return membershipOverrides.get(key);
+    return membershipCache.get(key) ?? null;
+}
+
+function projectCuratorCommunities(viewer, list) {
+    const owner = String(viewer || '').toLowerCase();
+    const prefix = `${owner}::`;
+    const next = new Set(list);
+    for (const [key, override] of membershipOverrides) {
+        if (!key.startsWith(prefix)) continue;
+        const slug = key.slice(prefix.length);
+        if (override === null) next.delete(slug);
+        else next.add(slug);
+    }
+    return [...next];
+}
+
 export async function fetchViewerCuratorMembership(community, viewer, { fresh = false } = {}) {
     const slug = requireCommunitySlug(community);
     const owner = String(viewer || '').trim().toLowerCase();
@@ -98,15 +197,17 @@ export async function fetchViewerCuratorMembership(community, viewer, { fresh = 
         const list = curatorListByViewer.get(owner);
         if (list?.loaded) list.byCommunity.delete(slug);
     }
-    if (membershipCache.has(key)) return membershipCache.get(key);
+    // Every exit reconciles: the cache and the curator list both hold server
+    // truth, which is precisely what an unsettled optimistic change contradicts.
+    if (membershipCache.has(key)) return reconcileMembership(owner, slug, membershipCache.get(key));
     if (!fresh) {
         const fromList = membershipFromCuratorList(owner, slug);
         if (fromList !== undefined) {
             membershipCache.set(key, fromList);
-            return fromList;
+            return reconcileMembership(owner, slug, fromList);
         }
     }
-    if (inflight.has(key)) return inflight.get(key);
+    if (inflight.has(key)) return reconcileMembership(owner, slug, await inflight.get(key));
 
     const pending = (async () => {
         const proof = await signReadParams(CURATOR_READ_ACTION, owner);
@@ -164,7 +265,7 @@ export async function fetchViewerCuratorMembership(community, viewer, { fresh = 
 
     inflight.set(key, pending);
     try {
-        return await pending;
+        return reconcileMembership(owner, slug, await pending);
     } finally {
         inflight.delete(key);
     }
@@ -209,9 +310,9 @@ export function useViewerCuratorCommunities() {
                 if (Array.isArray(data.memberships)) {
                     rememberCuratorList(viewer, data.memberships);
                 }
-                const next = data.communities
+                const next = projectCuratorCommunities(viewer, data.communities
                     .map((slug) => String(slug || '').trim().toLowerCase())
-                    .filter(Boolean);
+                    .filter(Boolean));
                 console.debug('[curation] viewer curator communities', {
                     viewer: viewer.slice(0, 12),
                     count: next.length,
@@ -249,14 +350,23 @@ export function useViewerCuratorCommunities() {
             if (!cancelled) setCommunities([]);
         });
         const onUpdate = () => {
-            refresh().catch(() => {});
+            refresh().catch(() => { });
+        };
+        // Re-project what is already on screen so the sidebar highlight moves on
+        // click, then reconcile in the background. Refreshing covers the revert
+        // case too, where the override is gone and only the server knows the truth.
+        const onOptimistic = () => {
+            if (!cancelled) setCommunities((prev) => projectCuratorCommunities(viewer, prev));
+            refresh().catch(() => { });
         };
         window.addEventListener('curationUpdated', onUpdate);
+        window.addEventListener('curatorMembershipOptimistic', onOptimistic);
         return () => {
             cancelled = true;
             window.removeEventListener('curationUpdated', onUpdate);
+            window.removeEventListener('curatorMembershipOptimistic', onOptimistic);
         };
-    }, [enabled, refresh]);
+    }, [enabled, refresh, viewer]);
 
     return { communities, loading, refresh };
 }
@@ -265,11 +375,12 @@ export function useViewerCuratorMembership(community, { enabled: enabledOption =
     const slug = String(community || '').trim().toLowerCase();
     const viewer = String(Storage.load('publicKey', '') || '').toLowerCase();
     const enabled = Boolean(enabledOption && slug && viewer && viewer !== 'guest');
-    const [membership, setMembership] = useState(() => {
-        if (!enabled) return null;
-        return membershipCache.get(cacheKey(viewer, slug)) ?? null;
-    });
-    const [loading, setLoading] = useState(enabled && !membershipCache.has(cacheKey(viewer, slug)));
+    const [membership, setMembership] = useState(() => (enabled ? peekMembership(viewer, slug) : null));
+    const [loading, setLoading] = useState(
+        enabled
+        && !membershipCache.has(cacheKey(viewer, slug))
+        && !membershipOverrides.has(cacheKey(viewer, slug)),
+    );
     const [error, setError] = useState('');
 
     const refresh = useCallback(async () => {
@@ -305,7 +416,10 @@ export function useViewerCuratorMembership(community, { enabled: enabledOption =
             return undefined;
         }
         let cancelled = false;
-        setLoading(!membershipCache.has(cacheKey(viewer, slug)));
+        setLoading(
+            !membershipCache.has(cacheKey(viewer, slug))
+            && !membershipOverrides.has(cacheKey(viewer, slug)),
+        );
         fetchViewerCuratorMembership(slug, viewer)
             .then((next) => {
                 if (!cancelled) {
@@ -335,10 +449,31 @@ export function useViewerCuratorMembership(community, { enabled: enabledOption =
                     if (!cancelled) setMembership(null);
                 });
         };
+        // Take the override straight to state; a fetch would only tell us what
+        // the indexer still believes. When it was reverted instead, there is no
+        // override left and the fresh read is the answer.
+        const onOptimistic = (event) => {
+            const changed = String(event?.detail?.community || '').toLowerCase();
+            if (changed && changed !== slug) return;
+            const override = membershipOverrides.get(cacheKey(viewer, slug));
+            if (override !== undefined) {
+                if (!cancelled) setMembership(override);
+                return;
+            }
+            fetchViewerCuratorMembership(slug, viewer, { fresh: true })
+                .then((next) => {
+                    if (!cancelled) setMembership(next);
+                })
+                .catch(() => {
+                    if (!cancelled) setMembership(null);
+                });
+        };
         window.addEventListener('curationUpdated', onUpdate);
+        window.addEventListener('curatorMembershipOptimistic', onOptimistic);
         return () => {
             cancelled = true;
             window.removeEventListener('curationUpdated', onUpdate);
+            window.removeEventListener('curatorMembershipOptimistic', onOptimistic);
         };
     }, [enabled, slug, viewer]);
 
@@ -364,8 +499,26 @@ const inviteListInflight = new Map();
  */
 const answeredInvites = new Set();
 
+onSessionReset(({ reason }) => {
+    answeredInvites.clear();
+    console.debug('[curation] answered invites cleared on session reset', { reason });
+});
+
 function answeredKey(viewer, community, teamId) {
     return `${String(viewer || '').toLowerCase()}::${String(community || '').toLowerCase()}:${Number(teamId)}`;
+}
+
+/**
+ * Answering an invite from the team page has to silence the home-feed hero too,
+ * and that hero is rendered by a hook this page never mounts.
+ */
+export function markCuratorInviteAnswered(viewer, community, teamId) {
+    answeredInvites.add(answeredKey(viewer, community, teamId));
+    console.debug('[curation] invite answered', { community, teamId: Number(teamId) });
+}
+
+export function unmarkCuratorInviteAnswered(viewer, community, teamId) {
+    answeredInvites.delete(answeredKey(viewer, community, teamId));
 }
 
 function withoutAnswered(viewer, list) {
@@ -470,7 +623,7 @@ export function useViewerPendingCuratorInvites() {
             if (!cancelled) setInvites([]);
         });
         const onUpdate = () => {
-            refresh().catch(() => {});
+            refresh().catch(() => { });
         };
         window.addEventListener('curationUpdated', onUpdate);
         return () => {
@@ -482,15 +635,14 @@ export function useViewerPendingCuratorInvites() {
     const dismiss = useCallback((community, teamId) => {
         const slug = String(community || '').toLowerCase();
         const id = Number(teamId);
-        answeredInvites.add(answeredKey(viewer, slug, id));
+        markCuratorInviteAnswered(viewer, slug, id);
         setInvites((prev) => prev.filter((invite) => !(
             invite.community === slug && invite.teamId === id
         )));
-        console.debug('[curation] invite answered', { community: slug, teamId: id });
     }, [viewer]);
 
     const restore = useCallback((invite) => {
-        answeredInvites.delete(answeredKey(viewer, invite.community, invite.teamId));
+        unmarkCuratorInviteAnswered(viewer, invite.community, invite.teamId);
         setInvites((prev) => {
             if (prev.some((item) => item.community === invite.community && item.teamId === invite.teamId)) {
                 return prev;

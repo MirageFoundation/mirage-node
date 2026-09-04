@@ -23,10 +23,18 @@ import {
 import { setOptimisticCurationVisibility } from '../../../utils/curationVisibility';
 import { formatUserLabel, resolveUserIdentity } from '../../../utils/UsernameCache';
 import {
+    patchCurationTeamOptimistically,
+    revertCurationTeamPatch,
     useCurationTeam,
     useHiddenCurationPosts,
     useHiddenCurationUsers,
 } from '../../../logic/useCurationTeams';
+import {
+    clearOptimisticCuratorMembership,
+    markCuratorInviteAnswered,
+    setOptimisticCuratorMembership,
+    unmarkCuratorInviteAnswered,
+} from '../../../logic/useViewerCuratorMembership';
 import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { TAG_OPTIONS } from '../../../logic/useCreatePost';
 import Button from '../components/Button';
@@ -378,6 +386,36 @@ export default function CurationTeamView() {
         if (!result?.success) report(formatError(result));
         return result;
     };
+    /**
+     * Show the change now and undo it only if the transaction is refused. A
+     * relayed transaction that comes back successful is on chain, so the only
+     * thing left is the indexer, and waiting for that is what made every one of
+     * these buttons look broken. `undo` covers what the roster patch cannot,
+     * such as the viewer's own membership.
+     */
+    const runOptimistic = async (patch, operation, undo = () => { }) => {
+        patchCurationTeamOptimistically(community, Number(teamId), patch);
+        try {
+            const result = await run(operation);
+            if (!result?.success) {
+                revertCurationTeamPatch(community, Number(teamId), patch);
+                undo();
+            }
+            return result;
+        } catch (err) {
+            revertCurationTeamPatch(community, Number(teamId), patch);
+            undo();
+            const message = formatError(err);
+            setError(message);
+            console.error('[curation] optimistic action failed', {
+                community,
+                teamId,
+                fields: Object.keys(patch),
+                error: message,
+            });
+            return undefined;
+        }
+    };
     const unban = async (kind, item) => {
         if (kind !== 'post' && kind !== 'user') throw new Error(`Invalid unban kind: ${kind}`);
         const isPost = kind === 'post';
@@ -693,7 +731,10 @@ export default function CurationTeamView() {
                                 <SettingTitle>Subscriber-only posting</SettingTitle>
                                 <Meta>Require users to be active subscribers when they create a post.</Meta>
                             </SettingCopy>
-                            <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => run(() => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only))}>
+                            <Button size="xs" variant="subtle" disabled={!!pendingFor('set_curation_subscriber_only')} onClick={() => runOptimistic(
+                                { subscriberOnly: !team.subscriber_only },
+                                () => tx.setCurationSubscriberOnly(community, Number(teamId), !team.subscriber_only),
+                            )}>
                                 {statusFor('set_curation_subscriber_only', '', 'Updating…') || (team.subscriber_only ? 'Disable' : 'Enable')}
                             </Button>
                         </SettingRow>
@@ -775,10 +816,34 @@ export default function CurationTeamView() {
                 <CardTitle>Team invitation</CardTitle>
                 <Body>The leader invited you to join this curator team.</Body>
                 <Actions>
-                    <Button size="xs" disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), true))}>
+                    <Button size="xs" disabled={!!getInfo('accept_curator_invite', community, Number(teamId), viewer)} onClick={() => {
+                        markCuratorInviteAnswered(viewer, community, Number(teamId));
+                        setOptimisticCuratorMembership(viewer, community, {
+                            teamId: Number(teamId),
+                            teamName: team.name,
+                        });
+                        return runOptimistic(
+                            {
+                                removeInvitation: viewer,
+                                addMember: { address: viewer, username: myInvitation.username },
+                            },
+                            () => tx.respondCurationTeamInvitation(community, Number(teamId), true),
+                            () => {
+                                unmarkCuratorInviteAnswered(viewer, community, Number(teamId));
+                                clearOptimisticCuratorMembership(viewer, community);
+                            },
+                        );
+                    }}>
                         {getStatus('accept_curator_invite', community, Number(teamId), viewer, 'Accepting…') || 'Accept'}
                     </Button>
-                    <Button size="xs" variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => run(() => tx.respondCurationTeamInvitation(community, Number(teamId), false))}>
+                    <Button size="xs" variant="subtle" disabled={!!getInfo('decline_curator_invite', community, Number(teamId), viewer)} onClick={() => {
+                        markCuratorInviteAnswered(viewer, community, Number(teamId));
+                        return runOptimistic(
+                            { removeInvitation: viewer },
+                            () => tx.respondCurationTeamInvitation(community, Number(teamId), false),
+                            () => unmarkCuratorInviteAnswered(viewer, community, Number(teamId)),
+                        );
+                    }}>
                         {getStatus('decline_curator_invite', community, Number(teamId), viewer, 'Declining…') || 'Decline'}
                     </Button>
                 </Actions>
@@ -792,10 +857,16 @@ export default function CurationTeamView() {
                         {member.address === team.owner ? ' · leader' : ''}
                     </span>
                     {isLeader && member.address !== team.owner && <Actions>
-                        <Button size="xs" variant="subtle" disabled={!!pendingFor('transfer_curation_team', member.address)} onClick={() => run(() => tx.transferCurationTeamLeadership(community, Number(teamId), member.address))}>
+                        <Button size="xs" variant="subtle" disabled={!!pendingFor('transfer_curation_team', member.address)} onClick={() => runOptimistic(
+                            { owner: member.address },
+                            () => tx.transferCurationTeamLeadership(community, Number(teamId), member.address),
+                        )}>
                             {statusFor('transfer_curation_team', member.address, 'Transferring…') || 'Transfer leadership'}
                         </Button>
-                        <Button size="xs" variant="danger" disabled={!!pendingFor('remove_curator', member.address)} onClick={() => run(() => tx.removeCurationTeamMember(community, Number(teamId), member.address))}>
+                        <Button size="xs" variant="danger" disabled={!!pendingFor('remove_curator', member.address)} onClick={() => runOptimistic(
+                            { removeMember: member.address },
+                            () => tx.removeCurationTeamMember(community, Number(teamId), member.address),
+                        )}>
                             {statusFor('remove_curator', member.address, 'Removing…') || 'Remove'}
                         </Button>
                     </Actions>}
@@ -827,7 +898,10 @@ export default function CurationTeamView() {
                     <Meta title={invite.address}>
                         {invite.optimistic ? 'Inviting' : 'Pending'}: {formatUserLabel(invite.username, invite.address)}
                     </Meta>
-                    {isLeader && !invite.optimistic && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => run(() => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address))}>
+                    {isLeader && !invite.optimistic && <Button size="xs" variant="subtle" disabled={!!pendingFor('revoke_curator_invite', invite.address)} onClick={() => runOptimistic(
+                        { removeInvitation: invite.address },
+                        () => tx.revokeCurationTeamInvitation(community, Number(teamId), invite.address),
+                    )}>
                         {statusFor('revoke_curator_invite', invite.address, 'Revoking…') || 'Revoke'}
                     </Button>}
                 </Row>)}
@@ -837,7 +911,16 @@ export default function CurationTeamView() {
                             size="xs"
                             variant="danger"
                             disabled={!!pendingFor('leave_curation_team', viewer)}
-                            onClick={() => run(() => tx.leaveCurationTeam(community, Number(teamId)))}
+                            onClick={() => {
+                                // Leaving also has to drop the sidebar highlight and
+                                // the curate menu, which read membership, not the roster.
+                                setOptimisticCuratorMembership(viewer, community, null);
+                                return runOptimistic(
+                                    { removeMember: viewer },
+                                    () => tx.leaveCurationTeam(community, Number(teamId)),
+                                    () => clearOptimisticCuratorMembership(viewer, community),
+                                );
+                            }}
                         >
                             {statusFor('leave_curation_team', viewer, 'Leaving…') || 'Leave team'}
                         </Button>

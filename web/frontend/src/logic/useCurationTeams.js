@@ -6,7 +6,183 @@ import {
     requireCommunitySlug,
     requireTeamId,
 } from '../utils/curation';
+import { onSessionReset } from '../utils/sessionLifecycle';
 import { CURATOR_READ_ACTION, signReadParams } from '../utils/signPlain';
+
+/**
+ * Roster and settings the viewer has already changed on chain, but which the
+ * indexer has not projected yet. Module scope is load-bearing: the landed
+ * transaction fires `curationUpdated`, every listener refetches within the
+ * same tick, and that read still describes the team as it was before the
+ * change. Component state would therefore be overwritten a moment after the
+ * click, which is exactly the "nothing happened" this is meant to remove.
+ * Each field deletes itself as soon as a server read agrees with it, so a
+ * later change made by somebody else is never masked.
+ */
+const teamPatches = new Map();
+
+onSessionReset(({ reason }) => {
+    teamPatches.clear();
+    console.debug('[curation] optimistic team patches cleared on session reset', { reason });
+});
+
+const PATCH_FIELDS = ['removeMember', 'addMember', 'removeInvitation', 'owner', 'subscriberOnly'];
+
+function patchKey(community, teamId) {
+    return `${requireCommunitySlug(community)}:${requireTeamId(teamId)}`;
+}
+
+function normalizeAddress(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function requirePatchAddress(value) {
+    const address = normalizeAddress(value);
+    if (!address) throw new Error('Curation team patch is missing an address');
+    return address;
+}
+
+function addressOf(entry) {
+    return normalizeAddress(entry?.address);
+}
+
+function emptyPatch() {
+    return {
+        removedMembers: new Set(),
+        addedMembers: new Map(),
+        removedInvitations: new Set(),
+        owner: undefined,
+        subscriberOnly: undefined,
+    };
+}
+
+function patchIsEmpty(patch) {
+    return patch.removedMembers.size === 0
+        && patch.addedMembers.size === 0
+        && patch.removedInvitations.size === 0
+        && patch.owner === undefined
+        && patch.subscriberOnly === undefined;
+}
+
+function requirePatchFields(change) {
+    const fields = Object.keys(change || {});
+    if (!fields.length) throw new Error('Empty curation team patch');
+    for (const field of fields) {
+        if (!PATCH_FIELDS.includes(field)) {
+            throw new Error(`Unknown curation team patch field: ${field}`);
+        }
+    }
+    return fields;
+}
+
+function announcePatch(key) {
+    window.dispatchEvent(new CustomEvent('curationTeamOptimistic', { detail: { team: key } }));
+}
+
+/**
+ * Show a roster or settings change immediately, before the indexer serves it.
+ * Revert the identical `change` if the transaction turns out to have failed.
+ */
+export function patchCurationTeamOptimistically(community, teamId, change) {
+    const fields = requirePatchFields(change);
+    const key = patchKey(community, teamId);
+    const patch = teamPatches.get(key) || emptyPatch();
+    for (const field of fields) {
+        const value = change[field];
+        if (field === 'removeMember') {
+            const address = requirePatchAddress(value);
+            patch.addedMembers.delete(address);
+            patch.removedMembers.add(address);
+        } else if (field === 'addMember') {
+            const address = requirePatchAddress(value?.address);
+            patch.removedMembers.delete(address);
+            patch.addedMembers.set(address, { ...value, address });
+        } else if (field === 'removeInvitation') {
+            patch.removedInvitations.add(requirePatchAddress(value));
+        } else if (field === 'owner') {
+            patch.owner = requirePatchAddress(value);
+        } else if (typeof value !== 'boolean') {
+            throw new Error('subscriberOnly patch must be a boolean');
+        } else {
+            patch.subscriberOnly = value;
+        }
+    }
+    teamPatches.set(key, patch);
+    announcePatch(key);
+    console.debug('[curation] team patch applied', { team: key, fields });
+}
+
+export function revertCurationTeamPatch(community, teamId, change) {
+    const fields = requirePatchFields(change);
+    const key = patchKey(community, teamId);
+    const patch = teamPatches.get(key);
+    if (!patch) return;
+    for (const field of fields) {
+        const value = change[field];
+        if (field === 'removeMember') patch.removedMembers.delete(requirePatchAddress(value));
+        else if (field === 'addMember') patch.addedMembers.delete(requirePatchAddress(value?.address));
+        else if (field === 'removeInvitation') patch.removedInvitations.delete(requirePatchAddress(value));
+        else if (field === 'owner') patch.owner = undefined;
+        else patch.subscriberOnly = undefined;
+    }
+    if (patchIsEmpty(patch)) teamPatches.delete(key);
+    announcePatch(key);
+    console.debug('[curation] team patch reverted', { team: key, fields });
+}
+
+/** Drop the parts of the patch a server read now reflects on its own. */
+function reconcileTeamPatch(key, serverTeam) {
+    const patch = teamPatches.get(key);
+    if (!patch) return;
+    const memberAddresses = new Set((serverTeam.members || []).map(addressOf));
+    for (const address of [...patch.removedMembers]) {
+        if (!memberAddresses.has(address)) patch.removedMembers.delete(address);
+    }
+    for (const address of [...patch.addedMembers.keys()]) {
+        if (memberAddresses.has(address)) patch.addedMembers.delete(address);
+    }
+    const inviteAddresses = new Set((serverTeam.invitations || []).map(addressOf));
+    for (const address of [...patch.removedInvitations]) {
+        if (!inviteAddresses.has(address)) patch.removedInvitations.delete(address);
+    }
+    if (patch.owner !== undefined && normalizeAddress(serverTeam.owner) === patch.owner) {
+        patch.owner = undefined;
+    }
+    if (patch.subscriberOnly !== undefined && serverTeam.subscriber_only === patch.subscriberOnly) {
+        patch.subscriberOnly = undefined;
+    }
+    if (patchIsEmpty(patch)) {
+        teamPatches.delete(key);
+        console.debug('[curation] team patch caught up', { team: key });
+    }
+}
+
+function projectCurationTeam(key, serverTeam) {
+    const patch = teamPatches.get(key);
+    if (!patch || !serverTeam) return serverTeam;
+    let members = serverTeam.members || [];
+    if (patch.removedMembers.size) {
+        members = members.filter((member) => !patch.removedMembers.has(addressOf(member)));
+    }
+    if (patch.addedMembers.size) {
+        const present = new Set(members.map(addressOf));
+        const additions = [...patch.addedMembers.values()].filter((member) => !present.has(member.address));
+        if (additions.length) members = [...members, ...additions];
+    }
+    let invitations = serverTeam.invitations || [];
+    if (patch.removedInvitations.size) {
+        invitations = invitations.filter((invite) => !patch.removedInvitations.has(addressOf(invite)));
+    }
+    return {
+        ...serverTeam,
+        members,
+        invitations,
+        owner: patch.owner === undefined ? serverTeam.owner : patch.owner,
+        subscriber_only: patch.subscriberOnly === undefined
+            ? serverTeam.subscriber_only
+            : patch.subscriberOnly,
+    };
+}
 
 async function curatorParams(viewer, params = {}) {
     const address = String(viewer || '').trim().toLowerCase();
@@ -104,9 +280,12 @@ export function useCurationTeams(community, { includeDeleted = false, viewer = '
 export function useCurationTeam(community, teamId, viewer = '') {
     const slug = requireCommunitySlug(community);
     const id = requireTeamId(teamId);
+    const key = `${slug}:${id}`;
     const [team, setTeam] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    // Kept so an optimistic patch can be re-projected without another fetch.
+    const serverTeamRef = useRef(null);
 
     const refresh = useCallback(async () => {
         setLoading(true);
@@ -143,9 +322,12 @@ export function useCurationTeam(community, teamId, viewer = '') {
                 };
             });
             const combined = { ...next, invitations };
-            setTeam(combined);
+            serverTeamRef.current = combined;
+            reconcileTeamPatch(key, combined);
+            const projected = projectCurationTeam(key, combined);
+            setTeam(projected);
             console.debug('[curation] team detail loaded', { community: slug, teamId: id });
-            return combined;
+            return projected;
         } catch (err) {
             const message = String(err?.message || err);
             setError(message);
@@ -154,7 +336,7 @@ export function useCurationTeam(community, teamId, viewer = '') {
         } finally {
             setLoading(false);
         }
-    }, [id, slug, viewer]);
+    }, [id, key, slug, viewer]);
 
     useEffect(() => {
         refresh().catch(() => { });
@@ -162,9 +344,20 @@ export function useCurationTeam(community, teamId, viewer = '') {
             const changed = String(event?.detail?.community || '').toLowerCase();
             if (!changed || changed === slug) refresh().catch(() => { });
         };
+        // Re-project from the last read instead of refetching: the point of the
+        // patch is that the server does not know about the change yet.
+        const onPatch = (event) => {
+            if (String(event?.detail?.team || '') !== key) return;
+            if (!serverTeamRef.current) return;
+            setTeam(projectCurationTeam(key, serverTeamRef.current));
+        };
         window.addEventListener('curationUpdated', onUpdate);
-        return () => window.removeEventListener('curationUpdated', onUpdate);
-    }, [refresh, slug]);
+        window.addEventListener('curationTeamOptimistic', onPatch);
+        return () => {
+            window.removeEventListener('curationUpdated', onUpdate);
+            window.removeEventListener('curationTeamOptimistic', onPatch);
+        };
+    }, [key, refresh, slug]);
 
     return { team, loading, error, refresh };
 }
