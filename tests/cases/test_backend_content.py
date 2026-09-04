@@ -1681,7 +1681,10 @@ def test_legacy_mobile_content(backend: str):
 
     # Feed weights are learned from votes, so a second wallet has to vote before
     # /api/get_preferences has anything to alias. Asserting on an empty list
-    # would pass even if the topic key were dropped entirely.
+    # would pass even if the topic key were dropped entirely. Waiting for a
+    # merely non-empty list is not enough either: an earlier category holding
+    # this same wallet lease leaves its own communities on the voter, so the
+    # loop has to wait for this topic or it reads a list indexed before the vote.
     voter = WALLETS["sub2"]
     voter_addr = str(voter.address()).lower()
     _do_vote(backend, voter, root_hash, 1, skip_pow=True)
@@ -1689,7 +1692,10 @@ def test_legacy_mobile_content(backend: str):
     preferences: dict = {}
     while time.perf_counter() < deadline:
         code, preferences = _get(f"{backend}/api/get_preferences", {"address": voter_addr})
-        if code == 200 and (preferences or {}).get("communities"):
+        if code == 200 and any(
+            item.get("community") == topic
+            for item in ((preferences or {}).get("communities") or [])
+        ):
             break
         time.sleep(0.5)
     weighted = (preferences or {}).get("communities") or []
