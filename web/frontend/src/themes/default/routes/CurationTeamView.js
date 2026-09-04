@@ -31,6 +31,7 @@ import { usePendingCuration } from '../../../logic/usePendingCuration';
 import { TAG_OPTIONS } from '../../../logic/useCreatePost';
 import Button from '../components/Button';
 import ConfirmDialog from '../components/ConfirmDialog';
+import UserSuggestInput from '../components/UserSuggestInput';
 import { CommunityMentionText } from '../components/MarkdownRenderer';
 import { requireThemeColor } from '../../../utils/themeColor';
 
@@ -273,6 +274,7 @@ export default function CurationTeamView() {
     const savedProfileRef = useRef(null);
     const [invitee, setInvitee] = useState('');
     const [inviteBusy, setInviteBusy] = useState(false);
+    const [inviteError, setInviteError] = useState('');
     const [error, setError] = useState('');
     const [optimisticTag, setOptimisticTag] = useState(null);
     const [optimisticInvites, setOptimisticInvites] = useState([]);
@@ -369,10 +371,11 @@ export default function CurationTeamView() {
         });
     };
 
-    const run = async (operation) => {
-        setError('');
+    /** `report` lets a form keep its failure next to its own fields instead of the page-level slot. */
+    const run = async (operation, report = setError) => {
+        report('');
         const result = await operation();
-        if (!result?.success) setError(formatError(result));
+        if (!result?.success) report(formatError(result));
         return result;
     };
     const unban = async (kind, item) => {
@@ -526,36 +529,36 @@ export default function CurationTeamView() {
         event.preventDefault();
         const raw = invitee.trim();
         if (!raw) {
-            setError('Enter a username or mirage1 address.');
+            setInviteError('Enter a username or mirage1 address.');
             return;
         }
-        setError('');
+        setInviteError('');
         setInviteBusy(true);
         let identity;
         try {
             identity = await resolveUserIdentity(raw);
         } catch (err) {
             const message = err instanceof Error ? err.message : formatError(err);
-            setError(message);
+            setInviteError(message);
             setInviteBusy(false);
             console.error('[curation] invite resolve failed', { error: message });
             return;
         }
         const address = identity.address;
         if (address === viewer) {
-            setError('You cannot invite yourself.');
+            setInviteError('You cannot invite yourself.');
             setInviteBusy(false);
             return;
         }
         if (members.some((member) => String(member.address).toLowerCase() === address)) {
-            setError('That user is already a curator on this team.');
+            setInviteError('That user is already a curator on this team.');
             setInviteBusy(false);
             return;
         }
         const alreadyPending = invitations.some((invite) => String(invite.address).toLowerCase() === address)
             || optimisticInvites.some((invite) => String(invite.address).toLowerCase() === address);
         if (alreadyPending) {
-            setError('That user already has a pending invite.');
+            setInviteError('That user already has a pending invite.');
             setInviteBusy(false);
             return;
         }
@@ -574,7 +577,7 @@ export default function CurationTeamView() {
                 community,
                 Number(teamId),
                 address,
-            ));
+            ), setInviteError);
             if (!result?.success) {
                 setOptimisticInvites((prev) => prev.filter((invite) => invite.address !== address));
                 setInvitee(raw);
@@ -594,7 +597,7 @@ export default function CurationTeamView() {
             setOptimisticInvites((prev) => prev.filter((invite) => invite.address !== address));
             setInvitee(raw);
             const message = err instanceof Error ? err.message : formatError(err);
-            setError(message);
+            setInviteError(message);
             console.error('[curation] invite failed', { error: message });
         } finally {
             setInviteBusy(false);
@@ -800,15 +803,20 @@ export default function CurationTeamView() {
                 {isLeader && <Form onSubmit={submitInvite}>
                     <Field>
                         <FieldLabel>Invite curator</FieldLabel>
-                        <Input
-                            aria-label="Username or address to invite"
+                        <UserSuggestInput
+                            ariaLabel="Username or address to invite"
                             value={invitee}
-                            onChange={(event) => setInvitee(event.target.value)}
+                            onChange={(next) => {
+                                setInvitee(next);
+                                setInviteError('');
+                            }}
                             placeholder="Username or mirage1…"
                             required
                             disabled={inviteBusy}
+                            listId="invite-curator-suggestions"
                         />
                     </Field>
+                    {inviteError && <ErrorText role="alert">{inviteError}</ErrorText>}
                     <FormActions>
                         <Button type="submit" size="xs" disabled={inviteBusy} aria-busy={inviteBusy}>
                             {inviteBusy ? 'Inviting…' : 'Invite curator'}

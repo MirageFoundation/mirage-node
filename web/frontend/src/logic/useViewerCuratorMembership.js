@@ -354,6 +354,24 @@ export function useViewerCuratorMembership(community, { enabled: enabledOption =
 
 const inviteListInflight = new Map();
 
+/**
+ * Invitations the viewer has answered, kept at module scope because component
+ * state cannot outlive a remount. Hiding the card is otherwise undone twice
+ * over: the landed response fires `curationUpdated`, which refetches while the
+ * indexer still lists the row, and any remount refetches from scratch. Both
+ * would pop an answered invite back into the feed. Cleared only if the
+ * response failed, which is when the invite really is pending again.
+ */
+const answeredInvites = new Set();
+
+function answeredKey(viewer, community, teamId) {
+    return `${String(viewer || '').toLowerCase()}::${String(community || '').toLowerCase()}:${Number(teamId)}`;
+}
+
+function withoutAnswered(viewer, list) {
+    return list.filter((invite) => !answeredInvites.has(answeredKey(viewer, invite.community, invite.teamId)));
+}
+
 function normalizePendingInvite(item) {
     const community = String(item?.community || '').trim().toLowerCase();
     const teamId = Number(item?.team_id);
@@ -401,7 +419,7 @@ export function useViewerPendingCuratorInvites() {
         setLoading(true);
         try {
             if (inviteListInflight.has(viewer)) {
-                const reused = await inviteListInflight.get(viewer);
+                const reused = withoutAnswered(viewer, await inviteListInflight.get(viewer));
                 setInvites(reused);
                 return reused;
             }
@@ -423,7 +441,7 @@ export function useViewerPendingCuratorInvites() {
             })();
             inviteListInflight.set(viewer, pending);
             try {
-                const next = await pending;
+                const next = withoutAnswered(viewer, await pending);
                 setInvites(next);
                 return next;
             } finally {
@@ -464,19 +482,22 @@ export function useViewerPendingCuratorInvites() {
     const dismiss = useCallback((community, teamId) => {
         const slug = String(community || '').toLowerCase();
         const id = Number(teamId);
+        answeredInvites.add(answeredKey(viewer, slug, id));
         setInvites((prev) => prev.filter((invite) => !(
             invite.community === slug && invite.teamId === id
         )));
-    }, []);
+        console.debug('[curation] invite answered', { community: slug, teamId: id });
+    }, [viewer]);
 
     const restore = useCallback((invite) => {
+        answeredInvites.delete(answeredKey(viewer, invite.community, invite.teamId));
         setInvites((prev) => {
             if (prev.some((item) => item.community === invite.community && item.teamId === invite.teamId)) {
                 return prev;
             }
             return [invite, ...prev];
         });
-    }, []);
+    }, [viewer]);
 
     return { invites, loading, refresh, dismiss, restore };
 }

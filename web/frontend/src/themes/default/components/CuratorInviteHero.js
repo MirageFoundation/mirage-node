@@ -16,10 +16,12 @@ const Card = styled.div`
     max-width: 100%;
     align-self: flex-start;
     margin: 4px 0;
+    /* Green wash + success outline, built the same way the NSFW consent hero
+     * builds its red one: an invitation is that prompt's affirmative twin. */
     background: ${({ theme }) => theme.name === 'light'
-        ? 'rgba(102, 126, 234, 0.08)'
-        : 'rgba(102, 126, 234, 0.14)'};
-    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'gradientStart')};
+        ? 'rgba(22, 163, 74, 0.06)'
+        : 'rgba(22, 163, 74, 0.08)'};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'buttonSuccessBorder')};
     border-radius: 8px;
     padding: 0.75rem 1rem;
     display: flex;
@@ -48,8 +50,9 @@ const IconTile = styled.div`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
-    background: ${({ theme }) => requireThemeColor(theme, 'gradient')};
+    color: ${({ theme }) => requireThemeColor(theme, 'voteUp')};
+    background: ${({ theme }) => requireThemeColor(theme, 'buttonSuccessBg')};
+    border: 1px solid ${({ theme }) => requireThemeColor(theme, 'buttonSuccessBorder')};
 
     svg {
         width: 0.8rem;
@@ -93,7 +96,9 @@ const HeroButton = styled.button`
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+    transition: transform 0.15s ease, background 0.15s ease,
+        border-color 0.15s ease, color 0.15s ease;
+    border: 1px solid transparent;
     line-height: 1.2;
     display: inline-flex;
     align-items: center;
@@ -117,21 +122,21 @@ const HeroButton = styled.button`
     }
 
     ${({ $variant, theme }) => $variant === 'accept' ? `
-        background: ${requireThemeColor(theme, 'gradient')};
+        background: ${requireThemeColor(theme, 'voteUp')};
         color: #ffffff;
-        border: 1px solid transparent;
-        box-shadow: 0 1px 5px rgba(102, 126, 234, 0.28);
+        border-color: ${requireThemeColor(theme, 'voteUp')};
         &:hover:not(:disabled) {
             transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.36);
+            background: ${requireThemeColor(theme, 'voteUpHover')};
+            border-color: ${requireThemeColor(theme, 'voteUpHover')};
         }
     ` : `
         background: transparent;
         color: ${requireThemeColor(theme, 'text')};
-        border: 1px solid ${requireThemeColor(theme, 'borderStrong')};
+        border-color: ${requireThemeColor(theme, 'buttonSuccessBorder')};
         &:hover:not(:disabled) {
-            transform: translateY(-1px);
-            background: ${requireThemeColor(theme, 'hoverBg')};
+            background: ${requireThemeColor(theme, 'buttonSuccessBg')};
+            border-color: ${requireThemeColor(theme, 'voteUp')};
         }
     `}
 `;
@@ -140,11 +145,16 @@ const Note = styled.div`
     color: ${({ theme }) => requireThemeColor(theme, 'subtleText')};
     font-size: 0.6rem;
     line-height: 1.4;
+    margin-top: 0.1rem;
 `;
 
 const TeamLink = styled(Link)`
-    color: inherit;
-    text-decoration: underline;
+    color: ${({ theme }) => requireThemeColor(theme, 'link')};
+    text-decoration: none;
+
+    &:hover {
+        text-decoration: underline;
+    }
 `;
 
 function InviteCard({ invite, getInfo, getStatus, onRespond }) {
