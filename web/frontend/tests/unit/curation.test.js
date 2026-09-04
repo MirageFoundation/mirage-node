@@ -1086,6 +1086,7 @@ describe('v1.39 curation UI contracts', () => {
             'utf8',
         );
         const actions = readFileSync(join(frontendSrc, 'logic/usePostCurateActions.js'), 'utf8');
+        const moderationCache = readFileSync(join(frontendSrc, 'logic/teamModerationCache.js'), 'utf8');
         const postMenu = readFileSync(join(frontendSrc, 'themes/default/components/PostMenu.js'), 'utf8');
         const app = readFileSync(join(frontendSrc, 'App.js'), 'utf8');
 
@@ -1103,7 +1104,11 @@ describe('v1.39 curation UI contracts', () => {
         expect(actions).toMatch(/const INHERIT_TAG = '__inherit__'/);
         expect(actions).toMatch(/No override/);
         expect(actions).toMatch(/Untagged/);
-        expect(actions).toMatch(/fetchedTag = typeof data\.post_tag === 'string' \? data\.post_tag : null/);
+        // Both moderation reads keep "no override" (null) apart from "untagged"
+        // (''): the batch cache that answers a menu open, and the single-post
+        // fallback for a post the batch did not return.
+        expect(moderationCache).toMatch(/postTag: typeof item\.post_tag === 'string' \? item\.post_tag : null/);
+        expect(actions).toMatch(/postTag: typeof data\.post_tag === 'string' \? data\.post_tag : null/);
         expect(actions).toMatch(/modState\.postTag === null \? INHERIT_TAG : modState\.postTag/);
         expect(actions).toMatch(/optimistic apply/);
         expect(actions).toMatch(/optimistic revert/);
