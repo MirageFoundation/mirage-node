@@ -23,7 +23,12 @@ ROOT = Path("/opt/mirage")
 if not ROOT.is_dir():
     ROOT = Path(__file__).resolve().parent.parent
 
-VERSION = "v1.39.0"
+# The release being verified is whatever the deployed tree says it is. Pinning a
+# literal here made every release after v1.39.0 fail three checks for the sole
+# offence of not being v1.39.0. UPGRADE_NAME stays pinned: it names the governed
+# plan whose migrations and parameter changes these checks actually verify, and
+# that plan does not change when a later ordinary release ships.
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 UPGRADE_NAME = "v1.39.0"
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
