@@ -181,25 +181,46 @@ with tarfile.open(tarball, "r:gz") as archive:
     image = stream.read().decode("utf-8").strip()
 if not image:
     raise SystemExit(f"{tarball}: docker_image metadata is empty")
-manifest = json.loads(
-    subprocess.check_output(
-        ["git", "-C", str(root), "show", "v1.38.11:release/manifest.json"],
+
+# The backup must come from a signed release, never a dev build: restoring an
+# arbitrary image rehearses a starting state no node was ever on. Which release
+# is not pinned here. Pinning one version made this gate un-passable the moment
+# that release stopped being the newest thing UAT had run, which is permanent
+# after the next release ships.
+tags = subprocess.check_output(
+    ["git", "-C", str(root), "tag", "--sort=-v:refname"],
+    text=True,
+).split()
+released = {}
+for tag in tags[:40]:
+    blob = subprocess.run(
+        ["git", "-C", str(root), "show", f"{tag}:release/manifest.json"],
+        capture_output=True,
         text=True,
     )
-)
-expected_image = manifest.get("image")
-if not expected_image:
-    raise SystemExit("v1.38.11:release/manifest.json is missing image")
-if image != expected_image:
+    if blob.returncode != 0:
+        continue
+    try:
+        signed = json.loads(blob.stdout).get("image")
+    except json.JSONDecodeError:
+        continue
+    if signed:
+        released.setdefault(signed, tag)
+if not released:
+    raise SystemExit("no release tag carries a signed release/manifest.json to compare against")
+matched = released.get(image)
+if not matched:
     raise SystemExit(
-        f"{tarball}: docker_image is {image}; signed v1.38.11 image is {expected_image}"
+        f"{tarball}: docker_image is {image}, which is not the signed image of any "
+        f"release tag. Restore a backup taken while the node ran a signed release; "
+        f"known signed images: {sorted(released.values())}"
     )
 Path(sys.argv[2]).write_text(
     json.dumps(
         {
             "tarball": str(tarball),
             "image": image,
-            "expected_image": expected_image,
+            "matched_release": matched,
         },
         indent=2,
     )
@@ -208,11 +229,13 @@ Path(sys.argv[2]).write_text(
 )
 print(f"backup={tarball}")
 print(f"image={image}")
+print(f"release={matched}")
 PY
   BACKUP_TARBALL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tarball"])' "$metadata")"
-  local image
+  local image matched
   image="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$metadata")"
-  log "backup image digest matches signed v1.38.11 manifest"
+  matched="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["matched_release"])' "$metadata")"
+  log "backup image digest matches the signed ${matched} manifest"
   set +e
   docker run --rm --network none --entrypoint /bin/bash "$image" -lc '
 set -euo pipefail
@@ -232,7 +255,7 @@ exec "$binary" version
   local reported
   reported="$(grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' "$version_out" | sed -n '$p')"
   [[ -n "$reported" ]] || die "backup image ${image} printed no vX.Y.Z version line"
-  log "backup binary version string=${reported} (signed v1.38.11 image may be mislabeled)"
+  log "backup binary version string=${reported} (signed ${matched} image may be mislabeled)"
 }
 
 verify_proto_generation_parity() {

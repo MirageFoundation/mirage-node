@@ -1,12 +1,12 @@
 {
-    "title": "Release v1.39.0 (communities, creator pool, no Agent)",
-    "summary": "THIS UPGRADE HALTS THE CHAIN. Every validator must be running v1.39.0 when the plan height is reached. Topics become open communities: every valid name can receive posts, while paid subscriber-led curator teams provide optional competing lenses without owning or claiming the name. The Agent tier is removed and those accounts become ordinary subscribers. Subscriptions no longer keep a relay reserve: half of each new payment is burned and half funds creator epochs that begin at six-hour intervals. Subscribers receive 1,000 zero-fee relays per UTC day, while appointed admins receive 10,000. This is a consensus change: a node still on v1.38.x computes different state from the same block, so mixed binaries would fork. Jailed and unbonded validators remain excluded.",
+    "title": "Release v1.39.2 (indexer quota fix) — NOT A CHAIN UPGRADE, DO NOT SUBMIT",
+    "summary": "THIS PROPOSAL MUST NOT BE SUBMITTED. v1.39.2 is an ordinary release: it registers no SetUpgradeHandler, so submitting it would halt the chain at the plan height with nothing able to resume it. The file names the current release only so scripts/test_upgrade.sh can detect that this release ships no chain change and run in --no-chain-upgrade mode; the rehearsal never submits it in that mode. v1.39.2 fixes an indexer that treated a subscriber tier dropping mid-epoch as corrupted chain data and stopped, which stalled every node's indexer on the same block. Nodes install it with mirage-update. Replace this file with a real plan, and register the matching handler, only when a release actually changes consensus.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.39.0",
+                "name": "v1.39.2",
                 "height": "T+50",
                 "info": ""
             }
