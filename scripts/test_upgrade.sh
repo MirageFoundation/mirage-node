@@ -47,6 +47,12 @@ UPGRADES_GO="${ROOT}/blockchain/app/upgrades.go"
 JOBS=(blockchain backend verify)
 BACKUP_TARBALL=""
 
+# Which backup the rehearsal restores. Empty means the newest one for the host.
+# An override exists because "newest" is not the same as "the baseline this
+# release upgrades from": once a backup is taken from a newer release, the
+# newest one is the wrong starting state and the run cannot be steered off it.
+BACKUP_OVERRIDE=""
+
 # Set from --no-chain-upgrade; cross-checked against upgrades.go before use.
 NO_CHAIN_UPGRADE=0
 
@@ -74,7 +80,13 @@ the halt and the plan to apply.
 
   scripts/test_upgrade.sh                     run the pipeline and launch the jobs
   scripts/test_upgrade.sh --no-chain-upgrade  same, for a release that ships no handler
+  scripts/test_upgrade.sh --backup FILE       restore FILE instead of the newest backup
   scripts/test_upgrade.sh --wait              block until the jobs finish; exit 0 iff all passed
+
+--backup names the baseline to upgrade from. The newest backup is the default,
+but it is only the right baseline while it predates the upgrade under rehearsal;
+once a backup is taken from a newer release the newest one restores post-upgrade
+state and the upgrade path cannot be exercised from it.
 
 --no-chain-upgrade is cross-checked against blockchain/app/upgrades.go. The run
 aborts if the flag and the source disagree in either direction, because both
@@ -155,7 +167,7 @@ assert_backup_image_version() {
   local metadata="${STATUS_HOST}/backup-image.json"
   local version_out="${STATUS_HOST}/backup-image-version.out"
   local version_err="${STATUS_HOST}/backup-image-version.err"
-  python3 - "$ROOT" "$metadata" <<'PY'
+  python3 - "$ROOT" "$metadata" "$BACKUP_OVERRIDE" <<'PY'
 import json
 import subprocess
 import sys
@@ -166,7 +178,14 @@ root = Path(sys.argv[1])
 sys.path.insert(0, str(root / "scripts"))
 import backup_restore
 
-tarball = backup_restore.find_latest_backup("mirage.vote").resolve()
+override = sys.argv[3] if len(sys.argv) > 3 else ""
+if override:
+    tarball = Path(override).expanduser()
+    if not tarball.is_file():
+        raise SystemExit(f"--backup {override}: not a file")
+    tarball = tarball.resolve()
+else:
+    tarball = backup_restore.find_latest_backup("mirage.vote").resolve()
 with tarfile.open(tarball, "r:gz") as archive:
     members = [
         member
@@ -1046,10 +1065,22 @@ run_pipeline() {
   print_monitor
 }
 
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-  --wait) wait_for_jobs ;;
-  --no-chain-upgrade) NO_CHAIN_UPGRADE=1; run_pipeline ;;
-  "") run_pipeline ;;
-  *) die "unknown argument: $1 (try --help)" ;;
+MODE=pipeline
+while (( $# )); do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --wait) MODE=wait; shift ;;
+    --no-chain-upgrade) NO_CHAIN_UPGRADE=1; shift ;;
+    --backup)
+      [[ -n "${2:-}" ]] || die "--backup requires a path to a backup tarball"
+      BACKUP_OVERRIDE="$2"
+      shift 2
+      ;;
+    *) die "unknown argument: $1 (try --help)" ;;
+  esac
+done
+
+case "$MODE" in
+  wait) wait_for_jobs ;;
+  pipeline) run_pipeline ;;
 esac
