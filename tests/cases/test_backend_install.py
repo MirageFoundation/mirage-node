@@ -3709,15 +3709,23 @@ activate_if_halted
             f"test_upgrade.sh missing required postflight gates: {missing_postflight}",
         )
         return
+    # The property is that the restored backup came from a signed release, not
+    # that it came from one named version. Asserting the literal
+    # "v1.38.11:release/manifest.json" pinned the rehearsal to a baseline that
+    # stopped being reachable the moment UAT was backed up on a later release,
+    # so the gate could never pass again and this test kept it that way.
     if (
-        "v1.38.11:release/manifest.json" not in rehearsal
+        "release/manifest.json" not in rehearsal
+        or "not the signed image of any" not in rehearsal
         or "verify_proto_generation_parity" not in rehearsal
         or "LCD params after reset" not in rehearsal
         or "pre_upgrade_financial.json" not in rehearsal
     ):
         _fail(
             "install.upgrade.rehearsal_preflight",
-            "test_upgrade.sh must pin the backup image to the signed v1.38.11 digest, check protobuf parity, wait for LCD after reset, and snapshot legacy payout rows",
+            "test_upgrade.sh must verify the backup image against a signed release manifest and "
+            "refuse anything else, check protobuf parity, wait for LCD after reset, and snapshot "
+            "legacy payout rows",
         )
         return
     reset_src = Path(os.path.join(REPO_ROOT, "scripts", "reset_local_testnet.py")).read_text(encoding="utf-8")
