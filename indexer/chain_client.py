@@ -880,10 +880,18 @@ class ChainClient:
             "renewal_last_attempt_epoch": renewal_last_attempt_epoch,
             "renewal_warning_sent": renewal_warning_sent,
         }
-        if result["quota_limit"] < result["quota_used"] or result["quota_remaining"] != (
-            result["quota_limit"] - result["quota_used"]
-        ):
-            raise RuntimeError(f"SubscriberQuota returned inconsistent values for {owner}")
+        # used may legitimately exceed limit: limit comes from the owner's current
+        # tier while used is the counter already spent this UTC epoch, so a tier
+        # that drops mid-epoch (lapsed subscription → limit 0, admin de-appointed
+        # → lower tier) leaves the epoch's spend above the new cap. The chain
+        # clamps remaining at 0 for exactly that case; mirror it rather than
+        # calling it corruption.
+        if result["quota_remaining"] != max(0, result["quota_limit"] - result["quota_used"]):
+            raise RuntimeError(
+                f"SubscriberQuota returned inconsistent values for {owner}: "
+                f"limit={result['quota_limit']} used={result['quota_used']} "
+                f"remaining={result['quota_remaining']}"
+            )
         logger.debug(
             "[quota] grpc address=%s used=%s limit=%s renewal_expiry=%s",
             owner,

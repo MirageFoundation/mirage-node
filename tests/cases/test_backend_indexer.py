@@ -2134,6 +2134,109 @@ def _indexer_v139_projection_checks() -> None:
     finally:
         probe.end_block_profile_cache()
 
+    # ── quota invariant: a mid-epoch tier drop is chain truth, not corruption ──
+    #
+    # quota.limit comes from the owner's *current* tier while quota.used is what
+    # the owner already spent this UTC epoch, so the two can disagree: a lapsed
+    # subscription drops the tier to free (max_daily_relays=0) with the day's
+    # spend still on the books, and SubscriberQuota clamps remaining to 0 rather
+    # than going negative. Rejecting that reachable state crash-looped every
+    # indexer in the fleet on block 7345769 (a subscription lapsing on a zero
+    # balance) until the supervisor hit its restart limit and gave up.
+    from indexer import chain_client as chain_client_module
+
+    class _FakeQuotaResponse:
+        def __init__(self, epoch, limit, used, remaining, reset_at):
+            self.epoch = epoch
+            self.limit = limit
+            self.used = used
+            self.remaining = remaining
+            self.reset_at = reset_at
+
+    class _FakeRenewalResponse:
+        @staticmethod
+        def HasField(_field):
+            return False
+
+    class _FakeChannel:
+        def __init__(self, quota_response):
+            self._quota = quota_response
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def unary_unary(self, path, request_serializer=None, response_deserializer=None):
+            response = self._quota if path.endswith("SubscriberQuota") else _FakeRenewalResponse()
+            return lambda _request, timeout=None: response
+
+    # (label, (epoch, limit, used, remaining, reset_at), expect_raise)
+    quota_cases = (
+        ("lapsed_to_free", (20701, 0, 7, 0, 1788652800), False),
+        ("admin_downgrade", (20701, 1000, 5000, 0, 1788652800), False),
+        ("free_untouched", (20701, 0, 0, 0, 1788652800), False),
+        ("normal_spend", (20701, 1000, 5, 995, 1788652800), False),
+        ("quota_exhausted", (20701, 1000, 1000, 0, 1788652800), False),
+        ("corrupt_remaining", (20701, 1000, 5, 1, 1788652800), True),
+        ("corrupt_unclamped", (20701, 0, 7, 4294967289, 1788652800), True),
+    )
+
+    quota_failures = []
+    real_insecure_channel = chain_client_module.grpc.insecure_channel
+    for label, fields, expect_raise in quota_cases:
+        probe_client = ChainClient("http://unused")
+        chain_client_module.grpc.insecure_channel = (
+            lambda _target, _response=_FakeQuotaResponse(*fields): _FakeChannel(_response)
+        )
+        try:
+            runtime = probe_client.query_subscription_runtime("mirage1quotaprobe")
+        except RuntimeError as error:
+            if not expect_raise:
+                quota_failures.append(f"{label}: unexpected raise ({error})")
+            elif "inconsistent values" not in str(error):
+                quota_failures.append(f"{label}: wrong error ({error})")
+        except Exception as error:  # noqa: BLE001 - any other type is a test defect
+            quota_failures.append(f"{label}: {type(error).__name__}: {error}")
+        else:
+            if expect_raise:
+                quota_failures.append(f"{label}: accepted a corrupt SubscriberQuota response")
+            elif (runtime["quota_limit"], runtime["quota_used"]) != (fields[1], fields[2]):
+                quota_failures.append(f"{label}: quota fields not passed through ({runtime})")
+        finally:
+            chain_client_module.grpc.insecure_channel = real_insecure_channel
+
+    if quota_failures:
+        _fail("indexer_v139.quota_tier_drop_mid_epoch", "; ".join(quota_failures))
+    else:
+        _pass("indexer_v139.quota_tier_drop_mid_epoch", cases=len(quota_cases))
+
+    # The backend projects the same quota into /api/bootstrap and carried the
+    # same false invariant, reachable when an admin is de-appointed to level 1
+    # after spending above that tier's cap. Its DB read cannot be exercised
+    # without a provisioned profile, and importing the module needs the backend
+    # on sys.path, so pin the arithmetic by reading the source.
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    with open(os.path.join(repo_root, "web", "backend", "routes", "public.py"), "r", encoding="utf-8") as fh:
+        public_src = fh.read()
+    marker = "def _build_community_bootstrap("
+    if marker not in public_src:
+        raise RuntimeError("_build_community_bootstrap not found in web/backend/routes/public.py")
+    tail = public_src.split(marker, 1)[1]
+    next_def = tail.find("\ndef ")
+    bootstrap_source = tail if next_def == -1 else tail[:next_def]
+
+    if "subscriber quota projection exceeds chain limit" in bootstrap_source:
+        _fail(
+            "indexer_v139.backend_quota_clamped",
+            "backend still rejects used > limit instead of clamping remaining",
+        )
+    elif "max(0, limit - used)" in bootstrap_source:
+        _pass("indexer_v139.backend_quota_clamped")
+    else:
+        _fail("indexer_v139.backend_quota_clamped", "backend quota remaining is not clamped at 0")
+
     backfill_source = inspect.getsource(indexer_main.Indexer._backfill_creator_rewards)
     if (
         "query_terminal_creator_epochs" in backfill_source

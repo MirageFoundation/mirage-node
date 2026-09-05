@@ -4573,13 +4573,14 @@ def _build_community_bootstrap(address: str) -> dict:
         if limit < 1:
             raise RuntimeError("relay-quota tier has max_daily_relays < 1")
         used = int(quota_used)
-        if used > limit:
-            raise RuntimeError("subscriber quota projection exceeds chain limit")
+        # A tier that drops mid-epoch (admin de-appointed to level 1) leaves the
+        # epoch's spend above the new cap. The chain clamps remaining at 0 for
+        # this case; it is not a broken projection.
         daily_quota = {
             "epoch": int(quota_epoch),
             "used": used,
             "limit": limit,
-            "remaining": limit - used,
+            "remaining": max(0, limit - used),
             "reset_at": (int(quota_epoch) + 1) * 86400,
         }
     renewal_values = row[3:7]
