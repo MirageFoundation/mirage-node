@@ -2098,6 +2098,40 @@ def _indexer_v139_projection_checks() -> None:
     else:
         _fail("indexer_v139.grpc_snapshots_precede_db_transaction", "block opens DB transaction before snapshots")
 
+    class _EffectiveStateProcessor:
+        def __init__(self):
+            self.calls = []
+
+        def update_profile_effective_state(self, address, effective_paid, expiry, ts):
+            self.calls.append((address, effective_paid, expiry, ts))
+
+    effective_processor = _EffectiveStateProcessor()
+    effective_indexer = type("_EffectiveStateIndexer", (), {"processor": effective_processor})()
+    indexer_main.Indexer._process_subscription_events(
+        effective_indexer,
+        {
+            "finalize_block_events": [
+                {
+                    "type": "subscription_effective_state_changed",
+                    "attributes": [
+                        {"key": "address", "value": "mirage1expired"},
+                        {"key": "effective_paid", "value": "false"},
+                        {"key": "expiry", "value": "0"},
+                    ],
+                }
+            ]
+        },
+        1789475605,
+        7606425,
+    )
+    if effective_processor.calls == [("mirage1expired", False, 0, 1789475605)]:
+        _pass("indexer_v139.effective_paid_event_projected")
+    else:
+        _fail(
+            "indexer_v139.effective_paid_event_projected",
+            f"calls={effective_processor.calls}",
+        )
+
     from shared.datatypes import MsgUpdateParams as _MsgUpdateParams
 
     update_params = _MsgUpdateParams()

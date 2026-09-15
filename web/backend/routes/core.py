@@ -473,7 +473,17 @@ def _tx_error(
         # Never fail the request just because logging failed.
         pass
 
-    return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), status
+    return (
+        jsonify(
+            {
+                "error": message,
+                "error_code": info["error_code"],
+                "details": info,
+                "tx_hash": tx_hash,
+            }
+        ),
+        status,
+    )
 
 
 def _classify_thread_read_only(raw: str) -> tuple[str, int] | None:
@@ -2730,7 +2740,12 @@ def core_post():
         # Free users require PoW; relay-quota tiers (subscriber, admin) skip it.
         if not is_relay_exempt(user_addr):
             if not (has_difficulty and has_pow):
-                return jsonify({"error": "missing required fields"}), 400
+                log_event(rid, "post.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
+                return api_error_code(
+                    "pow_required",
+                    400,
+                    details="Free-tier posts must provide valid proof of work.",
+                )
             required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400

@@ -708,6 +708,7 @@ class Indexer:
                 "subscription_expired",
                 "subscription_renewed",
                 "subscription_renewal_warning",
+                "subscription_effective_state_changed",
             ):
                 continue
             attrs = {attr_text(a.get("key")): attr_text(a.get("value")) for a in event.get("attributes", [])}
@@ -721,6 +722,25 @@ class Indexer:
             elif event_type == "subscription_expired":
                 logger.info("Subscription expired for %s (reason: %s)", address, attrs.get("reason", "unknown"))
                 self.processor.update_profile_level(address, 0, ts)
+            elif event_type == "subscription_effective_state_changed":
+                effective_paid = attrs.get("effective_paid", "").strip().lower()
+                if effective_paid not in ("true", "false"):
+                    raise RuntimeError(
+                        f"subscription_effective_state_changed event has invalid effective_paid at height {height}"
+                    )
+                expiry = int(attrs.get("expiry", "0") or 0)
+                logger.info(
+                    "Subscription effective state changed for %s (paid: %s, expiry: %d)",
+                    address,
+                    effective_paid,
+                    expiry,
+                )
+                self.processor.update_profile_effective_state(
+                    address,
+                    effective_paid == "true",
+                    expiry,
+                    ts,
+                )
             else:
                 level = int(attrs.get("level", "0") or 0)
                 new_expiry = int(attrs.get("new_expiry", "0") or 0)

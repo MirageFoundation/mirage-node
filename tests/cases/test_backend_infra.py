@@ -150,9 +150,7 @@ def test_params(backend: str):
 
     # 1.4b three-tier max_blocked_communities. Tier config lives on
     # get_chain_config; get_parameters carries only the PoW envelope inputs.
-    _cc_code, chain_config = _get(
-        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
-    )
+    _cc_code, chain_config = _get(f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"})
     if _cc_code != 200:
         _fail("params.get_chain_config returns valid data", f"code={_cc_code}")
         return
@@ -221,9 +219,7 @@ def test_params(backend: str):
             _fail("params.network_stats has earned_24h", earned_24h=earned)
 
     # 1.6 get_chain_config returns valid governance params
-    code3, cfg = _get(
-        f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"}
-    )
+    code3, cfg = _get(f"{backend}/api/get_chain_config", headers={"X-Mirage-Visitor": "backend-tests"})
     if code3 == 200 and cfg.get("subscription_period"):
         _pass("params.get_chain_config valid", keys=list(cfg.keys()))
     else:
@@ -384,12 +380,7 @@ def test_bootstrap(backend: str):
         _fail("bootstrap.anonymous node_config valid", f"got={type(nc).__name__}")
 
     cc = body.get("chain_config")
-    if (
-        isinstance(cc, dict)
-        and len(cc.get("tiers") or []) == 2
-        and "max_topic_size" in cc
-        and "award_configs" in cc
-    ):
+    if isinstance(cc, dict) and len(cc.get("tiers") or []) == 2 and "max_topic_size" in cc and "award_configs" in cc:
         _pass("bootstrap.anonymous legacy chain_config valid")
     else:
         _fail("bootstrap.anonymous legacy chain_config valid", f"config={cc}")
@@ -544,9 +535,7 @@ def test_search(backend: str):
         and (topics or {}).get("min_posts") == 10
         and isinstance((topics or {}).get("small_topics_count"), int)
         and all(
-            "topic" in item
-            and int(item.get("post_count") or 0) >= 10
-            and item.get("count") == item.get("post_count")
+            "topic" in item and int(item.get("post_count") or 0) >= 10 and item.get("count") == item.get("post_count")
             for item in topic_items
         )
     ):
@@ -1386,10 +1375,24 @@ def test_error_registry(backend):
     if backend_src not in sys.path:
         sys.path.insert(0, backend_src)
     try:
+        from chain import classify_reject
         from error_utils import ERRORS, _MSG_TO_CODE
     except Exception as e:
         _skip("error_registry.unmapped_messages", f"backend modules not importable: {e}")
         return
+
+    relay_reject = classify_reject("zero-fee relay requires a relay-quota tier")
+    if relay_reject.get("error_code") == "pow_required" and relay_reject.get("message") == ERRORS["pow_required"]:
+        _pass("error_registry.relay_tier_mismatch")
+    else:
+        _fail("error_registry.relay_tier_mismatch", f"classification={relay_reject}")
+
+    core_path = os.path.join(backend_src, "routes", "core.py")
+    core_source = open(core_path, encoding="utf-8").read()
+    if '"error_code": info["error_code"]' in core_source:
+        _pass("error_registry.tx_reject_code_propagated")
+    else:
+        _fail("error_registry.tx_reject_code_propagated", "_tx_error omits classified error_code")
 
     unregistered = []
     unknown_codes = []
@@ -2232,9 +2235,7 @@ def test_legacy_mobile_source_contract(backend: str):
                 f"prepared={prepared} protocol={protocol} legacy={legacy} error={error}",
             )
 
-        _prepared, _protocol, _legacy, conflict = wiring.prepare_post_request(
-            {"topic": "one", "community": "two"}
-        )
+        _prepared, _protocol, _legacy, conflict = wiring.prepare_post_request({"topic": "one", "community": "two"})
         if conflict is not None and conflict[1] == 400:
             _pass("legacy_mobile_source.post_conflict")
         else:

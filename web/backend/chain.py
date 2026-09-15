@@ -335,8 +335,21 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
     """Classify a chain broadcast rejection into a safe, user-facing message."""
     raw = "" if raw_log is None else str(raw_log)
     msg = raw.lower()
-    out: Dict[str, Any] = {"reason": "rejected", "message": "transaction rejected"}
+    out: Dict[str, Any] = {
+        "reason": "rejected",
+        "message": "transaction rejected",
+        "error_code": "transaction_rejected",
+    }
     try:
+        if "zero-fee relay requires a relay-quota tier" in msg:
+            out.update(
+                {
+                    "reason": "pow_required",
+                    "message": "proof of work required",
+                    "error_code": "pow_required",
+                }
+            )
+            return out
         m = re.search(r"out of gas.*?gaswanted:\s*(\d+).*?gasused:\s*(\d+)", msg)
         if m:
             out.update(
@@ -345,6 +358,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                     "gas_provided": int(m.group(1)),
                     "gas_required": int(m.group(2)),
                     "message": "out of gas",
+                    "error_code": "out_of_gas",
                 }
             )
             return out
@@ -359,6 +373,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                     "have": have_amt,
                     "denom": need_den if need_den == have_den else need_den,
                     "message": "fee payer insufficient funds",
+                    "error_code": "fee_payer_insufficient_funds",
                 }
             )
             return out
@@ -369,6 +384,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                     "reason": "invalid_relay_fields",
                     "gas_used": int(m.group(1)),
                     "message": "invalid relay fields",
+                    "error_code": "invalid_relay_fields",
                 }
             )
             return out
@@ -377,17 +393,25 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
                 {
                     "reason": "gift_rejected_higher_tier",
                     "message": "gift rejected: recipient has a higher tier than requested",
+                    "error_code": "gift_rejected_higher_tier",
                 }
             )
             return out
         if "insufficient balance" in msg:
-            out.update({"reason": "insufficient_balance", "message": "insufficient balance"})
+            out.update(
+                {
+                    "reason": "insufficient_balance",
+                    "message": "insufficient balance",
+                    "error_code": "insufficient_balance",
+                }
+            )
             return out
     except Exception:
         pass
 
     if not raw.strip():
         out["message"] = "chain returned empty error log for this transaction"
+        out["error_code"] = "empty_error_log"
     return out
 
 

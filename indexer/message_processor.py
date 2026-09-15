@@ -2251,6 +2251,23 @@ class MessageProcessor:
             logger.error("Error updating profile level for %s: %s", addr, e, exc_info=True)
             raise
 
+    def update_profile_effective_state(self, addr: str, effective_paid: bool, expiry: int, ts: int):
+        """Refresh and verify a paid-state transition emitted from BeginBlock."""
+        try:
+            profile = self._refresh_subscription_projection(addr, ts)
+            if (
+                bool(profile["effective_paid"]) != bool(effective_paid)
+                or int(profile["subscription_expiry"]) != int(expiry)
+            ):
+                raise RuntimeError(
+                    f"subscription effective-state mismatch for {addr}: "
+                    f"event=({effective_paid},{expiry}) "
+                    f"chain=({profile['effective_paid']},{profile['subscription_expiry']})"
+                )
+        except Exception as e:
+            logger.error("Error updating profile effective state for %s: %s", addr, e, exc_info=True)
+            raise
+
     def update_profile_subscription(self, addr: str, level: int, subscription_expiry: int, ts: int):
         """Update profile level and subscription_expiry from renewal events (EndBlock)."""
         try:

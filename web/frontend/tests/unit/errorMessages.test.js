@@ -11,6 +11,11 @@ describe('formatError', () => {
             .toBe('This browser blocked the proof-of-work engine. Please try again, or use a different browser.');
     });
 
+    it('explains a subscription-to-pow transition', () => {
+        expect(formatError({ error_code: 'pow_required' }))
+            .toBe('Your subscription status changed. Please try again.');
+    });
+
     it('surfaces cancelled queue reasons instead of Missing error code', () => {
         expect(formatError({ success: false, cancelled: true, reason: 'owner_mismatch' }))
             .toBe('Session changed while submitting. Please try again.');

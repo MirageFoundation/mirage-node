@@ -74,7 +74,7 @@ const ERROR_MAP = {
     invalid_pow: "Invalid proof-of-work value.",
     pow_not_allowed_for_award: "Proof-of-work is not allowed for awards.",
     pow_not_allowed_for_set_auto_renewal: "Proof-of-work is not allowed for auto-renewal.",
-    pow_required: "Proof-of-work is required.",
+    pow_required: "Your subscription status changed. Please try again.",
     invalid_pow_fields: "Invalid proof-of-work fields.",
     invalid_last_block_hash: "Invalid last block hash.",
     pow_timeout: "Proof-of-work took too long. Please try again later.",

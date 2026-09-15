@@ -4894,6 +4894,7 @@ class TransactionHandler {
                 try {
                     Storage.save('user_level', '0');
                     window.dispatchEvent(new CustomEvent('subscriptionStatusChanged', { detail: { level: 0 } }));
+                    window.dispatchEvent(new Event('userStatusUpdated'));
                 } catch (_) { }
             }
             let cleanMsg = errMsg;
